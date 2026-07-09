@@ -15,14 +15,31 @@ interface ScreenProps {
   copy: ScreenCopy;
 }
 
+interface TrustWelcomeProps extends ScreenProps {
+  /**
+   * U-2 / UX-01 (docs/ux-pass-2026-07-09.md): the receipt-card below
+   * is hardcoded UI, not sourced from `copy`, so it needs its own
+   * phase switch — swaps the "Total cashback" label for "Total
+   * saved" so the card doesn't promise a Phase-2 feature. Optional /
+   * defaults to Phase-2 framing so existing callers (if any are
+   * added later) don't silently regress.
+   */
+  phase1Only?: boolean;
+}
+
 /**
  * Screen 1 — brand moment. Loop wordmark, a receipt-card with an
  * animated "total cashback" counter that re-ticks every time the
  * screen becomes active, then the headline + sub.
  */
-export function TrustWelcome({ active, copy }: ScreenProps): React.JSX.Element {
+export function TrustWelcome({
+  active,
+  copy,
+  phase1Only = false,
+}: TrustWelcomeProps): React.JSX.Element {
   const savings = useCountUp(2847, active, 1600);
   const [dollars, cents] = savings.toFixed(2).split('.');
+  const totalLabel = phase1Only ? 'Total saved' : 'Total cashback';
   return (
     <div className="flex-1 flex flex-col px-6">
       <div className="flex-1 flex flex-col items-center justify-center gap-6">
@@ -31,7 +48,7 @@ export function TrustWelcome({ active, copy }: ScreenProps): React.JSX.Element {
 
         <div className="w-full max-w-[280px] rounded-[18px] p-5 bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 shadow-[0_2px_10px_rgba(0,0,0,0.04),0_20px_40px_rgba(0,0,0,0.06)] dark:shadow-[0_2px_10px_rgba(0,0,0,0.20),0_20px_40px_rgba(0,0,0,0.30)]">
           <div className="text-[11px] uppercase tracking-[0.08em] font-semibold text-gray-500 dark:text-gray-400 mb-2">
-            Total cashback
+            {totalLabel}
           </div>
           <div
             className="text-[44px] font-extrabold text-gray-950 dark:text-white leading-none"
@@ -115,15 +132,35 @@ function TrustStepVisual({ visual }: { visual: StepVisual }): React.JSX.Element 
   );
 }
 
+interface TrustHowItWorksProps extends ScreenProps {
+  /**
+   * U-2 / UX-01 (docs/ux-pass-2026-07-09.md): step 3's label below is
+   * hardcoded UI, not sourced from `copy` — "Cashback lands in your
+   * bank" is a Phase-2 settlement claim (Loop doesn't do bank
+   * transfers in Phase 1). Swaps to the discount-at-checkout framing
+   * when set. Optional / defaults to Phase-2 framing so existing
+   * callers (if any are added later) don't silently regress.
+   */
+  phase1Only?: boolean;
+}
+
 /**
  * Screen 2 — three-step explainer. Each step card fades+slides in
  * with a staggered delay when the screen becomes active.
  */
-export function TrustHowItWorks({ active, copy }: ScreenProps): React.JSX.Element {
+export function TrustHowItWorks({
+  active,
+  copy,
+  phase1Only = false,
+}: TrustHowItWorksProps): React.JSX.Element {
   const steps: { num: string; label: string; visual: StepVisual }[] = [
     { num: '1', label: 'Open Loop before you shop', visual: 'app' },
     { num: '2', label: 'Buy a gift card at the store', visual: 'card' },
-    { num: '3', label: 'Cashback lands in your bank', visual: 'bank' },
+    {
+      num: '3',
+      label: phase1Only ? 'Your discount applies instantly' : 'Cashback lands in your bank',
+      visual: 'bank',
+    },
   ];
   return (
     <div className="flex-1 flex flex-col justify-center gap-6 px-6 overflow-hidden py-6">

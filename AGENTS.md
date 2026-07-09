@@ -371,9 +371,13 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # LOOP_REDEEM_ENCRYPTION_KEY=<32-byte-base64-or-hex-secret>
 
 # Phase 1 launch gate. true → web hides every Phase 2+ surface (cashback
-# links, /settings/wallet, /settings/cashback, /cashback, onboarding
-# currency picker + wallet-intro, "you've earned X" copy); discount
-# badges stay. UI-side equivalent of the backend Phase 2 gates
+# links, /settings/wallet, /settings/cashback, /cashback, /calculator,
+# onboarding currency picker + wallet-intro, "you've earned X" copy);
+# discount badges stay. Also swaps the onboarding marketing
+# trust-screen copy (welcome/how-it-works slides, native + web) from
+# cashback/bank-transfer framing to discount framing (U-2 / UX-01,
+# docs/ux-pass-2026-07-09.md — apps/web/app/components/features/onboarding/Onboarding.tsx's
+# `getOnboardingCopy()`). UI-side equivalent of the backend Phase 2 gates
 # (LOOP_WORKERS_ENABLED / LOOP_AUTH_NATIVE_ENABLED / INTEREST_APY_BASIS_POINTS).
 # Flip back to false to launch cashback — server-side only. Default false.
 # LOOP_PHASE_1_ONLY=true

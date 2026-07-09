@@ -8,28 +8,41 @@
  * Reuses `useOnboardingAuth` so the OTP send/verify behaviour is
  * identical to the mobile flow.
  */
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { LoopLogo } from '~/components/ui/LoopLogo';
 import { BackToSite } from '~/components/ui/BackToSite';
 import { Input } from '~/components/ui/Input';
 import { Button } from '~/components/ui/Button';
+import { useAppConfig } from '~/hooks/use-app-config';
 import { useOnboardingAuth } from './signup-tail';
 import { TrustWelcome, TrustHowItWorks, TrustMerchants } from './screens-trust';
-import { COPY } from './Onboarding';
+import { getOnboardingCopy } from './Onboarding';
 
 // The same animated marketing screens the mobile flow uses (the
 // count-up cashback card, the how-it-works panel, the brand tiles) —
 // reused verbatim so desktop and mobile tell the identical story.
-const SCREENS = [
-  (active: boolean) => <TrustWelcome active={active} copy={COPY[1]} />,
-  (active: boolean) => <TrustHowItWorks active={active} copy={COPY[2]} />,
-  (active: boolean) => <TrustMerchants active={active} copy={COPY[3]} />,
-];
+// U-2 / UX-01 (docs/ux-pass-2026-07-09.md): `phase1Only` threads
+// through to both `getOnboardingCopy()` (the COPY[1]/[2]/[3] text)
+// and the two screens' own hardcoded card labels, mirroring the
+// native `Onboarding.tsx` flow so the two surfaces never drift.
+function buildScreens(phase1Only: boolean): ((active: boolean) => React.JSX.Element)[] {
+  const copy = getOnboardingCopy(phase1Only);
+  return [
+    (active: boolean) => <TrustWelcome active={active} copy={copy[1]} phase1Only={phase1Only} />,
+    (active: boolean) => <TrustHowItWorks active={active} copy={copy[2]} phase1Only={phase1Only} />,
+    (active: boolean) => <TrustMerchants active={active} copy={copy[3]} />,
+  ];
+}
 
 function SlidePanel(): React.JSX.Element {
+  const { config } = useAppConfig();
+  const SCREENS = useMemo(() => buildScreens(config.phase1Only), [config.phase1Only]);
   const [i, setI] = useState(0);
-  const go = useCallback((d: number) => setI((v) => (v + d + SCREENS.length) % SCREENS.length), []);
+  const go = useCallback(
+    (d: number) => setI((v) => (v + d + SCREENS.length) % SCREENS.length),
+    [SCREENS.length],
+  );
 
   // No autoplay — the user advances the slideshow with the arrows / dots.
 
