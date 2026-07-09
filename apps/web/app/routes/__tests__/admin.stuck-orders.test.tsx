@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
@@ -9,13 +9,17 @@ import AdminStuckOrdersRoute, { ageClass } from '../admin.stuck-orders';
 
 afterEach(cleanup);
 
-const { adminMock, authMock } = vi.hoisted(() => ({
+const { adminMock, authMock, userMock } = vi.hoisted(() => ({
   adminMock: {
     getStuckOrders: vi.fn(),
     getStuckPayouts: vi.fn(),
   },
   authMock: {
     isAuthenticated: true,
+  },
+  userMock: {
+    staffRole: 'support' as 'admin' | 'support' | null,
+    isAdmin: false,
   },
 }));
 
@@ -40,7 +44,11 @@ vi.mock('~/hooks/use-auth', () => ({
   useAuth: () => ({ isAuthenticated: authMock.isAuthenticated }),
 }));
 
-// A2-1101: RequireAdmin gates the admin shell on /api/users/me.isAdmin.
+// A5-6: the page gates on `RequireStaff minimum="support"` (see
+// admin.stuck-orders.tsx) — `getMe` is driven by a mutable `userMock`
+// (default `staffRole: 'support'`, `isAdmin: false`) so the suite's
+// baseline proves the SUPPORT path renders, not just the admin path.
+// Same pattern as admin.skips.test.tsx (the other support-tier page).
 import type * as UserModule from '~/services/user';
 vi.mock('~/services/user', async (importActual) => {
   const actual = (await importActual()) as typeof UserModule;
@@ -48,8 +56,9 @@ vi.mock('~/services/user', async (importActual) => {
     ...actual,
     getMe: vi.fn(async () => ({
       id: 'u1',
-      email: 'admin@loop.test',
-      isAdmin: true,
+      email: 'support@loop.test',
+      isAdmin: userMock.isAdmin,
+      staffRole: userMock.staffRole,
       homeCurrency: 'USD' as const,
       stellarAddress: null,
       homeCurrencyBalanceMinor: '0',
@@ -60,6 +69,11 @@ vi.mock('~/services/user', async (importActual) => {
 vi.mock('~/hooks/query-retry', () => ({
   shouldRetry: () => false,
 }));
+
+beforeEach(() => {
+  userMock.staffRole = 'support';
+  userMock.isAdmin = false;
+});
 
 function renderPage(): void {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -178,5 +192,37 @@ describe('<AdminStuckOrdersRoute />', () => {
     // Formatted stroops appear on the row.
     expect(screen.getByText(/12\.345 USDLOOP/)).toBeDefined();
     expect(screen.getByText('11m')).toBeDefined();
+  });
+
+  // A5-6: the concrete regression this whole change guards against —
+  // a support-tier signed-in user must reach the triage table, not a
+  // deny banner (the previous `<RequireAdmin>` wrapper 403'd here even
+  // though the backend already served support 200s).
+  it('a support-role user sees the triage table, not a deny banner (A5-6)', async () => {
+    userMock.staffRole = 'support';
+    userMock.isAdmin = false;
+    adminMock.getStuckOrders.mockResolvedValue({
+      thresholdMinutes: 15,
+      rows: [row({ id: 'supportvis1234', ageMinutes: 30 })],
+    });
+    adminMock.getStuckPayouts.mockResolvedValue({ thresholdMinutes: 5, rows: [] });
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText('supportv')).toBeDefined();
+    });
+    expect(screen.queryByText(/Staff access required/i)).toBeNull();
+    expect(screen.queryByText(/Admin access required/i)).toBeNull();
+  });
+
+  it('denies a non-staff signed-in user at the shell gate', async () => {
+    userMock.staffRole = null;
+    userMock.isAdmin = false;
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole('alert').textContent).toMatch(/Staff access required/i);
+    });
+    // The deny banner renders in place of the triage content — no
+    // table, no all-clear card, from either query's data.
+    expect(screen.queryByRole('table')).toBeNull();
   });
 });

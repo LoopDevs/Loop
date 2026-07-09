@@ -90,4 +90,8 @@ export async function runProcurementTick(
 // `SWEEP_INTERVAL_MS` constants live in `./procurement-worker.ts`.
 // Re-exported below so `'../orders/procurement.js'` keeps
 // resolving for `index.ts` and the test suite.
-export { startProcurementWorker, stopProcurementWorker } from './procurement-worker.js';
+export {
+  startProcurementWorker,
+  stopProcurementWorker,
+  PROCUREMENT_TIMEOUT_MS,
+} from './procurement-worker.js';

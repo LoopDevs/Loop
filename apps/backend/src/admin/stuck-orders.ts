@@ -22,7 +22,29 @@ import { logger } from '../logger.js';
 
 const log = logger.child({ handler: 'admin-stuck-orders' });
 
-const DEFAULT_THRESHOLD_MINUTES = 5;
+/**
+ * A5-6: this is a deliberately EARLIER early-warning threshold than
+ * `sweepStuckProcurement`'s terminal-action cutoff
+ * (`PROCUREMENT_TIMEOUT_MS`, 15 min — `orders/procurement-worker.ts`)
+ * — an operator should see a row here well before the sweep silently
+ * fails + auto-refunds it, not learn about the incident after the
+ * fact from a Discord alert. `stuck-orders.test.ts` pins
+ * `DEFAULT_THRESHOLD_MINUTES * 60_000 < PROCUREMENT_TIMEOUT_MS` so a
+ * future edit can't invert that ordering unnoticed.
+ *
+ * The WHERE-filter below also intentionally anchors on `createdAt`
+ * (order creation) rather than the per-state `paidAt`/`procuredAt`
+ * columns the response uses for display: `createdAt <= paidAt <=
+ * procuredAt` always, so the createdAt filter is a superset of what a
+ * per-state filter would return — it can over-include a row that's
+ * young by `paidAt`/`procuredAt` (never hides a genuinely-stuck one)
+ * and reuses the existing `orders_paid_procuring_created` partial
+ * index (migration 0036 / PERF-006) built for exactly this query
+ * shape. Precise per-state filtering would need a new migration;
+ * deferred until stuck-order volume justifies it (see the inline note
+ * on the query below).
+ */
+export const DEFAULT_THRESHOLD_MINUTES = 5;
 const MAX_THRESHOLD_MINUTES = 60 * 24 * 7; // 1 week
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;

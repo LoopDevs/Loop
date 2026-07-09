@@ -140,10 +140,16 @@ const CARDS: ReadonlyArray<CardLink> = [
   },
   {
     href: '/admin/stuck-orders',
-    minRole: 'admin',
+    // A5-6: the backend read already rides the ADR 037 support-tier
+    // blanket (GET, non-CSV, non-Discord — staff-route-gating.test.ts
+    // pins this), and the page itself now gates at `minimum="support"`
+    // (see admin.stuck-orders.tsx). Money-moving actions reached from
+    // the drill pages (redrive, payout retry) stay admin-gated on
+    // their own buttons regardless.
+    minRole: 'support',
     title: 'Stuck orders',
     description:
-      'SLO-triage list for orders sitting past threshold in paid / procuring (ADR 011/013).',
+      'SLO-triage list for orders sitting past threshold in paid / procuring, plus stuck payouts (ADR 011/013/015/016).',
   },
   {
     href: '/admin/audit',
@@ -266,10 +272,10 @@ function AdminIndexRouteInner(): React.JSX.Element {
               {failed}
             </div>
           </Link>
-          {/* StuckOrdersCard drills into /admin/stuck-orders which
-              stays admin-gated — hide the card for support so the
-              home page never offers a dead end. */}
-          {isAdminRole ? <StuckOrdersCard /> : null}
+          {/* A5-6: /admin/stuck-orders is support-visible (both the
+              API read and the page gate), so both triage cards show
+              for support too — no dead end. */}
+          <StuckOrdersCard />
           <StuckPayoutsCard />
         </section>
       )}
