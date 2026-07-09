@@ -26,11 +26,34 @@ const ISSUER = 'GISSUERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 const WALLET = 'GWALLETAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 
 // ── table-routed chainable db mock ──────────────────────────────────
-const { state, dbMock } = vi.hoisted(() => {
+const { state, dbMock, makeDrizzleUniqueViolation } = vi.hoisted(() => {
   interface SnapshotRowLike {
     periodCursor: string;
     carryAfterStroops: bigint;
   }
+
+  /**
+   * Builds the REAL shape a Drizzle-wrapped postgres-js unique
+   * violation takes: the outer error's `.message` is Drizzle's FIXED
+   * "Failed query: ..." string (never the constraint text), and the
+   * underlying `PostgresError` (`code='23505'`, `constraint_name`
+   * populated) lives on `.cause`. AUDIT-2 finding D: the pre-fix code
+   * matched on the OUTER `.message`, which this shape never contains
+   * — a flat `Error` with the constraint name inlined at the top
+   * level (the old mock shape) is not what the real driver produces
+   * and gave the old tests false confidence.
+   */
+  function makeDrizzleUniqueViolation(constraintName: string): Error {
+    const cause = Object.assign(new Error('duplicate key value violates unique constraint'), {
+      code: '23505',
+      constraint_name: constraintName,
+    });
+    return Object.assign(
+      new Error('Failed query: insert into "interest_mint_snapshots" ...\nparams: ...'),
+      { cause },
+    );
+  }
+
   const state = {
     /** value of the watcher_cursors row (null = absent). */
     cursorRow: null as string | null,
@@ -45,6 +68,17 @@ const { state, dbMock } = vi.hoisted(() => {
     payoutInserts: [] as Array<Record<string, unknown>>,
     /** keys already snapshotted — drives the unique-violation fence. */
     snapshotKeys: new Set<string>(),
+    /**
+     * When set, thrown directly from the `interest_mint_snapshots`
+     * insert instead of the key-collision check below — lets a test
+     * inject an arbitrary error shape (a real Drizzle-wrapped unique
+     * violation on a specific constraint, a different constraint, or
+     * a genuinely unrelated infra error) to simulate a race the
+     * prior-row SELECT missed.
+     */
+    snapshotInsertError: null as unknown,
+    /** Same injection point for the second (credit_transactions) fence. */
+    creditInsertError: null as unknown,
     /** set by the test file after imports resolve. */
     tableNameOf: (_t: unknown): string => '',
     advisoryAcquired: true,
@@ -57,6 +91,8 @@ const { state, dbMock } = vi.hoisted(() => {
       state.creditUpserts = [];
       state.payoutInserts = [];
       state.snapshotKeys = new Set<string>();
+      state.snapshotInsertError = null;
+      state.creditInsertError = null;
       state.advisoryAcquired = true;
     },
   };
@@ -75,17 +111,21 @@ const { state, dbMock } = vi.hoisted(() => {
 
   function handleInsert(table: string, v: Record<string, unknown>): void {
     if (table === 'interest_mint_snapshots') {
+      if (state.snapshotInsertError !== null) {
+        throw state.snapshotInsertError;
+      }
       const key = `${String(v['userId'])}:${String(v['assetCode'])}:${String(v['periodCursor'])}`;
       if (state.snapshotKeys.has(key)) {
-        throw new Error(
-          'duplicate key value violates unique constraint "interest_mint_snapshots_user_asset_period_unique"',
-        );
+        throw makeDrizzleUniqueViolation('interest_mint_snapshots_user_asset_period_unique');
       }
       state.snapshotKeys.add(key);
       state.snapshotInserts.push(v);
       return;
     }
     if (table === 'credit_transactions') {
+      if (state.creditInsertError !== null) {
+        throw state.creditInsertError;
+      }
       state.creditInserts.push(v);
       return;
     }
@@ -166,7 +206,7 @@ const { state, dbMock } = vi.hoisted(() => {
     },
   };
 
-  return { state, dbMock };
+  return { state, dbMock, makeDrizzleUniqueViolation };
 });
 
 vi.mock('../../db/client.js', () => ({
@@ -434,6 +474,86 @@ describe('runInterestMintTick', () => {
     expect(state.creditInserts).toHaveLength(1);
     expect(state.payoutInserts).toHaveLength(1);
     expect(state.snapshotInserts).toHaveLength(1);
+  });
+
+  describe('AUDIT-2 finding D: unique-violation classification uses err.cause, not err.message', () => {
+    // The test above ("period idempotency") only exercises the
+    // prior-row SELECT short-circuit — it never reaches the catch
+    // block at all. These tests target the catch block directly: a
+    // race where a concurrent insert already landed but the SELECT
+    // (read before that commit) didn't see it, so `mintOneUser`
+    // proceeds to INSERT and collides. `latestSnapshotQueue` is left
+    // empty on purpose to force that path.
+
+    it('a genuinely concurrent insert conflict on the snapshot fence is recognized via the real Drizzle-wrapped .cause chain: skipped_already, not a fatal error, cursor still advances', async () => {
+      configureGbp();
+      state.eligibleUsers = [{ id: 'u-1', walletAddress: WALLET }];
+      horizonState.balances.set(WALLET, 5_000_000_000n);
+      state.snapshotInsertError = makeDrizzleUniqueViolation(
+        'interest_mint_snapshots_user_asset_period_unique',
+      );
+
+      const r = await runInterestMintTick({ now: NOW, apyBps: 300 });
+
+      expect(r.minted).toBe(0);
+      expect(r.skippedAlready).toBe(1);
+      expect(r.errors).toBe(0);
+      // The whole point of the fix: the benign case no longer stalls
+      // the cursor for the rest of the UTC day.
+      expect(state.cursorRow).toBe('2026-06-12');
+      expect(state.creditInserts).toHaveLength(0);
+      expect(state.payoutInserts).toHaveLength(0);
+    });
+
+    it('a genuinely concurrent insert conflict on the credit_transactions period-cursor fence (the second idempotency fence) is also recognized', async () => {
+      configureGbp();
+      state.eligibleUsers = [{ id: 'u-1', walletAddress: WALLET }];
+      horizonState.balances.set(WALLET, 5_000_000_000n);
+      state.creditInsertError = makeDrizzleUniqueViolation(
+        'credit_transactions_interest_period_unique',
+      );
+
+      const r = await runInterestMintTick({ now: NOW, apyBps: 300 });
+
+      expect(r.minted).toBe(0);
+      expect(r.skippedAlready).toBe(1);
+      expect(r.errors).toBe(0);
+      expect(state.cursorRow).toBe('2026-06-12');
+      // The snapshot row itself commits within the same txn attempt
+      // before the credit_transactions insert throws, but the whole
+      // transaction rolls back (simulated by the mock) — nothing
+      // partially lands.
+      expect(state.snapshotInserts).toHaveLength(0);
+    });
+
+    it('a DIFFERENT constraint unique violation (23505 but not the interest-mint fences) is NOT swallowed as this period-s skip — still a real error', async () => {
+      configureGbp();
+      state.eligibleUsers = [{ id: 'u-1', walletAddress: WALLET }];
+      horizonState.balances.set(WALLET, 5_000_000_000n);
+      state.snapshotInsertError = makeDrizzleUniqueViolation('some_unrelated_unique_index');
+
+      const r = await runInterestMintTick({ now: NOW, apyBps: 300 });
+
+      expect(r.minted).toBe(0);
+      expect(r.skippedAlready).toBe(0);
+      expect(r.errors).toBe(1);
+      // A real error keeps the cursor from advancing, same as before.
+      expect(state.cursorRow).toBe(null);
+    });
+
+    it('a genuinely unexpected error (no cause, no code) still throws/counts as a real error, not swallowed', async () => {
+      configureGbp();
+      state.eligibleUsers = [{ id: 'u-1', walletAddress: WALLET }];
+      horizonState.balances.set(WALLET, 5_000_000_000n);
+      state.snapshotInsertError = new Error('connection terminated unexpectedly');
+
+      const r = await runInterestMintTick({ now: NOW, apyBps: 300 });
+
+      expect(r.minted).toBe(0);
+      expect(r.skippedAlready).toBe(0);
+      expect(r.errors).toBe(1);
+      expect(state.cursorRow).toBe(null);
+    });
   });
 
   it('cursor fast-path: a tick inside an already-processed period is a no-op', async () => {

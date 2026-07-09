@@ -45,7 +45,16 @@
 import { and, eq, gt } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { creditTransactions, userCredits } from '../db/schema.js';
+import { isUniqueViolation } from '../db/errors.js';
 import { logger } from '../logger.js';
+
+/**
+ * The period-cursor partial-unique-index fence (migration 0012) this
+ * legacy accrual path relies on for idempotency. Named explicitly
+ * (rather than matching ANY `23505`) so an unrelated unique violation
+ * isn't silently swallowed as "already accrued".
+ */
+const INTEREST_ACCRUAL_IDEMPOTENCY_CONSTRAINT = 'credit_transactions_interest_period_unique';
 
 const log = logger.child({ area: 'interest-accrual' });
 
@@ -185,12 +194,14 @@ export async function accrueOnePeriod(
       // periodCursor) already accrued. That's the idempotency
       // guarantee firing — skip the row and keep going so a retried
       // run of a partially-completed tick still makes progress on
-      // users that never accrued.
-      const message = err instanceof Error ? err.message : String(err);
-      if (
-        message.includes('credit_transactions_interest_period_unique') ||
-        message.includes('duplicate key value violates unique constraint')
-      ) {
+      // users that never accrued. AUDIT-2 finding D: this used to
+      // match on the top-level `err.message`, which never matches the
+      // real Drizzle-wrapped driver error — see `db/errors.ts` for
+      // why. This path is gated off in production while
+      // `LOOP_INTEREST_ONCHAIN_ENABLED=true` (the on-chain
+      // `interest-mint.ts` worker is authoritative), but the same fix
+      // applies for the same reason.
+      if (isUniqueViolation(err, INTEREST_ACCRUAL_IDEMPOTENCY_CONSTRAINT)) {
         result.skippedAlreadyAccrued++;
         continue;
       }

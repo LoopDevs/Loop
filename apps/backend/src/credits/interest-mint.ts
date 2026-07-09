@@ -89,6 +89,21 @@ import {
   markWorkerTickFailure,
   markWorkerTickSuccess,
 } from '../runtime-health.js';
+import { isUniqueViolationOnAny } from '../db/errors.js';
+
+/**
+ * The two unique-index fences a single `mintOneUser` transaction can
+ * hit (the snapshot table and the credit-transactions period-cursor
+ * index, migrations 0041 / 0012) — a violation of either means this
+ * (user, asset, night) was already processed by a prior run. Named
+ * explicitly (rather than matching ANY `23505`) so an unrelated
+ * unique violation isn't silently swallowed as "already minted" —
+ * see AUDIT-2 finding D.
+ */
+const INTEREST_MINT_IDEMPOTENCY_CONSTRAINTS = [
+  'interest_mint_snapshots_user_asset_period_unique',
+  'credit_transactions_interest_period_unique',
+] as const;
 
 const log = logger.child({ area: 'interest-mint' });
 
@@ -324,13 +339,15 @@ async function mintOneUser(args: MintOneArgs): Promise<{
   } catch (err) {
     // Unique-violation on either fence = this (user, asset, night)
     // was already processed (crash-retry of a partially-completed
-    // sweep, or a racing worker). Skip and keep going.
-    const message = err instanceof Error ? err.message : String(err);
-    if (
-      message.includes('interest_mint_snapshots_user_asset_period_unique') ||
-      message.includes('credit_transactions_interest_period_unique') ||
-      message.includes('duplicate key value violates unique constraint')
-    ) {
+    // sweep, or a racing worker). Skip and keep going. AUDIT-2 finding
+    // D: this used to match on the top-level `err.message`, which
+    // never matches the real Drizzle-wrapped driver error (its
+    // top-level message is the fixed "Failed query: ..." string, not
+    // the constraint-violation text — that lives on `err.cause`). A
+    // misclassified benign duplicate fell through to `throw err`,
+    // which kept `writeMintCursor` from ever advancing for the rest
+    // of the UTC day.
+    if (isUniqueViolationOnAny(err, INTEREST_MINT_IDEMPOTENCY_CONSTRAINTS)) {
       return { outcome: 'skipped_already', mintedMinor: 0n };
     }
     throw err;

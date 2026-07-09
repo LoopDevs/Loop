@@ -24,6 +24,7 @@
 import { and, eq, gte, inArray, or, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { creditTransactions, orders, paymentWatcherSkips, userCredits } from '../db/schema.js';
+import { isUniqueViolation } from '../db/errors.js';
 import { env } from '../env.js';
 import { adjustmentCapLockKey, DailyAdjustmentLimitError } from './adjustments.js';
 import {
@@ -498,24 +499,14 @@ export async function applyAdminRefund(args: {
 
 /**
  * Best-effort detection of the partial-unique-index violation from
- * migration 0013. postgres-js surfaces a Postgres error with
- * `code='23505'` (unique_violation) and `constraint_name` populated.
- *
- * Drizzle wraps the raw `PostgresError` in a `DrizzleQueryError`, so
- * the unique-violation code lives on `err.cause`, not on the top-
- * level Error. Walk the cause chain so we reach the postgres-js
- * error regardless of the wrapper layer the ORM happens to produce.
- * Without this, the duplicate-refund attempt 500s instead of
- * surfacing as 409 — caught by the admin-writes integration suite.
+ * migration 0013. Thin wrapper around the shared `isUniqueViolation`
+ * (`db/errors.ts`), which walks the Drizzle `.cause` chain to reach
+ * the underlying postgres-js `PostgresError` (`code='23505'`,
+ * `constraint_name` populated) regardless of the wrapper layer the
+ * ORM happens to produce. Without this, the duplicate-refund attempt
+ * 500s instead of surfacing as 409 — caught by the admin-writes
+ * integration suite.
  */
 function isDuplicateRefund(err: unknown): boolean {
-  let cur: unknown = err;
-  for (let depth = 0; depth < 4 && cur instanceof Error; depth++) {
-    const e = cur as Error & { code?: string; constraint_name?: string };
-    if (e.code === '23505' && e.constraint_name === 'credit_transactions_reference_unique') {
-      return true;
-    }
-    cur = (e as { cause?: unknown }).cause;
-  }
-  return false;
+  return isUniqueViolation(err, 'credit_transactions_reference_unique');
 }

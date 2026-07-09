@@ -149,7 +149,7 @@
       visible/recoverable but not yet one-click-refundable — noted in-code at
       `deposit-refund.ts`); and `account_merge` deliveries stay outside the
       recovery trail (see P2-d below).
-- [ ] **AUDIT-2-D · `interest-mint.ts` idempotency-skip catch never matches the real error shape.** _S · 💰._
+- [x] **AUDIT-2-D · `interest-mint.ts` idempotency-skip catch never matches the real error shape.** _S · 💰._
       `credits/interest-mint.ts:324-337` (same pattern in
       `credits/accrue-interest.ts:183-201`, P2/legacy-gated-off) string-matches
       `err.message`, but Drizzle wraps the real Postgres error in a
@@ -169,6 +169,26 @@
       **Done when:** a shared `isUniqueViolation(err)` helper walks
       `err.cause` for `code==='23505'`, used in both mint paths, with a test
       that constructs the real wrapped-error shape.
+      **Done 2026-07-09:** added `db/errors.ts` (`isUniqueViolation` /
+      `isUniqueViolationOnAny`) walking the `.cause` chain for
+      `code==='23505'`, optionally pinned to a specific `constraint_name` so
+      an unrelated unique violation isn't silently swallowed. Wired into
+      `interest-mint.ts` (both the snapshot and credit-transactions fences,
+      named explicitly) and `accrue-interest.ts`. Also refactored
+      `refunds.ts`'s `isDuplicateRefund` and `emissions.ts`'s
+      `isDuplicateEmission` onto the same shared helper (DRY — same
+      behavior, tests unchanged). `orders/repo-idempotency.ts`'s
+      `isOrderIdempotencyConflict` already used the correct cause-walking
+      pattern independently (A4-026) and was left as-is — a trivial
+      follow-up would dedupe it onto the shared helper too.
+      `admin/payouts-retry.ts`'s `isEmissionConservationViolation` walks
+      `.cause` correctly but matches on message text, because it's
+      detecting a `RAISE EXCEPTION` (trigger check-violation, no
+      `constraint_name`/`23505`) rather than a unique-index violation — a
+      structurally different case, confirmed not the same bug, left as-is.
+      New tests construct the real `DrizzleQueryError`-wrapped shape
+      (fixed outer message, `code`/`constraint_name` on `.cause`) and were
+      confirmed to fail against the pre-fix code.
 - [x] **T0-1b · Duplicate deposit against an already-PAID order.** _M · 💰._
       Persist the paying deposit's Horizon payment id + tx hash on the order in
       `markOrderPaid` (schema + migration); in the watcher's `unmatched` arm, record
