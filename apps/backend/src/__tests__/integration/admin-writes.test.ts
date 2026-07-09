@@ -905,6 +905,8 @@ describeIf('hardening A1 — emission conservation (cumulative, cross-writer, DB
     bearer: string;
     stepUp: string;
     amountMinor: string;
+    /** Defaults to 'USD' (→ USDLOOP). P2-f's interest_mint case needs 'GBP' (→ GBPLOOP, the only interest_mint-eligible asset — see the kind_shape CHECK). */
+    currency?: 'USD' | 'GBP' | 'EUR';
   }): Promise<Response> {
     return app.request(`http://localhost/api/admin/users/${args.userId}/emissions`, {
       method: 'POST',
@@ -916,7 +918,7 @@ describeIf('hardening A1 — emission conservation (cumulative, cross-writer, DB
       },
       body: JSON.stringify({
         amountMinor: args.amountMinor,
-        currency: 'USD',
+        currency: args.currency ?? 'USD',
         destinationAddress: DEST,
         reason: 'conservation integration test',
       }),
@@ -1109,6 +1111,127 @@ describeIf('hardening A1 — emission conservation (cumulative, cross-writer, DB
       .from(pendingPayouts)
       .where(eq(pendingPayouts.id, failedRow!.id));
     expect(row?.state).toBe('pending');
+  });
+
+  // P2-f (docs/money-auth-worklist.md / audit-2026-07-09-money-auth-sweep.md
+  // P2 findings — credits): migration 0044's INSERT-side trigger only
+  // WHENs on kind='emission' — a fresh order_cashback/interest_mint
+  // INSERT moves the mirror atomically in the same app-layer txn, so it
+  // doesn't need the DB fence at insert time (see the migration's own
+  // header comment). The UPDATE-side "re-entry" trigger, however, WHENs
+  // on all three mint kinds (`OLD.state = 'failed' AND NEW.state !=
+  // 'failed'`) — that's the real double-mint vector for order_cashback
+  // and interest_mint too (a failed fulfilment-cashback or interest-mint
+  // row whose headroom was re-consumed by a backfill while it sat
+  // failed). Only the kind='emission' case had direct coverage before
+  // this — these two tests close that gap by mirroring the
+  // 'retry-after-backfill double mint' case above for the other two
+  // kinds the same trigger gates.
+  it('retry-after-backfill double mint is rejected by the re-entry trigger for kind=order_cashback (P2-f)', async () => {
+    const { targetUser, bearer, stepUp, orderId } = await seed();
+    await seedCashbackBalance({ userId: targetUser.id, amountMinor: 2000n });
+
+    // The original fulfilment-time cashback payout, terminally failed.
+    // kind_shape requires order_cashback rows to carry a real order id —
+    // reuse the seeded order (its `state` is irrelevant to the FK/CHECK).
+    const [failedRow] = await db
+      .insert(pendingPayouts)
+      .values({
+        userId: targetUser.id,
+        orderId,
+        kind: 'order_cashback',
+        assetCode: 'USDLOOP',
+        assetIssuer: 'GISSUERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+        toAddress: DEST,
+        amountStroops: 2000n * 100_000n,
+        memoText: 'original order_cashback, terminally failed',
+        state: 'failed',
+        lastError: 'op_no_trust',
+        attempts: 5,
+      })
+      .returning({ id: pendingPayouts.id });
+
+    // The backfill — a different mint kind (emission), same user/asset —
+    // legitimately consumes the full headroom. The trigger sums all
+    // three mint kinds together, so this is exactly the cross-kind
+    // double-mint shape the fence must catch.
+    const backfill = await emit({ userId: targetUser.id, bearer, stepUp, amountMinor: '2000' });
+    expect(backfill.status).toBe(200);
+
+    // Retrying the original failed order_cashback row would mint BOTH → 409.
+    const retry = await app.request(`http://localhost/api/admin/payouts/${failedRow!.id}/retry`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${bearer}`,
+        'idempotency-key': idemKey(),
+        'X-Admin-Step-Up': stepUp,
+      },
+      body: JSON.stringify({ reason: 'attempting the double-mint retry (order_cashback)' }),
+    });
+    expect(retry.status).toBe(409);
+    const body = (await retry.json()) as { code: string };
+    expect(body.code).toBe('EMISSION_EXCEEDS_UNEMITTED_BALANCE');
+
+    // The failed row stays failed — nothing re-entered the queue.
+    const [row] = await db
+      .select()
+      .from(pendingPayouts)
+      .where(eq(pendingPayouts.id, failedRow!.id));
+    expect(row?.state).toBe('failed');
+  });
+
+  it('retry-after-backfill double mint is rejected by the re-entry trigger for kind=interest_mint (P2-f)', async () => {
+    // interest_mint rows are GBPLOOP-only (kind_shape CHECK: kind !=
+    // 'interest_mint' OR asset_code = 'GBPLOOP') — seed the balance and
+    // the backfill emission in GBP to match.
+    const { targetUser, bearer, stepUp } = await seed();
+    await seedCashbackBalance({ userId: targetUser.id, currency: 'GBP', amountMinor: 2000n });
+
+    const [failedRow] = await db
+      .insert(pendingPayouts)
+      .values({
+        userId: targetUser.id,
+        kind: 'interest_mint',
+        assetCode: 'GBPLOOP',
+        assetIssuer: 'GISSUERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+        toAddress: DEST,
+        amountStroops: 2000n * 100_000n,
+        memoText: 'original interest_mint, terminally failed',
+        state: 'failed',
+        lastError: 'op_no_trust',
+        attempts: 5,
+      })
+      .returning({ id: pendingPayouts.id });
+
+    const backfill = await emit({
+      userId: targetUser.id,
+      bearer,
+      stepUp,
+      amountMinor: '2000',
+      currency: 'GBP',
+    });
+    expect(backfill.status).toBe(200);
+
+    const retry = await app.request(`http://localhost/api/admin/payouts/${failedRow!.id}/retry`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${bearer}`,
+        'idempotency-key': idemKey(),
+        'X-Admin-Step-Up': stepUp,
+      },
+      body: JSON.stringify({ reason: 'attempting the double-mint retry (interest_mint)' }),
+    });
+    expect(retry.status).toBe(409);
+    const body = (await retry.json()) as { code: string };
+    expect(body.code).toBe('EMISSION_EXCEEDS_UNEMITTED_BALANCE');
+
+    const [row] = await db
+      .select()
+      .from(pendingPayouts)
+      .where(eq(pendingPayouts.id, failedRow!.id));
+    expect(row?.state).toBe('failed');
   });
 
   it('fleet-wide daily emission cap: the primitive refuses past ADMIN_DAILY_WITHDRAWAL_CAP_MINOR', async () => {

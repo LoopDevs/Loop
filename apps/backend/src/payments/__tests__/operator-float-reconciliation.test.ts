@@ -214,6 +214,41 @@ describe('operator float movement extraction', () => {
       }),
     ).toBeNull();
   });
+
+  // P2-g (2026-07-10): the vacuous-issuer shape #1601/#1607 fixed on
+  // `isMatchingIncomingPayment` / `getAccountBalances` — a code-only
+  // "USDC" match with NO configured issuer must never be classified as
+  // a real USDC movement, since Stellar asset codes aren't unique and
+  // an unconfigured issuer previously matched ANY self-issued "USDC".
+  it('does NOT classify an any-issuer USDC payment as usdc when no issuer is configured (fail-closed)', () => {
+    const movement = extractOperatorMovement({
+      payment: basePayment({
+        asset_type: 'credit_alphanum4',
+        asset_code: 'USDC',
+        // An arbitrary/attacker-controlled issuer — with no configured
+        // `usdcIssuer`, this must be excluded, not matched.
+        asset_issuer: 'GATTACKERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      }),
+      account: 'GOPERATOR',
+      usdcIssuer: null,
+    });
+
+    expect(movement).toBeNull();
+  });
+
+  it('still classifies a matching-issuer USDC payment as usdc when the issuer IS configured', () => {
+    const movement = extractOperatorMovement({
+      payment: basePayment({
+        asset_type: 'credit_alphanum4',
+        asset_code: 'USDC',
+        asset_issuer: 'GISSUER',
+      }),
+      account: 'GOPERATOR',
+      usdcIssuer: 'GISSUER',
+    });
+
+    expect(movement).toMatchObject({ asset: 'usdc', assetCode: 'USDC', assetIssuer: 'GISSUER' });
+  });
 });
 
 describe('operator float reconciliation math', () => {

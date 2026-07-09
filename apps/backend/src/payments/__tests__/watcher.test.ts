@@ -1028,6 +1028,66 @@ describe('AUDIT-2 finding C — unrecognized inbound deposit recording', () => {
     expect(state.writtenCursors).toEqual(['pt-outbound']);
   });
 
+  // P2-d (2026-07-10): an account_merge delivering the source's whole
+  // balance INTO the deposit address previously vanished with no DB
+  // row at all — `isInboundDeliveryToAccount` only recognized
+  // payment/path-payment ops (`to === account`), and account_merge
+  // never populates `to` (only `source_account`/`into`). It now
+  // records into the same unrecognized_deposit recovery trail.
+  it('P2-d: an inbound account_merge (into the deposit address) records an unrecognized_deposit skip', async () => {
+    const p: HorizonPayment = {
+      id: 'id-pt-merge',
+      paging_token: 'pt-merge',
+      type: 'account_merge',
+      source_account: 'GMERGEDSOURCEXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
+      into: ACCOUNT,
+      transaction_hash: 'tx-merge',
+      transaction_successful: true,
+      transaction: { memo: 'MEMO', memo_type: 'text', successful: true },
+    };
+    listPaymentsMock.mockResolvedValue({ records: [p], nextCursor: null });
+    findOrderMock.mockResolvedValue(makeOrder());
+    const r = await runPaymentWatcherTick({ account: ACCOUNT, usdcIssuer: 'GCENTRE' });
+    expect(r.paid).toBe(0);
+    expect(markPaidMock).not.toHaveBeenCalled();
+    expect(recordSkipMock).toHaveBeenCalledTimes(1);
+    expect(recordSkipMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payment: expect.objectContaining({ id: 'id-pt-merge', type: 'account_merge' }),
+        orderId: null,
+        reason: 'unrecognized_deposit',
+        detail: expect.stringContaining('account_merge'),
+      }),
+    );
+    // The detail string resolves the source via `source_account` (the
+    // real Horizon field), not the create_account-only `account` field.
+    expect(recordSkipMock).toHaveBeenCalledWith(
+      expect.objectContaining({ detail: expect.stringContaining('GMERGEDSOURCE') }),
+    );
+    expect(state.writtenCursors).toEqual(['pt-merge']);
+  });
+
+  it('P2-d: an OUTBOUND account_merge (this account merging INTO another) is never recorded', async () => {
+    // The critical noise guard's account_merge twin — an `into` that
+    // does NOT match `account` param must never record, the same way
+    // an outbound payment (`to !== account`) never does.
+    const p: HorizonPayment = {
+      id: 'id-pt-merge-out',
+      paging_token: 'pt-merge-out',
+      type: 'account_merge',
+      source_account: ACCOUNT,
+      into: 'GSOMEOTHERACCOUNTXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
+      transaction_hash: 'tx-merge-out',
+      transaction_successful: true,
+      transaction: { memo: 'MEMO', memo_type: 'text', successful: true },
+    };
+    listPaymentsMock.mockResolvedValue({ records: [p], nextCursor: null });
+    const r = await runPaymentWatcherTick({ account: ACCOUNT, usdcIssuer: 'GCENTRE' });
+    expect(r.paid).toBe(0);
+    expect(recordSkipMock).not.toHaveBeenCalled();
+    expect(state.writtenCursors).toEqual(['pt-merge-out']);
+  });
+
   it('a sub-dust unrecognized inbound deposit is counted but not recorded (T0-1c dust-floor parity)', async () => {
     const p: HorizonPayment = {
       id: 'id-pt-dust',

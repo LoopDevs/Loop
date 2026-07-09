@@ -63,8 +63,14 @@ const HorizonPayment = z.object({
   // recovery trail, the Horizon cursor moved past it anyway. It now
   // also accepts `path_payment_strict_send` /
   // `path_payment_strict_receive`. `create_account` / `account_merge`
-  // represent activation/merge XLM moves with their own field shapes
-  // and stay excluded.
+  // still stay excluded from THIS function — they don't deliver a
+  // chosen payment amount/asset in the same sense (account_merge
+  // moves the source's ENTIRE remaining balance, not an amount the
+  // sender picked to "pay" with), so neither should ever mark an
+  // order paid. P2-d (2026-07-10): `account_merge`'s INBOUND
+  // direction is still recognized for recovery-trail visibility by
+  // `isInboundDeliveryToAccount` below, via the `into` field (see its
+  // own comment) — just never treated as an order payment.
   type: z.string(),
   from: z.string().optional(),
   to: z.string().optional(),
@@ -91,12 +97,30 @@ const HorizonPayment = z.object({
   source_asset_code: z.string().optional(),
   source_asset_issuer: z.string().optional(),
   source_amount: z.string().optional(),
-  // create_account-only fields: present when activating the
-  // account. Captured so a future log line or test can introspect
-  // the bootstrap event.
+  // create_account-only: the NEW account being activated.
   starting_balance: z.string().optional(),
   account: z.string().optional(),
   funder: z.string().optional(),
+  // account_merge-only (P2-d, 2026-07-10): the DESTINATION account
+  // receiving the source's entire remaining native-XLM balance.
+  // Horizon does NOT populate `to` for this op type — `into` is the
+  // field to check when deciding whether a merge delivered value to
+  // the deposit/operator account. No `amount` field is emitted for
+  // this op type at all (the merged quantity isn't reported here —
+  // only via the separate effects API, which this client doesn't
+  // call), so a recorded account_merge skip row's amount reads
+  // 'unknown'.
+  into: z.string().optional(),
+  // Every Horizon operation record carries `source_account` — the
+  // account that submitted the op (Horizon's `BaseOperationResponse`
+  // shape). Only consumed today for account_merge's SOURCE address in
+  // an `unrecognized_deposit` skip row's human-readable detail (P2-d)
+  // — an earlier draft of this fix incorrectly assumed account_merge
+  // reused the `account` field above for its source (it doesn't;
+  // `account` is create_account-only — the real Horizon schema gives
+  // account_merge only `into`, no separate merge-specific source
+  // field, since `source_account` already IS the merging account).
+  source_account: z.string().optional(),
   transaction_hash: z.string(),
   transaction_successful: z.boolean().optional(),
   transaction: HorizonTransaction.optional(),
@@ -265,13 +289,16 @@ export function isMatchingIncomingPayment(
 /**
  * AUDIT-2 finding C: true when `p` is an operation that DELIVERS value
  * to `account` — a successful `payment` / `path_payment_strict_send` /
- * `path_payment_strict_receive` operation addressed `to === account` —
- * regardless of asset or memo.
+ * `path_payment_strict_receive` operation addressed `to === account`,
+ * OR (P2-d, 2026-07-10) a successful `account_merge` addressed
+ * `into === account` — regardless of asset or memo.
  *
  * Deliberately independent of `isMatchingIncomingPayment` above (which
- * additionally requires an asset/memo match against a specific rail).
- * The watcher uses THIS narrower "did value land here" check to decide
- * whether a payment that matched NO configured rail is a genuine
+ * additionally requires an asset/memo match against a specific rail,
+ * AND deliberately never matches `account_merge` at all — see the
+ * `type` field comment on `HorizonPayment` above for why). The watcher
+ * uses THIS narrower "did value land here" check to decide whether an
+ * operation that matched NO configured payment rail is a genuine
  * unrecognized inbound deposit (record it for manual reconciliation —
  * INV-6, no stranded value) or just one of the SAME account's routine
  * OUTBOUND operator payments/payouts, which also appear in this feed
@@ -286,16 +313,36 @@ export function isMatchingIncomingPayment(
  * `unrecognized_deposit` row an operator can dismiss — never a
  * mispaid order — and the operator never sends itself memo-less dust in
  * normal operation. Not special-cased.
+ *
+ * P2-d rationale: `account_merge` into the deposit/operator account is
+ * unusual (nobody's expected wallet-funding flow), but a genuine one
+ * previously vanished with no DB row at all — the cursor moves past it
+ * like every other op, and `to === account` never holds for a merge
+ * (Horizon never populates `to` for this op type), so the pre-P2-d
+ * check silently excluded it. It now lands in the exact same
+ * `unrecognized_deposit` recordSkip path as an unrecognized
+ * payment/path-payment (same dust-floor guard where an amount is
+ * known, same #1604 throttled-alert dedup — `account_merge` reports no
+ * `amount` field at all, so the caller's dust-floor check, which only
+ * fires when an amount IS present, doesn't exclude any merge; every
+ * inbound merge gets recorded, which is fine precisely because it's
+ * rare-to-never on this account). Never fed into
+ * `isMatchingIncomingPayment` / order-payment matching — see that
+ * function's doc for why an account_merge's whole-balance transfer
+ * isn't a safe "the user paid for this order" signal.
  */
 export function isInboundDeliveryToAccount(p: HorizonPayment, account: string): boolean {
-  if (
-    p.type !== 'payment' &&
-    p.type !== 'path_payment_strict_send' &&
-    p.type !== 'path_payment_strict_receive'
-  ) {
-    return false;
-  }
   if (p.transaction_successful === false) return false;
   if (p.transaction?.successful === false) return false;
-  return p.to === account;
+  if (
+    p.type === 'payment' ||
+    p.type === 'path_payment_strict_send' ||
+    p.type === 'path_payment_strict_receive'
+  ) {
+    return p.to === account;
+  }
+  if (p.type === 'account_merge') {
+    return p.into === account;
+  }
+  return false;
 }

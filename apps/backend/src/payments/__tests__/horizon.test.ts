@@ -422,9 +422,40 @@ describe('isInboundDeliveryToAccount (AUDIT-2 finding C)', () => {
     ).toBe(false);
   });
 
-  it('is false for create_account / account_merge (not payment-shaped)', () => {
+  it('is false for create_account (not payment-shaped, no merge destination field)', () => {
     expect(isInboundDeliveryToAccount({ ...base, type: 'create_account' }, ACCOUNT)).toBe(false);
+  });
+
+  // P2-d (2026-07-10): account_merge moves the ENTIRE source balance
+  // into a destination via Horizon's `into` field, not `to` —
+  // previously excluded outright (no recovery-trail row for a
+  // genuine inbound merge), now recognized via `into` specifically.
+  it('P2-d: is false for account_merge with no matching `into` destination', () => {
+    // `base.to === ACCOUNT` but account_merge never populates `to` —
+    // only `into` counts for this op type, so this must stay false
+    // even though `to` happens to coincidentally match.
     expect(isInboundDeliveryToAccount({ ...base, type: 'account_merge' }, ACCOUNT)).toBe(false);
+    expect(
+      isInboundDeliveryToAccount({ ...base, type: 'account_merge', into: 'GSOMEONEELSE' }, ACCOUNT),
+    ).toBe(false);
+  });
+
+  it('P2-d: is true for a successful account_merge whose `into` targets the account', () => {
+    expect(
+      isInboundDeliveryToAccount(
+        { ...base, type: 'account_merge', source_account: 'GSOURCE', into: ACCOUNT },
+        ACCOUNT,
+      ),
+    ).toBe(true);
+  });
+
+  it('P2-d: account_merge still respects the failed-transaction guard', () => {
+    expect(
+      isInboundDeliveryToAccount(
+        { ...base, type: 'account_merge', into: ACCOUNT, transaction_successful: false },
+        ACCOUNT,
+      ),
+    ).toBe(false);
   });
 });
 
