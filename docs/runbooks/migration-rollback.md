@@ -119,14 +119,25 @@ need back:
 
 1. Stop the affected services (`fly secrets set LOOP_KILL_*` per
    `kill-switch.md`) — no further writes.
-2. Snapshot the current DB state for forensics (Fly Postgres
-   automatic backups every hour; trigger an immediate one with
-   `fly postgres backup create`).
-3. Restore to a point before the bad migration:
+2. Confirm the live app name (`fly postgres list` — don't assume;
+   see `disaster-recovery.md` §"Backup posture" for why this repo's
+   docs have drifted on this before) and snapshot the current DB
+   state for forensics before touching anything else
+   (`fly volumes snapshots create <volume-id>`).
+3. Restore to a point before the bad migration. **True PITR** (an
+   exact timestamp, not just "the last daily snapshot") requires
+   `fly postgres backup enable` to have been turned on ahead of time
+   (B-4, `disaster-recovery.md` §"Backup posture" — not on by
+   default):
    ```bash
-   fly postgres backup list -a loopfinance-pg
-   fly postgres restore --backup-id <id-from-before-bad-migration> -a loopfinance-pg
+   fly postgres backup list -a <app>
+   fly postgres backup restore <restored-app-name> \
+     -a <app> \
+     --restore-target-time <RFC3339-timestamp-before-the-bad-migration>
    ```
+   If PITR isn't enabled yet, the only option is the last daily
+   volume snapshot (up to 24h of data loss) — see
+   `disaster-recovery.md` §"Postgres data loss" Path A.
 4. Replay any orders / payments that came in during the lost
    window (cross-ref `disaster-recovery.md` §"Postgres data loss"
    for the post-restore reconciliation pass).
