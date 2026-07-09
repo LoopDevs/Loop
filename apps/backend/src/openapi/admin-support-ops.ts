@@ -93,11 +93,19 @@ export function registerAdminSupportOpsOpenApi(
       paymentId: z.string().openapi({ description: 'Horizon operation id (row PK).' }),
       memo: z.string(),
       orderId: z.string().uuid().nullable(),
+      // Kept in sync with `WATCHER_SKIP_REASONS` (@loop/shared) by hand —
+      // this registration predates that constant existing and doesn't
+      // import it (openapi/ stays independent of the runtime schema
+      // module graph). AUDIT-2 finding C review: this enum had already
+      // drifted behind `order_gone` (T0-1, #1526) before this PR; both
+      // that and this PR's new `unrecognized_deposit` are added here.
       reason: z.enum([
         'asset_mismatch',
         'amount_insufficient',
         'missing_credit_row',
         'processing_error',
+        'order_gone',
+        'unrecognized_deposit',
       ]),
       status: z.enum(['pending', 'resolved', 'abandoned']),
       attempts: z.number().int(),
@@ -131,7 +139,14 @@ export function registerAdminSupportOpsOpenApi(
       query: z.object({
         status: z.enum(['pending', 'resolved', 'abandoned']).optional(),
         reason: z
-          .enum(['asset_mismatch', 'amount_insufficient', 'missing_credit_row', 'processing_error'])
+          .enum([
+            'asset_mismatch',
+            'amount_insufficient',
+            'missing_credit_row',
+            'processing_error',
+            'order_gone',
+            'unrecognized_deposit',
+          ])
           .optional(),
         limit: z.string().optional().openapi({ description: '1-100, default 20.' }),
         before: z.string().optional().openapi({ description: 'ISO-8601 keyset cursor.' }),
