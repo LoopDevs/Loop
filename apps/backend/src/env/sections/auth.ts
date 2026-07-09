@@ -133,11 +133,16 @@ export const authEnvFields = {
 
   // USDC issuer account for the watcher's asset-match guard. Circle
   // on mainnet: GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN.
-  // Defaults to undefined → watcher accepts any USDC issuer (MVP
-  // leniency; tighten once operators have verified the deployment).
-  // `parseEnv` warns at boot when this is set on mainnet to anything
-  // other than the canonical Circle issuer (launch-runbook typo
-  // tripwire — see CANONICAL_MAINNET_USDC_ISSUER above).
+  // AUDIT-2 finding A: defaults to undefined → the watcher's
+  // issuer-match guard (horizon.ts: isMatchingIncomingPayment) fails
+  // CLOSED — it matches NO USDC deposit, never "any issuer" (Stellar
+  // asset codes aren't unique; an unpinned issuer would otherwise let
+  // an attacker's self-issued fake "USDC" mark a real order paid).
+  // `parseEnv` boot-fails in production when this is unset (unless
+  // DISABLE_USDC_ISSUER_ENFORCEMENT=1) and separately warns at boot
+  // when it's set on mainnet to anything other than the canonical
+  // Circle issuer (launch-runbook typo tripwire — see
+  // CANONICAL_MAINNET_USDC_ISSUER above).
   LOOP_STELLAR_USDC_ISSUER: z
     .string()
     .regex(STELLAR_PUBKEY_REGEX, { message: STELLAR_ADDRESS_MESSAGE })

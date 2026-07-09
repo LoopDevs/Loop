@@ -163,6 +163,16 @@ async function processPayment(
   // USDC path — preferred for launch. Falls back to XLM check for
   // a native-asset payment; the order-level isAmountSufficient
   // will still reject it at amount-check time until FX lands.
+  //
+  // AUDIT-2 finding A: `args.usdcIssuer` traces back to
+  // `LOOP_STELLAR_USDC_ISSUER`. When it's unset, the spread below
+  // omits `assetIssuer` entirely, and `isMatchingIncomingPayment`
+  // now requires a pinned issuer for any credit-asset match — so
+  // `matchesUsdc` is `false` for every payment, not "any issuer".
+  // That's the safe default: an unconfigured issuer disables the
+  // USDC deposit rail (matches nothing) rather than accepting an
+  // attacker's self-issued fake "USDC" (env.ts also boot-fails
+  // production without this var set, absent an explicit override).
   const matchesUsdc = isMatchingIncomingPayment(p, {
     account: args.account,
     assetCode: 'USDC',

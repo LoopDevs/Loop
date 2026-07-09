@@ -228,6 +228,38 @@ Only GBPLOOP is minted on-chain nightly; USDLOOP/EURLOOP are vault shares
 
 ---
 
+## Deposit matching (the identity-adjacent invariant)
+
+### INV-13 — A deposit's asset identity is issuer-pinned before it can pay an order
+
+`markOrderPaid` only fires for a credit-asset (USDC / LOOP-asset) deposit
+whose Stellar issuer is explicitly configured and matches. Stellar asset
+codes are not unique — anyone can self-issue an asset called "USDC" (or
+any LOOP-asset code) from their own account, so a match on code alone
+would let an attacker's worthless self-issued asset pay a real order,
+triggering real CTX procurement against real operator funds (upstream of
+INV-7's "CTX paid at most once" — this invariant is what makes that
+payment legitimate in the first place).
+
+- **runtime**: `isMatchingIncomingPayment` (`payments/horizon.ts`) requires
+  a pinned `assetIssuer` for any non-native asset match — an omitted
+  issuer means NO match, never "any issuer" (AUDIT-2 finding A, fixed
+  2026-07). The LOOP-asset allowlist (`credits/payout-asset.ts`:
+  `configuredLoopPayableAssets`) has held this shape since ADR 015; the
+  USDC rail (`payments/watcher.ts`'s `matchesUsdc`) now mirrors it.
+- **DB/boot**: `env.ts` boot-fails in production when
+  `LOOP_STELLAR_USDC_ISSUER` is unset (mirrors the admin step-up guard,
+  hardening B3 precedent), unless `DISABLE_USDC_ISSUER_ENFORCEMENT=1`
+  deliberately ships the USDC rail disabled — this is INV-12's "config
+  that looks wired is actually wired" applied to the deposit identity
+  gate, not a substitute for the runtime check above.
+- **test**: `horizon.test.ts` (`isMatchingIncomingPayment` unit cases) +
+  `watcher.test.ts` (tick-level: fake USDC from an unconfigured issuer,
+  and from an attacker issuer when the real one IS configured, both
+  reject) + `env.test.ts` (production USDC-issuer boot guard).
+
+---
+
 ## How to use this doc
 
 **Reviewing a money diff**: run `/review-money-diff` (or manually) — for

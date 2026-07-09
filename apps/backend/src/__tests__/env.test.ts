@@ -26,6 +26,10 @@ const base = {
 // (or the explicit opt-out), so production-success fixtures carry it.
 const STEP_UP_KEY = 'admin-step-up-test-key-32-chars-min!!';
 const JWT_KEY = 'jwt-test-signing-key-32-chars-min!!';
+// AUDIT-2 finding A: production boots require LOOP_STELLAR_USDC_ISSUER
+// (or the explicit opt-out), so production-success fixtures carry it
+// too — same pattern as STEP_UP_KEY above.
+const USDC_ISSUER = CANONICAL_MAINNET_USDC_ISSUER;
 
 describe('parseEnv', () => {
   it('parses a minimal valid env with defaults', () => {
@@ -183,6 +187,7 @@ describe('parseEnv', () => {
       IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
       LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
       DISABLE_NATIVE_AUTH_ENFORCEMENT: '1',
+      LOOP_STELLAR_USDC_ISSUER: USDC_ISSUER,
     });
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('INCLUDE_DISABLED_MERCHANTS'));
     warn.mockRestore();
@@ -209,6 +214,7 @@ describe('parseEnv', () => {
       LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
       LOOP_AUTH_NATIVE_ENABLED: 'true',
       LOOP_JWT_SIGNING_KEY: JWT_KEY,
+      LOOP_STELLAR_USDC_ISSUER: USDC_ISSUER,
     });
     expect(env.NODE_ENV).toBe('production');
     expect(env.IMAGE_PROXY_ALLOWED_HOSTS).toBe('cdn.example.com,images.example.com');
@@ -221,6 +227,7 @@ describe('parseEnv', () => {
       DISABLE_IMAGE_PROXY_ALLOWLIST_ENFORCEMENT: '1',
       LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
       DISABLE_NATIVE_AUTH_ENFORCEMENT: '1',
+      LOOP_STELLAR_USDC_ISSUER: USDC_ISSUER,
     });
     expect(env.NODE_ENV).toBe('production');
   });
@@ -354,6 +361,7 @@ describe('parseEnv', () => {
           IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
           LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
           DISABLE_NATIVE_AUTH_ENFORCEMENT: '1',
+          LOOP_STELLAR_USDC_ISSUER: USDC_ISSUER,
         }),
       ).not.toThrow();
       expect(() =>
@@ -364,6 +372,7 @@ describe('parseEnv', () => {
           DISABLE_RATE_LIMITING: 'false',
           LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
           DISABLE_NATIVE_AUTH_ENFORCEMENT: '1',
+          LOOP_STELLAR_USDC_ISSUER: USDC_ISSUER,
         }),
       ).not.toThrow();
     });
@@ -460,6 +469,7 @@ describe('parseEnv', () => {
           LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
           LOOP_AUTH_NATIVE_ENABLED: 'true',
           LOOP_JWT_SIGNING_KEY: JWT_KEY,
+          LOOP_STELLAR_USDC_ISSUER: USDC_ISSUER,
         }),
       ).not.toThrow();
     });
@@ -472,6 +482,7 @@ describe('parseEnv', () => {
           IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
           LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
           DISABLE_NATIVE_AUTH_ENFORCEMENT: '1',
+          LOOP_STELLAR_USDC_ISSUER: USDC_ISSUER,
         }),
       ).not.toThrow();
     });
@@ -516,6 +527,7 @@ describe('parseEnv', () => {
           DISABLE_ADMIN_STEP_UP_ENFORCEMENT: '1',
           LOOP_AUTH_NATIVE_ENABLED: 'true',
           LOOP_JWT_SIGNING_KEY: JWT_KEY,
+          LOOP_STELLAR_USDC_ISSUER: USDC_ISSUER,
         }),
       ).not.toThrow();
     });
@@ -534,6 +546,73 @@ describe('parseEnv', () => {
     });
 
     it('does not enforce the step-up key outside production', () => {
+      expect(() => parseEnv({ ...base, NODE_ENV: 'development' })).not.toThrow();
+      expect(() => parseEnv({ ...base, NODE_ENV: 'test' })).not.toThrow();
+    });
+  });
+
+  // AUDIT-2 finding A: production must not silently disable the USDC
+  // deposit rail. The watcher's issuer-match guard (horizon.ts) now
+  // fails closed on an unset issuer — matches no USDC deposit at all
+  // — but a production deploy that never noticed the rail went dark
+  // is still a launch-readiness gap, so parseEnv fails loud too.
+  // Same shape as the admin step-up guard directly above.
+  describe('production USDC-issuer boot guard (AUDIT-2 finding A)', () => {
+    it('refuses production without LOOP_STELLAR_USDC_ISSUER', () => {
+      expect(() =>
+        parseEnv({
+          ...base,
+          NODE_ENV: 'production',
+          IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
+          LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
+          LOOP_AUTH_NATIVE_ENABLED: 'true',
+          LOOP_JWT_SIGNING_KEY: JWT_KEY,
+        }),
+      ).toThrow(/LOOP_STELLAR_USDC_ISSUER must be set in production/);
+    });
+
+    it('accepts production once LOOP_STELLAR_USDC_ISSUER is set', () => {
+      const env = parseEnv({
+        ...base,
+        NODE_ENV: 'production',
+        IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
+        LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
+        LOOP_AUTH_NATIVE_ENABLED: 'true',
+        LOOP_JWT_SIGNING_KEY: JWT_KEY,
+        LOOP_STELLAR_USDC_ISSUER: USDC_ISSUER,
+      });
+      expect(env.LOOP_STELLAR_USDC_ISSUER).toBe(USDC_ISSUER);
+    });
+
+    it('allows DISABLE_USDC_ISSUER_ENFORCEMENT=1 as the explicit opt-out', () => {
+      expect(() =>
+        parseEnv({
+          ...base,
+          NODE_ENV: 'production',
+          IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
+          LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
+          LOOP_AUTH_NATIVE_ENABLED: 'true',
+          LOOP_JWT_SIGNING_KEY: JWT_KEY,
+          DISABLE_USDC_ISSUER_ENFORCEMENT: '1',
+        }),
+      ).not.toThrow();
+    });
+
+    it('rejects any opt-out value other than "1" at parse time', () => {
+      expect(() =>
+        parseEnv({
+          ...base,
+          NODE_ENV: 'production',
+          IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
+          LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
+          LOOP_AUTH_NATIVE_ENABLED: 'true',
+          LOOP_JWT_SIGNING_KEY: JWT_KEY,
+          DISABLE_USDC_ISSUER_ENFORCEMENT: 'true',
+        }),
+      ).toThrow(/DISABLE_USDC_ISSUER_ENFORCEMENT/);
+    });
+
+    it('does not enforce the USDC issuer outside production', () => {
       expect(() => parseEnv({ ...base, NODE_ENV: 'development' })).not.toThrow();
       expect(() => parseEnv({ ...base, NODE_ENV: 'test' })).not.toThrow();
     });
