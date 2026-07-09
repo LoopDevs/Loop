@@ -473,10 +473,35 @@ Note the **sweep** arm already maps a skip-row that goes `unmatched` → `order_
 
 ### S4-5 · Raise the DB pool; plan PgBouncer `[code]`
 
-- [ ] **Status:** ☐ Not started
+- [ ] **Status:** ☐ Not started (docs half done 2026-07-09 — see below; operator sizing action stays open)
       **Why:** `db/client.ts:57` `max: DATABASE_POOL_MAX` default **10** vs `fly.toml` `hard_limit=250` concurrency — a 25× admission gap; a spike of concurrent authed/admin work queues on 10 connections while CPU idles. Scale-#4.
       **Do:** raise `DATABASE_POOL_MAX` (mind Postgres `max_connections` = pool × machines). Plan PgBouncer for later. ⚠️ **PgBouncer transaction-mode disables session advisory locks** — `withAdvisoryLock` (payout/provisioning/interest/ledger single-flight) would silently degrade; the money path needs care/testing before that migration.
       **Done when:** pool sized to actual concurrency; PgBouncer risk documented for the money path.
+      **Progress note (2026-07-09) — docs landed, 🟢 half done:**
+      `docs/deployment.md` §"Database pool sizing & PgBouncer (S4-5)" now
+      has the verified current numbers (`DATABASE_POOL_MAX` default 10 —
+      `apps/backend/src/env/sections/core.ts:239` — vs `fly.toml`
+      `hard_limit=250`, the 25× gap), the sizing formula
+      (`DATABASE_POOL_MAX × running machines + headroom ≤ Postgres
+max_connections`, including the release-command migration machine
+      as a temporary extra pool during deploys) with the `psql
+"$DATABASE_URL" -c "SHOW max_connections;"` check, a **PROPOSED**
+      ~25/machine starting point for the current 2-machine fleet (operator
+      sets via `fly secrets set`, not a code-default change), and the full
+      ⚠️ PgBouncer/session-advisory-lock writeup: every `withAdvisoryLock`
+      call site (payout worker, wallet provisioning, interest-mint, the
+      payment watcher, order-expiry sweep, redemption backfill,
+      operator-float reconciliation, and the `orders/redeem.ts` redeem
+      fence) degrades to running UNLOCKED with a `log.warn` under a
+      transaction-mode pooler (`isPooledPostgresUrl()` in `db/client.ts`),
+      while the transaction-scoped locks (`ledger-invariant-watcher.ts`,
+      `cursor-watchdog.ts`, `stuck-payout-watchdog.ts`) are unaffected.
+      Cross-linked from `docs/development.md` and
+      `apps/backend/.env.example`'s `DATABASE_POOL_MAX` entries. **Still
+      open (👤 operator):** actually read the live Postgres
+      `max_connections` and set `DATABASE_POOL_MAX` against it — that's an
+      operator call requiring `flyctl` access, not more engineering. No
+      code default changed. S4-5 stays unchecked until that half lands.
 
 ### S4-6 · Bound the admin ledger-drift scan `[code]`
 

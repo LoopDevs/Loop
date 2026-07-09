@@ -108,6 +108,11 @@ LOCATION_REFRESH_INTERVAL_HOURS=24      # location data refresh
 # Postgres instance — see `docker-compose.yml` at the repo root.
 DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # DATABASE_POOL_MAX=10                   # default 10
+# See docs/deployment.md → "Database pool sizing & PgBouncer" (S4-5)
+# before raising this: the sizing formula (pool × machines ≤ Postgres
+# max_connections) and the ⚠️ PgBouncer risk (transaction-mode pooling
+# silently disables withAdvisoryLock's session locks — payout/wallet-
+# provisioning/interest-mint/watcher single-flight).
 # A2-724: per-session statement_timeout (ms) sent on every connection
 # so a runaway query can't monopolise a pool slot. 0 disables.
 # DATABASE_STATEMENT_TIMEOUT_MS=30000
