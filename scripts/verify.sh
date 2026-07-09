@@ -16,6 +16,7 @@ echo "=== Docs ==="      && ./scripts/lint-docs.sh
 echo "=== Type parity ===" && node scripts/check-shared-type-parity.mjs
 echo "=== OpenAPI parity ===" && node ./scripts/check-openapi-parity.mjs
 echo "=== Dead flags ===" && node ./scripts/check-dead-flags.mjs
+echo "=== Money invariants (DB presence) ===" && node ./scripts/check-money-invariants.mjs
 echo "=== Tool self-tests ===" && npm run test:tools
 echo "=== Env perms ===" && ./scripts/check-env-perms.sh
 echo "=== Test ==="      && npm test

@@ -17,6 +17,20 @@
 > touch, confirm the enforcement still holds and the diff doesn't quietly
 > demote a DB/test tier down to convention. The `/review-money-diff` skill
 > automates walking this list.
+>
+> **T0-3 (2026-07-10):** every row below tagged **DB** whose object is a
+> named trigger/function, unique index, or CHECK constraint is now also
+> mechanically presence- and shape-asserted by
+> `scripts/check-money-invariants.mjs` (`npm run check:money-invariants`),
+> which runs in the CI Quality job — a **required** merge check — and in
+> `npm run verify`. It statically replays the migration chain's
+> CREATE/DROP events (no live DB needed) so a diff that drops or narrows
+> one of these objects fails CI even if it updates `schema.ts` to match
+> (the one case `check-migration-parity` alone would let through, since
+> that check only proves the migration chain and `schema.ts` agree with
+> each other, not that either still contains the object). Adding a new
+> DB-tier invariant here should come with a matching entry in that
+> script's tracked-object list in the same PR.
 
 ---
 
