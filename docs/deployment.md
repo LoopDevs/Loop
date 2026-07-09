@@ -278,6 +278,31 @@ The DB refreshes on each such deploy. `MAXMIND_GEOLITE2_PATH` is set in the Dock
 (`/app/geoip/GeoLite2-Country.mmdb`); no `fly secrets` entry is needed since the build
 secrets are consumed at build time, not runtime.
 
+**Staleness signal (go-live-plan §T1-F, 2026-07-09):** because the refresh only happens
+on a deploy that remembers the two `--build-secret` flags, and the download is
+best-effort, a forgotten refresh used to be silent — the `.mmdb` (or its absence) would
+sit unnoticed indefinitely. `/health` now reports it directly:
+
+- `geoDbStale: boolean` — true when the `.mmdb` build is more than 45 days old (MaxMind
+  ships weekly; 45d ≈ a missed monthly refresh cycle — `GEO_DB_STALE_AFTER_DAYS` in
+  `apps/backend/src/public/geo.ts`) **or** `MAXMIND_GEOLITE2_PATH` is set but the file
+  failed to open (bad path, unreadable file, a build that silently skipped the secrets).
+  Deliberately **false** when `MAXMIND_GEOLITE2_PATH` was never configured at all — that's
+  a valid dev/staging posture, not a degradation.
+- `geoDbBuildEpoch: string | null` — the `.mmdb`'s own build timestamp (from its
+  metadata), null when unavailable.
+- When stale, `'geo_db_stale'` appears in `/health`'s `softDegradedReasons` (soft —
+  visible, never 503s, never cycles the Fly machine) and the backend pages
+  `DISCORD_WEBHOOK_MONITORING` at most once every 7 days (`notifyGeoDbStale` in
+  `apps/backend/src/discord/monitoring.ts`) so a forgotten refresh surfaces as a nudge,
+  not silence. A one-time `logger.warn` also fires at boot when the condition holds.
+
+**Operator action when you see this:** redeploy with the two `--build-secret` flags
+above — that's the entire remediation; there is no separate refresh command. This is a
+stopgap: `docs/adr/040-cloudflare-edge.md` (Cloudflare's `CF-IPCountry` header) would make
+MaxMind optional entirely and moots the whole cadence question if/when it lands — see
+`docs/roadmap.md`'s orphaned-work entry.
+
 ### Scaling
 
 ```bash

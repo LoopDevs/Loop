@@ -71,7 +71,7 @@ Phase-2 surfaces ship dark behind `LOOP_PHASE_1_ONLY=true`, so T1 launches witho
 
 - [ ] **U-1 · Full customer-journey UX / visual pass** (in progress). 🟢
 - [ ] **ADR 040 · Cloudflare edge** — the real geo fix (`CF-IPCountry`, code already prefers it) + EU latency + WAF/DDoS. 👤 setup; **security prereq: lock origin to CF before trusting its headers.** Closes the GeoLite2 item below if it lands.
-- [ ] **GeoLite2 refresh cadence / staleness signal** (mooted if Cloudflare lands). 🟢+👤
+- [ ] **GeoLite2 refresh cadence / staleness signal** (mooted if Cloudflare lands). 🟢 **done 2026-07-09:** `/health` reports `geoDbStale`/`geoDbBuildEpoch`, soft-degrades with `geo_db_stale`, pages `DISCORD_WEBHOOK_MONITORING` weekly, boot warn — `docs/deployment.md` §GeoLite2. · 👤 the remembered-cadence half (an operator actually redeploying with the `--build-secret` flags on a schedule) is still open.
 - [x] `.gitleaksignore` fingerprint for the audit doc (advisory gitleaks noise). 🟢 **✅ done 2026-07-08:** verified with gitleaks v8.30.1 (both the local binary and CI's pinned Docker image, same `detect --config=.gitleaks.toml` invocation as `.github/workflows/ci.yml`) over full history (1496 commits) — exit 0, "no leaks found." The two finding classes the audit doc (`docs/audit-2026-06-30-cold/raw/x-security.md`) called out as noise were already resolved via `.gitleaks.toml` allowlist entries (the `-chars-min` stopword for the flywheel test-fixture JWT key, and the `__tests__/` path allowlist covering the now-removed Stellar test seeds) in #1534, not a `.gitleaksignore` fingerprint. No live finding remains to suppress, so no `.gitleaksignore` file was added — one would have nothing valid to reference.
 
 ## T1 exit criteria

@@ -62,6 +62,7 @@ vi.mock('../monitoring-circuit-breaker.js', () => ({
 
 import {
   notifyHealthChange,
+  notifyGeoDbStale,
   notifyPayoutFailed,
   notifyInterestPoolLow,
   notifyInterestPoolRecovered,
@@ -105,6 +106,28 @@ describe('notifyHealthChange', () => {
     const e = lastEmbed();
     expect(e.title).toBe('🟠 Service Degraded');
     expect(e.color).toBe(0xe67e22);
+  });
+});
+
+describe('notifyGeoDbStale', () => {
+  it('renders the age + build epoch when the db opened but is stale', () => {
+    notifyGeoDbStale({ buildEpoch: '2026-01-01T00:00:00.000Z', ageDays: 100, thresholdDays: 45 });
+    const e = lastEmbed();
+    expect(e.title).toBe('🟡 GeoLite2 database stale');
+    expect(e.color).toBe(0xe67e22);
+    expect(e.description).toContain('100 day(s) ago');
+    expect(e.description).toContain('45-day staleness threshold');
+    expect(e.fields!.find((f) => f.name === 'Build epoch')!.value).toBe('2026-01-01T00:00:00.000Z');
+    expect(e.fields!.find((f) => f.name === 'Age (days)')!.value).toBe('100');
+    expect(e.fields!.find((f) => f.name === 'Threshold (days)')!.value).toBe('45');
+  });
+
+  it('renders the misconfigured-load-failure copy when buildEpoch is null', () => {
+    notifyGeoDbStale({ buildEpoch: null, ageDays: null, thresholdDays: 45 });
+    const e = lastEmbed();
+    expect(e.description).toContain('failed to open');
+    expect(e.fields!.find((f) => f.name === 'Build epoch')!.value).toBe('_open failed_');
+    expect(e.fields!.find((f) => f.name === 'Age (days)')!.value).toBe('_n/a_');
   });
 });
 

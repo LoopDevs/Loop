@@ -7,25 +7,41 @@ import type { Context } from 'hono';
  * exposure, and to close the pre-existing gap while touching this file.
  */
 
-const { locationsState, merchantsState, runtimeState, dbState, operatorHealthMock } = vi.hoisted(
-  () => ({
-    locationsState: { locations: [] as unknown[], loadedAt: Date.now(), loading: false },
-    merchantsState: { merchants: [] as unknown[], loadedAt: Date.now() },
-    runtimeState: {
+const {
+  locationsState,
+  merchantsState,
+  runtimeState,
+  dbState,
+  operatorHealthMock,
+  geoDbState,
+  notifyGeoDbStaleMock,
+} = vi.hoisted(() => ({
+  locationsState: { locations: [] as unknown[], loadedAt: Date.now(), loading: false },
+  merchantsState: { merchants: [] as unknown[], loadedAt: Date.now() },
+  runtimeState: {
+    degraded: false,
+    otpDelivery: {
+      enabled: true,
+      lastSuccessAtMs: null,
+      lastFailureAtMs: null,
+      lastError: null,
       degraded: false,
-      otpDelivery: {
-        enabled: true,
-        lastSuccessAtMs: null,
-        lastFailureAtMs: null,
-        lastError: null,
-        degraded: false,
-      },
-      workers: [] as unknown[],
     },
-    dbState: { shouldFail: false },
-    operatorHealthMock: vi.fn(() => [] as Array<{ id: string; state: string }>),
-  }),
-);
+    workers: [] as unknown[],
+  },
+  dbState: { shouldFail: false },
+  operatorHealthMock: vi.fn(() => [] as Array<{ id: string; state: string }>),
+  // Defaults mirror the "unconfigured" GeoDbStatus (public/geo.ts) —
+  // most tests don't care about geo staleness, so the baseline must not
+  // spuriously soft-degrade / page.
+  geoDbState: {
+    available: false,
+    buildEpoch: null as string | null,
+    ageDays: null as number | null,
+    stale: false,
+  },
+  notifyGeoDbStaleMock: vi.fn(),
+}));
 
 vi.mock('../clustering/data-store.js', () => ({
   getLocations: () => ({ locations: locationsState.locations, loadedAt: locationsState.loadedAt }),
@@ -42,6 +58,12 @@ vi.mock('../runtime-health.js', () => ({
 
 vi.mock('../discord.js', () => ({
   notifyHealthChange: vi.fn(),
+  notifyGeoDbStale: notifyGeoDbStaleMock,
+}));
+
+vi.mock('../public/geo.js', () => ({
+  getGeoDbStatus: () => Promise.resolve(geoDbState),
+  GEO_DB_STALE_AFTER_DAYS: 45,
 }));
 
 vi.mock('../upstream.js', () => ({
@@ -95,6 +117,11 @@ beforeEach(() => {
   dbState.shouldFail = false;
   operatorHealthMock.mockReset().mockReturnValue([]);
   fetchMock.mockReset().mockResolvedValue(new Response('ok', { status: 200 }));
+  geoDbState.available = false;
+  geoDbState.buildEpoch = null;
+  geoDbState.ageDays = null;
+  geoDbState.stale = false;
+  notifyGeoDbStaleMock.mockReset();
   __resetHealthProbeCacheForTests();
   __resetDbProbeCacheForTests();
 });
@@ -201,5 +228,101 @@ describe('healthHandler', () => {
     const { ctx, headers } = makeCtx();
     await healthHandler(ctx);
     expect(headers.get('Cache-Control')).toBe('no-store');
+  });
+
+  // go-live-plan §T1-F: GeoLite2 staleness/absence signal. Pins the
+  // three-way distinction in `GeoDbStatus.stale` (public/geo.ts) —
+  // "unconfigured" must read as healthy/quiet, "stale" and
+  // "configured-but-unopenable" must both soft-degrade + eventually page.
+  describe('geo db staleness', () => {
+    it('does not soft-degrade when MAXMIND_GEOLITE2_PATH was never configured', async () => {
+      // geoDbState defaults to the "unconfigured" shape (see beforeEach).
+      const { ctx } = makeCtx();
+      const res = await healthHandler(ctx);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        status: string;
+        geoDbStale: boolean;
+        geoDbBuildEpoch: string | null;
+        softDegradedReasons: string[];
+      };
+      expect(body.status).toBe('healthy');
+      expect(body.geoDbStale).toBe(false);
+      expect(body.geoDbBuildEpoch).toBeNull();
+      expect(body.softDegradedReasons).not.toContain('geo_db_stale');
+      expect(notifyGeoDbStaleMock).not.toHaveBeenCalled();
+    });
+
+    it('soft-degrades (200, not 503) and reports geoDbBuildEpoch when the db is stale', async () => {
+      geoDbState.available = true;
+      geoDbState.buildEpoch = '2026-01-01T00:00:00.000Z';
+      geoDbState.ageDays = 100;
+      geoDbState.stale = true;
+
+      const { ctx } = makeCtx();
+      const res = await healthHandler(ctx);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        status: string;
+        geoDbStale: boolean;
+        geoDbBuildEpoch: string | null;
+        softDegraded: boolean;
+        criticalDegraded: boolean;
+        softDegradedReasons: string[];
+      };
+      expect(body.status).toBe('degraded');
+      expect(body.geoDbStale).toBe(true);
+      expect(body.geoDbBuildEpoch).toBe('2026-01-01T00:00:00.000Z');
+      expect(body.softDegraded).toBe(true);
+      expect(body.criticalDegraded).toBe(false);
+      expect(body.softDegradedReasons).toContain('geo_db_stale');
+    });
+
+    it('soft-degrades with a null buildEpoch when the path is configured but the db failed to open', async () => {
+      geoDbState.available = false;
+      geoDbState.buildEpoch = null;
+      geoDbState.ageDays = null;
+      geoDbState.stale = true;
+
+      const { ctx } = makeCtx();
+      const res = await healthHandler(ctx);
+      const body = (await res.json()) as { geoDbStale: boolean; geoDbBuildEpoch: string | null };
+      expect(body.geoDbStale).toBe(true);
+      expect(body.geoDbBuildEpoch).toBeNull();
+    });
+
+    it('gates notifyGeoDbStale to a 7-day cooldown, then re-fires once the cooldown elapses', async () => {
+      geoDbState.available = true;
+      geoDbState.buildEpoch = '2026-01-01T00:00:00.000Z';
+      geoDbState.ageDays = 100;
+      geoDbState.stale = true;
+
+      const first = makeCtx();
+      await healthHandler(first.ctx);
+      expect(notifyGeoDbStaleMock).toHaveBeenCalledTimes(1);
+      expect(notifyGeoDbStaleMock).toHaveBeenCalledWith({
+        buildEpoch: '2026-01-01T00:00:00.000Z',
+        ageDays: 100,
+        thresholdDays: 45,
+      });
+
+      // Condition still persists on the very next probe — cooldown
+      // withholds the repage so a sustained "forgot to redeploy" state
+      // doesn't spam the channel every request.
+      const second = makeCtx();
+      await healthHandler(second.ctx);
+      expect(notifyGeoDbStaleMock).toHaveBeenCalledTimes(1);
+
+      // Jump past the 7-day cooldown window.
+      const realNow = Date.now();
+      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(realNow + 7 * 24 * 60 * 60 * 1000 + 1);
+      try {
+        const third = makeCtx();
+        await healthHandler(third.ctx);
+        expect(notifyGeoDbStaleMock).toHaveBeenCalledTimes(2);
+      } finally {
+        nowSpy.mockRestore();
+      }
+    });
   });
 });

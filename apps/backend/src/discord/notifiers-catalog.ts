@@ -146,6 +146,12 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
       'Fires on the /health probe cache transitioning healthy ↔ degraded. Paging-grade for the on-call lookup.',
   },
   {
+    name: 'notifyGeoDbStale',
+    channel: 'monitoring',
+    description:
+      "go-live-plan §T1-F: fires when the operator-provided GeoLite2-Country .mmdb is stale (built more than 45 days ago) or configured-but-unopenable. NOT a paging incident — fix is always 'redeploy with the two --build-secret flags' (docs/deployment.md §GeoLite2). Throttled to once per 7 days via a module-level cooldown in health.ts so a forgotten refresh nudges rather than spams.",
+  },
+  {
     name: 'notifyPayoutFailed',
     channel: 'monitoring',
     description:
