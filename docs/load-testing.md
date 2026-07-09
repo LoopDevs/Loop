@@ -178,6 +178,20 @@ runner — no `host.docker.internal` workaround needed there), uploads
 `tools/load-test/results/*.json` + service logs as artifacts, and fails
 the job if either scenario's k6 thresholds fail.
 
+**Container-uid gotcha found on the first real CI run:** `grafana/k6`
+runs `--summary-export` as non-root uid `12345`, which can't write into
+a bind-mounted `results/` dir created with the default runner-user
+umask (`755`) on a real Linux Docker host. k6 logs a
+`permission denied` warning and still exits `0` on passing thresholds
+— so the job showed green while silently producing an **empty**
+`k6-summaries` artifact. Docker Desktop's macOS bind-mount bridge is
+looser about container-uid checks and didn't reproduce this locally,
+which is why it only surfaced once this workflow actually ran on
+`ubuntu-latest`. Fixed by `chmod 777`-ing the results dir before the
+`docker run` (both here and in `run-local.sh`) — it's a throwaway,
+git-ignored, local/CI-only directory, so world-writable is an
+acceptable fix rather than chasing uid-mapping across two host OSes.
+
 ## Measured baselines — 2026-07-09
 
 **⚠️ These are dev-machine + mock-CTX numbers, not production capacity
