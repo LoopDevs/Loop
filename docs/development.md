@@ -184,6 +184,16 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # navigator.language. Optional locally; only needed to test geo wiring.
 # MAXMIND_GEOLITE2_PATH=/etc/loop/GeoLite2-Country.mmdb
 
+# Mobile deep-linking domain verification (M-3). Each gates its
+# GET /.well-known/* file 404 WELL_KNOWN_NOT_CONFIGURED until set —
+# fill in only once the corresponding credential exists: APPLE_TEAM_ID
+# after Apple Developer Program enrollment (go-live-plan L1-4),
+# ANDROID_CERT_SHA256 after the release keystore is created
+# (go-live-plan L1-5; comma-separated to list a debug + release
+# fingerprint side by side during rollout). Not needed for local dev.
+# APPLE_TEAM_ID=ABCDE12345
+# ANDROID_CERT_SHA256=AA:BB:CC:...,DD:EE:FF:...
+
 # Rate-limit trust boundary (audit A-023). Set TRUST_PROXY=true only
 # when running behind a trusted edge proxy that rewrites
 # X-Forwarded-For (Fly.io, Cloudflare, etc.). Otherwise leave unset so

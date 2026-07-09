@@ -310,6 +310,8 @@ GET  /health
 GET  /metrics                               — Prometheus format
 GET  /openapi.json                          — full OpenAPI 3.1 spec, bearer-gated, `private, no-store`
 GET  /.well-known/jwks.json                 — public RSA JWKS for Loop-minted RS256 JWTs (ADR 030 Phase A), `public, max-age=3600`
+GET  /.well-known/apple-app-site-association — iOS Universal Links domain-verification (M-3); 404 WELL_KNOWN_NOT_CONFIGURED until APPLE_TEAM_ID is set, `public, max-age=300`
+GET  /.well-known/assetlinks.json            — Android App Links domain-verification (M-3); 404 WELL_KNOWN_NOT_CONFIGURED until ANDROID_CERT_SHA256 is set, `public, max-age=300`
 GET  /api/merchants              ?page=&limit=&q=      — paginated, max 100 per page
 GET  /api/merchants/all                                 — full catalog in one response (audit A-002); `?fields=lite` strips description/instructions/terms for browse (S4-7)
 GET  /api/merchants/by-slug/:slug

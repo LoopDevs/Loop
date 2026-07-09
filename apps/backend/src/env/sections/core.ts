@@ -72,6 +72,21 @@ export const coreEnvFields = {
   // returns the US default and the web client falls back to navigator.language.
   MAXMIND_GEOLITE2_PATH: z.string().optional(),
 
+  // M-3 (deep linking) domain-verification files. Both gate their
+  // `/.well-known/*` endpoint 404 `WELL_KNOWN_NOT_CONFIGURED` when
+  // unset — the operator fills these in once the corresponding native
+  // credential exists, not before: `APPLE_TEAM_ID` after Apple
+  // Developer Program enrollment (go-live-plan L1-4),
+  // `ANDROID_CERT_SHA256` after the release keystore is created
+  // (go-live-plan L1-5). No boot guard — absent is a valid pre-launch
+  // state (deep linking degrades to "verification file missing", not
+  // an outage; see apps/backend/src/well-known/deep-link-verification.ts).
+  APPLE_TEAM_ID: z.string().optional(),
+  // Comma-separated SHA-256 certificate fingerprints (colon-hex, e.g.
+  // "AA:BB:CC:..."), supporting a debug + release keystore fingerprint
+  // side by side during rollout. Split/trimmed at read time.
+  ANDROID_CERT_SHA256: z.string().optional(),
+
   // A2-654: emergency opt-out for the production-allowlist boot guard
   // below. Typed here rather than read from bare `process.env` so a
   // typo on deploy (`DISABLE_IMAGE_PROXY_ALLOWLIST_ENFORCMENT=1`) fails

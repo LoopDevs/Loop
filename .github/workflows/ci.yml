@@ -724,6 +724,47 @@ jobs:
             echo "AndroidManifest.xml is missing android:fullBackupContent (A-033)" >&2
             exit 1
           fi
+      # M-3 (deep linking): a bare `cap sync` regenerates AndroidManifest.xml
+      # with no App Links intent-filter at all — same silent-drop hazard as
+      # the M-4 overlays above, so it gets the same CI-enforced assertion.
+      - name: Verify Android App Links intent-filter
+        run: |
+          set -euo pipefail
+          manifest=apps/mobile/android/app/src/main/AndroidManifest.xml
+          if ! grep -q 'android:autoVerify="true"' "$manifest"; then
+            echo "AndroidManifest.xml is missing the autoVerify App Links intent-filter (M-3)" >&2
+            exit 1
+          fi
+          for host in loopfinance.io www.loopfinance.io beta.loopfinance.io; do
+            if ! grep -q "android:host=\"$host\"" "$manifest"; then
+              echo "AndroidManifest.xml is missing App Links data host $host (M-3)" >&2
+              exit 1
+            fi
+          done
+      # M-3 (deep linking): App.entitlements has no Capacitor-template
+      # equivalent at all — a clean `cap add ios` produces nothing for
+      # it, so both the file's presence and its pbxproj wiring need
+      # their own assertions here.
+      - name: Verify iOS associated-domains entitlements wiring
+        run: |
+          set -euo pipefail
+          pbxproj=apps/mobile/ios/App/App.xcodeproj/project.pbxproj
+          entitlements=apps/mobile/ios/App/App/App.entitlements
+          if [ ! -f "$entitlements" ]; then
+            echo "App.entitlements was not copied into the iOS project (M-3)" >&2
+            exit 1
+          fi
+          for host in loopfinance.io www.loopfinance.io beta.loopfinance.io; do
+            if ! grep -q "applinks:$host" "$entitlements"; then
+              echo "App.entitlements is missing applinks:$host (M-3)" >&2
+              exit 1
+            fi
+          done
+          count=$(grep -c 'CODE_SIGN_ENTITLEMENTS = App/App.entitlements;' "$pbxproj" || true)
+          if [ "${count:-0}" -lt 2 ]; then
+            echo "CODE_SIGN_ENTITLEMENTS is wired on fewer than 2 XCBuildConfiguration blocks (M-3)" >&2
+            exit 1
+          fi
 
   test-e2e:
     name: E2E tests

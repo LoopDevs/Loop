@@ -119,6 +119,8 @@ import {
 } from '../secure-storage';
 import { setStatusBarStyle, setStatusBarOverlay } from '../status-bar';
 import { registerBackButton } from '../back-button';
+import { resolveDeepLinkTarget, registerDeepLinks } from '../deep-link';
+import { registerAppStateSync } from '../app-state';
 import { watchNetwork } from '../network';
 import { enableTaskSwitcherPrivacyOverlay } from '../task-switcher-overlay';
 import { nativeShare } from '../share';
@@ -281,6 +283,35 @@ describe('back-button', () => {
     // listener on unmount. On web (non-Capacitor) it's a no-op, but
     // calling it must still be safe.
     const dispose = registerBackButton();
+    expect(typeof dispose).toBe('function');
+    expect(() => dispose()).not.toThrow();
+  });
+});
+
+// ────────────────────────────────────────────────────────────
+// 6b. Deep Links (M-3) — see deep-link.test.ts for the full
+// resolveDeepLinkTarget security-mapper suite and
+// deep-link.native.test.ts for the App.addListener wiring.
+// ────────────────────────────────────────────────────────────
+describe('deep-link', () => {
+  it('resolveDeepLinkTarget is available as a pure function', () => {
+    expect(resolveDeepLinkTarget('https://loopfinance.io/x')).toBe('/x');
+  });
+
+  it('registerDeepLinks is a no-op on web and returns a disposer', () => {
+    const dispose = registerDeepLinks(() => {});
+    expect(typeof dispose).toBe('function');
+    expect(() => dispose()).not.toThrow();
+  });
+});
+
+// ────────────────────────────────────────────────────────────
+// 6c. App State (M-5) — see app-state.native.test.ts for the
+// App.addListener('appStateChange') -> focusManager wiring.
+// ────────────────────────────────────────────────────────────
+describe('app-state', () => {
+  it('registerAppStateSync is a no-op on web and returns a disposer', () => {
+    const dispose = registerAppStateSync();
     expect(typeof dispose).toBe('function');
     expect(() => dispose()).not.toThrow();
   });

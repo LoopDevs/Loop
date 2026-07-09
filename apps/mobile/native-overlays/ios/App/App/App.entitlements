@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Loop iOS associated-domains entitlement (M-3, deep linking).
+
+  Declares the hosts Universal Links may open the app for — Apple
+  verifies each against the `apple-app-site-association` file served
+  at `https://<host>/.well-known/apple-app-site-association` (backend
+  handler: apps/backend/src/well-known/deep-link-verification.ts,
+  gated on the operator-filled APPLE_TEAM_ID env var — go-live-plan
+  L1-4). Wired into the Xcode project via CODE_SIGN_ENTITLEMENTS on
+  both build configurations by
+  apps/mobile/scripts/apply-native-overlays.sh; see that script for
+  the anchored pbxproj patch. Keep this host list in sync with
+  ALLOWED_DEEP_LINK_HOSTS in apps/web/app/native/deep-link.ts and the
+  Android intent-filter data hosts the same script wires into
+  AndroidManifest.xml.
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:loopfinance.io</string>
+		<string>applinks:www.loopfinance.io</string>
+		<string>applinks:beta.loopfinance.io</string>
+	</array>
+</dict>
+</plist>
