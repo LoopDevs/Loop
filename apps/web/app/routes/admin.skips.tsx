@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
 import {
   ApiException,
+  WATCHER_SKIP_REASONS,
   type AdminWatcherSkipRow,
   type WatcherSkipReason,
   type WatcherSkipStatus,
@@ -33,13 +34,15 @@ const STATUSES: ReadonlyArray<WatcherSkipStatus> = [
   'refunding',
   'refunded',
 ];
-const REASONS: ReadonlyArray<WatcherSkipReason> = [
-  'asset_mismatch',
-  'amount_insufficient',
-  'missing_credit_row',
-  'processing_error',
-  'order_gone',
-];
+// AUDIT-2 finding C review nit: this used to be a hardcoded literal
+// list that drifted behind `@loop/shared`'s `WATCHER_SKIP_REASONS`
+// (missing `order_gone` for one PR cycle, then `unrecognized_deposit`
+// for this one) — the filter `<select>` silently couldn't offer the
+// newest reason and a direct `?reason=<new>` URL degraded to
+// "no filter" instead of filtering. Deriving from the shared constant
+// closes this drift class for good: a new reason value now shows up
+// here automatically, no companion edit required.
+const REASONS: ReadonlyArray<WatcherSkipReason> = WATCHER_SKIP_REASONS;
 
 const STATUS_CLASSES: Record<WatcherSkipStatus, string> = {
   pending: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',

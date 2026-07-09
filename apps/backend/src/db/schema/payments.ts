@@ -72,7 +72,7 @@ export const paymentWatcherSkips = pgTable(
   (t) => [
     check(
       'payment_watcher_skips_reason_known',
-      sql`${t.reason} IN ('asset_mismatch', 'amount_insufficient', 'missing_credit_row', 'processing_error', 'order_gone')`,
+      sql`${t.reason} IN ('asset_mismatch', 'amount_insufficient', 'missing_credit_row', 'processing_error', 'order_gone', 'unrecognized_deposit')`,
     ),
     check(
       'payment_watcher_skips_status_known',

@@ -64,7 +64,8 @@
 
 ## Phase 1 — Money correctness (can lose or double-count value)
 
-- [ ] **AUDIT-2-B · `loop_asset` payment method has no server-side Phase-1 gate (LIVE-RISK).** _M · 💰._
+- [x] **AUDIT-2-B · `loop_asset` payment method has no server-side Phase-1 gate (LIVE-RISK).** _M · 💰._
+      ✅ Done 2026-07-09 (#1603).
       No `LOOP_PHASE_1_ONLY` check anywhere in the `loop_asset` create/redeem
       path — `orders/loop-handler.ts` (contrast the `credit` gate at
       ~404-420), `orders/redeem.ts` (gated only on wallet-provider +
@@ -81,7 +82,8 @@
       **Done when:** `loop_asset` create + redeem both reject with a clear
       `PHASE_1_ONLY` error while the flag is set, same shape as
       `CREDIT_METHOD_RETIRED`.
-- [ ] **AUDIT-2-A · USDC deposit matching accepts any-issuer USDC when `LOOP_STELLAR_USDC_ISSUER` is unset.** _S–M · 💰 + operator._
+- [x] **AUDIT-2-A · USDC deposit matching accepts any-issuer USDC when `LOOP_STELLAR_USDC_ISSUER` is unset.** _S–M · 💰 + operator._
+      ✅ Done 2026-07-09 (#1601).
       `payments/watcher.ts:166-170` + `payments/horizon.ts:191-213` (line 211
       is a vacuous-true issuer clause when the issuer arg is `undefined`) +
       `payments/amount-sufficient.ts:99-119` (amount-only, no identity
@@ -99,7 +101,7 @@
       method is reachable and the issuer is unset (same pattern as
       `LOOP_ADMIN_STEP_UP_SIGNING_KEY`), and/or defaults to Circle's
       canonical mainnet issuer on mainnet.
-- [ ] **AUDIT-2-C · Deposit watcher silently drops `no_match`/`no_memo` payments.** _S–M · 💰._
+- [x] **AUDIT-2-C · Deposit watcher silently drops `no_match`/`no_memo` payments.** _S–M · 💰._
       `payments/watcher.ts:192,207-208,438-441` — the outcome switch
       `break;`s with no `recordSkip` call. Root cause in
       `payments/horizon.ts:199` (`type !== 'payment'` excludes path
@@ -114,6 +116,39 @@
       **Done when:** any payment-op with `to === depositAddress` that fails
       every rail match routes into `recordSkip` with a new reason, visible
       on `/admin/skips`.
+      ✅ Done 2026-07-09 (#1604, review-first — not yet merged at doc-write
+      time). `horizon.ts` now accepts `path_payment_strict_send`/
+      `path_payment_strict_receive` (same destination-side field names as
+      `payment`) and adds `isInboundDeliveryToAccount` — the exact
+      inbound-vs-outbound discriminator (successful payment/path-payment op,
+      `to === account`), independent of asset/memo matching. The watcher
+      records a new `unrecognized_deposit` skip reason for any inbound
+      delivery that fails every rail match (both the live tick and the
+      retry-sweep re-evaluation path, so the reason survives retries instead
+      of being clobbered to `processing_error`), gated on the same
+      `REFUND_MIN_STROOPS` dust floor T0-1c uses. Outbound operator
+      payments/payouts (`to !== account`, same shared deposit/operator
+      account) are never recorded — verified by dedicated tests. Migration
+      0056 widens the reason CHECK; the backend `/api/admin/watcher-skips`
+      handlers pick the new reason up automatically (already generic over
+      `WATCHER_SKIP_REASONS`) — but `money-reviewer` caught that the web
+      admin route (`admin.skips.tsx`) hardcoded its own reason
+      filter/dropdown list independent of the shared constant, so the new
+      reason (and, pre-existing, `order_gone`) couldn't actually be
+      filtered on; fixed in the same PR by deriving from
+      `WATCHER_SKIP_REASONS` instead (closes the drift class). A second
+      money-review pass caught that alerting on every `unrecognized_deposit`
+      row (added to `ALERT_ON_FIRST_RECORD`) was itself a public-deposit-
+      address Discord-flood vector — a ~1¢ tx with 100 dust ops could fire
+      ~50 pages/tick on the shared monitoring channel and push real pages
+      past Discord's rate limit; fixed by routing the reason to a throttled + rolled-up `notifyUnrecognizedDepositRecorded` (leading-edge page,
+      one count-bearing page per ~15-min window, mirrors the circuit-breaker
+      dedup) while every row is still written to the DB unconditionally.
+      **Known residuals** (not blocking): the A6 automated refund path still
+      only handles `type === 'payment'` (path-payment skip rows are
+      visible/recoverable but not yet one-click-refundable — noted in-code at
+      `deposit-refund.ts`); and `account_merge` deliveries stay outside the
+      recovery trail (see P2-d below).
 - [ ] **AUDIT-2-D · `interest-mint.ts` idempotency-skip catch never matches the real error shape.** _S · 💰._
       `credits/interest-mint.ts:324-337` (same pattern in
       `credits/accrue-interest.ts:183-201`, P2/legacy-gated-off) string-matches
@@ -254,6 +289,53 @@
 - [ ] **B-3 · User-level fraud/abuse controls.** _L · 💰 + design/ADR._
       No velocity limits, duplicate-account detection, or chargeback handling today
       (`loop-create-checks.ts` only does a balance check). Needs a design pass first.
+
+## P2 / follow-ups (lower severity, not blocking)
+
+Smaller items surfaced while working an item above; not re-scoped to the
+depth of a numbered ID, but worth tracking so they don't get lost.
+
+- [ ] **P2-a · `payments/horizon-balances.ts:92-104` has the same
+      vacuous-issuer pattern AUDIT-2-A fixed on the deposit-matching path.**
+      _S · 💰._ Found while fixing AUDIT-2-C. This is the operator-balance
+      READ path (feeds procurement asset choice + treasury display), not a
+      payment-authorization gate, so it's lower severity than finding A was
+      — but the same "unconfigured issuer silently matches anything" shape
+      is worth closing for consistency and to stop it from misreporting
+      operator treasury balances against a spoofed/self-issued asset.
+- [ ] **P2-b · No order-create-time gate for a `usdc` order when
+      `LOOP_STELLAR_USDC_ISSUER` is unconfigured.** _S · 💰._ Found while
+      fixing AUDIT-2-C. `orders/loop-create-response.ts` lets a `usdc`
+      order get created even when the issuer var is unset — the order then
+      sits `pending_payment` forever because the watcher (correctly, per
+      AUDIT-2-A) matches nothing on that rail. A create-time 503/4xx would
+      surface the misconfiguration immediately instead of via silent
+      24h-later expiry. Liveness/UX, not a money-safety gap (no unbacked
+      value can move).
+- [ ] **P2-c · `orders/transitions.ts` `loop_asset` debit residual: a
+      pre-existing `pending_payment` `loop_asset` order can still be paid
+      via direct on-chain payment.** _👤 operator query + 💰._ AUDIT-2-B
+      closed the create/redeem gate going forward, but any `loop_asset`
+      order that was already `pending_payment` before #1603 merged remains
+      payable by whoever holds its deposit memo, since `markOrderPaid`'s
+      debit branch itself has no phase check. Recommend a deploy-time
+      one-off cleanup — `UPDATE orders SET state='expired' WHERE
+payment_method='loop_asset' AND state='pending_payment'` — plus a
+      periodic monitoring query (any `loop_asset` order re-entering
+      `pending_payment` post-cleanup is unexpected in Phase 1 and worth an
+      alert) so the residual doesn't silently reopen.
+- [ ] **P2-d · `account_merge` into the deposit address is outside the
+      recovery trail.** _S · 💰._ Found in the #1604 (AUDIT-2-C) money
+      review. AUDIT-2-C surfaced unrecognized `payment` /
+      `path_payment_strict_*` deliveries, but an `account_merge` op moves
+      the entire source account's XLM into the deposit account via
+      Horizon's `account` / `into` fields (not `to`), so
+      `isInboundDeliveryToAccount` (`payments/horizon.ts`) doesn't see it
+      and no skip row is written. Rare/unusual vector (not the normal
+      wallet-funding path the finding targeted) and pre-existing (the same
+      op type was already excluded from `isMatchingIncomingPayment`), so
+      it's a residual to track, not a launch blocker — extending the
+      discriminator to the merge fields would close it.
 
 ## Ongoing — remaining money/auth test coverage
 

@@ -9,6 +9,7 @@ vi.mock('../../logger.js', () => ({
 import {
   listAccountPayments,
   isMatchingIncomingPayment,
+  isInboundDeliveryToAccount,
   findOutboundPaymentByMemo,
   getOutboundPaymentByTxHash,
   type HorizonPayment,
@@ -305,6 +306,125 @@ describe('isMatchingIncomingPayment', () => {
     expect(isMatchingIncomingPayment(fakeUsdc, { account: ACCOUNT, assetCode: 'USDC' })).toBe(
       false,
     );
+  });
+
+  // ─────────────────────── AUDIT-2 finding C ───────────────────────
+
+  it('AUDIT-2 finding C: accepts a path_payment_strict_receive delivering the matched asset+memo', () => {
+    const usdcViaPath: HorizonPayment = {
+      ...base,
+      type: 'path_payment_strict_receive',
+      asset_type: 'credit_alphanum4',
+      asset_code: 'USDC',
+      asset_issuer: 'GCENTRE',
+      source_asset_type: 'native',
+      source_amount: '95.0000000',
+    };
+    expect(
+      isMatchingIncomingPayment(usdcViaPath, {
+        account: ACCOUNT,
+        assetCode: 'USDC',
+        assetIssuer: 'GCENTRE',
+      }),
+    ).toBe(true);
+  });
+
+  it('AUDIT-2 finding C: accepts a path_payment_strict_send delivering the matched asset+memo', () => {
+    const usdcViaPath: HorizonPayment = {
+      ...base,
+      type: 'path_payment_strict_send',
+      asset_type: 'credit_alphanum4',
+      asset_code: 'USDC',
+      asset_issuer: 'GCENTRE',
+    };
+    expect(
+      isMatchingIncomingPayment(usdcViaPath, {
+        account: ACCOUNT,
+        assetCode: 'USDC',
+        assetIssuer: 'GCENTRE',
+      }),
+    ).toBe(true);
+  });
+
+  it('AUDIT-2 finding C: still rejects create_account / account_merge (not payment-shaped)', () => {
+    expect(
+      isMatchingIncomingPayment(
+        { ...base, type: 'create_account' },
+        { account: ACCOUNT, assetCode: null },
+      ),
+    ).toBe(false);
+    expect(
+      isMatchingIncomingPayment(
+        { ...base, type: 'account_merge' },
+        { account: ACCOUNT, assetCode: null },
+      ),
+    ).toBe(false);
+  });
+});
+
+describe('isInboundDeliveryToAccount (AUDIT-2 finding C)', () => {
+  const base: HorizonPayment = {
+    id: 'id-1',
+    paging_token: 'pt-1',
+    type: 'payment',
+    from: 'GOTHER',
+    to: ACCOUNT,
+    asset_type: 'native',
+    amount: '10.0000000',
+    transaction_hash: 'tx-1',
+    transaction_successful: true,
+    transaction: { memo: 'MEMO123', memo_type: 'text', successful: true },
+  };
+
+  it('is true for a successful plain payment addressed to the account', () => {
+    expect(isInboundDeliveryToAccount(base, ACCOUNT)).toBe(true);
+  });
+
+  it('is true for a successful path_payment_strict_receive addressed to the account', () => {
+    expect(
+      isInboundDeliveryToAccount({ ...base, type: 'path_payment_strict_receive' }, ACCOUNT),
+    ).toBe(true);
+  });
+
+  it('is true for a successful path_payment_strict_send addressed to the account', () => {
+    expect(isInboundDeliveryToAccount({ ...base, type: 'path_payment_strict_send' }, ACCOUNT)).toBe(
+      true,
+    );
+  });
+
+  it('is true regardless of memo type/presence — independent of rail matching', () => {
+    expect(
+      isInboundDeliveryToAccount(
+        { ...base, transaction: { memo: undefined, memo_type: 'hash' } },
+        ACCOUNT,
+      ),
+    ).toBe(true);
+    expect(isInboundDeliveryToAccount({ ...base, transaction: undefined }, ACCOUNT)).toBe(true);
+  });
+
+  it('is false for the SAME account operator OUTBOUND payment (to !== account) — the critical noise guard', () => {
+    // The deposit account IS the operator account (ADR 010) — this is
+    // the exact shape a routine outbound payout takes in this feed.
+    expect(isInboundDeliveryToAccount({ ...base, from: ACCOUNT, to: 'GRECIPIENT' }, ACCOUNT)).toBe(
+      false,
+    );
+  });
+
+  it('is false for a failed transaction (no value actually moved)', () => {
+    expect(isInboundDeliveryToAccount({ ...base, transaction_successful: false }, ACCOUNT)).toBe(
+      false,
+    );
+    expect(
+      isInboundDeliveryToAccount(
+        { ...base, transaction: { ...base.transaction!, successful: false } },
+        ACCOUNT,
+      ),
+    ).toBe(false);
+  });
+
+  it('is false for create_account / account_merge (not payment-shaped)', () => {
+    expect(isInboundDeliveryToAccount({ ...base, type: 'create_account' }, ACCOUNT)).toBe(false);
+    expect(isInboundDeliveryToAccount({ ...base, type: 'account_merge' }, ACCOUNT)).toBe(false);
   });
 });
 
