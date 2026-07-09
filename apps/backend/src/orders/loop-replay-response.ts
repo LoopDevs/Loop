@@ -117,6 +117,16 @@ export async function replayOrderResponse(c: Context, order: Order): Promise<Res
       503,
     );
   }
+  // Mirror loop-create-response.ts's same-shaped guard (AUDIT-2 P2
+  // follow-up 'b'): a replayed usdc order with no configured issuer
+  // would otherwise re-emit a SEP-7 URI with an empty `asset_issuer`
+  // that no wallet can pay — un-payable, not un-safe (the deposit
+  // watcher already refuses to match any payment when the issuer is
+  // unconfigured, AUDIT-2 finding A).
+  if (order.paymentMethod === 'usdc' && env.LOOP_STELLAR_USDC_ISSUER === undefined) {
+    log.error({ orderId: order.id }, 'replay: usdc order but LOOP_STELLAR_USDC_ISSUER not set');
+    return c.json({ code: 'SERVICE_UNAVAILABLE', message: 'USDC payment not configured' }, 503);
+  }
   const memo = order.paymentMemo ?? '';
   const stellarAddress = env.LOOP_STELLAR_DEPOSIT_ADDRESS;
   const chargeCurrency = order.chargeCurrency as 'USD' | 'GBP' | 'EUR';
@@ -139,7 +149,9 @@ export async function replayOrderResponse(c: Context, order: Order): Promise<Res
     amount: assetAmount.formatted,
     memo,
     ...(order.paymentMethod === 'usdc'
-      ? { assetCode: 'USDC', assetIssuer: env.LOOP_STELLAR_USDC_ISSUER ?? '' }
+      ? // `?? ''` is defensive-only dead code: the guard above already
+        // 503s before this point whenever the issuer is unset.
+        { assetCode: 'USDC', assetIssuer: env.LOOP_STELLAR_USDC_ISSUER ?? '' }
       : {}),
     msg: `Loop order ${order.id.slice(0, 8)}`,
   });
