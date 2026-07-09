@@ -2,59 +2,60 @@
  * Admin order re-drive lever (A5-1 — readiness-backlog §Tier 5 "the
  * biggest hole").
  *
- * `POST /api/admin/orders/:orderId/redrive` — today a `paid` or
- * `procuring` order with no live worker touching it has NO operator
- * action: no requeue, no manual re-procure, no cancel. Resolution
- * relies on the procurement worker eventually retrying (transient
- * errors already self-heal inside `procureOne`) or, failing that, the
- * 15-minute `sweepStuckProcurement` recovery sweep — which only ever
- * FAILS a stuck row (auto-refund or hold), never retries it. If the
- * whole worker process is down (crashed machine, `LOOP_WORKERS_ENABLED`
- * off), neither the tick nor the sweep run at all and an operator's
- * only lever today is raw SQL or a kill switch.
+ * `POST /api/admin/orders/:orderId/redrive` — a `paid` order the
+ * procurement worker never drains has NO operator action today and NO
+ * automatic recovery: `runProcurementTick` only picks it up while a
+ * worker process is alive, and the 15-minute `sweepStuckProcurement`
+ * recovery sweep only ever touches `procuring` rows — it never looks
+ * at `paid`. So a `paid` order stranded because the worker is down
+ * (crashed machine, `LOOP_WORKERS_ENABLED` off, an operator-pool
+ * outage that outlived the tick) sits forever, and an operator's only
+ * lever is raw SQL or a kill switch. This is the gap A5-1 closes.
  *
  * This handler re-runs the SAME procurement path the worker itself
  * uses (`procureOne` from `orders/procure-one.ts`) rather than any
- * parallel money logic, so every existing safety property still
- * holds:
+ * parallel money logic, so every existing safety property holds:
  *
- *   - `markOrderProcuring`'s `WHERE state='paid'` CAS makes
- *     `procureOne` a no-op ('skipped') if anything else already
- *     claimed the order — a redrive of a `paid` order that a live
- *     worker ticks into `procuring` a moment earlier just loses the
- *     race harmlessly.
- *   - `payCtxOrder`'s `ctx_settlements` durable record + authoritative
- *     Horizon hash lookup (hardening A4) makes the CTX payment
- *     idempotent across re-runs (INV-7) — a redrive can never cause
- *     Loop to pay CTX twice for the same order.
+ *   - `markOrderProcuring`'s `WHERE state='paid'` CAS is a hard
+ *     single-flight gate. Whatever else is racing this order — a live
+ *     worker tick, the background sweep, a second concurrent redrive —
+ *     exactly ONE caller wins the transition into `procuring`; every
+ *     other `procureOne` gets `null` back and returns `'skipped'`
+ *     before it ever reaches `payCtxOrder`. So a redrive can never
+ *     produce a second in-flight procurement (and therefore never a
+ *     second `payCtxOrder`) for the same order.
+ *   - Because only one `procureOne` per order can reach `payCtxOrder`,
+ *     `payCtxOrder`'s `ctx_settlements` durable record + authoritative
+ *     Horizon hash lookup (hardening A4, INV-7) sees the same
+ *     single-flight it was designed for — a redrive can never cause
+ *     Loop to pay CTX twice.
  *
- * `paid` orders are always safe to redrive directly — the CAS above
- * is the only guard needed. `procuring` orders are trickier: nothing
- * in this codebase distinguishes "the worker crashed mid-flight" from
- * "the worker is still legitimately working this order" (CTX call +
- * up to ~5 minutes waiting on the redemption SSE stream). Forcing a
- * `procuring` order back to `paid` while a live worker is still
- * holding it would let a SECOND `procureOne` run concurrently against
- * the same order — outside the single-flighted-by-CAS model
- * `payCtxOrder`'s idempotency assumes, and a real (if narrow) double
- * -pay-CTX risk (see the money-review notes in the PR). So a
- * `procuring` redrive is gated on the SAME staleness bar the
- * automatic stuck-procurement sweep already uses
- * (`PROCUREMENT_TIMEOUT_MS`, 15 minutes) — reusing the established,
- * already-reviewed "no legitimate worker is still running this" bar
- * rather than inventing a shorter one — AND refuses the redrive
- * outright (409) when the durable settlement record shows Loop
- * already paid CTX for this order (reusing `loopPaidCtx`, the same
- * disambiguation the sweep uses): redriving that case would just have
- * `procureOne` create a confusing, wasteful second CTX order (refused
- * downstream by the `ctx_settlements` reconcile guard, so it still
- * can't double-pay, but there's no reason to let an operator walk
- * into it).
+ * SCOPE — `paid` orders ONLY (money-review 2026-07-09, PR #1609).
+ * `procuring` orders are deliberately refused (409
+ * `ORDER_REDRIVE_IN_PROGRESS`). A manual re-procure of a `procuring`
+ * order would mean forcibly reverting it to `paid` and calling
+ * `procureOne` again — but nothing in the codebase distinguishes "the
+ * worker crashed mid-flight" from "the worker is still legitimately
+ * working this order" (a CTX call + up to ~5 min waiting on the
+ * redemption stream, and `submitNativePayment`'s `loadAccount` has no
+ * client-side timeout, so a hung-but-alive worker can outlast any
+ * wall-clock staleness bar). Reverting under a genuinely-live worker
+ * would spawn a SECOND, independent claim episode outside the
+ * single-flight model above — the money review found this can strand a
+ * paid, CTX-paid order in `failed` with no refund (INV-6) and, in a
+ * narrower window, double-pay CTX (INV-7). That path is NOT worth the
+ * risk here: stuck `procuring` orders already have the automatic
+ * recovery sweep (fail + auto-refund when CTX is unpaid, hold + page
+ * ops when it is), so they are not left with "no action" the way a
+ * stuck `paid` order is. Making `procuring` safely re-procurable needs
+ * a genuine liveness signal + bounded Horizon I/O — core-payment-path
+ * hardening tracked as a follow-up, out of scope for the re-drive
+ * lever.
  *
- * Cancel-and-refund of a genuinely stuck order is deliberately OUT of
- * scope here — that's A5-4 (order-bound refund UI + fulfilled-order
- * policy), a distinct decision with its own policy questions. This
- * endpoint is the re-drive/retry lever only.
+ * Cancel-and-refund of a genuinely stuck order is also OUT of scope —
+ * that's A5-4 (order-bound refund UI + fulfilled-order policy), a
+ * distinct decision with its own policy questions. This endpoint is
+ * the re-drive/retry lever only.
  *
  * ADR 017 envelope (Idempotency-Key + reason + Discord audit) plus
  * ADR 028 step-up (`'order-redrive'` scope, admin-tier only) — unlike
@@ -68,9 +69,6 @@ import { UUID_RE } from '../uuid.js';
 import type { User } from '../db/users.js';
 import { getOrderById } from '../orders/repo.js';
 import { procureOne } from '../orders/procure-one.js';
-import { revertOrderProcuringToPaid } from '../orders/transitions.js';
-import { loopPaidCtx } from '../orders/transitions-sweeps.js';
-import { PROCUREMENT_TIMEOUT_MS } from '../orders/procurement-worker.js';
 import { notifyAdminAudit } from '../discord.js';
 import { logger } from '../logger.js';
 import { buildAuditEnvelope, type AdminAuditEnvelope } from './audit-envelope.js';
@@ -83,23 +81,15 @@ import {
 
 const log = logger.child({ handler: 'admin-order-redrive' });
 
-/** Non-terminal states eligible for a redrive. Terminal/pre-payment states are refused. */
-const REDRIVABLE_STATES = new Set(['paid', 'procuring']);
-
 /**
  * Control-flow escape for the not-applicable outcomes — thrown from
  * inside the idempotency guard so no failure snapshot is stored (a
- * transient-state 409 must never replay once the order's real state
- * has moved on).
+ * transient-state 409/400 must never replay once the order's real
+ * state has moved on).
  */
 class RedriveNotApplicableError extends Error {
   constructor(
-    readonly kind:
-      | 'order_not_found'
-      | 'not_redrivable'
-      | 'not_stale_enough'
-      | 'ctx_already_paid'
-      | 'state_changed',
+    readonly kind: 'order_not_found' | 'in_progress' | 'not_redrivable',
     readonly orderState?: string,
   ) {
     super(`order redrive not applicable: ${kind}`);
@@ -152,46 +142,30 @@ export async function adminRedriveOrderHandler(c: Context): Promise<Response> {
         if (order === null) {
           throw new RedriveNotApplicableError('order_not_found');
         }
-        if (!REDRIVABLE_STATES.has(order.state)) {
+        // `procuring` is refused (not re-procured) — see the SCOPE
+        // section of the module docstring. It's distinguished from the
+        // terminal/pre-payment refusal so the operator gets the "wait
+        // for the recovery sweep" guidance rather than "dead order".
+        if (order.state === 'procuring') {
+          throw new RedriveNotApplicableError('in_progress');
+        }
+        if (order.state !== 'paid') {
           throw new RedriveNotApplicableError('not_redrivable', order.state);
         }
 
-        let workingOrder = order;
-        if (order.state === 'procuring') {
-          // Only ever revert a `procuring` row back to `paid` once it's
-          // past the SAME staleness bar the automatic stuck-procurement
-          // sweep uses — see the module docstring for why a shorter bar
-          // would risk racing a still-live worker.
-          const stale =
-            order.procuredAt !== null &&
-            Date.now() - order.procuredAt.getTime() >= PROCUREMENT_TIMEOUT_MS;
-          if (!stale) {
-            throw new RedriveNotApplicableError('not_stale_enough');
-          }
-          const ctxPaid = await loopPaidCtx(order.id);
-          if (ctxPaid) {
-            throw new RedriveNotApplicableError('ctx_already_paid');
-          }
-          const reverted = await revertOrderProcuringToPaid(order.id);
-          if (reverted === null) {
-            // Lost the race — something else (the sweep, another
-            // redrive) already moved the row off `procuring`.
-            throw new RedriveNotApplicableError('state_changed');
-          }
-          workingOrder = reverted;
-        }
-
-        // `workingOrder.state === 'paid'` here. `procureOne` owns its
-        // own `markOrderProcuring` CAS claim — this call cannot
-        // double-claim or double-pay regardless of what else is
-        // racing it (see module docstring).
-        const outcome = await procureOne(workingOrder);
+        // state === 'paid'. `procureOne` owns its own
+        // `markOrderProcuring` CAS claim — this call cannot double-claim
+        // or double-pay regardless of what else (a live worker tick,
+        // another redrive) is racing it: exactly one caller wins the
+        // `WHERE state='paid'` transition, the rest return 'skipped'
+        // before reaching payCtxOrder (see module docstring).
+        const outcome = await procureOne(order);
 
         const finalOrder = await getOrderById(orderId);
         const result: AdminOrderRedriveResult = {
           orderId,
           outcome,
-          state: finalOrder?.state ?? workingOrder.state,
+          state: finalOrder?.state ?? order.state,
         };
         log.info(
           { orderId, adminUserId: actor.id, outcome, finalState: result.state },
@@ -212,42 +186,23 @@ export async function adminRedriveOrderHandler(c: Context): Promise<Response> {
       if (err.kind === 'order_not_found') {
         return c.json({ code: 'NOT_FOUND', message: 'Order not found' }, 404);
       }
-      if (err.kind === 'not_redrivable') {
+      if (err.kind === 'in_progress') {
         return c.json(
           {
-            code: 'ORDER_NOT_REDRIVABLE',
-            message: `Order is in state '${err.orderState ?? 'unknown'}' — only 'paid' and 'procuring' orders can be redriven`,
-          },
-          400,
-        );
-      }
-      if (err.kind === 'not_stale_enough') {
-        return c.json(
-          {
-            code: 'ORDER_REDRIVE_NOT_STALE',
+            code: 'ORDER_REDRIVE_IN_PROGRESS',
             message:
-              'Order has been procuring for less than the stuck-procurement threshold — a worker may still be actively processing it. Wait, or use the stuck-orders view to confirm before retrying.',
+              'Order is currently procuring. A stuck procuring order is auto-recovered by the recovery sweep (failed + refunded when CTX is unpaid, held + paged when it is) — the re-drive lever is for paid orders the worker has not picked up. Do not force-retry a procuring order.',
           },
           409,
         );
       }
-      if (err.kind === 'ctx_already_paid') {
-        return c.json(
-          {
-            code: 'ORDER_REDRIVE_CTX_ALREADY_PAID',
-            message:
-              'Loop already paid CTX for this order — redriving would create a second CTX gift-card order. Use the redemption re-fetch action or escalate for manual reconcile instead.',
-          },
-          409,
-        );
-      }
-      // state_changed
+      // not_redrivable — terminal / pre-payment state
       return c.json(
         {
-          code: 'ORDER_REDRIVE_STATE_CHANGED',
-          message: 'Order state changed before the redrive could apply — refresh and retry.',
+          code: 'ORDER_NOT_REDRIVABLE',
+          message: `Order is in state '${err.orderState ?? 'unknown'}' — only a 'paid' order can be redriven`,
         },
-        409,
+        400,
       );
     }
     log.error({ err, orderId, actorUserId: actor.id }, 'Admin order redrive failed');

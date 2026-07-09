@@ -1,31 +1,24 @@
 /**
- * Admin order re-drive lever (A5-1). This file covers the HANDLER
- * edge: state-eligibility routing, the staleness + ctx-already-paid
- * guards on `procuring` orders, the outcome → status mapping, and the
- * no-snapshot-on-failure contract.
+ * Admin order re-drive lever (A5-1), paid-only scope. This file covers
+ * the HANDLER edge: state-eligibility routing (paid redrives,
+ * procuring refused, terminal states refused), the outcome → status
+ * mapping, the no-snapshot-on-failure contract, and same-key
+ * idempotent replay.
  *
- * The underlying money-safety invariants this handler *delegates to*
- * (rather than reimplements) are proven elsewhere and NOT re-tested
- * here:
- *   - `markOrderProcuring`'s `WHERE state='paid'` CAS — "another
- *     worker already claimed order → skipped, no CTX call" in
- *     `orders/__tests__/procurement.test.ts`.
- *   - `payCtxOrder`'s `ctx_settlements` durable-record idempotency
- *     (INV-7, no double-pay-CTX across re-runs) — the `A4:` cases in
- *     `orders/__tests__/pay-ctx.test.ts`.
- * What IS proven here: the handler calls `procureOne` AT MOST ONCE
- * per redrive attempt, never calls it at all when a guard trips, and
- * a same-key double-click converges to one `procureOne` call via the
- * idempotency-guard replay (first line of defence; the CAS + settlement
- * record above are the second, order-row-level line that holds even
- * across two DIFFERENT idempotency keys).
+ * The money-safety property this handler *delegates to* (rather than
+ * reimplements) is NOT re-tested here — it's `markOrderProcuring`'s
+ * `WHERE state='paid'` CAS making concurrent `procureOne` calls
+ * single-flight (one wins, the rest report `'skipped'` before reaching
+ * `payCtxOrder`), proven in `orders/__tests__/procurement.test.ts`
+ * ("another worker already claimed order → skipped, no CTX call") and
+ * `orders/__tests__/pay-ctx.test.ts` (the `A4:` ctx_settlements
+ * idempotency cases). What IS proven here: the handler calls
+ * `procureOne` AT MOST ONCE per redrive, never calls it at all when a
+ * guard trips, and a same-key double-click converges to one
+ * `procureOne` call via the idempotency-guard replay.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Context } from 'hono';
-
-const { PROCUREMENT_TIMEOUT_MS } = vi.hoisted(() => ({
-  PROCUREMENT_TIMEOUT_MS: 15 * 60 * 1000,
-}));
 
 const state = vi.hoisted(() => ({
   orders: new Map<string, Record<string, unknown>>(),
@@ -37,10 +30,6 @@ const state = vi.hoisted(() => ({
   orderSequence: [] as Array<Record<string, unknown> | null>,
   procureCalls: [] as Array<Record<string, unknown>>,
   procureOutcome: 'fulfilled' as 'fulfilled' | 'failed' | 'skipped',
-  revertCalls: [] as string[],
-  revertReturns: null as Record<string, unknown> | null,
-  loopPaidCtxCalls: [] as string[],
-  loopPaidCtxReturn: false,
   snapshotStored: false,
   priorSnapshot: null as null | { status: number; body: Record<string, unknown> },
   discordCalls: [] as Array<Record<string, unknown>>,
@@ -58,24 +47,6 @@ vi.mock('../../orders/procure-one.js', () => ({
     state.procureCalls.push(order);
     return state.procureOutcome;
   }),
-}));
-
-vi.mock('../../orders/transitions.js', () => ({
-  revertOrderProcuringToPaid: vi.fn(async (id: string) => {
-    state.revertCalls.push(id);
-    return state.revertReturns;
-  }),
-}));
-
-vi.mock('../../orders/transitions-sweeps.js', () => ({
-  loopPaidCtx: vi.fn(async (id: string) => {
-    state.loopPaidCtxCalls.push(id);
-    return state.loopPaidCtxReturn;
-  }),
-}));
-
-vi.mock('../../orders/procurement-worker.js', () => ({
-  PROCUREMENT_TIMEOUT_MS,
 }));
 
 vi.mock('../idempotency.js', () => ({
@@ -148,7 +119,7 @@ const redrive = (over?: Partial<Parameters<typeof makeCtx>[0]>): Promise<Respons
   adminRedriveOrderHandler(
     makeCtx({
       headers: { 'idempotency-key': validKey },
-      body: { reason: 'stuck order, worker looks dead, re-driving' },
+      body: { reason: 'stuck paid order, worker looks dead, re-driving' },
       ...over,
     }),
   );
@@ -167,47 +138,38 @@ beforeEach(() => {
   state.orderSequence = [];
   state.procureCalls = [];
   state.procureOutcome = 'fulfilled';
-  state.revertCalls = [];
-  state.revertReturns = null;
-  state.loopPaidCtxCalls = [];
-  state.loopPaidCtxReturn = false;
   state.snapshotStored = false;
   state.priorSnapshot = null;
   state.discordCalls = [];
 });
 
 describe('adminRedriveOrderHandler — paid orders', () => {
-  it('200: redrives a paid order directly (no revert, no ctx-paid check)', async () => {
+  it('200: redrives a paid order directly via procureOne', async () => {
     const res = await redrive();
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, any>;
     expect(body.result).toEqual({ orderId: ORDER_ID, outcome: 'fulfilled', state: 'paid' });
     expect(state.procureCalls).toHaveLength(1);
     expect(state.procureCalls[0]?.id).toBe(ORDER_ID);
-    expect(state.revertCalls).toEqual([]);
-    expect(state.loopPaidCtxCalls).toEqual([]);
     expect(state.discordCalls).toHaveLength(1);
   });
 
   it('reports the fresh post-attempt state via a second read, not the pre-attempt one', async () => {
     // First getOrderById call (eligibility check) sees 'paid'; the
     // SECOND call (post-procureOne re-fetch) sees 'fulfilled' — proves
-    // the handler reports the fresh re-read, not an assumption
-    // derived from `outcome`.
+    // the handler reports the fresh re-read, not an assumption derived
+    // from `outcome`.
     state.orderSequence = [makeOrder({ state: 'paid' }), makeOrder({ state: 'fulfilled' })];
     const res = await redrive();
     const body = (await res.json()) as Record<string, any>;
     expect(body.result).toEqual({ orderId: ORDER_ID, outcome: 'fulfilled', state: 'fulfilled' });
   });
 
-  it('outcome=skipped (another worker already claimed it) still 200s with the real final state', async () => {
-    // A `paid` order redrive is always attempted directly — no
-    // staleness gate applies. `procureOne` itself reports `skipped`
-    // when its own `markOrderProcuring` CAS loses the claim to a
-    // live worker (proven independently in procurement.test.ts's
-    // "another worker already claimed order" case); this test only
-    // proves the handler surfaces that outcome + the fresh state
-    // faithfully rather than assuming success. The winning worker
+  it('outcome=skipped (another claimant won the CAS) still 200s with the real final state', async () => {
+    // `procureOne` reports `skipped` when its own `markOrderProcuring`
+    // CAS loses the claim to a live worker / another redrive (proven
+    // independently in procurement.test.ts) — the handler surfaces that
+    // faithfully rather than assuming success. The winning claimant
     // left the row in 'procuring' by the time the handler re-reads.
     state.procureOutcome = 'skipped';
     state.orderSequence = [makeOrder({ state: 'paid' }), makeOrder({ state: 'procuring' })];
@@ -219,71 +181,28 @@ describe('adminRedriveOrderHandler — paid orders', () => {
   });
 });
 
-describe('adminRedriveOrderHandler — procuring orders', () => {
-  it('409 ORDER_REDRIVE_NOT_STALE when procuredAt is recent — no revert, no procureOne', async () => {
+describe('adminRedriveOrderHandler — procuring orders are refused (paid-only scope)', () => {
+  it('409 ORDER_REDRIVE_IN_PROGRESS — never calls procureOne, stores no snapshot', async () => {
+    state.orders.set(ORDER_ID, makeOrder({ state: 'procuring', procuredAt: new Date() }));
+    const res = await redrive();
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code: string }).code).toBe('ORDER_REDRIVE_IN_PROGRESS');
+    expect(state.procureCalls).toEqual([]);
+    expect(state.snapshotStored).toBe(false);
+  });
+
+  it('refuses a long-stale procuring order the same way (no wall-clock exception)', async () => {
+    // Even a very old procuring row is refused — the whole
+    // revert-and-re-procure path is out of scope; the recovery sweep
+    // owns stuck procuring orders.
     state.orders.set(
       ORDER_ID,
-      makeOrder({ state: 'procuring', procuredAt: new Date(Date.now() - 60_000) }),
+      makeOrder({ state: 'procuring', procuredAt: new Date(Date.now() - 60 * 60 * 1000) }),
     );
     const res = await redrive();
     expect(res.status).toBe(409);
-    expect(((await res.json()) as { code: string }).code).toBe('ORDER_REDRIVE_NOT_STALE');
-    expect(state.revertCalls).toEqual([]);
+    expect(((await res.json()) as { code: string }).code).toBe('ORDER_REDRIVE_IN_PROGRESS');
     expect(state.procureCalls).toEqual([]);
-    expect(state.loopPaidCtxCalls).toEqual([]);
-    expect(state.snapshotStored).toBe(false);
-  });
-
-  it('409 ORDER_REDRIVE_NOT_STALE when procuredAt is null (never actually started procuring)', async () => {
-    state.orders.set(ORDER_ID, makeOrder({ state: 'procuring', procuredAt: null }));
-    const res = await redrive();
-    expect(res.status).toBe(409);
-    expect(((await res.json()) as { code: string }).code).toBe('ORDER_REDRIVE_NOT_STALE');
-  });
-
-  it('409 ORDER_REDRIVE_CTX_ALREADY_PAID when stale but Loop already paid CTX — no revert, no procureOne', async () => {
-    state.orders.set(
-      ORDER_ID,
-      makeOrder({
-        state: 'procuring',
-        procuredAt: new Date(Date.now() - PROCUREMENT_TIMEOUT_MS - 1000),
-      }),
-    );
-    state.loopPaidCtxReturn = true;
-    const res = await redrive();
-    expect(res.status).toBe(409);
-    expect(((await res.json()) as { code: string }).code).toBe('ORDER_REDRIVE_CTX_ALREADY_PAID');
-    expect(state.loopPaidCtxCalls).toEqual([ORDER_ID]);
-    expect(state.revertCalls).toEqual([]);
-    expect(state.procureCalls).toEqual([]);
-    expect(state.snapshotStored).toBe(false);
-  });
-
-  it('200: stale + not ctx-paid → reverts to paid, then redrives the REVERTED row', async () => {
-    const staleProcuredAt = new Date(Date.now() - PROCUREMENT_TIMEOUT_MS - 1000);
-    state.orders.set(ORDER_ID, makeOrder({ state: 'procuring', procuredAt: staleProcuredAt }));
-    const reverted = makeOrder({ state: 'paid', procuredAt: null });
-    state.revertReturns = reverted;
-    state.loopPaidCtxReturn = false;
-
-    const res = await redrive();
-    expect(res.status).toBe(200);
-    expect(state.revertCalls).toEqual([ORDER_ID]);
-    expect(state.procureCalls).toHaveLength(1);
-    // The handler must redrive the FRESH reverted row, not the stale
-    // pre-revert one still carrying state='procuring'.
-    expect(state.procureCalls[0]).toEqual(reverted);
-  });
-
-  it('409 ORDER_REDRIVE_STATE_CHANGED when the revert loses the race (CAS returns null)', async () => {
-    const staleProcuredAt = new Date(Date.now() - PROCUREMENT_TIMEOUT_MS - 1000);
-    state.orders.set(ORDER_ID, makeOrder({ state: 'procuring', procuredAt: staleProcuredAt }));
-    state.revertReturns = null; // something else already moved the row
-    const res = await redrive();
-    expect(res.status).toBe(409);
-    expect(((await res.json()) as { code: string }).code).toBe('ORDER_REDRIVE_STATE_CHANGED');
-    expect(state.procureCalls).toEqual([]);
-    expect(state.snapshotStored).toBe(false);
   });
 });
 
@@ -333,13 +252,13 @@ describe('adminRedriveOrderHandler — idempotency', () => {
 
     const second = await redrive();
     expect(second.status).toBe(200);
-    // Still exactly one procureOne call across BOTH handler
-    // invocations — the guard short-circuited the second doWrite().
+    // Still exactly one procureOne call across BOTH handler invocations
+    // — the guard short-circuited the second doWrite().
     expect(state.procureCalls).toHaveLength(1);
     expect(state.discordCalls).toHaveLength(2); // audit fires on replay too (replayed: true)
   });
 
-  it('replays mark audit.replayed and skip the Discord "fresh write" framing distinction only via the replayed flag', async () => {
+  it('replays return the snapshot and mark the audit as replayed', async () => {
     state.priorSnapshot = {
       status: 200,
       body: {

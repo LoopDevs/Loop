@@ -50,9 +50,9 @@ export function registerAdminOrderRedriveOpenApi(
   registry.registerPath({
     method: 'post',
     path: '/api/admin/orders/{orderId}/redrive',
-    summary: 'Re-drive a stuck paid/procuring order (A5-1 — the order re-drive lever).',
+    summary: 'Re-drive a stuck paid order (A5-1 — the order re-drive lever).',
     description:
-      "Re-runs the SAME procurement path the worker itself uses (`procureOne`) for a `paid` or `procuring` order — the operator lever for a stuck order that has no other UI action today. `paid` orders redrive directly (the `markOrderProcuring` state-CAS makes this safe even if a live worker is racing it). `procuring` orders only redrive once they're past the same 15-minute staleness bar the automatic stuck-procurement sweep uses (`ORDER_REDRIVE_NOT_STALE` otherwise — a live worker may still be mid-flight) AND only when Loop has NOT already paid CTX for the order per the durable `ctx_settlements` record (`ORDER_REDRIVE_CTX_ALREADY_PAID` otherwise — redriving would create a wasteful, confusing second CTX order; the `ctx_settlements` reconcile guard would refuse to pay it, so it can't double-pay, but there's no reason to walk into it). `fulfilled`/`failed`/`expired`/`pending_payment` orders are refused (`ORDER_NOT_REDRIVABLE`) — this endpoint is a retry lever only, not cancel-and-refund (that's the separate A5-4 item). Idempotent: the underlying `markOrderProcuring` CAS + `ctx_settlements` durable settlement record (hardening A4, INV-7) make a double-click or a concurrent redrive request converge to at most one procurement attempt and at most one CTX payment — never a double-procure or double-pay. ADR 017 compliant: `Idempotency-Key` header + `reason` body required; a repeat call returns the stored snapshot with `audit.replayed: true`. ADR-028 step-up gate enforced at the route (`order-redrive` scope).",
+      "Re-runs the SAME procurement path the worker itself uses (`procureOne`) for a `paid` order the worker never drained — the operator lever for a paid order stranded by a downed worker (the automatic recovery sweep only touches `procuring` rows, so a stuck `paid` order otherwise sits forever). Safe under concurrency: `markOrderProcuring`'s `WHERE state='paid'` CAS is a hard single-flight gate — a live worker tick, the sweep, or a second concurrent redrive all contend on it and exactly one wins the transition into `procuring`; every other `procureOne` returns `'skipped'` before it ever reaches `payCtxOrder`, so a redrive can never produce a second in-flight procurement or a second CTX payment for the order (INV-7). Scope is `paid` only: a `procuring` order is refused with 409 `ORDER_REDRIVE_IN_PROGRESS` — force-re-procuring an in-flight order is a genuine double-pay / stranding risk (money-review 2026-07-09), and stuck `procuring` orders are auto-recovered by the recovery sweep. Terminal / pre-payment states are refused with 400 `ORDER_NOT_REDRIVABLE`. This is a retry lever only, not cancel-and-refund (that's the separate A5-4 item). ADR 017 compliant: `Idempotency-Key` header + `reason` body required; a repeat call returns the stored snapshot with `audit.replayed: true`. ADR-028 step-up gate enforced at the route (`order-redrive` scope).",
     tags: ['Admin'],
     security: [{ bearerAuth: [] }],
     request: {
@@ -77,7 +77,7 @@ export function registerAdminOrderRedriveOpenApi(
       },
       400: {
         description:
-          "Missing idempotency key, invalid reason, malformed orderId, or order is not in a redrivable state (`ORDER_NOT_REDRIVABLE` — only 'paid'/'procuring' orders qualify)",
+          'Missing idempotency key, invalid reason, malformed orderId, or the order is not `paid` (`ORDER_NOT_REDRIVABLE` — a terminal / pre-payment state)',
         content: { 'application/json': { schema: errorResponse } },
       },
       401: {
@@ -90,7 +90,7 @@ export function registerAdminOrderRedriveOpenApi(
       },
       409: {
         description:
-          "Order not eligible for a redrive right now: still within the normal procurement window (`ORDER_REDRIVE_NOT_STALE`), Loop already paid CTX for this order (`ORDER_REDRIVE_CTX_ALREADY_PAID`), or the order's state changed mid-request (`ORDER_REDRIVE_STATE_CHANGED`)",
+          'Order is currently `procuring` (`ORDER_REDRIVE_IN_PROGRESS`) — refused; stuck procuring orders are auto-recovered by the recovery sweep, and force-re-procuring is a double-pay / stranding risk',
         content: { 'application/json': { schema: errorResponse } },
       },
       429: {

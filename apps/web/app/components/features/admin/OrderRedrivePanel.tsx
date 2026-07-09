@@ -8,26 +8,25 @@ import { useUiStore } from '~/stores/ui.store';
 import { ReasonDialog } from './ReasonDialog';
 import { StepUpModal } from './StepUpModal';
 
-const REDRIVABLE_STATES = new Set(['paid', 'procuring']);
-
 /**
  * Order re-drive panel (A5-1 — readiness-backlog §Tier 5 "the biggest
- * hole"). A `paid`/`procuring` order with no live worker touching it
- * had NO operator action before this: no requeue, no manual
- * re-procure. `POST /api/admin/orders/:orderId/redrive` re-runs the
- * SAME procurement path the worker itself uses.
+ * hole"). A `paid` order the worker never drained had NO operator
+ * action before this and NO automatic recovery (the sweep only touches
+ * `procuring` rows). `POST /api/admin/orders/:orderId/redrive` re-runs
+ * the SAME procurement path the worker itself uses — paid-only; a
+ * `procuring` order is refused server-side (`ORDER_REDRIVE_IN_PROGRESS`,
+ * surfaced as a toast) because force-re-procuring an in-flight order is
+ * a double-pay / stranding risk and stuck procuring orders are
+ * auto-recovered by the sweep.
  *
  * Admin-tier + step-up (unlike the sibling `OrderDeliveryPanel`,
  * which is support-allowed) — a redrive can submit a real outbound
  * Stellar payment to CTX, so it's a money write per the ADR 037
  * matrix, not a delivery-unsticking read-drive.
  *
- * Self-hides for non-admin staff and for orders outside the
- * `paid`/`procuring` window (nothing to redrive). The backend's own
- * guards are the source of truth on WHETHER a specific redrive
- * attempt is safe right now (staleness / already-paid-CTX / state
- * raced) — this panel surfaces those as errors rather than
- * pre-computing eligibility client-side.
+ * Self-hides for non-admin staff and for non-`paid` orders. The
+ * backend re-validates state regardless — this gate is a UX filter,
+ * not the security boundary.
  */
 export function OrderRedrivePanel({
   orderId,
@@ -74,9 +73,9 @@ export function OrderRedrivePanel({
     }
   };
 
-  // Admin-only (money write) and only meaningful for the two
-  // redrivable states — the backend re-validates this regardless.
-  if (!isAdminRole || !REDRIVABLE_STATES.has(orderState)) return null;
+  // Admin-only (money write) and only meaningful for a stuck `paid`
+  // order — the backend re-validates this regardless.
+  if (!isAdminRole || orderState !== 'paid') return null;
 
   return (
     <section className="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900">
@@ -89,11 +88,11 @@ export function OrderRedrivePanel({
         </h2>
       </header>
       <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-        This order is stuck in <code className="font-mono text-xs">{orderState}</code> with no
-        automatic action pending. Re-driving re-runs the same procurement path the worker uses —
-        idempotent and audited. A `procuring` order only redrives once it&rsquo;s past the normal
-        procurement window; if Loop already paid CTX for it, the redrive refuses rather than create
-        a second CTX order.
+        This order is stuck in <code className="font-mono text-xs">paid</code> — the procurement
+        worker hasn&rsquo;t picked it up, and nothing else will (the recovery sweep only acts on
+        orders already procuring). Re-driving re-runs the same procurement path the worker uses,
+        idempotent and audited; the <code className="font-mono text-xs">markOrderProcuring</code>{' '}
+        claim makes it safe even if a worker is racing it.
       </p>
       {last !== null ? (
         <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">

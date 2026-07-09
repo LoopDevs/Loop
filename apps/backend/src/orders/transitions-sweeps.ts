@@ -61,17 +61,8 @@ const log = logger.child({ area: 'stuck-procurement-sweep' });
  *     never-landed → not paid.
  *   - ANY read failure (DB or Horizon) → treat as PAID and hold —
  *     uncertainty must never auto-refund (the double-spend direction).
- *
- * Exported (A5-1) so the admin order re-drive endpoint
- * (`admin/order-redrive.ts`) can reuse the SAME disambiguation before
- * reverting a stuck `procuring` order back to `paid` for a re-drive —
- * redriving an order Loop already paid CTX for would have
- * `procureOne` create a second CTX gift-card order (INV-7's
- * `ctx_settlements` guard refuses to pay it, so it can't double-pay,
- * but it's a wasteful, confusing failure the redrive should refuse
- * up front instead).
  */
-export async function loopPaidCtx(orderId: string): Promise<boolean> {
+async function loopPaidCtx(orderId: string): Promise<boolean> {
   const settlement = await getCtxSettlementByOrderId(orderId);
   if (settlement === null || settlement.txHash === null) return false;
   if (settlement.confirmedAt !== null) return true;

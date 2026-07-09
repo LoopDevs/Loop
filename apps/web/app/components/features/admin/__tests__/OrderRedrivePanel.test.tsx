@@ -143,7 +143,12 @@ describe('<OrderRedrivePanel /> — gating', () => {
     expect(screen.queryByText(/Re-drive \(A5-1\)/i)).toBeNull();
   });
 
-  it('self-hides for non-admin staff even on a redrivable state (support-tier)', () => {
+  it('self-hides for a procuring order (paid-only scope — the sweep owns procuring)', () => {
+    renderPanel('procuring');
+    expect(screen.queryByText(/Re-drive \(A5-1\)/i)).toBeNull();
+  });
+
+  it('self-hides for non-admin staff even on a paid order (support-tier)', () => {
     staffRoleMock.value = {
       staffRole: 'support',
       isAdminRole: false,
@@ -154,7 +159,7 @@ describe('<OrderRedrivePanel /> — gating', () => {
     expect(screen.queryByText(/Re-drive \(A5-1\)/i)).toBeNull();
   });
 
-  it('renders for an admin on paid/procuring states', () => {
+  it('renders for an admin on a paid order', () => {
     renderPanel('paid');
     expect(screen.getByText(/Re-drive \(A5-1\)/i)).toBeDefined();
     expect(screen.getByRole('button', { name: /Re-drive order/i })).toBeDefined();
@@ -227,19 +232,22 @@ describe('<OrderRedrivePanel /> — redrive flow', () => {
   });
 
   it('a 409 guard rejection lands as an error toast', async () => {
+    // A paid order can still race into `procuring` between the page
+    // load and the click; the backend then refuses with
+    // ORDER_REDRIVE_IN_PROGRESS, which the panel surfaces as a toast.
     adminMock.redriveOrder.mockRejectedValue(
       new ApiException(409, {
-        code: 'ORDER_REDRIVE_NOT_STALE',
-        message: 'Order has been procuring for less than the stuck-procurement threshold.',
+        code: 'ORDER_REDRIVE_IN_PROGRESS',
+        message: 'Order is currently procuring. A stuck procuring order is auto-recovered.',
       }),
     );
-    renderPanel('procuring');
+    renderPanel('paid');
     await redriveWithReason();
     await waitFor(() => {
       expect(
         useUiStore
           .getState()
-          .toasts.some((t) => t.type === 'error' && /stuck-procurement threshold/i.test(t.message)),
+          .toasts.some((t) => t.type === 'error' && /auto-recovered/i.test(t.message)),
       ).toBe(true);
     });
   });
