@@ -42,8 +42,17 @@ let sweepTimer: ReturnType<typeof setInterval> | null = null;
  * happy path completes in a few seconds; anything hanging at the
  * 15-minute mark is a crashed worker or a deep upstream issue the
  * user shouldn't be left waiting on.
+ *
+ * Exported (A5-1) so the admin order re-drive endpoint
+ * (`admin/order-redrive.ts`) can gate its `procuring` → `paid`
+ * revert on the SAME staleness bar this sweep uses, rather than
+ * inventing a shorter one. A re-drive request for a `procuring`
+ * order younger than this is refused (409) — a live worker may
+ * still legitimately be mid-flight (CTX call + up to ~5 min
+ * redemption wait), and reverting under it would let a second
+ * `procureOne` run concurrently against the same order.
  */
-const PROCUREMENT_TIMEOUT_MS = 15 * 60 * 1000;
+export const PROCUREMENT_TIMEOUT_MS = 15 * 60 * 1000;
 
 /** How often the recovery sweep runs. Once a minute is generous. */
 const SWEEP_INTERVAL_MS = 60 * 1000;

@@ -489,12 +489,14 @@ export { type HomeCurrencySetResult, setUserHomeCurrency } from './admin-user-ho
 // A2-1165 (slice 24): admin orders surface lives in
 // `./admin-orders.ts`. Re-export keeps `AdminOrdersTable.tsx`,
 // `UserOrdersTable.tsx`, `routes/admin.orders.tsx`, paired
-// tests untouched.
+// tests untouched. `redriveOrder` (A5-1) is the newest addition —
+// same slice, since it's the order-detail page's write action.
 export {
   type AdminOrderState,
   type AdminOrderView,
   getAdminOrder,
   listAdminOrders,
+  redriveOrder,
 } from './admin-orders';
 
 // A2-1165 (slice 26): merchant-flows lifetime cashback table

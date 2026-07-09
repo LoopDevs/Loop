@@ -31,6 +31,7 @@
 import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 import { registerAdminOrderClusterDrillsOpenApi } from './admin-order-cluster-drills.js';
+import { registerAdminOrderRedriveOpenApi } from './admin-order-redrive.js';
 
 /**
  * Registers the order-cluster paths + their locally-scoped
@@ -41,6 +42,7 @@ export function registerAdminOrderClusterOpenApi(
   registry: OpenAPIRegistry,
   errorResponse: ReturnType<OpenAPIRegistry['register']>,
   adminPayoutView: ReturnType<OpenAPIRegistry['register']>,
+  adminWriteAudit: ReturnType<OpenAPIRegistry['register']>,
 ): void {
   const AdminPayoutView = adminPayoutView;
 
@@ -174,4 +176,10 @@ export function registerAdminOrderClusterOpenApi(
   // for the payout-by-order path so the registered component stays
   // shared with the payouts cluster.
   registerAdminOrderClusterDrillsOpenApi(registry, errorResponse, AdminPayoutView);
+
+  // A5-1: the order re-drive write lives in its own file
+  // (`./admin-order-redrive.ts`) — same split as the payouts-cluster
+  // read/write files. `adminWriteAudit` is threaded through for the
+  // `{ result, audit }` envelope.
+  registerAdminOrderRedriveOpenApi(registry, errorResponse, adminWriteAudit);
 }

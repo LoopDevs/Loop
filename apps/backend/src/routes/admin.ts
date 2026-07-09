@@ -43,8 +43,8 @@
  * - **Payouts (~10)** — list, by-id drill, by-asset, by-order,
  *   settlement-lag SLA, retry, compensation, CSV, monthly,
  *   activity, activity CSV.
- * - **Orders (~6)** — list, drill, CSV, activity, payment-method
- *   share + activity (ADR 011 / 015).
+ * - **Orders (~7)** — list, drill, CSV, activity, payment-method
+ *   share + activity, redrive (A5-1) (ADR 011 / 015).
  * - **Stuck triage (2)** — stuck orders, stuck payouts.
  * - **Cashback realization + activity + monthly (~8)** — fleet-
  *   wide cashback metrics + finance CSVs (ADR 009 / 015).

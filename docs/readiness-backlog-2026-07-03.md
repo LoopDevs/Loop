@@ -565,11 +565,12 @@ max_connections`, including the release-command migration machine
 
 ### A5-1 · Order re-drive lever (biggest hole) `[code]`
 
-- [ ] **Status:** ☐ Not started
+- [x] **Status:** ✅ Shipped 2026-07-09 (PR TBD — review-first, not yet merged).
       **Why:** A stuck `paid`/`procuring` order has **no** operator action — no requeue/reprocure/manual-fulfill/cancel. Resolution relies on the worker eventually retrying, else raw SQL/kill-switch.
       **Do:** add admin endpoint(s) + UI to re-drive a stuck order: re-enqueue procurement, or (with step-up + reason + audit) mark for retry/cancel-and-refund. Reuse the procurement worker path; don't duplicate its money logic.
       **⚠️** Money-review — a re-drive must be idempotent (can't double-procure/double-pay CTX; the `ctx_settlements` guard must hold).
       **Done when:** an operator can unstick a paid/procuring order from `/admin/orders/:id` without SQL; test.
+      **Shipped:** `POST /api/admin/orders/:orderId/redrive` — admin-tier + step-up (`order-redrive` scope), ADR-017 envelope. `paid` orders redrive directly via `procureOne` (safe under `markOrderProcuring`'s CAS). `procuring` orders only redrive once past the SAME 15-minute staleness bar the automatic `sweepStuckProcurement` uses (`ORDER_REDRIVE_NOT_STALE` otherwise — a live worker may still be mid-flight) AND only when the durable `ctx_settlements` record shows Loop has NOT already paid CTX (`ORDER_REDRIVE_CTX_ALREADY_PAID` otherwise). No new money logic — reuses `procureOne`, `revertOrderProcuringToPaid`, `loopPaidCtx`, `ctx_settlements`. Web: admin-only `OrderRedrivePanel` on `/admin/orders/:orderId`, step-up + reason-dialog gated. **Scope decision:** cancel-and-refund is explicitly OUT of scope here — deferred to A5-4 (order-bound refund UI + fulfilled-order policy), which is a distinct policy question. Tests: `apps/backend/src/admin/__tests__/order-redrive.test.ts` (state routing, staleness gate, ctx-already-paid gate, idempotent double-click, no double-procure delegation) + `apps/web/app/components/features/admin/__tests__/OrderRedrivePanel.test.tsx` + `staff-route-gating.test.ts` / `rate-limit-route-inventory.test.ts` updates.
 
 ### A5-2 · Admin session-revocation UI `[code]`
 

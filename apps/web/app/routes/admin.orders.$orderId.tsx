@@ -12,6 +12,7 @@ import {
 } from '~/services/admin';
 import { AdminNav } from '~/components/features/admin/AdminNav';
 import { OrderDeliveryPanel } from '~/components/features/admin/OrderDeliveryPanel';
+import { OrderRedrivePanel } from '~/components/features/admin/OrderRedrivePanel';
 import { RequireStaff } from '~/components/features/admin/RequireAdmin';
 import { CopyButton } from '~/components/features/admin/CopyButton';
 import { Spinner } from '~/components/ui/Spinner';
@@ -59,6 +60,8 @@ function TimelineRow({ label, iso }: { label: string; iso: string | null }): Rea
 // A2-1101: see RequireAdmin.tsx for the shell-gate rationale.
 // ADR 037: support-visible — order reads + the redemption-refetch
 // delivery-unsticking action are both in support's permission set.
+// The A5-1 re-drive panel is admin-only (money write) and self-hides
+// for support via `OrderRedrivePanel`'s own `useStaffRole` check.
 export default function AdminOrderDetailRoute(): React.JSX.Element {
   return (
     <RequireStaff minimum="support">
@@ -110,6 +113,14 @@ function AdminOrderDetailRouteInner(): React.JSX.Element {
       ) : (
         <>
           <Detail row={query.data} />
+          {/* A5-1: order re-drive lever — admin-tier money write.
+              Self-hides for non-admin staff and for non-redrivable
+              states. Rendered before the (support-allowed) delivery
+              panel so the money-write action reads as the primary
+              "unstick this" affordance. */}
+          {orderId !== undefined ? (
+            <OrderRedrivePanel orderId={orderId} orderState={query.data.state} />
+          ) : null}
           {/* ADR 037 §3: delivery panel — redemption status + the
               support-allowed refetch re-drive. Self-hides for
               non-fulfilled states. */}

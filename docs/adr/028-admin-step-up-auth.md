@@ -55,6 +55,14 @@
   the current admin route stack because `requireAdmin` already rejects CTX
   auth before route-specific step-up middleware, but it prevents a future
   mis-mounted step-up gate from becoming a standalone CTX pass-through.
+- **2026-07-09** A5-1: the order re-drive lever
+  (`POST /api/admin/orders/:orderId/redrive`) joins the gated set with its
+  own scope, `order-redrive` — re-driving a stuck order can submit a real
+  outbound Stellar payment to CTX via the existing `payCtxOrder`
+  idempotency (`ctx_settlements`), the same class of risk as payout-retry.
+  The step-up-gated set is now: credit-adjust, refund, withdrawal,
+  payout-retry, payout-compensation, home-currency, cashback-config, staff
+  role grant/revoke, deposit-refund, operator-float, order-redrive.
 
 ### Activation gate / deploy ordering
 
@@ -94,6 +102,7 @@ The current step-up surface is:
 - merchant cashback-config write
 - staff role grant / revoke
 - abandoned-deposit refund
+- order re-drive (A5-1)
 
 **Excluded** from the current surface:
 

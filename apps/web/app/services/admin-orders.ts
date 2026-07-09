@@ -15,6 +15,12 @@
  *   transition timestamp.
  * - `GET /api/admin/orders/:orderId` — single drill-down. 404
  *   when the id doesn't match.
+ * - `POST /api/admin/orders/:orderId/redrive` — A5-1 order re-drive
+ *   lever. Re-runs the same procurement path the worker uses for a
+ *   stuck `paid`/`procuring` order. Admin-tier + step-up (ADR 028
+ *   `order-redrive` scope) — unlike the ADR 037 support-tier
+ *   delivery-unsticking actions this can submit a real outbound
+ *   Stellar payment to CTX.
  * - `GET /api/admin/orders` — paginated list with mix-axis
  *   filters (`state` / `userId` / `merchantId` / `chargeCurrency`
  *   / `paymentMethod` / `ctxOperatorId`). Cursor via
@@ -31,8 +37,9 @@
  * `routes/admin.orders.tsx`, paired tests) don't have to
  * re-target imports.
  */
-import type { OrderState } from '@loop/shared';
+import type { AdminOrderRedriveResult, OrderState } from '@loop/shared';
 import type { AdminPaymentMethod } from './admin-payment-method-share';
+import { generateIdempotencyKey, type AdminWriteEnvelope } from './admin-write-envelope';
 import { authenticatedRequest } from './api-client';
 
 /**
@@ -102,5 +109,28 @@ export async function listAdminOrders(opts: {
   const qs = params.toString();
   return authenticatedRequest<{ orders: AdminOrderView[] }>(
     `/api/admin/orders${qs.length > 0 ? `?${qs}` : ''}`,
+  );
+}
+
+/**
+ * `POST /api/admin/orders/:orderId/redrive` — A5-1 order re-drive
+ * lever, ADR 017 admin write. Reuses the `idempotencyKey` pass-through
+ * pattern from `retryPayout` so the same key threads across a
+ * step-up retry.
+ */
+export async function redriveOrder(args: {
+  orderId: string;
+  reason: string;
+  idempotencyKey?: string;
+}): Promise<AdminWriteEnvelope<AdminOrderRedriveResult>> {
+  return authenticatedRequest<AdminWriteEnvelope<AdminOrderRedriveResult>>(
+    `/api/admin/orders/${encodeURIComponent(args.orderId)}/redrive`,
+    {
+      method: 'POST',
+      headers: { 'Idempotency-Key': args.idempotencyKey ?? generateIdempotencyKey() },
+      body: { reason: args.reason },
+      // ADR-028 / A4-063: gated by step-up auth.
+      withStepUp: true,
+    },
   );
 }

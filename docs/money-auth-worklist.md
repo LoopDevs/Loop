@@ -303,7 +303,14 @@
 
 ## Phase 4 — Admin / support money tooling (ops can't intervene today)
 
-- [ ] **A5-1 · Order re-drive lever** (biggest hole). _M · 💰._
+- [x] **A5-1 · Order re-drive lever** (biggest hole). _M · 💰._
+      **Done 2026-07-09 (review-first PR open, not yet merged):** `POST /api/admin/orders/:orderId/redrive`
+      — admin-tier + step-up (`order-redrive` scope), ADR-017 envelope. `paid` orders redrive
+      directly via `procureOne` (safe under `markOrderProcuring`'s CAS). `procuring` orders only
+      redrive past the same 15-min staleness bar `sweepStuckProcurement` uses, and only when the
+      durable `ctx_settlements` record shows Loop hasn't already paid CTX. No new money logic —
+      reuses `procureOne` / `revertOrderProcuringToPaid` / `loopPaidCtx` / `ctx_settlements`.
+      Cancel-and-refund explicitly deferred to A5-4.
 - [ ] **A5-4 · Order-bound refund UI + fulfilled-order policy.** _M · 💰 + policy._
 - [ ] **A5-6 · Make stuck-orders / stuck-payouts support-visible.** _M · 💰._
 - [ ] **A5-9 · Bulk actions + drift-correction action.** _M · 💰._

@@ -344,14 +344,15 @@ export function registerAdminOpenApi(
 
   // ─── Admin order cluster (ADR 010/011/015/019) ─────────────────────────────
   //
-  // The four order-cluster paths (orders/activity,
+  // The four order-cluster read paths (orders/activity,
   // orders/payment-method-share, orders/{id}, orders/{id}/payout)
   // plus their three locally-scoped schemas (AdminOrderState,
-  // AdminOrderPaymentMethod, AdminOrderView) live in
-  // ./admin-order-cluster.ts. The `AdminPayoutView` schema stays
-  // here because it has multiple call sites; threaded as a
-  // parameter to the slice.
-  registerAdminOrderClusterOpenApi(registry, errorResponse, AdminPayoutView);
+  // AdminOrderPaymentMethod, AdminOrderView), and the A5-1
+  // orders/{id}/redrive write, live in ./admin-order-cluster.ts. The
+  // `AdminPayoutView` schema stays here because it has multiple call
+  // sites; `AdminWriteAudit` too (the redrive write's envelope);
+  // both threaded as parameters to the slice.
+  registerAdminOrderClusterOpenApi(registry, errorResponse, AdminPayoutView, AdminWriteAudit);
 
   // ─── Admin — cashback-config schemas (ADR 011) ──────────────────────────────
   //

@@ -471,6 +471,7 @@ POST /api/admin/watcher-skips/:paymentId/reopen         [staff — support actio
 GET  /api/admin/users/:userId/wallet                    [staff — wallet card: provider/wallet_id/addresses/provisioning + on-chain balances via the trustline reader, ADR 030/037]
 POST /api/admin/users/:userId/wallet/reprovision        [staff — support action: reset provisioning attempts + re-enqueue the drive; ADR-017 envelope, ADR 037]
 POST /api/admin/orders/:orderId/refetch-redemption      [staff — support action: one-shot redemption re-fetch via the backfill machinery; ADR-017 envelope, ADR 037]
+POST /api/admin/orders/:orderId/redrive                 [admin — A5-1 order re-drive lever: re-runs the procurement worker's own path for a stuck paid/procuring order; step-up gated, ADR-017 envelope]
 ```
 
 Since ADR 037 the `/api/admin/*` namespace is staff-gated, not
