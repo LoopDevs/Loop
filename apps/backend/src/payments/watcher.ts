@@ -136,12 +136,28 @@ function paymentWatcherLockKey(): bigint {
 
 /**
  * AUDIT-2 finding C: human-readable manual-reconciliation detail for
- * an `unrecognized_deposit` skip row — a payment that delivered value
- * to the deposit address but matched no configured rail. Deliberately
- * pulls only fields already on the parsed+snapshotted Horizon record
- * (the jsonb `payment` column carries the rest for a deeper dig).
+ * an `unrecognized_deposit` skip row — an operation that delivered
+ * value to the deposit address but matched no configured rail.
+ * Deliberately pulls only fields already on the parsed+snapshotted
+ * Horizon record (the jsonb `payment` column carries the rest for a
+ * deeper dig).
+ *
+ * P2-d (2026-07-10): `account_merge` uses different field names than
+ * payment/path-payment — `source_account` (common to every Horizon
+ * operation) is the account being merged away, `into` is the
+ * destination (see `HorizonPayment`'s `source_account`/`into` field
+ * comments) — and never reports an `amount` at all, so it gets its
+ * own branch rather than reading `p.from`/`p.amount` blindly into
+ * "unknown".
  */
 function describeUnrecognizedDeposit(p: HorizonPayment): string {
+  if (p.type === 'account_merge') {
+    return (
+      `op ${p.id} (account_merge) tx ${p.transaction_hash} from ${p.source_account ?? 'unknown'} ` +
+      `asset XLM (entire source balance) amount unknown (see Horizon effects) memo ` +
+      `${p.transaction?.memo_type === 'text' && typeof p.transaction.memo === 'string' ? p.transaction.memo : '(none)'}`
+    );
+  }
   const asset =
     p.asset_type === 'native'
       ? 'XLM'
@@ -506,11 +522,16 @@ async function runPaymentWatcherTickLocked(args: {
         // recorded here, or every ordinary payout would flood
         // `payment_watcher_skips` with noise.
         // `isInboundDeliveryToAccount` is the exact discriminator:
-        // true only for a successful payment/path-payment op
-        // addressed `to === account`, independent of asset/memo.
+        // true for a successful payment/path-payment op addressed
+        // `to === account`, OR (P2-d) a successful account_merge
+        // addressed `into === account` — independent of asset/memo.
         if (isInboundDeliveryToAccount(p, args.account)) {
           // T0-1c parity: don't record un-refundable dust — same
           // floor the `unmatched`/`order_gone` arm below applies.
+          // account_merge reports no `amount` at all (P2-d), so
+          // `amountStroops` stays null and the floor never excludes
+          // it — every inbound merge gets recorded (rare enough on
+          // this account that this is the right default).
           const amountStroops = p.amount !== undefined ? parseStroops(p.amount) : null;
           if (amountStroops !== null && amountStroops < REFUND_MIN_STROOPS) {
             log.info(

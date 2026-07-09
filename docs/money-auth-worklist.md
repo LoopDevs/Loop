@@ -388,7 +388,7 @@ payment_method='loop_asset' AND state='pending_payment'` — plus a
       periodic monitoring query (any `loop_asset` order re-entering
       `pending_payment` post-cleanup is unexpected in Phase 1 and worth an
       alert) so the residual doesn't silently reopen.
-- [ ] **P2-d · `account_merge` into the deposit address is outside the
+- [x] **P2-d · `account_merge` into the deposit address is outside the
       recovery trail.** _S · 💰._ Found in the #1604 (AUDIT-2-C) money
       review. AUDIT-2-C surfaced unrecognized `payment` /
       `path_payment_strict_*` deliveries, but an `account_merge` op moves
@@ -402,6 +402,48 @@ payment_method='loop_asset' AND state='pending_payment'` — plus a
       discriminator to the merge fields would close it.
       _Still open — not addressed in the P2-a/P2-b PR (2026-07-09); scope
       was the horizon-balances + usdc order-create issuer gaps only._
+      **Fixed 2026-07-10 (audit-2 P2 cleanup PR):** decided to fix rather
+      than defer — turned out to be exactly the "clean, small extension"
+      case. Added two new optional Zod fields to `HorizonPayment`
+      (`payments/horizon.ts`): `into` (account_merge's destination) and
+      `source_account` (the field every Horizon operation carries for
+      its submitting account — used here for account_merge's source; an
+      earlier draft of this fix incorrectly assumed account_merge reused
+      the pre-existing `account` field, which is actually create_account
+      -only — caught and corrected during the money-reviewer pass, which
+      independently verified the field semantics against the vendored
+      `@stellar/stellar-sdk` Horizon API types rather than trusting the
+      comment). `isInboundDeliveryToAccount` now recognizes a successful
+      `account_merge` whose `into === account` as an inbound delivery —
+      the security-relevant half of this fix, confirmed correct against
+      the SDK types — routed through the SAME #1604 `unrecognized_deposit`
+      `recordSkip` path (live tick + retry-sweep re-evaluation, both call
+      sites already shared the discriminator). Dust floor: `account_merge`
+      reports no `amount` field at all (Horizon only exposes the merged
+      quantity via the separate effects API, not called here), so the
+      existing amount-based dust check never excludes a merge — every
+      inbound merge is recorded, which is fine because the op is
+      rare-to-never on this account. Throttled alert: unaffected —
+      `recordSkip` already fans out through the #1604
+      `notifyUnrecognizedDepositRecorded` throttle regardless of the
+      underlying op type, so no new flood vector. `isMatchingIncomingPayment`
+      (order-payment matching) deliberately stays untouched — an
+      `account_merge` delivers the sender's WHOLE remaining balance, not a
+      chosen "I'm paying this order" amount, so it must never mark an
+      order paid; confirmed `processPayment` returns `no_match` for
+      account_merge before any memo/order lookup, so `markOrderPaid` is
+      structurally unreachable for this op type regardless of the
+      source-field mixup above. Also improved `describeUnrecognizedDeposit`
+      (`payments/watcher.ts`) with an `account_merge`-specific branch
+      (reads `source_account`/`into` instead of `from`/`amount`, which
+      account_merge never populates) so a recorded skip row's detail
+      string is actually useful to an operator instead
+      of reading "from unknown ... amount unknown" across the board.
+      Extended `isInboundDeliveryToAccount`'s existing unit-test
+      coverage (`horizon.test.ts`) plus a full watcher-tick-level test
+      pair (`watcher.test.ts`: inbound merge records, outbound merge
+      doesn't — the account_merge twin of the pre-existing payment
+      noise-guard test) — all four confirmed to fail against pre-fix code.
 - [ ] **P2-e · `sweepStuckProcurement` is not S4-8 single-flighted.** _S ·
       💰 · still open, not addressed in the P2-a/P2-b PR (2026-07-09)._
       Efficiency-only per the AUDIT-2 sweep — the work itself is
@@ -409,7 +451,7 @@ payment_method='loop_asset' AND state='pending_payment'` — plus a
       runs can't double-act on the same row. See
       [`audit-2026-07-09-money-auth-sweep.md`](./audit-2026-07-09-money-auth-sweep.md)
       P2 findings (orders).
-- [ ] **P2-f · Emission-conservation DB trigger (migration 0044) is
+- [x] **P2-f · Emission-conservation DB trigger (migration 0044) is
       integration-tested only for `kind='emission'`.** _S–M · 💰 · still
       open, not addressed in the P2-a/P2-b PR (2026-07-09)._ The same
       trigger also gates `order_cashback` and `interest_mint` rows per its
@@ -417,7 +459,32 @@ payment_method='loop_asset' AND state='pending_payment'` — plus a
       coverage. See
       [`audit-2026-07-09-money-auth-sweep.md`](./audit-2026-07-09-money-auth-sweep.md)
       P2 findings (credits).
-- [ ] **P2-g · `payments/operator-float-reconciliation.ts`'s
+      **Fixed 2026-07-10 (audit-2 P2 cleanup PR):** the migration's
+      INSERT-side trigger only `WHEN`s on `kind='emission'` by design (a
+      fresh `order_cashback`/`interest_mint` INSERT moves the mirror
+      atomically in the same app-layer txn, so it doesn't need the DB
+      fence at insert time — see the migration's own header comment); the
+      real double-mint vector for those two kinds is the UPDATE-side
+      re-entry trigger (`OLD.state = 'failed' AND NEW.state != 'failed'`),
+      which DOES gate all three kinds. Added two new integration tests to
+      `__tests__/integration/admin-writes.test.ts`'s existing "hardening
+      A1" describe block, mirroring its pre-existing
+      "retry-after-backfill double mint" (kind='emission') case: seed a
+      terminally-failed `order_cashback` (resp. `interest_mint`,
+      GBPLOOP-only per the kind_shape CHECK) row, consume the SAME
+      headroom with a legitimate `emission` backfill (the trigger sums
+      all three mint kinds together, so this is the real cross-kind
+      double-mint shape), then retry the failed row via the generic
+      `POST /api/admin/payouts/:id/retry` endpoint (kind-agnostic —
+      `resetPayoutToPending` doesn't discriminate by kind) and assert 409
+      `EMISSION_EXCEEDS_UNEMITTED_BALANCE` + the row stays `failed`. Ran
+      locally against a throwaway postgres container; both new tests
+      pass on the current trigger and were confirmed to FAIL (200 instead
+      of 409) against a deliberately-narrowed trigger WHEN clause
+      (`kind = 'emission'` only) — proving they actually exercise the
+      re-entry fence for the other two kinds, not just re-testing
+      emission.
+- [x] **P2-g · `payments/operator-float-reconciliation.ts`'s
       `extractOperatorMovement` has the same vacuous-issuer shape P2-a just
       fixed on the balance-read sibling.** _S · 💰 · found by the
       money-reviewer pass on the P2-a/P2-b PR (2026-07-09), out of that
@@ -438,6 +505,37 @@ payment_method='loop_asset' AND state='pending_payment'` — plus a
       counting unpinned "USDC" movements while `actualBalanceStroops`
       reads 0, which pages the drift alert (correctly loud, but this
       residual is worth closing rather than relying on the alert alone).
+      **Fixed 2026-07-10 (audit-2 P2 cleanup PR):** mirrored the exact
+      fail-closed shape #1601 (`payments/horizon.ts`) and #1607/P2-a
+      (`payments/horizon-balances.ts`) already established — changed
+      `args.usdcIssuer === null || p.asset_issuer === args.usdcIssuer` to
+      `args.usdcIssuer !== null && p.asset_issuer === args.usdcIssuer`. No
+      configured issuer now means the payment is never extracted as a
+      `usdc` movement at all (falls through to the function's existing
+      `return null`, the same path any other unrecognized asset already
+      takes) rather than landing in `operator_wallet_movements` as
+      `classification: 'unclassified'` — there's no third "unknown asset"
+      value the `asset` column can hold (a CHECK constraint pins it to
+      xlm-or-usdc only), so exclusion-from-indexing is the only
+      fail-closed shape available, and it's the same one the sibling
+      fixes use. Confirmed
+      this module makes no balance-adjusting writes (classification/
+      audit-trail metadata only, per the file's own header) — the fix
+      only changes what `operator_wallet_movements` records and what
+      `expectedBalanceStroops` sums for an unset-issuer deployment, never
+      a ledger/mirror value. Net effect on the P2-a interaction noted
+      above: with both fixed, an unset-issuer deployment's USDC run now
+      reads `actualBalanceStroops: 0` and `expectedBalanceStroops`
+      excluding the same unpinned movements — no more forced drift-page
+      from this specific cause (production boot-fails without the issuer
+      configured anyway, absent an explicit override, so this mostly
+      matters for a deliberately-disabled-USDC-rail deployment where
+      there's no legitimate USDC traffic to miss in the first place).
+      Added a fail-closed unit test (any-issuer USDC with no configured
+      issuer → not extracted) plus a control test (matching-issuer USDC
+      still classifies correctly when configured) to
+      `operator-float-reconciliation.test.ts`; the fail-closed test was
+      confirmed to fail against pre-fix code.
 
 ## Ongoing — remaining money/auth test coverage
 

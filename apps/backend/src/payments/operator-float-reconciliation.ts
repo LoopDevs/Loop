@@ -155,7 +155,23 @@ export function extractOperatorMovement(args: {
   } else if (
     (p.asset_type === 'credit_alphanum4' || p.asset_type === 'credit_alphanum12') &&
     p.asset_code === 'USDC' &&
-    (args.usdcIssuer === null || p.asset_issuer === args.usdcIssuer)
+    // P2-g (2026-07-10): fail-closed, mirroring `isMatchingIncomingPayment`
+    // (./horizon.ts, AUDIT-2 finding A) and `getAccountBalances`
+    // (./horizon-balances.ts, P2-a). The previous clause here was
+    // `args.usdcIssuer === null || p.asset_issuer === args.usdcIssuer`,
+    // vacuously true when no issuer is configured — an unconfigured
+    // LOOP_STELLAR_USDC_ISSUER classified ANY code-"USDC" payment
+    // (including an attacker's worthless self-issued asset) as a real
+    // USDC movement in the float-reconciliation ledger. No issuer
+    // configured now means NO match, never "any issuer" — the payment
+    // simply isn't extracted (falls through to `return null` below),
+    // same as any other unrecognized asset. This module makes no
+    // balance-adjusting writes (classification/audit-trail metadata
+    // only — see the file header), so excluding the movement here only
+    // affects what `operator_wallet_movements` records and what
+    // `expectedBalanceStroops` sums, not any ledger/mirror value.
+    args.usdcIssuer !== null &&
+    p.asset_issuer === args.usdcIssuer
   ) {
     asset = 'usdc';
     assetCode = 'USDC';
