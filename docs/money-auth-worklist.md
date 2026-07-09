@@ -53,13 +53,87 @@
       reports 97.5% lines / 75% branches. Added payout-worker lifecycle/reset
       coverage; targeted `payments/payout-worker.ts` coverage now reports 89.04%
       lines / 76.19% branches.
-- [ ] **AUDIT-2 · Adversarial money-path sweep.** _M · 💰🔐 · read-only._
+- [x] **AUDIT-2 · Adversarial money-path sweep.** _M · 💰🔐 · read-only._
       Run the `money-reviewer` / `auth-reviewer` subagents + `/review-money-diff`
       anchored on `docs/invariants.md`, across `credits/` `payments/` `orders/`
       `wallet/` `stellar/`. Catches issues not on this list; feeds new items back here.
+      **Done 2026-07-09:** five parallel domain sweeps (credits, payments,
+      orders, wallet+stellar, auth) found 5 P1s + several P2s; see
+      [`audit-2026-07-09-money-auth-sweep.md`](./audit-2026-07-09-money-auth-sweep.md).
+      Filed as AUDIT-2-A through AUDIT-2-E below.
 
 ## Phase 1 — Money correctness (can lose or double-count value)
 
+- [ ] **AUDIT-2-B · `loop_asset` payment method has no server-side Phase-1 gate (LIVE-RISK).** _M · 💰._
+      No `LOOP_PHASE_1_ONLY` check anywhere in the `loop_asset` create/redeem
+      path — `orders/loop-handler.ts` (contrast the `credit` gate at
+      ~404-420), `orders/redeem.ts` (gated only on wallet-provider +
+      provisioning, never phase), `orders/transitions.ts:73-211` (debit path),
+      `credits/emissions.ts:342-347` (admin emission mints on-chain LOOP
+      regardless of the flag). `fly.toml` confirms `LOOP_WORKERS_ENABLED=true`
+      and `LOOP_PHASE_1_ONLY=true` coexist in production; the only thing
+      holding the line today is that no user has a provisioned wallet with a
+      nonzero LOOP balance plus the client not rendering the UI — both
+      incidental, not structural. Matches
+      `docs/readiness-backlog-2026-07-03.md` Tier 12 LIVE-RISK, now scoped
+      to four call sites. See
+      [`audit-2026-07-09-money-auth-sweep.md`](./audit-2026-07-09-money-auth-sweep.md) finding B.
+      **Done when:** `loop_asset` create + redeem both reject with a clear
+      `PHASE_1_ONLY` error while the flag is set, same shape as
+      `CREDIT_METHOD_RETIRED`.
+- [ ] **AUDIT-2-A · USDC deposit matching accepts any-issuer USDC when `LOOP_STELLAR_USDC_ISSUER` is unset.** _S–M · 💰 + operator._
+      `payments/watcher.ts:166-170` + `payments/horizon.ts:191-213` (line 211
+      is a vacuous-true issuer clause when the issuer arg is `undefined`) +
+      `payments/amount-sufficient.ts:99-119` (amount-only, no identity
+      re-check). `env.ts:112-129` only warns when the value is _wrong_, says
+      nothing when it's _absent_; only the operator-run
+      `scripts/preflight-tranche-1.sh:43` actually requires it. Contrast
+      `credits/payout-asset.ts:73-84`, which correctly excludes unissued LOOP
+      assets with an explicit comment about this exact attack shape.
+      Independently found by two reviewers (payments + wallet) — see
+      [`audit-2026-07-09-money-auth-sweep.md`](./audit-2026-07-09-money-auth-sweep.md) finding A.
+      **Operator action (blocking, do first):** confirm whether
+      `LOOP_STELLAR_USDC_ISSUER` is actually set in production Fly secrets.
+      Escalates to P0 if unset. Cross-references `docs/go-live-plan.md` T1-C.
+      **Done when:** `env.ts` boot-fails in production when the USDC payment
+      method is reachable and the issuer is unset (same pattern as
+      `LOOP_ADMIN_STEP_UP_SIGNING_KEY`), and/or defaults to Circle's
+      canonical mainnet issuer on mainnet.
+- [ ] **AUDIT-2-C · Deposit watcher silently drops `no_match`/`no_memo` payments.** _S–M · 💰._
+      `payments/watcher.ts:192,207-208,438-441` — the outcome switch
+      `break;`s with no `recordSkip` call. Root cause in
+      `payments/horizon.ts:199` (`type !== 'payment'` excludes path
+      payments — reconfirms the still-open finding in
+      `docs/audit-2026-06-30-cold/raw/v-payments.md`) and `:203-204`
+      (`memo_type !== 'text'` folded into asset matching — new observation,
+      a memo-less or wrong-memo-type direct payment is indistinguishable
+      from "wrong asset"). Real value lands at Loop custody, gets no DB row,
+      cursor advances past it, order expires in 24h with no recovery trail
+      (R3-1 float reconciliation not yet fully production-wired). See
+      [`audit-2026-07-09-money-auth-sweep.md`](./audit-2026-07-09-money-auth-sweep.md) finding C.
+      **Done when:** any payment-op with `to === depositAddress` that fails
+      every rail match routes into `recordSkip` with a new reason, visible
+      on `/admin/skips`.
+- [ ] **AUDIT-2-D · `interest-mint.ts` idempotency-skip catch never matches the real error shape.** _S · 💰._
+      `credits/interest-mint.ts:324-337` (same pattern in
+      `credits/accrue-interest.ts:183-201`, P2/legacy-gated-off) string-matches
+      `err.message`, but Drizzle wraps the real Postgres error in a
+      `DrizzleQueryError` whose top-level message is a fixed
+      `"Failed query: ..."` string — the unique-violation code/constraint
+      lives on `err.cause`. `credits/refunds.ts:502-515` and
+      `credits/emissions.ts:378-388` already solve this correctly by walking
+      `err.cause`. Effect: after a crash/redeploy mid-sweep, re-processing
+      already-minted users throws misclassified errors, the cursor never
+      advances (`writeMintCursor` gated on `errors===0`), hours of
+      error-spam until the period rolls over at midnight UTC. **Not a
+      double-mint** — the DB unique constraint forces rollback first, so
+      this is a reliability/observability bug, not a money-safety one. The
+      existing test mocks a flat `Error`, not the real wrapped shape — false
+      confidence. See
+      [`audit-2026-07-09-money-auth-sweep.md`](./audit-2026-07-09-money-auth-sweep.md) finding D.
+      **Done when:** a shared `isUniqueViolation(err)` helper walks
+      `err.cause` for `code==='23505'`, used in both mint paths, with a test
+      that constructs the real wrapped-error shape.
 - [x] **T0-1b · Duplicate deposit against an already-PAID order.** _M · 💰._
       Persist the paying deposit's Horizon payment id + tx hash on the order in
       `markOrderPaid` (schema + migration); in the watcher's `unmatched` arm, record
@@ -135,6 +209,17 @@
 - [x] **R3-7 · Pin production to native auth at boot.** _S · 🔐._
 - [x] **R3-8 · Align admin step-up OTP with the B5 per-email lockout.** _S–M · 🔐._
 - [x] **R3-13 · Origin-check the redemption WebView `postMessage`.** _S · 🔐._
+- [ ] **AUDIT-2-E · `/__test__/mint-loop-token` has no defense-in-depth beyond `NODE_ENV`.** _S · 🔐._
+      `apps/backend/src/test-endpoints.ts`, mounted from `app.ts:127-129` only
+      when `NODE_ENV==='test'`, issues a full admin token pair for any
+      allowlisted email with zero credential check. Not reachable in
+      production today (`Dockerfile`/`fly.toml` hardcode
+      `NODE_ENV=production`), so P1 not P0 — but a single env misconfig on a
+      staging/preview app is unauthenticated admin-session minting. See
+      [`audit-2026-07-09-money-auth-sweep.md`](./audit-2026-07-09-money-auth-sweep.md) finding E.
+      **Done when:** the test-endpoints router requires a second, independent
+      control (shared secret header or loopback bind) even under
+      `NODE_ENV=test`.
 - [ ] **T0-3 · Make the money-invariant DB layer a required merge check.** _S · 💰 + operator._
       Enforcement, not a fix — promote the invariant checks to a required CI gate.
 
