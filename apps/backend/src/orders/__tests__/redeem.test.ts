@@ -303,24 +303,19 @@ describe('redeemLoopOrderHandler — guards', () => {
   });
 
   describe('LOOP_PHASE_1_ONLY gate (AUDIT-2 finding B)', () => {
-    it('400 LOOP_ASSET_UNAVAILABLE_PHASE_1 when the flag is true', async () => {
+    it('400 LOOP_ASSET_UNAVAILABLE_PHASE_1 when the flag is true — including for orders that predate the gate', async () => {
+      // The gate is unconditional on every redeem call — it doesn't
+      // inspect order provenance (there's no "created before this
+      // shipped" marker to check), so a `pending_payment` loop_asset
+      // order that already existed before this gate was deployed is
+      // blocked exactly the same way a brand-new one would be. The
+      // default fixture (`loopAssetOrder()`, state='pending_payment')
+      // stands in for both cases — nothing distinguishes them.
       envState.LOOP_PHASE_1_ONLY = true;
       const res = await redeemLoopOrderHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
       expect(res.status).toBe(400);
       expect((await bodyOf(res))['code']).toBe('LOOP_ASSET_UNAVAILABLE_PHASE_1');
       expect(submitMock).not.toHaveBeenCalled();
-    });
-
-    it('fails closed even for an order created before the gate existed', async () => {
-      // Same fixture shape as a pre-gate order — nothing distinguishes
-      // it from a freshly-created one (the gate isn't retroactive by
-      // record, it's live on every redeem call), so this doubles as
-      // "the gate can't be dodged by an already-existing order".
-      envState.LOOP_PHASE_1_ONLY = true;
-      orderState.row = loopAssetOrder({ state: 'pending_payment' });
-      const res = await redeemLoopOrderHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
-      expect(res.status).toBe(400);
-      expect((await bodyOf(res))['code']).toBe('LOOP_ASSET_UNAVAILABLE_PHASE_1');
     });
 
     it('does not affect idempotent replay of an already-paid order', async () => {
