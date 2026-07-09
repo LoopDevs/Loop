@@ -13,6 +13,28 @@ vi.mock('../../logger.js', () => ({
  *   - `insert()` + `update()` inside a tx → capture inserted + updated rows
  *   - `transaction(cb)` → cb(db) so all writes land on the outer mock
  */
+/**
+ * Builds the REAL shape a Drizzle-wrapped postgres-js unique
+ * violation takes: the outer error's `.message` is Drizzle's FIXED
+ * "Failed query: ..." string (never the constraint text), and the
+ * underlying `PostgresError` (`code='23505'`, `constraint_name`
+ * populated) lives on `.cause`. AUDIT-2 finding D: the pre-fix code
+ * matched on the OUTER `.message`, which this shape never contains —
+ * a flat `Error` with the constraint name inlined at the top level
+ * (the old mock shape) is not what the real driver produces and gave
+ * the old tests false confidence.
+ */
+function makeDrizzleUniqueViolation(constraintName: string): Error {
+  const cause = Object.assign(new Error('duplicate key value violates unique constraint'), {
+    code: '23505',
+    constraint_name: constraintName,
+  });
+  return Object.assign(
+    new Error('Failed query: insert into "credit_transactions" ...\nparams: ...'),
+    { cause },
+  );
+}
+
 const { dbMock, state } = vi.hoisted(() => {
   const s: {
     /**
@@ -28,12 +50,15 @@ const { dbMock, state } = vi.hoisted(() => {
     txThrowNext: boolean;
     /** Throw a unique-violation on next insert — for the idempotency test. */
     insertThrowUniqueNext: boolean;
+    /** Throw this arbitrary error on next insert — for negative-case tests. */
+    insertThrowCustomNext: unknown;
   } = {
     rows: [],
     inserts: [],
     updateSets: [],
     txThrowNext: false,
     insertThrowUniqueNext: false,
+    insertThrowCustomNext: null,
   };
   const m: Record<string, ReturnType<typeof vi.fn>> = {};
   m['select'] = vi.fn(() => m);
@@ -69,12 +94,14 @@ const { dbMock, state } = vi.hoisted(() => {
   };
   m['insert'] = vi.fn(() => m);
   m['values'] = vi.fn(async (v: unknown) => {
+    if (s.insertThrowCustomNext !== null) {
+      const err = s.insertThrowCustomNext;
+      s.insertThrowCustomNext = null;
+      throw err;
+    }
     if (s.insertThrowUniqueNext) {
       s.insertThrowUniqueNext = false;
-      const err = new Error(
-        'duplicate key value violates unique constraint "credit_transactions_interest_period_unique"',
-      );
-      throw err;
+      throw makeDrizzleUniqueViolation('credit_transactions_interest_period_unique');
     }
     s.inserts.push(v);
     return m;
@@ -125,6 +152,7 @@ beforeEach(() => {
   state.updateSets = [];
   state.txThrowNext = false;
   state.insertThrowUniqueNext = false;
+  state.insertThrowCustomNext = null;
   (dbMock as unknown as { __resetForUpdateCursor: () => void }).__resetForUpdateCursor();
   for (const fn of Object.values(dbMock)) {
     if (typeof fn === 'function' && 'mockClear' in fn) {
@@ -257,6 +285,34 @@ describe('accrueOnePeriod', () => {
     expect(r.credited).toBe(1);
     expect(r.skippedAlreadyAccrued).toBe(1);
     expect(state.inserts).toHaveLength(1); // only u-2's insert made it through
+  });
+
+  describe('AUDIT-2 finding D: unique-violation classification uses err.cause, not err.message', () => {
+    it('a DIFFERENT constraint unique violation (23505 but not credit_transactions_interest_period_unique) is NOT swallowed as skippedAlreadyAccrued', async () => {
+      state.rows = [
+        { userId: 'u-1', currency: 'GBP', balanceMinor: 100_000n },
+        { userId: 'u-2', currency: 'USD', balanceMinor: 50_000n },
+      ];
+      state.insertThrowCustomNext = makeDrizzleUniqueViolation('some_unrelated_unique_index');
+      const r = await accrueOnePeriod({ apyBasisPoints: 400, periodsPerYear: 12 }, CURSOR);
+      // u-1's insert throws an unrelated unique violation — must NOT
+      // be misclassified as "already accrued this period".
+      expect(r.skippedAlreadyAccrued).toBe(0);
+      expect(r.credited).toBe(1); // only u-2
+      expect(state.inserts).toHaveLength(1);
+    });
+
+    it('a genuinely unexpected error (no cause, no code) still does not get counted as skippedAlreadyAccrued', async () => {
+      state.rows = [
+        { userId: 'u-1', currency: 'GBP', balanceMinor: 100_000n },
+        { userId: 'u-2', currency: 'USD', balanceMinor: 50_000n },
+      ];
+      state.insertThrowCustomNext = new Error('connection terminated unexpectedly');
+      const r = await accrueOnePeriod({ apyBasisPoints: 400, periodsPerYear: 12 }, CURSOR);
+      expect(r.skippedAlreadyAccrued).toBe(0);
+      expect(r.credited).toBe(1); // only u-2
+      expect(state.inserts).toHaveLength(1);
+    });
   });
 
   it('uses a transaction for each per-user write', async () => {

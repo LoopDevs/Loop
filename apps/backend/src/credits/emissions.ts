@@ -63,6 +63,7 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { pendingPayouts, userCredits } from '../db/schema.js';
+import { isUniqueViolation } from '../db/errors.js';
 import { env } from '../env.js';
 import {
   InsufficientBalanceError,
@@ -388,23 +389,15 @@ export async function applyAdminEmission(args: {
 
 /**
  * Best-effort detection of the unique-violation path that should
- * surface as EMISSION_ALREADY_ISSUED. postgres-js surfaces a
- * Postgres error with `code='23505'` (unique_violation) and
- * `constraint_name` populated. Drizzle wraps `PostgresError` in
- * `DrizzleQueryError`; walk the cause chain to find the underlying
- * postgres-js error — without this the duplicate-emission attempt
- * 500s instead of surfacing as 409 EMISSION_ALREADY_ISSUED.
+ * surface as EMISSION_ALREADY_ISSUED. Thin wrapper around the shared
+ * `isUniqueViolation` (`db/errors.ts`), which walks the Drizzle
+ * `.cause` chain to find the underlying postgres-js `PostgresError`
+ * (`code='23505'`, `constraint_name` populated) — without this the
+ * duplicate-emission attempt 500s instead of surfacing as 409
+ * EMISSION_ALREADY_ISSUED.
  */
 function isDuplicateEmission(err: unknown): boolean {
-  let cur: unknown = err;
-  for (let depth = 0; depth < 4 && cur instanceof Error; depth++) {
-    const e = cur as Error & { code?: string; constraint_name?: string };
-    if (e.code === '23505' && e.constraint_name === 'pending_payouts_active_emission_unique') {
-      return true;
-    }
-    cur = (e as { cause?: unknown }).cause;
-  }
-  return false;
+  return isUniqueViolation(err, 'pending_payouts_active_emission_unique');
 }
 
 async function findMatchingActiveEmission(args: {
