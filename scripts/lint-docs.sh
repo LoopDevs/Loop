@@ -349,6 +349,23 @@ else
   echo "  (apps/mobile artifacts missing — skipping plugin parity check)"
 fi
 
+# ─── 11. Observability config-as-code stays parseable (B-5) ─────────────────
+#
+# docs/observability/grafana-dashboard.json + prometheus.yml are
+# committed operator artifacts (dashboards-as-code / scrape-config-as-
+# code, docs/observability.md) — nobody imports them through a build
+# step that would otherwise catch a JSON typo. Cheap corruption check
+# only: full Prometheus scrape-config schema validation needs
+# `promtool`, which isn't a repo dependency and isn't guaranteed on CI
+# runners — see docs/observability.md for how to run it locally.
+
+echo "Checking docs/observability/grafana-dashboard.json is valid JSON..."
+if [ -f docs/observability/grafana-dashboard.json ]; then
+  if ! node -e "JSON.parse(require('fs').readFileSync('docs/observability/grafana-dashboard.json', 'utf8'))" 2>/dev/null; then
+    err "docs/observability/grafana-dashboard.json does not parse as valid JSON"
+  fi
+fi
+
 # ─── Done ───────────────────────────────────────────────────────────────────
 
 echo ""

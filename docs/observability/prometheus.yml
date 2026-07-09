@@ -1,0 +1,61 @@
+# Example Prometheus scrape config for the Loop backend (B-5).
+#
+# Points at `GET /metrics` (apps/backend/src/observability-handlers.ts),
+# which serves Prometheus text-exposition format and is gated by
+# `probeGateAllows()` (apps/backend/src/middleware/probe-gate.ts):
+#   - production: 401s unless a `METRICS_BEARER_TOKEN`-matching
+#     `Authorization: Bearer <token>` header is presented. Unset →
+#     404 (closed by default, so a probe can't even fingerprint us).
+#   - development / test: open (no token required).
+#
+# This file is a committed EXAMPLE for the operator standing up a real
+# Prometheus instance — it is not wired into CI or deployed anywhere.
+# Validate locally with `promtool check config docs/observability/prometheus.yml`
+# before pointing a real instance at it (this repo does not depend on
+# promtool being installed — see docs/observability.md).
+#
+# Operator steps (👤, not done by this PR):
+#   1. Stand up Prometheus (Fly machine, or a managed target like
+#      Grafana Cloud's remote-write, or Prometheus Operator on your
+#      own k8s if you have one — Loop has none today).
+#   2. Set METRICS_BEARER_TOKEN on the Loop backend (`fly secrets set`).
+#   3. Put the same value in this file's bearer_token_file (or inline
+#      `credentials:` — prefer a file so the token isn't committed).
+#   4. Import docs/observability/grafana-dashboard.json into Grafana
+#      pointed at this Prometheus as its datasource.
+
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+  external_labels:
+    service: loop-backend
+
+scrape_configs:
+  - job_name: loop-backend-production
+    scheme: https
+    metrics_path: /metrics
+    scrape_interval: 30s
+    scrape_timeout: 10s
+    # /metrics is bearer-gated in production (METRICS_BEARER_TOKEN).
+    # Point this at a file containing ONLY the token — never commit the
+    # token itself. `openssl rand -hex 32` is a reasonable generator;
+    # keep it in the same secret store as the other Fly secrets.
+    authorization:
+      credentials_file: /etc/prometheus/secrets/loop-metrics-bearer-token
+    static_configs:
+      - targets: ['api.loopfinance.io']
+        labels:
+          env: production
+
+  # Staging target — same shape, different host + token file. Uncomment
+  # once a staging METRICS_BEARER_TOKEN exists.
+  # - job_name: loop-backend-staging
+  #   scheme: https
+  #   metrics_path: /metrics
+  #   scrape_interval: 30s
+  #   authorization:
+  #     credentials_file: /etc/prometheus/secrets/loop-metrics-bearer-token-staging
+  #   static_configs:
+  #     - targets: ['loopfinance-api-staging.fly.dev']
+  #       labels:
+  #         env: staging

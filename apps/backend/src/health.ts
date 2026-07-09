@@ -200,13 +200,29 @@ async function probeUpstream(): Promise<boolean> {
   return upstreamProbeInFlight;
 }
 
+/**
+ * B-5: the freshness-threshold formulas backing `/health`'s
+ * `merchantsStale` / `locationsStale` flags AND the equivalent
+ * `loop_catalog_stale` gauge on `/metrics` (`observability-handlers.ts`).
+ * Pulled out to a single source of truth so the two surfaces can never
+ * silently drift apart on the "2x refresh interval" threshold pinned in
+ * `docs/slo.md` §Freshness.
+ */
+export function merchantCatalogStaleAfterMs(): number {
+  return env.REFRESH_INTERVAL_HOURS * 2 * 60 * 60 * 1000;
+}
+
+export function locationCatalogStaleAfterMs(): number {
+  return env.LOCATION_REFRESH_INTERVAL_HOURS * 2 * 60 * 60 * 1000;
+}
+
 export async function healthHandler(c: Context): Promise<Response> {
   const { locations, loadedAt: locLoadedAt } = getLocations();
   const { merchants, loadedAt: merLoadedAt } = getMerchants();
 
   const now = Date.now();
-  const merchantStaleMs = env.REFRESH_INTERVAL_HOURS * 2 * 60 * 60 * 1000;
-  const locationStaleMs = env.LOCATION_REFRESH_INTERVAL_HOURS * 2 * 60 * 60 * 1000;
+  const merchantStaleMs = merchantCatalogStaleAfterMs();
+  const locationStaleMs = locationCatalogStaleAfterMs();
   const merchantsStale = now - merLoadedAt > merchantStaleMs;
   const locationsStale = now - locLoadedAt > locationStaleMs;
 
