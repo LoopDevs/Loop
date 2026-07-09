@@ -15,6 +15,14 @@
  * The `loop_asset` branch additionally fails closed (503) when the
  * region's issuer env var isn't set — the order row is already
  * written so the 24h expiry sweep cleans up; client retries later.
+ * The `usdc` branch mirrors this: fails closed (503) when
+ * `LOOP_STELLAR_USDC_ISSUER` isn't set, rather than emitting a SEP-7
+ * URI with an empty `asset_issuer` that no wallet can ever pay
+ * (AUDIT-2 P2 follow-up 'b', 2026-07 — liveness/UX, not a
+ * money-safety gap: `isMatchingIncomingPayment` already refuses to
+ * match any deposit when the issuer is unconfigured, so an
+ * un-payable URI would otherwise just silently stall to the 24h
+ * expiry instead of surfacing the misconfiguration immediately).
  *
  * Co-locating the branching here keeps the handler's body focused
  * on validation + create; the response shaping (and the Discord
@@ -147,6 +155,18 @@ export async function buildLoopCreateResponse(
   // was validated above. Compute the asset amount (XLM via oracle, USDC via
   // FX feed) and the SEP-7 deep-link URI so clients can render an
   // "Open in wallet" button.
+  if (order.paymentMethod === 'usdc' && env.LOOP_STELLAR_USDC_ISSUER === undefined) {
+    // Mirror the loop_asset branch above: without a configured USDC
+    // issuer, `isMatchingIncomingPayment` (payments/horizon.ts) will
+    // never match any deposit against this order (fail-closed, AUDIT-2
+    // finding A), so a SEP-7 URI built here would be un-payable — an
+    // empty `asset_issuer` param no wallet can act on. The order row
+    // is already written; log + 503 so the client can retry once ops
+    // fixes the config, instead of silently stalling to the 24h expiry
+    // sweep (AUDIT-2 P2 follow-up 'b').
+    log.error({ orderId: order.id }, 'usdc order placed but LOOP_STELLAR_USDC_ISSUER not set');
+    return c.json({ code: 'SERVICE_UNAVAILABLE', message: 'USDC payment not configured' }, 503);
+  }
   const memo = order.paymentMemo ?? '';
   const stellarAddress = env.LOOP_STELLAR_DEPOSIT_ADDRESS!;
   const chargeCurrency = order.chargeCurrency as 'USD' | 'GBP' | 'EUR';
@@ -162,10 +182,13 @@ export async function buildLoopCreateResponse(
       { err, orderId: order.id, paymentMethod: order.paymentMethod, chargeCurrency },
       'Asset-amount oracle unavailable at order create — falling back to fiat-only response',
     );
-    // Fail-open: if the oracle is down at create time, return the
-    // payment payload with a placeholder zero amount so the client
-    // still has the address + memo to fall back to manual entry.
-    // Watcher's amount validation will still hold.
+    // Fail-safe, not fail-open: if the oracle is down at create time,
+    // return the payment payload with a placeholder zero amount so the
+    // client still has the address + memo to fall back to manual
+    // entry. This degrades only the SEP-7 URI's cosmetic amount — the
+    // watcher's amount validation (the actual money check) is
+    // unaffected and still holds, so a 0-amount URI can never
+    // underpay the order (orders-sweep P2 finding, 2026-07-09).
     assetAmount = { stroops: 0n, formatted: '0.0000000' };
   }
   const paymentUri = buildSep7PayUri({
@@ -175,6 +198,9 @@ export async function buildLoopCreateResponse(
     ...(order.paymentMethod === 'usdc'
       ? {
           assetCode: 'USDC',
+          // `?? ''` is defensive-only dead code: the guard above
+          // already 503s before this point whenever the issuer is
+          // unset, so this is always the real issuer in practice.
           assetIssuer: env.LOOP_STELLAR_USDC_ISSUER ?? '',
         }
       : {}),

@@ -63,7 +63,13 @@ const HorizonAccountResponse = z.object({
 export interface AccountBalanceSnapshot {
   /** Native XLM balance in stroops. Null only if the account doesn't exist. */
   xlmStroops: bigint | null;
-  /** USDC balance in stroops. Null when no trustline to the configured issuer is established. */
+  /**
+   * USDC balance in stroops. Null when no trustline to the
+   * configured issuer is established, OR when no issuer is
+   * configured at all (`usdcIssuer === null` — fail-closed, see
+   * `getAccountBalances` doc above; a code-only "USDC" match isn't
+   * trustworthy without a pinned issuer).
+   */
   usdcStroops: bigint | null;
   /** Unix ms the snapshot was taken — useful for admin UIs showing freshness. */
   asOfMs: number;
@@ -89,9 +95,21 @@ export function __resetBalanceCacheForTests(): void {
  * keyed on `(account, usdcIssuer)` so an operator flipping the
  * issuer env var doesn't serve stale against the wrong asset.
  *
- * `usdcIssuer === null` accepts any USDC-code credit line — MVP
- * leniency matching the watcher's fallback (#168). Production
- * should always pin to Centre's mainnet issuer.
+ * `usdcIssuer === null` counts NO 'USDC'-code balance (AUDIT-2 P2
+ * follow-up 'a', 2026-07). Stellar asset codes aren't unique —
+ * anyone can self-issue a credit line called "USDC" from their own
+ * account — so without a pinned issuer to check against, a balance
+ * entry merely code-matching "USDC" isn't evidence of anything.
+ * This mirrors the fail-closed shape `isMatchingIncomingPayment`
+ * (`./horizon.ts`) uses for deposit matching and
+ * `configuredLoopPayableAssets` (`../credits/payout-asset.ts`) uses
+ * for the LOOP-asset allowlist: no issuer configured means the
+ * balance reads as unknown (null), never "any issuer accepted". The
+ * previous "MVP leniency" behavior here was the read-side sibling of
+ * the AUDIT-2 finding A deposit-matching bug — lower severity
+ * because this is a balance READ (procurement asset choice + admin
+ * treasury display), not a payment-authorization gate, but the same
+ * shape is worth closing for consistency.
  *
  * Throws on non-2xx / schema drift. A 404 on an unfunded account
  * is treated as `{ xlm: null, usdc: null }` (valid response; the
@@ -147,7 +165,9 @@ export async function getAccountBalances(
         continue;
       }
       if (b.asset_code !== 'USDC') continue;
-      if (usdcIssuer !== null && b.asset_issuer !== usdcIssuer) continue;
+      // Fail-closed: no configured issuer means no match, never "any
+      // issuer" — see the function doc above.
+      if (usdcIssuer === null || b.asset_issuer !== usdcIssuer) continue;
       usdcStroops = parseStroops(b.balance);
     } catch (err) {
       log.warn(

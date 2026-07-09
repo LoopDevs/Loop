@@ -8,6 +8,7 @@ vi.mock('../../logger.js', () => ({
 const { envState, payoutAssetState } = vi.hoisted(() => ({
   envState: {
     LOOP_STELLAR_DEPOSIT_ADDRESS: undefined as string | undefined,
+    LOOP_STELLAR_USDC_ISSUER: undefined as string | undefined,
   },
   payoutAssetState: {
     USD: { code: 'USDLOOP', issuer: null as string | null },
@@ -59,6 +60,7 @@ function order(overrides: Partial<OrderShape> = {}): OrderShape {
 
 beforeEach(() => {
   envState.LOOP_STELLAR_DEPOSIT_ADDRESS = 'GDEPOSIT';
+  envState.LOOP_STELLAR_USDC_ISSUER = 'GUSDCISSUER';
   payoutAssetState.USD.issuer = 'GISSUERUSD';
   payoutAssetState.GBP.issuer = 'GISSUERGBP';
   payoutAssetState.EUR.issuer = 'GISSUEREUR';
@@ -85,8 +87,26 @@ describe('replayOrderResponse', () => {
 
   it('replays a USDC-method order with the same envelope shape as XLM', async () => {
     const res = await replayOrderResponse(fakeContext(), order({ paymentMethod: 'usdc' }) as never);
-    const body = (await res.json()) as { payment: { method: string } };
+    const body = (await res.json()) as { payment: { method: string; paymentUri: string } };
     expect(body.payment.method).toBe('usdc');
+    expect(body.payment.paymentUri).toContain('asset_issuer=GUSDCISSUER');
+  });
+
+  it('AUDIT-2 P2-b: returns 503 replaying a usdc order when LOOP_STELLAR_USDC_ISSUER has been unset — never a malformed URI', async () => {
+    envState.LOOP_STELLAR_USDC_ISSUER = undefined;
+    const res = await replayOrderResponse(fakeContext(), order({ paymentMethod: 'usdc' }) as never);
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { code: string; payment?: unknown };
+    expect(body.code).toBe('SERVICE_UNAVAILABLE');
+    expect(body.payment).toBeUndefined();
+  });
+
+  it('replaying an xlm order is unaffected by an unset USDC issuer (non-regression)', async () => {
+    envState.LOOP_STELLAR_USDC_ISSUER = undefined;
+    const res = await replayOrderResponse(fakeContext(), order({ paymentMethod: 'xlm' }) as never);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { payment: { method: string } };
+    expect(body.payment.method).toBe('xlm');
   });
 
   it('replays a loop_asset order with assetCode + assetIssuer', async () => {

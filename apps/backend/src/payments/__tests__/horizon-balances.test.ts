@@ -78,10 +78,11 @@ describe('getAccountBalances', () => {
     expect(snap.usdcStroops).toBeNull();
   });
 
-  it('accepts USDC from any issuer when usdcIssuer is null (MVP leniency)', async () => {
+  it('AUDIT-2 P2-a: excludes any-issuer USDC when usdcIssuer is unset (fail-closed, not "any issuer")', async () => {
     fetchSpy = stubHorizon({
       account_id: ACCOUNT,
       balances: [
+        { asset_type: 'native', balance: '10.0000000' },
         {
           asset_type: 'credit_alphanum4',
           asset_code: 'USDC',
@@ -91,7 +92,14 @@ describe('getAccountBalances', () => {
       ],
     });
     const snap = await getAccountBalances(ACCOUNT, null);
-    expect(snap.usdcStroops).toBe(420_000_000n);
+    // Pre-fix this returned 420_000_000n (any-issuer "USDC" code
+    // counted as balance) — the same vacuous-issuer shape AUDIT-2
+    // finding A fixed on the deposit-matching path. A code-only
+    // match with no issuer configured is not evidence of a real
+    // USDC balance, so this must read as unknown/null, and the XLM
+    // balance on the same account must be unaffected.
+    expect(snap.usdcStroops).toBeNull();
+    expect(snap.xlmStroops).toBe(100_000_000n);
   });
 
   it('treats a 404 as an unfunded account (both balances null)', async () => {

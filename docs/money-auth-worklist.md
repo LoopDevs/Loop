@@ -323,7 +323,7 @@
 Smaller items surfaced while working an item above; not re-scoped to the
 depth of a numbered ID, but worth tracking so they don't get lost.
 
-- [ ] **P2-a · `payments/horizon-balances.ts:92-104` has the same
+- [x] **P2-a · `payments/horizon-balances.ts:92-104` has the same
       vacuous-issuer pattern AUDIT-2-A fixed on the deposit-matching path.**
       _S · 💰._ Found while fixing AUDIT-2-C. This is the operator-balance
       READ path (feeds procurement asset choice + treasury display), not a
@@ -331,7 +331,22 @@ depth of a numbered ID, but worth tracking so they don't get lost.
       — but the same "unconfigured issuer silently matches anything" shape
       is worth closing for consistency and to stop it from misreporting
       operator treasury balances against a spoofed/self-issued asset.
-- [ ] **P2-b · No order-create-time gate for a `usdc` order when
+      **Done (review-first, not yet merged):** `getAccountBalances` now
+      mirrors `isMatchingIncomingPayment`'s fail-closed shape — a 'USDC'
+      code balance is only counted when `usdcIssuer` is configured AND
+      matches; unset issuer now reads as `usdcStroops: null` (unknown),
+      never "any issuer accepted." Verified the three consumers
+      (`procurement-asset-picker.ts`'s `readUsdcBalanceSafely` — null
+      already means "haven't read a balance" and defaults to USDC, no
+      behavior change beyond correctness; `admin/treasury-builders.ts`'s
+      `buildAssets` — already renders `null` as `—`;
+      `payments/operator-float-reconciliation.ts`'s `currentBalance` —
+      already coalesces `null ?? 0n`) all handle the now-more-often-null
+      balance safely, no divide-by/NaN/negative surprise. Test flips the
+      old "MVP leniency"
+      assertion in `horizon-balances.test.ts` to assert the fail-closed
+      result, and was confirmed to fail against pre-fix code.
+- [x] **P2-b · No order-create-time gate for a `usdc` order when
       `LOOP_STELLAR_USDC_ISSUER` is unconfigured.** _S · 💰._ Found while
       fixing AUDIT-2-C. `orders/loop-create-response.ts` lets a `usdc`
       order get created even when the issuer var is unset — the order then
@@ -340,6 +355,17 @@ depth of a numbered ID, but worth tracking so they don't get lost.
       surface the misconfiguration immediately instead of via silent
       24h-later expiry. Liveness/UX, not a money-safety gap (no unbacked
       value can move).
+      **Done (review-first, not yet merged):** both
+      `loop-create-response.ts` and `loop-replay-response.ts` (the
+      idempotent-replay twin — same gap, same fix) now 503
+      `SERVICE_UNAVAILABLE` for a
+      `usdc` order when `LOOP_STELLAR_USDC_ISSUER` is unset, mirroring the
+      pre-existing `loop_asset` issuer guard. `xlm`/`loop_asset`/`credit`
+      create + replay are non-regression-tested unaffected. Also fixed the
+      adjacent `loop-create-response.ts` "Fail-open" comment on the
+      oracle-down zero-amount path — it's fail-SAFE (the watcher's amount
+      check is unaffected; a 0-amount URI can't underpay), per the
+      orders-sweep P2 finding.
 - [ ] **P2-c · `orders/transitions.ts` `loop_asset` debit residual: a
       pre-existing `pending_payment` `loop_asset` order can still be paid
       via direct on-chain payment.** _👤 operator query + 💰._ AUDIT-2-B
@@ -364,6 +390,44 @@ payment_method='loop_asset' AND state='pending_payment'` — plus a
       op type was already excluded from `isMatchingIncomingPayment`), so
       it's a residual to track, not a launch blocker — extending the
       discriminator to the merge fields would close it.
+      _Still open — not addressed in the P2-a/P2-b PR (2026-07-09); scope
+      was the horizon-balances + usdc order-create issuer gaps only._
+- [ ] **P2-e · `sweepStuckProcurement` is not S4-8 single-flighted.** _S ·
+      💰 · still open, not addressed in the P2-a/P2-b PR (2026-07-09)._
+      Efficiency-only per the AUDIT-2 sweep — the work itself is
+      row-lock-partitioned (`UPDATE ... WHERE state = ...`), so concurrent
+      runs can't double-act on the same row. See
+      [`audit-2026-07-09-money-auth-sweep.md`](./audit-2026-07-09-money-auth-sweep.md)
+      P2 findings (orders).
+- [ ] **P2-f · Emission-conservation DB trigger (migration 0044) is
+      integration-tested only for `kind='emission'`.** _S–M · 💰 · still
+      open, not addressed in the P2-a/P2-b PR (2026-07-09)._ The same
+      trigger also gates `order_cashback` and `interest_mint` rows per its
+      `WHEN` clause, but those paths lack equivalent direct integration
+      coverage. See
+      [`audit-2026-07-09-money-auth-sweep.md`](./audit-2026-07-09-money-auth-sweep.md)
+      P2 findings (credits).
+- [ ] **P2-g · `payments/operator-float-reconciliation.ts`'s
+      `extractOperatorMovement` has the same vacuous-issuer shape P2-a just
+      fixed on the balance-read sibling.** _S · 💰 · found by the
+      money-reviewer pass on the P2-a/P2-b PR (2026-07-09), out of that
+      PR's scope, still open._ `extractOperatorMovement` (~line 158)
+      classifies a Horizon payment as `asset: 'usdc'` on
+      `args.usdcIssuer === null || p.asset_issuer === args.usdcIssuer` —
+      when `LOOP_STELLAR_USDC_ISSUER` is unset, any code-"USDC" payment on
+      the operator account is counted into the float-reconciliation
+      movement ledger regardless of issuer, the same "unconfigured issuer
+      accepts anything" shape as P2-a. Lower severity than P2-a (this is
+      an audit-trail classification for the R3-1 float reconciler, not a
+      balance figure or a payment-authorization gate), but worth closing
+      for the same consistency reason. Note: the P2-a/P2-b PR's fix to
+      `getAccountBalances`'s `currentBalance` consumer means
+      `actualBalanceStroops` now reads `0` for USDC whenever the issuer is
+      unset — if this movement-classification sibling stays unfixed, an
+      unset-issuer deployment would show `expectedBalanceStroops` still
+      counting unpinned "USDC" movements while `actualBalanceStroops`
+      reads 0, which pages the drift alert (correctly loud, but this
+      residual is worth closing rather than relying on the alert alone).
 
 ## Ongoing — remaining money/auth test coverage
 

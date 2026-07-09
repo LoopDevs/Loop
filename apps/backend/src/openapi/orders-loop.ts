@@ -176,10 +176,12 @@ export function registerOrdersLoopOpenApi(
       // an ADR-035 extended-market currency (AED/INR/SAR/AUD/MXN) the
       // external rates service doesn't serve yet — a clean "coming soon"
       // rather than a wrong charge, distinct from a SERVICE_UNAVAILABLE
-      // feed outage for a supported currency.
+      // feed outage for a supported currency. AUDIT-2 P2 follow-up 'b'
+      // (2026-07-09) adds the usdc-issuer-unconfigured case, same shape
+      // as the pre-existing LOOP-asset-issuer guard.
       503: {
         description:
-          'SERVICE_UNAVAILABLE (FX feed outage, deposit address unconfigured, or LOOP-asset issuer not configured for the requested currency) or CURRENCY_NOT_AVAILABLE (ADR-035 extended-market currency not yet served by the rates feed — ordering coming soon)',
+          'SERVICE_UNAVAILABLE (FX feed outage, deposit address unconfigured, LOOP-asset issuer not configured for the requested currency, or LOOP_STELLAR_USDC_ISSUER not configured for paymentMethod=usdc) or CURRENCY_NOT_AVAILABLE (ADR-035 extended-market currency not yet served by the rates feed — ordering coming soon)',
         content: { 'application/json': { schema: errorResponse } },
       },
     },
