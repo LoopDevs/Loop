@@ -47,6 +47,7 @@ import { upstreamUrl } from './upstream.js';
 import { notifyHealthChange, notifyGeoDbStale } from './discord.js';
 import { getOperatorHealth } from './ctx/operator-pool.js';
 import { getGeoDbStatus, GEO_DB_STALE_AFTER_DAYS } from './public/geo.js';
+import { currentFleetSizeEstimate, currentFleetSizeSource } from './middleware/fleet-size.js';
 
 const healthLog = logger.child({ component: 'health' });
 
@@ -375,6 +376,15 @@ export async function healthHandler(c: Context): Promise<Response> {
       // must not read as "degraded".
       geoDbStale: geoDbStatus.stale,
       geoDbBuildEpoch: geoDbStatus.buildEpoch,
+      // S4-4: current divisor the rate limiter uses for its per-machine
+      // → fleet-wide budget conversion (middleware/fleet-size.ts).
+      // `rateLimitFleetEstimateSource` is 'dynamic' when a fresh
+      // `.internal` DNS read is in effect, 'static' when running on the
+      // RATE_LIMIT_MACHINE_COUNT_ESTIMATE fallback (no FLY_APP_NAME —
+      // local dev/CI — or DNS unavailable past the grace period). Purely
+      // informational: neither field affects softDegraded/criticalDegraded.
+      rateLimitFleetEstimate: currentFleetSizeEstimate(),
+      rateLimitFleetEstimateSource: currentFleetSizeSource(),
       upstreamReachable,
       // A4-034: DB readiness component. False = pool exhausted /
       // credentials rotated / network partition / DB hard-down.

@@ -110,6 +110,14 @@ export function registerHealthOpenApi(
         format: 'date-time',
         description: 'GeoLite2 .mmdb build timestamp, null when unavailable.',
       }),
+      rateLimitFleetEstimate: z.number().int().openapi({
+        description:
+          'S4-4 — current fleet-size divisor the rate limiter applies to every configured per-route budget (docs/readiness-backlog-2026-07-03.md §S4-4). Sourced from a live Fly `.internal` DNS count when fresh, else the static RATE_LIMIT_MACHINE_COUNT_ESTIMATE fallback.',
+      }),
+      rateLimitFleetEstimateSource: z.enum(['dynamic', 'static']).openapi({
+        description:
+          "'dynamic' when a fresh `.internal` DNS read is in effect; 'static' when running on the RATE_LIMIT_MACHINE_COUNT_ESTIMATE fallback (FLY_APP_NAME unset, or DNS unavailable past the grace period).",
+      }),
       upstreamReachable: z.boolean(),
       otpDelivery: z.object({
         enabled: z.boolean(),

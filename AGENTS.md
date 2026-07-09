@@ -296,13 +296,22 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # can spoof X-Forwarded-For and bypass per-IP limits.
 # TRUST_PROXY=true
 
-# CF2-10 (2026-06-30 cold audit) stopgap: rateLimitMap is in-memory and
-# per-machine, so every configured per-route budget is actually
-# max × (live Fly machine count). Divides every budget by this
-# estimate. Default 1 (no division, same posture as TRUST_PROXY) —
-# production sets this explicitly to the fleet's real machine count
-# (confirmed 2 during the audit); update when that count changes.
+# CF2-10 (2026-06-30 cold audit) → S4-4 (2026-07-09 dynamic fix):
+# rateLimitMap is in-memory and per-machine, so every configured
+# per-route budget is actually max × (live Fly machine count).
+# middleware/fleet-size.ts now derives that count LIVE from Fly's
+# `.internal` private DNS (one AAAA record per started machine,
+# fleet-wide, refreshed every 30s) and prefers it whenever fresh; this
+# var is now only the fallback for when FLY_APP_NAME is unset (local
+# dev/CI) or DNS has failed past a 5-minute grace period. Default 1
+# (no division, same posture as TRUST_PROXY) — production sets this
+# explicitly as the fallback floor.
 # RATE_LIMIT_MACHINE_COUNT_ESTIMATE=2
+
+# S4-4: Fly injects FLY_APP_NAME automatically — never set by hand.
+# Names the app's private `.internal` DNS zone the fleet-size estimator
+# above queries. Absent outside Fly (expected in local dev/CI).
+# FLY_APP_NAME=loopfinance-api
 
 # Optional: API credentials for endpoints that require auth (/locations)
 # GIFT_CARD_API_KEY=<key>
@@ -473,7 +482,7 @@ Applied in order on every request:
 3. **Body limit** — 1MB max request body; overflow returns 413 `PAYLOAD_TOO_LARGE` (A2-1005)
 4. **Request ID** — unique `X-Request-Id` on every request
 5. **Logger** — Pino-backed access log for every request (audit A-021); shares service/env/redaction with application logs and correlates via `X-Request-Id`
-6. **Rate limiting** — a global per-IP volumetric backstop (`globalRateLimit`, 600/min/IP, `/health`-exempt — hardening B6) runs early in the chain so routes lacking a per-route limiter and the admin auth-DB-reads-before-limiter path still have a ceiling; then per-IP, per-route limiters. The full enumeration is the source code: every `app.get/post/put/delete` mount in `apps/backend/src/routes/**` declares its own `rateLimit('METHOD /path', max, windowMs)`. Quick-reference for the highest-traffic surfaces: `/api/clusters` (60/min), `/api/image` (300/min), `/api/merchants` (180/min), `/api/merchants/all` (60/min), `/api/merchants/by-slug/:slug` (120/min), `/api/merchants/cashback-rates` (120/min), `/api/merchants/:id` (120/min — authed), `/api/merchants/:id/cashback-rate` (120/min), `/.well-known/jwks.json` (120/min), `/.well-known/apple-app-site-association` (120/min), `/.well-known/assetlinks.json` (120/min), `/api/auth/request-otp` (5/min), `/api/auth/verify-otp` (10/min), `/api/auth/refresh` (30/min), `DELETE /api/auth/session` (20/min), `POST /api/orders` (10/min), `GET /api/orders` (60/min), `GET /api/orders/:id` (120/min). Admin/payouts/credits/users/cashback-config endpoints have their own per-route limits (10–120/min, often 10/min for CSV exports). 429 responses include `Retry-After`. Don't treat this list as exhaustive — A4-001's per-route key fix is enforced in code, not docs. Hardening C6: `rate-limit-route-inventory.test.ts` walks the real route table and fails CI on any mount without a named `rateLimit(…)` gate (explicit allowlist: /health + the bearer-gated ops probes + NODE_ENV=test-only endpoints).
+6. **Rate limiting** — a global per-IP volumetric backstop (`globalRateLimit`, 600/min/IP, `/health`-exempt — hardening B6) runs early in the chain so routes lacking a per-route limiter and the admin auth-DB-reads-before-limiter path still have a ceiling; then per-IP, per-route limiters. The full enumeration is the source code: every `app.get/post/put/delete` mount in `apps/backend/src/routes/**` declares its own `rateLimit('METHOD /path', max, windowMs)`. Quick-reference for the highest-traffic surfaces: `/api/clusters` (60/min), `/api/image` (300/min), `/api/merchants` (180/min), `/api/merchants/all` (60/min), `/api/merchants/by-slug/:slug` (120/min), `/api/merchants/cashback-rates` (120/min), `/api/merchants/:id` (120/min — authed), `/api/merchants/:id/cashback-rate` (120/min), `/.well-known/jwks.json` (120/min), `/.well-known/apple-app-site-association` (120/min), `/.well-known/assetlinks.json` (120/min), `/api/auth/request-otp` (5/min), `/api/auth/verify-otp` (10/min), `/api/auth/refresh` (30/min), `DELETE /api/auth/session` (20/min), `POST /api/orders` (10/min), `GET /api/orders` (60/min), `GET /api/orders/:id` (120/min). Admin/payouts/credits/users/cashback-config endpoints have their own per-route limits (10–120/min, often 10/min for CSV exports). 429 responses include `Retry-After`. Don't treat this list as exhaustive — A4-001's per-route key fix is enforced in code, not docs. Hardening C6: `rate-limit-route-inventory.test.ts` walks the real route table and fails CI on any mount without a named `rateLimit(…)` gate (explicit allowlist: /health + the bearer-gated ops probes + NODE_ENV=test-only endpoints). Every budget above is a **per-machine** figure — `rateLimitMap` is in-memory, so the fleet-wide effective limit is `max × (live machine count)`; S4-4 (2026-07-09) makes that divisor track the real, currently-started Fly machine count via `middleware/fleet-size.ts` (a background `.internal`-DNS read, not a shared store — see `docs/deployment.md` §Rate-limiter fleet-size estimate), falling back to the static `RATE_LIMIT_MACHINE_COUNT_ESTIMATE` env var only when no live estimate is available. `/health`'s `rateLimitFleetEstimate`/`rateLimitFleetEstimateSource` fields expose which one is currently in effect.
 7. **Circuit breaker** — per-upstream-endpoint breakers (login, verify-email, refresh-token, logout, merchants, locations, gift-cards), each 5 failures → 30s open → HALF_OPEN probe. Independent so a failing `/locations` doesn't trip auth.
 
 ---

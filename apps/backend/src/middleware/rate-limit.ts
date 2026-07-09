@@ -35,6 +35,7 @@ import type { Context } from 'hono';
 import { getConnInfo } from '@hono/node-server/conninfo';
 import { env } from '../env.js';
 import { incrementRateLimitHit } from '../metrics.js';
+import { currentFleetSizeEstimate } from './fleet-size.js';
 
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 const RATE_LIMIT_MAP_MAX = 10_000;
@@ -121,35 +122,38 @@ export function sweepExpiredRateLimits(now: number = Date.now()): void {
  * for routes that share a path across methods (e.g. `GET /api/orders/:id`
  * vs `POST /api/orders/:id/retry`).
  *
- * **CF2-10 (2026-06-30 cold audit) stopgap:** `maxRequests` is the
- * caller's documented per-machine budget; this is `rateLimitMap`
- * being in-memory and per-machine, so the effective FLEET-wide
- * budget is `maxRequests × (live machine count)`. Until the real fix
- * (a shared counter, tracked separately as Wave 9 PR AA) lands, the
- * enforced budget is divided by `env.RATE_LIMIT_MACHINE_COUNT_ESTIMATE`
- * so the fleet-wide effective limit stays close to what each call
- * site's comment documents. Floors at 1 so a low `maxRequests` (e.g.
- * request-otp's 5/min) can never divide down to a limit of 0.
+ * **CF2-10 (2026-06-30 cold audit) → S4-4 (2026-07-09 dynamic fix):**
+ * `maxRequests` is the caller's documented per-machine budget; this is
+ * `rateLimitMap` being in-memory and per-machine, so the effective
+ * FLEET-wide budget is `maxRequests × (live machine count)`. The
+ * enforced budget is divided by `currentFleetSizeEstimate()`
+ * (`./fleet-size.ts`) so the fleet-wide effective limit stays close to
+ * what each call site's comment documents. Floors at 1 so a low
+ * `maxRequests` (e.g. request-otp's 5/min) can never divide down to a
+ * limit of 0.
  *
- * Defensive against a missing/invalid estimate (many existing tests
- * mock `env.js` with a hand-picked field subset that predates this
- * var, so `env.RATE_LIMIT_MACHINE_COUNT_ESTIMATE` can be `undefined`
- * there): anything that isn't a positive finite number falls back to
- * 1 (no division) rather than propagating `NaN`, which would make
- * `effectiveMaxRequests` `NaN` and `count > NaN` permanently `false`
- * — silently disabling the rate limiter entirely.
+ * The divisor is read fresh on **every request**, not once when the
+ * route mounts — `fleet-size.ts` updates its cached estimate on a
+ * background interval as the live Fly fleet scales, so a middleware
+ * closure created at boot must not freeze the divisor at whatever the
+ * estimate happened to be at that instant. `currentFleetSizeEstimate()`
+ * itself never does I/O (it reads an already-cached value) and never
+ * throws, so this stays cheap and safe on the request path.
+ *
+ * `currentFleetSizeEstimate()` already applies the same
+ * missing/invalid-estimate defense that used to live here directly
+ * (many existing tests mock `env.js` with a hand-picked field subset
+ * that predates `RATE_LIMIT_MACHINE_COUNT_ESTIMATE`, so it can be
+ * `undefined` at runtime there): anything that isn't usable falls back
+ * to 1 (no division) rather than propagating `NaN`, which would make
+ * `effectiveMaxRequests` `NaN` and `count > NaN` permanently `false` —
+ * silently disabling the rate limiter entirely.
  */
 export function rateLimit(
   name: string,
   maxRequests: number,
   windowMs: number,
 ): (c: Context, next: () => Promise<void>) => Promise<void | Response> {
-  const rawEstimate = env.RATE_LIMIT_MACHINE_COUNT_ESTIMATE;
-  const machineCountEstimate =
-    typeof rawEstimate === 'number' && Number.isFinite(rawEstimate) && rawEstimate > 0
-      ? rawEstimate
-      : 1;
-  const effectiveMaxRequests = Math.max(1, Math.floor(maxRequests / machineCountEstimate));
   const mw = async (c: Context, next: () => Promise<void>): Promise<void | Response> => {
     // Escape hatch for e2e test runs. The mocked-e2e suite drives
     // the purchase flow twice with Playwright retries, which
@@ -166,6 +170,10 @@ export function rateLimit(
     const key = `${name}:${ip}`;
     const now = Date.now();
     const entry = rateLimitMap.get(key);
+    // S4-4: read the fleet-size estimate fresh on every request — see
+    // the factory doc comment above for why this can't be hoisted out
+    // of the per-request closure.
+    const effectiveMaxRequests = Math.max(1, Math.floor(maxRequests / currentFleetSizeEstimate()));
 
     if (entry === undefined || now > entry.resetAt) {
       // Evict the oldest entry if we're at capacity. Map iteration

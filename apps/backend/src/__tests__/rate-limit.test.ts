@@ -7,7 +7,15 @@ import type { Context } from 'hono';
  * `trust-proxy.test.ts`), never the `rateLimit()` factory's actual
  * budget-enforcement/429 logic. Added alongside the
  * RATE_LIMIT_MACHINE_COUNT_ESTIMATE stopgap so both the pre-existing
- * behavior and the new machine-count division are locked in.
+ * behavior and the machine-count division are locked in.
+ *
+ * S4-4 (2026-07-09): the divisor's SOURCE moved to a dynamic fleet-size
+ * estimate (`middleware/fleet-size.ts`, unit-tested on its own in
+ * `fleet-size.test.ts` — DNS reads, grace period, clamping, the static
+ * fallback's defensiveness). This file mocks that module to a plain
+ * controllable number so the tests here stay focused on what
+ * `rateLimit()` itself is responsible for: applying the divisor
+ * correctly, per request, to the budget/429 logic.
  */
 
 const { envState } = vi.hoisted(() => ({
@@ -15,7 +23,6 @@ const { envState } = vi.hoisted(() => ({
     NODE_ENV: 'test' as string,
     TRUST_PROXY: false,
     DISABLE_RATE_LIMITING: false,
-    RATE_LIMIT_MACHINE_COUNT_ESTIMATE: 2 as number | undefined,
   },
 }));
 
@@ -45,6 +52,19 @@ vi.mock('../metrics.js', () => ({
   incrementRateLimitHit: () => metricsMock.incrementRateLimitHit(),
 }));
 
+// S4-4: the fleet-size estimator is unit-tested on its own
+// (`fleet-size.test.ts` covers DNS/grace-period/clamping behaviour in
+// isolation) — here it's mocked so these tests keep exercising exactly
+// what they did before the dynamic-estimate wiring (a plain numeric
+// divisor), plus a couple of tests below that lock in that the divisor
+// is read fresh per-request rather than frozen at factory time.
+const { fleetSizeState } = vi.hoisted(() => ({
+  fleetSizeState: { estimate: 1 },
+}));
+vi.mock('../middleware/fleet-size.js', () => ({
+  currentFleetSizeEstimate: () => fleetSizeState.estimate,
+}));
+
 import { rateLimit, globalRateLimit, __resetRateLimitsForTests } from '../middleware/rate-limit.js';
 
 function makeCtx(path = '/api/anything'): { ctx: Context; headers: Map<string, string> } {
@@ -62,7 +82,7 @@ beforeEach(() => {
   __resetRateLimitsForTests();
   envState.TRUST_PROXY = false;
   envState.DISABLE_RATE_LIMITING = false;
-  envState.RATE_LIMIT_MACHINE_COUNT_ESTIMATE = 2;
+  fleetSizeState.estimate = 2;
   metricsMock.incrementRateLimitHit.mockReset();
 });
 
@@ -79,8 +99,8 @@ describe('rateLimit middleware', () => {
     expect(next).toHaveBeenCalledTimes(5);
   });
 
-  it('CF2-10: divides maxRequests by RATE_LIMIT_MACHINE_COUNT_ESTIMATE before enforcing', async () => {
-    envState.RATE_LIMIT_MACHINE_COUNT_ESTIMATE = 2;
+  it('S4-4: divides maxRequests by the current fleet-size estimate before enforcing', async () => {
+    fleetSizeState.estimate = 2;
     const mw = rateLimit('test-route-b', 10, 60_000);
     const next = vi.fn(async () => {});
     // Effective budget is 10/2 = 5 — the 6th request in the window must 429.
@@ -98,7 +118,7 @@ describe('rateLimit middleware', () => {
   it('floors the effective budget at 1 rather than 0', async () => {
     // maxRequests=1, estimate=10 → naive division would be 0, which
     // would reject every single request including the first.
-    envState.RATE_LIMIT_MACHINE_COUNT_ESTIMATE = 10;
+    fleetSizeState.estimate = 10;
     const mw = rateLimit('test-route-c', 1, 60_000);
     const next = vi.fn(async () => {});
     const { ctx } = makeCtx();
@@ -107,31 +127,38 @@ describe('rateLimit middleware', () => {
     expect(next).toHaveBeenCalledTimes(1);
   });
 
-  // Real bug caught while implementing this fix: many existing test
-  // files mock env.js with a hand-picked field subset that predates
-  // this var, so RATE_LIMIT_MACHINE_COUNT_ESTIMATE is `undefined` at
-  // runtime there despite env.ts's static type claiming it's always a
-  // number. Math.floor(max / undefined) = NaN, and count > NaN is
-  // permanently false — silently disabling the limiter entirely
-  // (5 real test failures across handler.test.ts and
-  // routes.integration.test.ts before this fallback was added).
-  it('falls back to no division when the estimate is undefined/non-numeric at runtime', async () => {
-    envState.RATE_LIMIT_MACHINE_COUNT_ESTIMATE = undefined;
-    const mw = rateLimit('test-route-f', 2, 60_000);
+  // S4-4: this is the wiring bug the dynamic-estimate fix had to avoid
+  // reintroducing. Before this fix, `rateLimit()` computed the
+  // machine-count divisor ONCE at factory-creation time (i.e. once per
+  // route, at app boot) and closed over it forever — fine for a static
+  // env var that never changes for the life of the process, but wrong
+  // once the divisor is a live fleet-size estimate that changes while
+  // the process runs. This test creates the middleware once (like a
+  // route mount does) and changes the estimate BETWEEN requests,
+  // proving the effective budget is recomputed on every call rather
+  // than frozen at creation.
+  it("S4-4: reads the fleet-size estimate fresh on every request, not once at the route's creation", async () => {
+    fleetSizeState.estimate = 1; // effective budget = 10
+    const mw = rateLimit('test-route-live', 10, 60_000);
     const next = vi.fn(async () => {});
-    const { ctx: ctx1 } = makeCtx();
-    await mw(ctx1, next);
-    const { ctx: ctx2 } = makeCtx();
-    await mw(ctx2, next);
-    const { ctx: ctx3 } = makeCtx();
-    const res = await mw(ctx3, next);
+    for (let i = 0; i < 3; i++) {
+      const { ctx } = makeCtx();
+      const res = await mw(ctx, next);
+      expect(res).toBeUndefined();
+    }
+    // Fleet scales up mid-process — effective budget drops to 10/5=2,
+    // and the 3 requests already consumed this window must count
+    // against the NEW effective budget, tripping the 429 immediately.
+    fleetSizeState.estimate = 5;
+    const { ctx } = makeCtx();
+    const res = await mw(ctx, next);
     expect(res).toBeInstanceOf(Response);
     expect(res?.status).toBe(429);
-    expect(next).toHaveBeenCalledTimes(2);
+    expect(next).toHaveBeenCalledTimes(3);
   });
 
   it('sets Retry-After and increments the metrics counter on 429', async () => {
-    envState.RATE_LIMIT_MACHINE_COUNT_ESTIMATE = 1;
+    fleetSizeState.estimate = 1;
     const mw = rateLimit('test-route-d', 1, 60_000);
     const next = vi.fn(async () => {});
     const { ctx: ctx1 } = makeCtx();
@@ -144,7 +171,7 @@ describe('rateLimit middleware', () => {
   });
 
   it('scopes buckets independently per route name (A4-001)', async () => {
-    envState.RATE_LIMIT_MACHINE_COUNT_ESTIMATE = 1;
+    fleetSizeState.estimate = 1;
     const mwA = rateLimit('route-x', 1, 60_000);
     const mwB = rateLimit('route-y', 1, 60_000);
     const next = vi.fn(async () => {});
@@ -158,7 +185,7 @@ describe('rateLimit middleware', () => {
 
   it('bypasses enforcement entirely when DISABLE_RATE_LIMITING is set', async () => {
     envState.DISABLE_RATE_LIMITING = true;
-    envState.RATE_LIMIT_MACHINE_COUNT_ESTIMATE = 1;
+    fleetSizeState.estimate = 1;
     const mw = rateLimit('test-route-e', 1, 60_000);
     const next = vi.fn(async () => {});
     for (let i = 0; i < 5; i++) {
