@@ -264,7 +264,7 @@
 - [x] **R3-7 · Pin production to native auth at boot.** _S · 🔐._
 - [x] **R3-8 · Align admin step-up OTP with the B5 per-email lockout.** _S–M · 🔐._
 - [x] **R3-13 · Origin-check the redemption WebView `postMessage`.** _S · 🔐._
-- [ ] **AUDIT-2-E · `/__test__/mint-loop-token` has no defense-in-depth beyond `NODE_ENV`.** _S · 🔐._
+- [x] **AUDIT-2-E · `/__test__/mint-loop-token` has no defense-in-depth beyond `NODE_ENV`.** _S · 🔐._
       `apps/backend/src/test-endpoints.ts`, mounted from `app.ts:127-129` only
       when `NODE_ENV==='test'`, issues a full admin token pair for any
       allowlisted email with zero credential check. Not reachable in
@@ -275,6 +275,14 @@
       **Done when:** the test-endpoints router requires a second, independent
       control (shared secret header or loopback bind) even under
       `NODE_ENV=test`.
+      **Done (review-first, not yet merged):** `test-endpoints.ts` now
+      requires `LOOP_TEST_ENDPOINTS_SECRET` (matched per-request via the
+      `X-Test-Endpoints-Secret` header) in addition to `NODE_ENV==='test'`
+      (re-checked inside the module itself); either missing/wrong → 404,
+      same as unmounted. `env.ts` refuses to boot in production if the
+      secret is set at all. Mocked-e2e + flywheel-e2e Playwright configs
+      thread the secret through. See `docs/threat-model.md`'s AUDIT-2-E
+      accepted-risk row.
 - [ ] **T0-3 · Make the money-invariant DB layer a required merge check.** _S · 💰 + operator._
       Enforcement, not a fix — promote the invariant checks to a required CI gate.
 

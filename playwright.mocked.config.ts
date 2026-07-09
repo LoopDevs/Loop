@@ -93,6 +93,11 @@ export default defineConfig({
         // Playwright retries=2 in CI, hitting /api/auth/request-otp
         // up to 6 times in a cold window vs the 5/min limit.
         DISABLE_RATE_LIMITING: '1',
+        // AUDIT-2-E: required second control (in addition to
+        // NODE_ENV=test) before test-endpoints.ts mounts `/__test__/*`.
+        // Must match the header value `resetMock()` sends in
+        // tests/e2e-mocked/purchase-flow.test.ts.
+        LOOP_TEST_ENDPOINTS_SECRET: 'loop-mocked-e2e-test-endpoints-secret',
       },
     },
     {

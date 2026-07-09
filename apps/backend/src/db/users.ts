@@ -119,6 +119,19 @@ export async function getUserById(id: string): Promise<User | null> {
  * unique index on `users.ctx_user_id` does not apply; we find by
  * lower-cased email and insert a new row if nothing matches.
  *
+ * **Invariant: callers MUST only pass a provider/OTP-verified email.**
+ * `isAdmin` is derived from `ADMIN_EMAILS` (see `isAdminEmail` above)
+ * with no further check here — granting admin off an unverified
+ * address would let anyone claim an allowlisted identity. The two
+ * production entry points (`verify-otp`, `email_verified` social
+ * login) satisfy this by construction. The ONE deliberate exception is
+ * `test-endpoints.ts`'s `/__test__/mint-loop-token` (AUDIT-2-E),
+ * which calls this function with a caller-supplied, unverified email —
+ * that's safe only because reaching the endpoint at all requires
+ * `NODE_ENV==='test'` AND a shared secret that's never set outside
+ * test infrastructure (see that file's doc comment). Do not add a
+ * second unguarded caller.
+ *
  * Race-safe (A2-706). The unique index
  * `users_email_loop_native_unique` on `LOWER(email) WHERE
  * ctx_user_id IS NULL` (migration 0020) means two concurrent

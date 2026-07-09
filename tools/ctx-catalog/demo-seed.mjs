@@ -21,8 +21,9 @@
  *   - Discount video:  set LOOP_PHASE_1_ONLY=true  in apps/backend/.env, restart backend
  *   - Cashback video:  set LOOP_PHASE_1_ONLY=false in apps/backend/.env, restart backend
  *   Log in as the demo email via the normal OTP flow (loop-native OTP is in the
- *   `otps` table in dev; or run the backend with NODE_ENV=test to use the
- *   /__test__/mint-loop-token session minter).
+ *   `otps` table in dev; or run the backend with NODE_ENV=test AND
+ *   LOOP_TEST_ENDPOINTS_SECRET set to use the /__test__/mint-loop-token
+ *   session minter — AUDIT-2-E requires the secret as a second control).
  *
  * Re-running is safe: it clears this user's previously-seeded orders/credits
  * first, so the balance doesn't compound across runs.

@@ -27,6 +27,11 @@ vi.mock('../env.js', () => ({
     CTX_CLIENT_ID_IOS: 'loopios',
     CTX_CLIENT_ID_ANDROID: 'loopandroid',
     TRUST_PROXY: false,
+    // AUDIT-2-E: test-endpoints.ts now also requires this secret to
+    // mount `/__test__/*` at all — without it the two routes below
+    // wouldn't appear in `app.routes` and this inventory's assertions
+    // that they're present-but-unlimited would fail.
+    LOOP_TEST_ENDPOINTS_SECRET: 'rate-limit-inventory-test-secret',
   },
 }));
 
@@ -85,9 +90,12 @@ const UNLIMITED_ALLOWLIST = new Set<string>([
   // constant-time token compare + 404.
   'GET /metrics',
   'GET /openapi.json',
-  // Test-only endpoints: mounted exclusively under NODE_ENV=test
-  // (app.ts gate) — they do not exist in production route tables.
-  // This inventory runs with NODE_ENV=test so they appear here.
+  // Test-only endpoints: mounted only when NODE_ENV=test AND
+  // LOOP_TEST_ENDPOINTS_SECRET is configured (AUDIT-2-E defense-in-
+  // depth — see test-endpoints.ts) — they do not exist in production
+  // route tables. This inventory's env mock sets both so they appear
+  // here (they're not rate-limited; a mismatched/missing secret 404s
+  // before a limiter would ever be relevant).
   'POST /__test__/reset',
   'POST /__test__/mint-loop-token',
 ]);

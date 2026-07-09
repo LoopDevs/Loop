@@ -313,6 +313,17 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # above queries. Absent outside Fly (expected in local dev/CI).
 # FLY_APP_NAME=loopfinance-api
 
+# TEST-ONLY (AUDIT-2-E). Second, independent control required — in
+# addition to NODE_ENV=test — before test-endpoints.ts mounts the
+# `/__test__/*` surface (notably `/__test__/mint-loop-token`, a
+# zero-credential-check session minter). Every request under
+# `/__test__/*` must send this exact value via the
+# `X-Test-Endpoints-Secret` header; unset → the router never mounts at
+# all, even under NODE_ENV=test. Min 16 chars. Set ONLY in test configs
+# (playwright.mocked.config.ts, playwright.flywheel.config.ts) —
+# env.ts refuses to boot in production if this is set at all.
+# LOOP_TEST_ENDPOINTS_SECRET=<at-least-16-char-test-only-secret>
+
 # Optional: API credentials for endpoints that require auth (/locations)
 # GIFT_CARD_API_KEY=<key>
 # GIFT_CARD_API_SECRET=<secret>

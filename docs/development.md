@@ -232,6 +232,19 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # always uses the static fallback above).
 # FLY_APP_NAME=loopfinance-api
 
+# TEST-ONLY (AUDIT-2-E). Second, independent control required — in
+# addition to NODE_ENV=test — before test-endpoints.ts mounts the
+# `/__test__/*` surface (notably `/__test__/mint-loop-token`, which
+# mints a full session token pair with zero credential check). Every
+# request under `/__test__/*` must send this exact value via the
+# `X-Test-Endpoints-Secret` header; unset → the router never mounts,
+# even under NODE_ENV=test. Min 16 chars. Read by
+# playwright.mocked.config.ts + playwright.flywheel.config.ts (each
+# backend webServer sets it, and the matching Playwright test file
+# sends it as a header). Never set in production — env.ts refuses to
+# boot if it is.
+# LOOP_TEST_ENDPOINTS_SECRET=<at-least-16-char-test-only-secret>
+
 # ── Loop-native auth (ADR 013 / 014) ─────────────────────────────────
 # HS256 signing key; ≥32 chars. Absent → Loop-native auth endpoints
 # are inert and CTX-proxy auth is the only path. `_PREVIOUS` is only

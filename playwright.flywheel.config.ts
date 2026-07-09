@@ -77,6 +77,12 @@ export default defineConfig({
         LOOP_STELLAR_EURLOOP_ISSUER: 'GDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD',
         LOOP_WORKERS_ENABLED: 'false',
         DISABLE_RATE_LIMITING: '1',
+        // AUDIT-2-E: required second control (in addition to
+        // NODE_ENV=test) before test-endpoints.ts mounts
+        // `/__test__/mint-loop-token`. Must match the header value
+        // `mintLoopSession()` sends in
+        // tests/e2e-flywheel/flywheel-walk.test.ts.
+        LOOP_TEST_ENDPOINTS_SECRET: 'loop-flywheel-e2e-test-endpoints-secret',
       },
     },
     {
