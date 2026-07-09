@@ -637,10 +637,10 @@ Note the **sweep** arm already maps a skip-row that goes `unmatched` → `order_
 
 ### M-4 · CI/checklist guard for operator-once overlay steps `[code]`
 
-- [ ] **Status:** ☐ Not started
+- [x] **Status:** ✅ Done 2026-07-09 — `apply-native-overlays.sh` now patches `project.pbxproj` itself (anchored, idempotent, fail-loud on drift) and a new advisory CI job proves it on a scratch `cap add` regeneration.
       **Why:** A bare `cap sync` (without `apply-native-overlays.sh`) silently drops **all** overlays; and several store-critical steps aren't enforced by the script _or_ CI: the iOS `.pbxproj` `baseConfigurationReference` → `release.xcconfig`, `PrivacyInfo.xcprivacy` Copy-Bundle-Resources membership, and the (unhandled) APNs entitlement. These regress invisibly on a clean regeneration.
       **Do:** add a `mobile:sync` wrapper guard / CI check that fails if overlays are missing after sync; extend `apply-native-overlays.sh` to assert (fail-loud) the pbxproj xcconfig ref + PrivacyInfo membership; handle the push entitlement if M-2 lands.
-      **Done when:** a native regeneration that drops an overlay fails loudly.
+      **Done when:** a native regeneration that drops an overlay fails loudly. Resolved: `apps/mobile/scripts/apply-native-overlays.sh` patches `project.pbxproj` (PBXFileReference + baseConfigurationReference for release.xcconfig on every Release XCBuildConfiguration; PBXFileReference + PBXBuildFile + PBXResourcesBuildPhase membership for PrivacyInfo.xcprivacy), anchored on existing content (never hardcoded object ids) and verified post-patch; the `mobile-overlay-guard` CI job (`.github/workflows/ci.yml`) runs a scratch `npx cap add ios/android` + the overlay script on every push/PR and grep-asserts the wiring plus the pre-existing Android overlays. Push/APNs entitlement is moot — M-2 removed push notifications.
 
 ### M-5 · Add `@capacitor/app` lifecycle handling `[code]`
 

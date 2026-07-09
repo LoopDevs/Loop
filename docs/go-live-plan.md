@@ -59,7 +59,7 @@ Phase-2 surfaces ship dark behind `LOOP_PHASE_1_ONLY=true`, so T1 launches witho
 
 - [ ] **L1-4** Apple Developer enrollment + bundle id `io.loopfinance.app` → TestFlight. · [ ] **L1-5** Android keystore **+ offline-escrow procedure** (operator doesn't use 1Password — document a non-1Password escrow). · [ ] **L1-6** Google Play Console (`io.loopfinance.app`).
 - [ ] **L1-7** App Store + Play screenshots & metadata + **submit to review** (metadata draft `docs/app-store-connect-metadata.md`). · [ ] **L1-8** Demo video (script `docs/phase-1-demo-script.md`).
-- [ ] **M-1** Device/simulator testing on physical iOS + Android (headline mobile risk). 👤+🟢 · ✅ **M-2** Push notifications: wire or remove — resolved: removed (push is T2). 🟢 · [ ] **M-3** Deep linking (absent). 🟢 · [ ] **M-4** CI guard for operator-once native-overlay steps. 🟢 · [ ] **M-5** `@capacitor/app` lifecycle handling. 🟢
+- [ ] **M-1** Device/simulator testing on physical iOS + Android (headline mobile risk). 👤+🟢 · ✅ **M-2** Push notifications: wire or remove — resolved: removed (push is T2). 🟢 · [ ] **M-3** Deep linking (absent). 🟢 · ✅ **M-4** CI guard for operator-once native-overlay steps — resolved: overlay script now patches + verifies the iOS pbxproj wiring itself; `mobile-overlay-guard` CI job proves it on a scratch regeneration. 🟢 · [ ] **M-5** `@capacitor/app` lifecycle handling. 🟢
 - ✅ App icons + splash (iOS + Android native overlays) · ✅ Android signed-APK wiring · ✅ web app deployed (`beta.loopfinance.io` v9).
 
 ## T1-E · Launch-blocker code
