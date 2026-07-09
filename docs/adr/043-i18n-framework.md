@@ -188,14 +188,35 @@ regressions:
   "declare in both" rule is scoped to Capacitor plugins specifically — the
   mobile app loads the built static web output from disk, not this package
   directly).
-- **Lockfile-pruning bug encountered and repaired**: `npm install` on this
-  change dropped 11 `lightningcss-linux-*`/`lightningcss-*` platform
-  optional-dependency entries from `package-lock.json` (a known npm
-  optional-dependency lockfile-regeneration bug, not specific to this PR).
-  Repaired by merging only the genuinely new package entries (the 5 above)
-  into a clean `origin/main` copy of the lockfile rather than accepting
-  npm's full regeneration, then validated with `rm -rf node_modules && npm
-ci && npm run build -w @loop/web`.
+- **Lockfile — two hazards, one fixed in the original PR and one in a
+  follow-up.** (1) `npm install` on this change dropped 11
+  `lightningcss-linux-*`/`lightningcss-*` platform optional-dependency
+  entries (a known npm optional-dependency lockfile-regeneration bug, not
+  specific to this PR); repaired in the original PR by hand-merging only the
+  genuinely new package nodes into a clean `origin/main` lockfile rather than
+  accepting npm's regeneration. (2) **`@babel/runtime` dev→prod transition
+  (fixed in the lockfile follow-up PR):** on `origin/main` before this work,
+  `@babel/runtime` existed only as a `@testing-library` (devDependency)
+  transitive at `7.28.6`, flagged `"dev": true`. react-i18next (a
+  **production** dep of `@loop/web`) requires `@babel/runtime@^7.29.2`, which
+  `7.28.6` does **not** satisfy — so the shared hoisted node had to bump to
+  `7.29.7` (satisfies all three consumers: `@testing-library/react` +
+  `@testing-library/dom` at `^7.12.5`, react-i18next at `^7.29.2`) **and drop
+  `"dev": true`** (now a runtime dependency). `npm ci` installs a
+  technically-invalid tree silently (it doesn't validate ranges) — so this
+  passed every functional gate (typecheck / unit / e2e / build) in the
+  original PR and only surfaced via the **advisory** `sbom` CI job:
+  `@cyclonedx/cyclonedx-npm` runs `npm ls`, which exits non-zero on the range
+  violation. The original PR auto-merged on the five required checks going
+  green before the fix landed, so the `@babel/runtime` correction shipped as
+  a one-line-effect lockfile follow-up. Validated with `rm -rf node_modules
+&& npm ci` (exit 0, installs `7.29.7`) + `npm ls @babel/runtime` (no longer
+  `invalid`) + `npm run build -w @loop/web` + the web test suite. **Lesson
+  for the next dependency-adding PR: when a new _production_ dependency shares
+  a transitive with an existing _dev_-only one, check whether the shared
+  node's pinned version satisfies the new consumer's range AND whether its
+  `dev` flag needs clearing — `npm ci` won't tell you; only `npm ls` / the
+  sbom job will.**
 - **Bundle budget — tight, not broken**: `check:bundle-budget` passes
   (3296 KB vs. the 3300 KB `MAX_SSR_KB` ceiling — was 3240 KB before this
   PR). i18next's `~/i18n/locales/en/*.json` catalogs + the library itself
