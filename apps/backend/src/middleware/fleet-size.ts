@@ -56,6 +56,17 @@
  * it should always win when fresh; `max(dynamic, static)` would
  * needlessly re-introduce the "too tight when the fleet shrinks"
  * behaviour the static estimate already had, for no safety benefit.
+ *
+ * **Known transient (auth-review 2026-07-09).** The "never looser than
+ * the static estimate" guarantee above is proven for the DNS-FAILURE
+ * path only. On the success path there is a bounded undercount window:
+ * a refresh caches the count at N, and machines started in the
+ * following `FLEET_SIZE_REFRESH_MS` are not reflected until the next
+ * tick — so during a rapid scale-up the divisor can briefly be lower
+ * than the true fleet (loosest case: fleet trough of 1 right before a
+ * spike). Self-corrects within one refresh interval; the OTP routes'
+ * independent per-email lockout (threat-model B5) bounds the practical
+ * impact. Recorded in docs/threat-model.md CF2-10.
  */
 import { resolve6 } from 'node:dns/promises';
 import { env } from '../env.js';
