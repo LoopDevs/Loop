@@ -45,6 +45,20 @@
  * ADR-017 admin audit envelope. (Pre-ADR-036 'withdrawal' rows DID
  * write a negative `type='withdrawal'` ledger row; that ledger row is
  * what marks them as legacy/compensable — see payout-compensation.)
+ *
+ * AUDIT-2 finding B (2026-07 hardening) — deliberately NOT gated on
+ * `LOOP_PHASE_1_ONLY`: emission is a privileged, step-up-gated admin
+ * write (seeding/correcting a user's on-chain balance to match the
+ * mirror liability, e.g. backfilling a failed cashback payout) and
+ * may legitimately need to run during Phase 1. The user-facing spend
+ * surface is what actually needed closing — `orders/loop-handler.ts`
+ * (create) and `orders/redeem.ts` (redemption) now both reject
+ * `loop_asset` with `LOOP_ASSET_UNAVAILABLE_PHASE_1` while the flag
+ * is on, so an emission minted during Phase 1 sits in the wallet
+ * unspendable rather than being blocked at the source. If a future
+ * writer needs emission itself gated (e.g. a non-admin-triggered
+ * automatic emission path), re-derive this decision — don't assume
+ * it still holds.
  */
 import { and, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';

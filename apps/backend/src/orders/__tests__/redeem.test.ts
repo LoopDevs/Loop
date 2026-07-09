@@ -40,6 +40,10 @@ const { envState } = vi.hoisted(() => ({
     LOOP_STELLAR_DEPOSIT_ADDRESS: undefined as string | undefined,
     LOOP_STELLAR_OPERATOR_SECRET: undefined as string | undefined,
     LOOP_STELLAR_GBPLOOP_ISSUER: undefined as string | undefined,
+    // AUDIT-2 finding B (2026-07 hardening): the redeem-time gate.
+    // Default false — matches production's env.ts default and the
+    // existing tests below, which all exercise the flag-off path.
+    LOOP_PHASE_1_ONLY: false,
   },
 }));
 vi.mock('../../env.js', () => ({
@@ -224,6 +228,7 @@ beforeEach(() => {
   envState.LOOP_STELLAR_DEPOSIT_ADDRESS = DEPOSIT_ADDRESS;
   envState.LOOP_STELLAR_OPERATOR_SECRET = OPERATOR_SECRET;
   envState.LOOP_STELLAR_GBPLOOP_ISSUER = GBPLOOP_ISSUER;
+  envState.LOOP_PHASE_1_ONLY = false;
   orderState.row = loopAssetOrder();
   orderState.freshRow = undefined;
   userState.row = activatedUser();
@@ -295,6 +300,44 @@ describe('redeemLoopOrderHandler — guards', () => {
     const res = await redeemLoopOrderHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
     expect(res.status).toBe(503);
     expect((await bodyOf(res))['code']).toBe('NOT_CONFIGURED');
+  });
+
+  describe('LOOP_PHASE_1_ONLY gate (AUDIT-2 finding B)', () => {
+    it('400 LOOP_ASSET_UNAVAILABLE_PHASE_1 when the flag is true', async () => {
+      envState.LOOP_PHASE_1_ONLY = true;
+      const res = await redeemLoopOrderHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
+      expect(res.status).toBe(400);
+      expect((await bodyOf(res))['code']).toBe('LOOP_ASSET_UNAVAILABLE_PHASE_1');
+      expect(submitMock).not.toHaveBeenCalled();
+    });
+
+    it('fails closed even for an order created before the gate existed', async () => {
+      // Same fixture shape as a pre-gate order — nothing distinguishes
+      // it from a freshly-created one (the gate isn't retroactive by
+      // record, it's live on every redeem call), so this doubles as
+      // "the gate can't be dodged by an already-existing order".
+      envState.LOOP_PHASE_1_ONLY = true;
+      orderState.row = loopAssetOrder({ state: 'pending_payment' });
+      const res = await redeemLoopOrderHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
+      expect(res.status).toBe(400);
+      expect((await bodyOf(res))['code']).toBe('LOOP_ASSET_UNAVAILABLE_PHASE_1');
+    });
+
+    it('does not affect idempotent replay of an already-paid order', async () => {
+      envState.LOOP_PHASE_1_ONLY = true;
+      orderState.row = loopAssetOrder({ state: 'paid' });
+      const res = await redeemLoopOrderHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
+      expect(res.status).toBe(200);
+      expect(await bodyOf(res)).toEqual({ state: 'paid' });
+      expect(submitMock).not.toHaveBeenCalled();
+    });
+
+    it('succeeds when the flag is false (unchanged behavior)', async () => {
+      envState.LOOP_PHASE_1_ONLY = false;
+      const res = await redeemLoopOrderHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
+      expect(res.status).toBe(200);
+      expect(submitMock).toHaveBeenCalledOnce();
+    });
   });
 
   it('503 NOT_CONFIGURED when the LOOP issuer for the charge currency is unset', async () => {

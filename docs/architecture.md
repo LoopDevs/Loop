@@ -329,10 +329,10 @@ POST /api/auth/social/apple                 — ADR 014
 DELETE /api/auth/session
 DELETE /api/auth/session/all                             [authed — B4: sign out of all devices; revokes every live refresh token]
 POST /api/orders             [authenticated]
-POST /api/orders/loop        [authenticated — Loop-native flow, ADR 010 + Idempotency-Key, A2-2003; `credit` method is migration-window only — wallet-activated users get 400 CREDIT_METHOD_RETIRED and spend via token redemption, ADR 036 OQ3]
+POST /api/orders/loop        [authenticated — Loop-native flow, ADR 010 + Idempotency-Key, A2-2003; `credit` method is migration-window only — wallet-activated users get 400 CREDIT_METHOD_RETIRED and spend via token redemption, ADR 036 OQ3; `loop_asset` gets 400 LOOP_ASSET_UNAVAILABLE_PHASE_1 while LOOP_PHASE_1_ONLY=true (AUDIT-2 finding B)]
 GET  /api/orders/loop        [authenticated — Loop-native list, ADR 010]
 GET  /api/orders/loop/:id    [authenticated — Loop-native flow, ADR 010]
-POST /api/orders/loop/:id/redeem [authenticated — one-tap LOOP-asset redemption from the embedded wallet: user-signed inner payment + operator fee-bump; watcher settles downstream, ADR 030 C3 / ADR 036]
+POST /api/orders/loop/:id/redeem [authenticated — one-tap LOOP-asset redemption from the embedded wallet: user-signed inner payment + operator fee-bump; watcher settles downstream, ADR 030 C3 / ADR 036; 400 LOOP_ASSET_UNAVAILABLE_PHASE_1 while LOOP_PHASE_1_ONLY=true, fail-closed even for pre-existing orders (AUDIT-2 finding B)]
 GET  /api/orders             [authenticated]
 GET  /api/orders/:id         [authenticated]
 GET  /api/users/me           [authenticated — profile + home_currency, ADR 015]

@@ -379,6 +379,14 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # docs/ux-pass-2026-07-09.md — apps/web/app/components/features/onboarding/Onboarding.tsx's
 # `getOnboardingCopy()`). UI-side equivalent of the backend Phase 2 gates
 # (LOOP_WORKERS_ENABLED / LOOP_AUTH_NATIVE_ENABLED / INTEREST_APY_BASIS_POINTS).
+# AUDIT-2 finding B (2026-07 hardening): also STRUCTURALLY, server-side
+# gates the loop_asset spend surface — POST /api/orders/loop (create,
+# paymentMethod=loop_asset) and POST /api/orders/loop/:id/redeem
+# (redemption, fail-closed even for orders created before the gate
+# existed) both 400 LOOP_ASSET_UNAVAILABLE_PHASE_1 while this flag is
+# true. Admin emission (credits/emissions.ts) is deliberately NOT
+# gated — it's a privileged step-up admin write that may legitimately
+# run in Phase 1; closing the spend surface is what matters.
 # Flip back to false to launch cashback — server-side only. Default false.
 # LOOP_PHASE_1_ONLY=true
 

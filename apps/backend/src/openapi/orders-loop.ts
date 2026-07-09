@@ -150,7 +150,7 @@ export function registerOrdersLoopOpenApi(
       },
       400: {
         description:
-          'Validation error or unknown/disabled merchant (also: malformed Idempotency-Key length); `CREDIT_METHOD_RETIRED` when `paymentMethod=credit` is requested by a wallet-activated user (ADR 036 OQ3 — spend via token redemption instead); `INSUFFICIENT_CREDIT` when a migration-window credit order exceeds the mirror balance',
+          'Validation error or unknown/disabled merchant (also: malformed Idempotency-Key length); `CREDIT_METHOD_RETIRED` when `paymentMethod=credit` is requested by a wallet-activated user (ADR 036 OQ3 — spend via token redemption instead); `INSUFFICIENT_CREDIT` when a migration-window credit order exceeds the mirror balance; `LOOP_ASSET_UNAVAILABLE_PHASE_1` when `paymentMethod=loop_asset` is requested while `LOOP_PHASE_1_ONLY=true` (AUDIT-2 finding B — structural Phase-1 gate on the loop_asset spend surface)',
         content: { 'application/json': { schema: errorResponse } },
       },
       401: {

@@ -222,6 +222,27 @@ export async function redeemLoopOrderHandler(c: Context): Promise<Response> {
       400,
     );
   }
+  // AUDIT-2 finding B (2026-07 hardening): fail closed on the same
+  // LOOP_PHASE_1_ONLY gate as order-create (loop-handler.ts) — this
+  // guard is NOT retroactive, so an order created before that gate
+  // existed (or created while the flag was briefly off) must still
+  // be blocked from actually spending on-chain LOOP while the flag
+  // is on. Placed after the ORDER_NOT_PAYABLE check above so the
+  // idempotent-replay path for already-paid orders (no new money
+  // movement) is unaffected.
+  if (env.LOOP_PHASE_1_ONLY) {
+    log.info(
+      { orderId },
+      'loop_asset redemption rejected — LOOP_PHASE_1_ONLY gate (AUDIT-2 finding B)',
+    );
+    return c.json(
+      {
+        code: 'LOOP_ASSET_UNAVAILABLE_PHASE_1',
+        message: 'Paying with your Loop balance is not available yet.',
+      },
+      400,
+    );
+  }
   if (order.paymentMemo === null) {
     // loop_asset orders always carry a memo (repo.ts) — a null here
     // is schema drift / hand-edited row. Fail loud.

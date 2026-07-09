@@ -154,6 +154,16 @@ export const ApiErrorCode = {
   // window. Replaces the blanket A4-110(b) PAYMENT_METHOD_DISABLED
   // gate, which is now scoped precisely to the emitted balance.
   CREDIT_METHOD_RETIRED: 'CREDIT_METHOD_RETIRED',
+  // AUDIT-2 finding B (2026-07 hardening): `loop_asset` is a Phase-2
+  // spend surface (redemption of on-chain LOOP). Previously only
+  // client-side UI + the incidental absence of funded wallets kept a
+  // direct API caller from creating/redeeming a loop_asset order at
+  // full face value while LOOP_PHASE_1_ONLY=true. Returned by
+  // `loopCreateOrderHandler` (paymentMethod='loop_asset') and
+  // `redeemLoopOrderHandler` (an already-created loop_asset order)
+  // whenever LOOP_PHASE_1_ONLY is true — mirrors the CREDIT_METHOD_RETIRED
+  // shape above, structural rather than incidental.
+  LOOP_ASSET_UNAVAILABLE_PHASE_1: 'LOOP_ASSET_UNAVAILABLE_PHASE_1',
   // ADR-028 / A4-063 admin step-up auth. Distinct codes so the
   // admin UI can branch: REQUIRED → prompt for password modal;
   // INVALID → re-prompt (token expired or signature failed);

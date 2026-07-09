@@ -1,7 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Context } from 'hono';
 import type { LoopAuthContext } from '../../auth/handler.js';
 import type * as SchemaModule from '../../db/schema.js';
+import { env } from '../../env.js';
 
 vi.hoisted(() => {
   process.env['LOOP_AUTH_NATIVE_ENABLED'] = 'true';
@@ -674,6 +675,111 @@ describe('loopCreateOrderHandler', () => {
     });
     const res = await loopCreateOrderHandler(ctx);
     expect(res.status).toBe(503);
+  });
+
+  describe('LOOP_PHASE_1_ONLY gate on loop_asset (AUDIT-2 finding B)', () => {
+    const previous: { value: boolean } = { value: false };
+
+    beforeEach(() => {
+      previous.value = env.LOOP_PHASE_1_ONLY;
+    });
+
+    afterEach(() => {
+      env.LOOP_PHASE_1_ONLY = previous.value;
+    });
+
+    it('rejects loop_asset order-create with 400 LOOP_ASSET_UNAVAILABLE_PHASE_1 when the flag is true', async () => {
+      env.LOOP_PHASE_1_ONLY = true;
+      payoutAssetState.issuer = 'GB' + '2'.repeat(55);
+      const { ctx } = makeCtx({
+        auth: LOOP_AUTH,
+        body: {
+          merchantId: 'm1',
+          amountMinor: 10_000,
+          currency: 'GBP',
+          paymentMethod: 'loop_asset',
+        },
+      });
+      const res = await loopCreateOrderHandler(ctx);
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { code: string };
+      expect(body.code).toBe('LOOP_ASSET_UNAVAILABLE_PHASE_1');
+      expect(createOrderMock).not.toHaveBeenCalled();
+    });
+
+    it('allows loop_asset order-create when the flag is false', async () => {
+      env.LOOP_PHASE_1_ONLY = false;
+      payoutAssetState.issuer = 'GB' + '2'.repeat(55);
+      createOrderMock.mockResolvedValue({
+        id: 'order-uuid',
+        faceValueMinor: 10_000n,
+        currency: 'GBP',
+        chargeMinor: 10_000n,
+        chargeCurrency: 'GBP',
+        paymentMethod: 'loop_asset',
+        paymentMemo: 'MEMO-LOOP-123',
+      });
+      const { ctx } = makeCtx({
+        auth: LOOP_AUTH,
+        body: {
+          merchantId: 'm1',
+          amountMinor: 10_000,
+          currency: 'GBP',
+          paymentMethod: 'loop_asset',
+        },
+      });
+      const res = await loopCreateOrderHandler(ctx);
+      expect(res.status).toBe(200);
+      expect(createOrderMock).toHaveBeenCalledWith(
+        expect.objectContaining({ paymentMethod: 'loop_asset' }),
+      );
+    });
+
+    it('does not affect xlm order-create when the flag is true', async () => {
+      env.LOOP_PHASE_1_ONLY = true;
+      const { ctx } = makeCtx({
+        auth: LOOP_AUTH,
+        body: { merchantId: 'm1', amountMinor: 10_000, currency: 'GBP', paymentMethod: 'xlm' },
+      });
+      const res = await loopCreateOrderHandler(ctx);
+      expect(res.status).toBe(200);
+      expect(createOrderMock).toHaveBeenCalledWith(
+        expect.objectContaining({ paymentMethod: 'xlm' }),
+      );
+    });
+
+    it('does not affect credit order-create (migration-window user) when the flag is true', async () => {
+      env.LOOP_PHASE_1_ONLY = true;
+      walletProviderState.on = true;
+      userState.user = {
+        id: 'user-uuid',
+        email: 'a@b.com',
+        isAdmin: false,
+        homeCurrency: 'GBP',
+        ctxUserId: null,
+        walletProvisioning: 'wallet_created',
+      };
+      createOrderMock.mockResolvedValue({
+        id: 'order-uuid',
+        userId: 'user-uuid',
+        merchantId: 'm1',
+        faceValueMinor: 10_000n,
+        currency: 'GBP',
+        chargeMinor: 10_000n,
+        chargeCurrency: 'GBP',
+        paymentMethod: 'credit',
+        paymentMemo: null,
+      });
+      const { ctx } = makeCtx({
+        auth: LOOP_AUTH,
+        body: { merchantId: 'm1', amountMinor: 10_000, currency: 'GBP', paymentMethod: 'credit' },
+      });
+      const res = await loopCreateOrderHandler(ctx);
+      expect(res.status).toBe(200);
+      expect(createOrderMock).toHaveBeenCalledWith(
+        expect.objectContaining({ paymentMethod: 'credit' }),
+      );
+    });
   });
 
   // A2-2003: Idempotency-Key support on POST /api/orders/loop
