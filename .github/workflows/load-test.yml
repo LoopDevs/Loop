@@ -111,6 +111,14 @@ jobs:
         run: |
           set +e   # collect both scenarios' results before failing the step
           mkdir -p tools/load-test/results
+          # grafana/k6 runs --summary-export as non-root uid 12345; the
+          # runner-owned results/ dir (mode 755) isn't writable from inside
+          # the container on a real Linux Docker host, which silently
+          # dropped the summary JSON (k6 logs a warning and still exits 0
+          # on passing thresholds, so this did not fail the job — it just
+          # produced an empty k6-summaries artifact). See
+          # tools/load-test/run-local.sh's matching comment.
+          chmod 777 tools/load-test/results
           overall=0
           run_scenario() {
             docker run --rm --network host \

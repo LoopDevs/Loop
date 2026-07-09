@@ -43,6 +43,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 RESULTS_DIR="$SCRIPT_DIR/results"
 mkdir -p "$RESULTS_DIR"
+# The grafana/k6 image runs `--summary-export` as a non-root, non-host uid
+# (uid 12345 — confirmed via `docker run grafana/k6:2.1.0 ... id`), so a
+# bind-mounted results/ dir created with the default host-user umask (755)
+# is not writable from inside the container. world-writable is fine here:
+# this is a throwaway, git-ignored, local/CI-only results directory, never
+# anything sensitive. Confirmed necessary on a real Linux Docker host
+# (ubuntu-latest CI) — Docker Desktop's macOS bind-mount bridge is looser
+# about container-uid permission checks and doesn't show this without it.
+chmod 777 "$RESULTS_DIR"
 
 SCENARIO="${1:-both}"
 case "$SCENARIO" in
