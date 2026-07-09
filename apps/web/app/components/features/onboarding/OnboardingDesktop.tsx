@@ -10,6 +10,8 @@
  */
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { LoopLogo } from '~/components/ui/LoopLogo';
 import { BackToSite } from '~/components/ui/BackToSite';
 import { Input } from '~/components/ui/Input';
@@ -26,8 +28,11 @@ import { getOnboardingCopy } from './Onboarding';
 // through to both `getOnboardingCopy()` (the COPY[1]/[2]/[3] text)
 // and the two screens' own hardcoded card labels, mirroring the
 // native `Onboarding.tsx` flow so the two surfaces never drift.
-function buildScreens(phase1Only: boolean): ((active: boolean) => React.JSX.Element)[] {
-  const copy = getOnboardingCopy(phase1Only);
+function buildScreens(
+  t: TFunction<'onboarding'>,
+  phase1Only: boolean,
+): ((active: boolean) => React.JSX.Element)[] {
+  const copy = getOnboardingCopy(t, phase1Only);
   return [
     (active: boolean) => <TrustWelcome active={active} copy={copy[1]} phase1Only={phase1Only} />,
     (active: boolean) => <TrustHowItWorks active={active} copy={copy[2]} phase1Only={phase1Only} />,
@@ -37,7 +42,8 @@ function buildScreens(phase1Only: boolean): ((active: boolean) => React.JSX.Elem
 
 function SlidePanel(): React.JSX.Element {
   const { config } = useAppConfig();
-  const SCREENS = useMemo(() => buildScreens(config.phase1Only), [config.phase1Only]);
+  const { t } = useTranslation('onboarding');
+  const SCREENS = useMemo(() => buildScreens(t, config.phase1Only), [t, config.phase1Only]);
   const [i, setI] = useState(0);
   const go = useCallback(
     (d: number) => setI((v) => (v + d + SCREENS.length) % SCREENS.length),

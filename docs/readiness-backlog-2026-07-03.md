@@ -819,7 +819,27 @@ max_connections`, including the release-command migration machine
 
 ### B-6 · i18n is English-only behind a good scaffold `[code]` (large)
 
-- [ ] **Status:** ☐ Not started — `SUPPORTED_LANGS=['en']` (`packages/shared/src/countries.ts:49`), copy hardcoded in JSX, no i18n framework, RTL unconsidered despite AE/SA. Routing/formatting scaffold is excellent; a second language is a from-scratch build. Scope: pick a framework (i18next/formatjs → ADR), extract copy to catalogs, add RTL. Large; only if a second-language market is prioritised.
+- [ ] **Status:** 🟡 In progress (2026-07-10) — **framework + first extraction
+      tranche done** (ADR 043): i18next + react-i18next chosen and wired into
+      `root.tsx` (route-driven locale via `~/i18n/locale.ts#useLocale()`,
+      synchronous bundled-resources init so both the SSR and static-mobile-export
+      builds work with no async/Suspense gymnastics). First tranche extracted:
+      `Footer.tsx`, `not-found.tsx`/`not-found-ssr.tsx`, `home.tsx`'s desktop
+      hero + section headers, `auth.tsx` in full (OTP flow + Account view),
+      `Onboarding.tsx`'s copy bank + CTA labels, `screens-trust.tsx`. Catalogs
+      at `apps/web/app/i18n/locales/en/*.json`, English-only — see
+      `docs/i18n.md`. Supersedes the old CF-22 `i18n/t.ts`/`messages.ts`
+      scaffold (deleted; see ADR 034's updated "i18n seam status"). RTL wiring
+      (`<html dir>`) predates this and is unchanged — still unverified against
+      a real RTL language since none ships yet. **Still open:** the remaining
+      customer-facing tranches (`MobileHome.tsx`, the other onboarding screens,
+      `OnboardingDesktop.tsx`'s own OTP-capture copy, gift-card detail,
+      purchase flow, orders, settings), and actual non-English translations —
+      both gated on the 🧭 language-set decision (which language(s) to ship).
+      Watch `scripts/check-bundle-budget.sh`'s `MAX_SSR_KB` — this tranche used
+      56 of the prior 60 KB headroom (3296/3300 KB); the next web PR that adds
+      client bytes may need to raise it (documented escape hatch in that
+      script).
 
 ---
 

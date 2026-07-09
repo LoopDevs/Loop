@@ -1,7 +1,10 @@
 import { useCallback, useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import type { Route } from './+types/auth';
+import i18n from '~/i18n/i18next';
 import { useAuth } from '~/hooks/use-auth';
 import { LoopLogo } from '~/components/ui/LoopLogo';
 import { BackToSite } from '~/components/ui/BackToSite';
@@ -30,19 +33,22 @@ import { useLocaleTag } from '~/i18n/format';
 import { useWallet } from '~/hooks/use-wallet';
 import { CURRENCY_TO_ASSET_CODE } from '@loop/shared';
 
+// ADR 043 (B-6): `meta()` runs outside the React tree (no hooks) — uses the
+// i18next singleton's `.t()` directly rather than `useTranslation()`.
 export function meta(): Route.MetaDescriptors {
-  return [{ title: 'Sign in — Loop' }];
+  return [{ title: i18n.t('auth:meta.title') }];
 }
 
 type AuthStep = 'email' | 'otp';
 
 function ThemeToggleRow(): React.JSX.Element {
   const { themePreference, setThemePreference } = useUiStore();
+  const { t } = useTranslation('auth');
 
   const options: Array<{ value: ThemePreference; label: string }> = [
-    { value: 'system', label: 'System' },
-    { value: 'light', label: 'Light' },
-    { value: 'dark', label: 'Dark' },
+    { value: 'system', label: t('theme.system') },
+    { value: 'light', label: t('theme.light') },
+    { value: 'dark', label: t('theme.dark') },
   ];
 
   const handleCycle = (): void => {
@@ -57,7 +63,7 @@ function ThemeToggleRow(): React.JSX.Element {
       onClick={handleCycle}
       className="w-full flex items-center justify-between px-4 py-3 min-h-[44px] bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg text-sm"
     >
-      <span className="text-gray-700 dark:text-gray-300">Appearance</span>
+      <span className="text-gray-700 dark:text-gray-300">{t('theme.appearance')}</span>
       <span className="text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
         {themePreference === 'dark' ? (
           <svg
@@ -88,7 +94,11 @@ function ThemeToggleRow(): React.JSX.Element {
             />
           </svg>
         ) : null}
-        {themePreference === 'dark' ? 'Dark' : themePreference === 'light' ? 'Light' : 'System'}
+        {themePreference === 'dark'
+          ? t('theme.dark')
+          : themePreference === 'light'
+            ? t('theme.light')
+            : t('theme.system')}
       </span>
     </button>
   );
@@ -98,6 +108,7 @@ function BiometricLockRow(): React.JSX.Element | null {
   const [available, setAvailable] = useState(false);
   const [enabled, setEnabled] = useState(false);
   const [biometryType, setBiometryType] = useState<string>('');
+  const { t } = useTranslation('auth');
 
   useEffect(() => {
     // Cancellation guard — the check is async and may resolve after the
@@ -110,11 +121,14 @@ function BiometricLockRow(): React.JSX.Element | null {
       if (cancelled) return;
       setAvailable(result.available);
       setBiometryType(
+        // "Face ID" / "Touch ID" are Apple product names — never translated,
+        // same convention as "iPhone". Only the generic fallback is
+        // catalogue-driven.
         result.biometryType === 'face'
           ? 'Face ID'
           : result.biometryType === 'fingerprint'
             ? 'Touch ID'
-            : 'Biometrics',
+            : t('biometric.generic'),
       );
       if (result.available) {
         const lockEnabled = await isAppLockEnabled();
@@ -124,7 +138,9 @@ function BiometricLockRow(): React.JSX.Element | null {
     return () => {
       cancelled = true;
     };
-  }, []);
+    // `t`'s identity is stable per-language (react-i18next memoizes it), so
+    // this still fires exactly once per mount in the single-language app.
+  }, [t]);
 
   if (!available) return null;
 
@@ -135,7 +151,9 @@ function BiometricLockRow(): React.JSX.Element | null {
     // for every future launch. Both directions of the toggle require the
     // same proof of presence.
     const ok = await authenticateWithBiometrics(
-      enabled ? `Disable ${biometryType}` : `Enable ${biometryType}`,
+      enabled
+        ? t('biometric.disable', { type: biometryType })
+        : t('biometric.enable', { type: biometryType }),
     );
     if (!ok) return;
     const next = !enabled;
@@ -151,9 +169,11 @@ function BiometricLockRow(): React.JSX.Element | null {
       }}
       className="w-full flex items-center justify-between px-4 py-3 min-h-[44px] bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg text-sm"
     >
-      <span className="text-gray-700 dark:text-gray-300">{biometryType} App Lock</span>
+      <span className="text-gray-700 dark:text-gray-300">
+        {t('biometric.appLock', { type: biometryType })}
+      </span>
       <span className={`text-sm font-medium ${enabled ? 'text-green-600' : 'text-gray-400'}`}>
-        {enabled ? 'On' : 'Off'}
+        {enabled ? t('biometric.on') : t('biometric.off')}
       </span>
     </button>
   );
@@ -210,10 +230,11 @@ function CashbackBalanceCard({
   const tokenSourced = isActivated && wallet !== undefined;
   const locale = useLocaleTag();
   const showWithdrawNudge = !phase1Only && me?.stellarAddress === null;
+  const { t } = useTranslation('auth');
   return (
     <div className="mb-6 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-4">
       <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
-        Your cashback
+        {t('cashback.heading')}
       </p>
       <p className="mt-1 text-2xl font-semibold text-gray-900 dark:text-white">
         {isLoading || me === undefined
@@ -227,8 +248,8 @@ function CashbackBalanceCard({
             : formatCashbackBalance(me.homeCurrencyBalanceMinor, me.homeCurrency)}
       </p>
       <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-        {phase1Only ? 'Realised on every Loop order as a discount.' : 'Earned on every Loop order.'}
-        {showWithdrawNudge ? ' Link a wallet to withdraw.' : ''}
+        {phase1Only ? t('cashback.subtitlePhase1') : t('cashback.subtitlePhase2')}
+        {showWithdrawNudge ? t('cashback.withdrawNudge') : ''}
       </p>
     </div>
   );
@@ -260,15 +281,22 @@ function formatLedgerAmount(minor: string, currency: string): string {
  * Maps a ledger `type` to the human-readable label the Account card
  * renders. Keeps the card compact — the full detail (referenceId
  * etc.) lives in a follow-up dedicated page.
+ *
+ * ADR 043 (B-6): takes `t` as a parameter (rather than a module-scope
+ * `Record` literal) so the label is catalogue-driven — every call site
+ * already has `t` in scope from its own `useTranslation('auth')`.
  */
-const LEDGER_LABELS: Record<CashbackHistoryEntry['type'], string> = {
-  cashback: 'Cashback',
-  interest: 'Interest',
-  spend: 'Spend',
-  withdrawal: 'Withdrawal',
-  refund: 'Refund',
-  adjustment: 'Adjustment',
-};
+function ledgerLabel(t: TFunction, type: CashbackHistoryEntry['type']): string {
+  const labels: Record<CashbackHistoryEntry['type'], string> = {
+    cashback: t('history.labels.cashback'),
+    interest: t('history.labels.interest'),
+    spend: t('history.labels.spend'),
+    withdrawal: t('history.labels.withdrawal'),
+    refund: t('history.labels.refund'),
+    adjustment: t('history.labels.adjustment'),
+  };
+  return labels[type];
+}
 
 /**
  * Recent-cashback card on the Account screen. Renders up to 5 of
@@ -289,19 +317,18 @@ function CashbackHistoryCard({
   // Swallow the error state entirely rather than surfacing a red banner
   // to the user — the history card is supplementary to the balance,
   // which is the source of truth. The next `['me']` refetch will retry.
+  const { t } = useTranslation('auth');
   if (isError) return null;
   const shown = entries?.slice(0, 5) ?? [];
   return (
     <div className="mb-6 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-4 text-left">
       <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
-        Recent activity
+        {t('history.heading')}
       </p>
       {isLoading ? (
-        <p className="mt-3 text-sm text-gray-400 dark:text-gray-500">Loading…</p>
+        <p className="mt-3 text-sm text-gray-400 dark:text-gray-500">{t('history.loading')}</p>
       ) : shown.length === 0 ? (
-        <p className="mt-3 text-sm text-gray-500 dark:text-gray-400">
-          No cashback yet — your first Loop order will land here.
-        </p>
+        <p className="mt-3 text-sm text-gray-500 dark:text-gray-400">{t('history.empty')}</p>
       ) : (
         <>
           <ul className="mt-3 space-y-3">
@@ -309,7 +336,7 @@ function CashbackHistoryCard({
               <li key={entry.id} className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-gray-900 dark:text-white">
-                    {LEDGER_LABELS[entry.type]}
+                    {ledgerLabel(t, entry.type)}
                   </p>
                   <p className="text-xs text-gray-500 dark:text-gray-400">
                     {new Date(entry.createdAt).toLocaleDateString(undefined, {
@@ -338,7 +365,7 @@ function CashbackHistoryCard({
             to="/settings/cashback"
             className="mt-4 block text-center text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
           >
-            See all activity →
+            {t('history.viewAll')}
           </Link>
         </>
       )}
@@ -347,17 +374,16 @@ function CashbackHistoryCard({
 }
 
 export function ErrorBoundary(): React.JSX.Element {
+  const { t } = useTranslation(['auth', 'common']);
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 px-4">
       <div className="text-center">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
-          Something went wrong
+          {t('common:errorBoundary.heading')}
         </h1>
-        <p className="text-gray-600 dark:text-gray-300 mb-6">
-          We couldn&apos;t load the sign-in page.
-        </p>
+        <p className="text-gray-600 dark:text-gray-300 mb-6">{t('auth:error.message')}</p>
         <a href="/auth" className="text-blue-600 underline">
-          Try again
+          {t('auth:error.tryAgain')}
         </a>
       </div>
     </div>
@@ -366,6 +392,7 @@ export function ErrorBoundary(): React.JSX.Element {
 
 export default function AuthRoute(): React.JSX.Element {
   const navigate = useNavigate();
+  const { t } = useTranslation('auth');
   const {
     email: userEmail,
     isAuthenticated,
@@ -425,14 +452,15 @@ export default function AuthRoute(): React.JSX.Element {
       setIsLoading(true);
       void signInWithGoogle(idToken)
         .catch((err: unknown) => {
-          setError(err instanceof Error ? err.message : 'Google sign-in failed.');
+          setError(err instanceof Error ? err.message : t('socialSignIn.googleFailed'));
         })
         .finally(() => {
           setIsLoading(false);
         });
     },
-    // signInWithGoogle identity is stable via useAuthStore; the
-    // setters from local useState are stable too.
+    // signInWithGoogle identity is stable via useAuthStore; the setters
+    // from local useState are stable too; `t`'s identity is stable
+    // per-language (react-i18next memoizes it).
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
@@ -443,14 +471,15 @@ export default function AuthRoute(): React.JSX.Element {
       setIsLoading(true);
       void signInWithApple(idToken)
         .catch((err: unknown) => {
-          setError(err instanceof Error ? err.message : 'Apple sign-in failed.');
+          setError(err instanceof Error ? err.message : t('socialSignIn.appleFailed'));
         })
         .finally(() => {
           setIsLoading(false);
         });
     },
-    // signInWithApple identity is stable via useAuthStore; the
-    // setters from local useState are stable too.
+    // signInWithApple identity is stable via useAuthStore; the setters
+    // from local useState are stable too; `t`'s identity is stable
+    // per-language (react-i18next memoizes it).
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
@@ -484,7 +513,9 @@ export default function AuthRoute(): React.JSX.Element {
             <div className="w-16 h-16 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
               <span className="text-2xl">👤</span>
             </div>
-            <h1 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Your account</h1>
+            <h1 className="text-xl font-bold text-gray-900 dark:text-white mb-1">
+              {t('account.heading')}
+            </h1>
             <p className="text-gray-500 dark:text-gray-400 mb-6">{userEmail}</p>
             {/* ADR 030 Phase C: the on-chain LOOP balance is THE
                 user-facing balance once the embedded wallet is live.
@@ -511,11 +542,11 @@ export default function AuthRoute(): React.JSX.Element {
                 className="block w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-3 text-left text-gray-900 dark:text-white hover:border-gray-400 dark:hover:border-gray-600 transition-colors"
               >
                 <div className="flex items-center justify-between">
-                  <span className="font-medium">Wallet</span>
+                  <span className="font-medium">{t('account.walletLinkTitle')}</span>
                   <span className="text-gray-400 dark:text-gray-500">›</span>
                 </div>
                 <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                  Link a Stellar address to receive on-chain cashback.
+                  {t('account.walletLinkSub')}
                 </p>
               </Link>
               {/* CF-26 / X-PRIV-01: in-app data export + account deletion.
@@ -526,11 +557,11 @@ export default function AuthRoute(): React.JSX.Element {
                 className="block w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-3 text-left text-gray-900 dark:text-white hover:border-gray-400 dark:hover:border-gray-600 transition-colors"
               >
                 <div className="flex items-center justify-between">
-                  <span className="font-medium">Privacy &amp; data</span>
+                  <span className="font-medium">{t('account.privacyLinkTitle')}</span>
                   <span className="text-gray-400 dark:text-gray-500">›</span>
                 </div>
                 <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                  Export your data or delete your account.
+                  {t('account.privacyLinkSub')}
                 </p>
               </Link>
               <Button
@@ -543,7 +574,7 @@ export default function AuthRoute(): React.JSX.Element {
                   })();
                 }}
               >
-                Sign out
+                {t('account.signOut')}
               </Button>
             </div>
           </div>
@@ -561,7 +592,7 @@ export default function AuthRoute(): React.JSX.Element {
       await requestOtp(email);
       setStep('otp');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to send verification code.');
+      setError(err instanceof Error ? err.message : t('email.sendError'));
     } finally {
       setIsLoading(false);
     }
@@ -576,7 +607,7 @@ export default function AuthRoute(): React.JSX.Element {
       await verifyAndStore(email, otp);
       void navigate('/');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Verification failed.');
+      setError(err instanceof Error ? err.message : t('otp.verifyError'));
     } finally {
       setIsLoading(false);
     }
@@ -590,9 +621,9 @@ export default function AuthRoute(): React.JSX.Element {
         <div className="absolute inset-0 bg-gradient-to-t from-blue-950/55 via-blue-900/10 to-transparent" />
         <div className="absolute bottom-10 left-10 right-10">
           <p className="text-3xl font-semibold leading-tight tracking-[-0.02em] text-white">
-            Instant cashback,
+            {t('quote.line1')}
             <br />
-            everywhere you shop.
+            {t('quote.line2')}
           </p>
         </div>
       </div>
@@ -604,10 +635,10 @@ export default function AuthRoute(): React.JSX.Element {
           <div className="mb-8 text-center lg:text-left">
             <LoopLogo className="h-8 w-auto mb-4 text-ink mx-auto lg:mx-0" />
             <h1 className="text-2xl font-bold text-ink">
-              {step === 'email' ? 'Sign in to Loop' : 'Check your email'}
+              {step === 'email' ? t('step.signInHeading') : t('step.checkEmailHeading')}
             </h1>
             {step === 'otp' && (
-              <p className="text-ink-muted mt-2">We sent a 6-digit code to {email}</p>
+              <p className="text-ink-muted mt-2">{t('step.otpSentTo', { email })}</p>
             )}
           </div>
 
@@ -635,7 +666,7 @@ export default function AuthRoute(): React.JSX.Element {
                     <div className="relative flex items-center justify-center my-2">
                       <span className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-px bg-gray-200 dark:bg-gray-800" />
                       <span className="relative bg-white dark:bg-gray-950 px-3 text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                        or
+                        {t('divider')}
                       </span>
                     </div>
                   </>
@@ -649,11 +680,11 @@ export default function AuthRoute(): React.JSX.Element {
               >
                 <Input
                   type="email"
-                  placeholder="you@example.com"
+                  placeholder={t('email.placeholder')}
                   value={email}
                   onChange={(v) => setEmail(v)}
                   required
-                  label="Email address"
+                  label={t('email.label')}
                   // A2-1100: let password managers + iOS / Android auto-fill
                   // the email from Keychain / Autofill. Matches the
                   // onboarding signup form (signup-tail.tsx) which already
@@ -667,7 +698,7 @@ export default function AuthRoute(): React.JSX.Element {
                   </p>
                 )}
                 <Button type="submit" className="w-full" disabled={isLoading}>
-                  {isLoading ? 'Sending…' : 'Send verification code'}
+                  {isLoading ? t('email.sending') : t('email.send')}
                 </Button>
               </form>
             </div>
@@ -689,7 +720,7 @@ export default function AuthRoute(): React.JSX.Element {
                 required
                 // eslint-disable-next-line jsx-a11y/no-autofocus -- ADR 042: deliberate UX — this is the sole input on a step that just became active after an explicit user action (submit email / advance a wizard step), not an unexpected focus jump. eslint-plugin-jsx-a11y blanket-disallows autoFocus; WCAG does not. Tracked: docs/readiness-backlog-2026-07-03.md B-2.
                 autoFocus
-                label="Verification code"
+                label={t('otp.label')}
                 // A2-1100: iOS surfaces the OTP from the notification
                 // bar as a keyboard suggestion; Android Autofill does
                 // the same via Google Messages. Matches the onboarding
@@ -698,7 +729,7 @@ export default function AuthRoute(): React.JSX.Element {
               />
               {error !== null && <p className="text-red-500 text-sm">{error}</p>}
               <Button type="submit" className="w-full" disabled={isLoading}>
-                {isLoading ? 'Verifying…' : 'Verify'}
+                {isLoading ? t('otp.verifying') : t('otp.verify')}
               </Button>
               <button
                 type="button"
@@ -716,7 +747,7 @@ export default function AuthRoute(): React.JSX.Element {
                   setError(null);
                 }}
               >
-                Use a different email
+                {t('otp.useDifferentEmail')}
               </button>
             </form>
           )}

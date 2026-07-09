@@ -10,6 +10,8 @@ import {
   useNavigate,
 } from 'react-router';
 import { QueryClient, QueryCache, MutationCache, QueryClientProvider } from '@tanstack/react-query';
+import { I18nextProvider } from 'react-i18next';
+import i18n from '~/i18n/i18next';
 import { initSentryLazily, captureExceptionLazily } from '~/utils/sentry-lazy';
 import { scrubErrorForSentry } from '~/utils/sentry-error-scrubber';
 import { forwardQueryErrorToSentry, type SentryLike } from '~/utils/query-error-reporting';
@@ -315,7 +317,13 @@ export function Layout({ children }: { children: React.ReactNode }): React.JSX.E
         <Links />
       </head>
       <body>
-        {children}
+        {/* ADR 043 (B-6): single I18nextProvider at the document-shell root
+            so every route/component can call `useTranslation()` without a
+            per-surface wrapper. `i18n` is the module-scope singleton from
+            `~/i18n/i18next` — already initialized (synchronous, bundled
+            resources) by the time this renders, on both the SSR and
+            static-mobile-export paths. */}
+        <I18nextProvider i18n={i18n}>{children}</I18nextProvider>
         {/* A4-057: nonce stamps the inline scripts React Router v7
             emits for hydration data + the routing manifest. RR's
             <Scripts nonce> propagates to every emitted <script>. */}
@@ -519,11 +527,18 @@ export default function App(): React.JSX.Element {
   // would otherwise still report `lang="en"` and give SRs the wrong
   // pronunciation. `Layout` renders the document shell outside the router,
   // so this effect (inside the router) is where the URL locale is known.
+  //
+  // ADR 043 (B-6): same effect also syncs the i18next active language to
+  // the route locale — the single place `t()`'s language and `<html lang>`
+  // are kept in agreement. A no-op today (`i18n.changeLanguage('en')` every
+  // time, since `SUPPORTED_LANGS` is still `['en']`), but this is the seam
+  // a second `/:country/:lang` language drops into without a code change.
   const locale = useLocale();
   useEffect(() => {
     const el = document.documentElement;
     el.setAttribute('lang', locale.lang);
     el.setAttribute('dir', getLangDir(locale.lang));
+    void i18n.changeLanguage(locale.lang);
   }, [locale.lang]);
   // Pins the onboarding UI once we enter it so a mid-flow
   // `setSession` (fired by the OTP-verify step) doesn't flip the
