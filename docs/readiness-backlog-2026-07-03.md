@@ -759,11 +759,77 @@ Note the **sweep** arm already maps a skip-row that goes `unmatched` → `order_
 
 ### U-1 · Full customer-journey UX/visual pass `[code]` assessment
 
-- [ ] **Status:** ☐ In progress (only home + one product page checked; T0-2 brand-imagery is the first finding)
+- [x] **Status:** ✅ Done 2026-07-09 — findings doc at `docs/ux-pass-2026-07-09.md`;
+      9 findings (0 P0 / 2 P1 / 7 P2), concrete P1 bugs filed as U-2 and U-3
+      below (P2s stay documented in the findings doc only, per its own
+      severity rubric). Pass covered Home/Directory/Map/Search/Merchant
+      detail/Onboarding/Auth/Purchase-to-payment-wall/Order history +
+      redemption/Settings/404, at desktop (1440×900) + mobile (390×844),
+      against both the live beta (read-only browse) and the local mocked
+      stack (interactive auth/purchase/orders walk).
       **Do:** systematically walk, on desktop **and** a mobile viewport, screenshotting + noting every broken / empty / loading / error state:
 - Home (hero, featured cards, footer) · Directory / brand grid · Map view (clustering, markers, empty-region) · Search (results, no-results, debounce feel) · Merchant/gift-card detail (imagery, denominations, price display) · Onboarding flow · Auth (email-OTP screen, wrong-OTP error, resend) · Purchase flow to the payment wall (amount select, payment step, countdown, expiry) · Order history + redemption reveal · Settings/privacy · 404/error routes.
 - Check: responsive layout, image loading, focus/keyboard (ties to B-2), copy consistency, currency/locale display per country, loading skeletons vs blank flashes.
   **Done when:** a written UX findings list exists with severities; concrete bugs (like T0-2) are filed as their own items.
+
+### U-2 · Onboarding marketing copy unconditionally promises Phase-2 cashback `[code]` (small)
+
+- [ ] **Status:** ☐ Not started — found in U-1 (finding UX-01, `docs/ux-pass-2026-07-09.md`)
+
+**Why:** The onboarding slideshow's first screen (both the native
+multi-screen `Onboarding.tsx` and the web `/onboarding` split-layout
+`OnboardingDesktop.tsx`, which share the same `COPY`/`TrustWelcome`)
+unconditionally shows a mocked "TOTAL CASHBACK $2,847.00" card under
+"Shop. Save. Repeat." with the subcopy "earn cashback on every purchase,
+paid by instant bank transfer" — Phase-2 language shown to every
+brand-new sign-up on a Phase-1 (discount-gift-card) build. This is
+inconsistent with `home.tsx`, which correctly branches its hero copy on
+`config.phase1Only` (`apps/web/app/routes/home.tsx:64,73,143,146,160,240`).
+Reproduced live on `beta.loopfinance.io/onboarding` and confirmed in code:
+`Onboarding.tsx`'s existing `phase1Only` skip effect
+(`Onboarding.tsx:354-359`) only skips the currency-picker (step 5) and
+wallet-intro (step 7) steps — it never touches the trust-screen copy
+(`COPY[1]`/`COPY[2]`/`COPY[3]`, steps 0-2), and `OnboardingDesktop.tsx`'s
+`SlidePanel` doesn't reference `phase1Only` at all.
+
+**Do:** branch `COPY[1]` / `COPY[2]` / `COPY[3]` (or the
+`TrustWelcome`/`TrustHowItWorks`/`TrustMerchants` screens themselves) on
+`phase1Only`, reusing the Phase-1 vs Phase-2 copy split `home.tsx`
+already has ("save up to X% instantly" vs. "earn cashback… paid by
+instant bank transfer"). Applies to both `Onboarding.tsx` (native) and
+`OnboardingDesktop.tsx` (web) since they share the same `COPY` object and
+trust-screen components.
+
+**Done when:** a Phase-1 build (`LOOP_PHASE_1_ONLY=true`) shows
+discount-flavoured onboarding copy with no cashback/bank-transfer
+promises, on both native and web onboarding; `npm run verify` green.
+
+### U-3 · `/calculator` is reachable in Phase 1 and shows a misleading empty state `[code]` (small)
+
+- [ ] **Status:** ☐ Not started — found in U-1 (findings UX-02 + UX-03, `docs/ux-pass-2026-07-09.md`)
+
+**Why:** `/cashback` correctly Phase-1-gates with a clean "Coming soon —
+this part of Loop is under construction" screen. `/calculator`
+(`apps/web/app/routes/calculator.tsx`) has no equivalent
+`phase1Only`/`Phase2Gate` check — it renders live with the heading
+"Cashback calculator" and subcopy "Pick a merchant and see what you'd
+earn on Loop — paid in LOOP-asset stablecoin you can spend on your next
+order," followed by "No merchants available right now. Check back
+shortly." A Phase-1 user who reaches this page (it's linked from the
+merchant-detail footer nav) gets a broken-looking dead end instead of the
+same clear "coming soon" messaging `/cashback` already has. Separately
+(UX-03, bundle into the same PR since it's the same file): the page's H1
+renders with its top ~15px clipped under the fixed navbar on load —
+other routes account for the navbar's height with top padding and this
+one appears to be missing it.
+
+**Do:** wrap `/calculator` in the same `Phase2Gate` (or equivalent
+`phase1Only` redirect/coming-soon render) `/cashback` uses; add the
+standard top-padding offset so the H1 clears the fixed navbar.
+
+**Done when:** `/calculator` shows the same Phase-1 "coming soon" gate as
+`/cashback` when `LOOP_PHASE_1_ONLY=true`, and its heading is fully
+visible (not clipped) on load; `npm run verify` green.
 
 ---
 
@@ -809,3 +875,4 @@ Each is documented + accepted in `docs/adr/005-known-limitations.md` with a revi
 ## Change log
 
 - **2026-07-03** — created; consolidates the outstanding-work inventory + the nine-lens readiness investigation + the verified P0 stranded-deposit bug + the running-app pass.
+- **2026-07-09** — U-1 (full customer-journey UX/visual pass) closed; findings doc `docs/ux-pass-2026-07-09.md`; U-2 and U-3 added for the two P1 findings.
