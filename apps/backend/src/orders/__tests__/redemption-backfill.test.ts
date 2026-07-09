@@ -54,12 +54,17 @@ const { dbMock, dbState } = vi.hoisted(() => {
     lastSet: null as Record<string, unknown> | null,
     /** S4-8: whether withAdvisoryLock's probe "acquires" the lock. */
     advisoryAcquired: true,
+    /** S4-8 lease test: candidate select never resolves while true. */
+    hangSelect: false,
   };
   const selectChain: Record<string, unknown> = {};
   selectChain['from'] = vi.fn(() => selectChain);
   selectChain['where'] = vi.fn(() => selectChain);
   selectChain['orderBy'] = vi.fn(() => selectChain);
-  selectChain['limit'] = vi.fn(async () => s.rows);
+  selectChain['limit'] = vi.fn(() => {
+    if (s.hangSelect) return new Promise(() => undefined); // simulated hung DB read
+    return Promise.resolve(s.rows);
+  });
   const updateChain: Record<string, unknown> = {};
   updateChain['set'] = vi.fn((vals: Record<string, unknown>) => {
     s.lastSet = vals;
@@ -131,6 +136,7 @@ beforeEach(() => {
   dbState.updateMatches = true;
   dbState.lastSet = null;
   dbState.advisoryAcquired = true;
+  dbState.hangSelect = false;
 });
 
 describe('redemptionBackfillDelayMs', () => {
@@ -281,6 +287,33 @@ describe('runRedemptionBackfillTick', () => {
       skippedLocked: false,
     });
     expect(fetchRedemptionMock).not.toHaveBeenCalled();
+  });
+
+  it('releases the lock + returns empty when the sweep body exceeds the lease deadline', async () => {
+    // A hung DB read: the candidate select never resolves. The lease
+    // must fire so the fleet-wide lock is released and the sweep is
+    // not stalled on every machine.
+    vi.useFakeTimers();
+    try {
+      dbState.hangSelect = true;
+      const tickPromise = runRedemptionBackfillTick({ now: NOW });
+      // Advance past the 240s lease — the Promise.race timeout wins.
+      await vi.advanceTimersByTimeAsync(240_001);
+      const r = await tickPromise;
+      expect(r).toEqual({
+        picked: 0,
+        notDueYet: 0,
+        recovered: 0,
+        stillEmpty: 0,
+        exhausted: 0,
+        errors: 0,
+        abortedPoolUnavailable: false,
+        skippedLocked: false,
+      });
+      expect(fetchRedemptionMock).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('S4-8: skips the sweep when another machine holds the redemption-backfill lock', async () => {

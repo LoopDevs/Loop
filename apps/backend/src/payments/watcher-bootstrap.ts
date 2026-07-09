@@ -13,6 +13,8 @@
  *     latency doesn't strand fresh deposits.
  *   - `stopPaymentWatcher()` — clears all three timers
  *     (graceful shutdown).
+ *   - `runOrderExpirySweepTick()` — one fleet-wide single-flighted
+ *     + lease-bounded pass of the expiry sweep (S4-8).
  *   - `PAYMENT_EXPIRY_MS` — 24h cutoff for `pending_payment` →
  *     `expired` (a user who drafted an order and walked away
  *     should see "expired" the next day rather than a stale row
@@ -31,6 +33,7 @@ import {
   markWorkerStarted,
   markWorkerStopped,
   markWorkerTickFailure,
+  markWorkerTickSkippedLocked,
   markWorkerTickSuccess,
 } from '../runtime-health.js';
 import { sweepExpiredOrders } from '../orders/transitions.js';
@@ -85,6 +88,60 @@ function orderExpirySweepLockKey(): bigint {
   return BigInt.asIntN(64, raw);
 }
 
+/**
+ * Hard ceiling on how long the lock holder may run one sweep
+ * (`db/client.ts` puts lease responsibility on the CALLER — the
+ * payout worker's `PAYOUT_TICK_LEASE_MS` is the established pattern,
+ * INV-9). The sweep is a single bounded UPDATE; 60s is generous. On
+ * expiry the lock releases and the orphaned sweep degrades to the
+ * pre-S4-8 per-machine concurrency (safe: the UPDATE is
+ * state-guarded), never a fleet stall.
+ */
+const ORDER_EXPIRY_SWEEP_LEASE_MS = 60_000;
+
+/** Distinct sentinel so the lease-timeout path is testable + loggable. */
+const SWEEP_LEASE_TIMED_OUT = Symbol('order-expiry-sweep-lease-timeout');
+
+export interface OrderExpirySweepResult {
+  /** Rows flipped pending_payment → expired ( -1 when not run). */
+  swept: number;
+  /** True when another machine held the fleet-wide sweep lock. */
+  skippedLocked: boolean;
+}
+
+/**
+ * S4-8: one fleet-wide single-flighted pass of the expiry sweep —
+ * see `orderExpirySweepLockKey`'s doc-comment. Exported so the test
+ * suite can exercise the lock-skip and lease-timeout paths directly;
+ * the interval loop in `startPaymentWatcher` is the runtime caller.
+ */
+export async function runOrderExpirySweepTick(): Promise<OrderExpirySweepResult> {
+  let leaseTimer: ReturnType<typeof setTimeout> | undefined;
+  const locked = await withAdvisoryLock(orderExpirySweepLockKey(), () =>
+    Promise.race([
+      (async () => {
+        const cutoff = new Date(Date.now() - PAYMENT_EXPIRY_MS);
+        return await sweepExpiredOrders(cutoff);
+      })(),
+      new Promise<typeof SWEEP_LEASE_TIMED_OUT>((resolve) => {
+        leaseTimer = setTimeout(() => resolve(SWEEP_LEASE_TIMED_OUT), ORDER_EXPIRY_SWEEP_LEASE_MS);
+      }),
+    ]),
+  );
+  if (leaseTimer !== undefined) clearTimeout(leaseTimer);
+  if (!locked.ran) {
+    return { swept: 0, skippedLocked: true };
+  }
+  if (locked.value === SWEEP_LEASE_TIMED_OUT) {
+    log.error(
+      { leaseMs: ORDER_EXPIRY_SWEEP_LEASE_MS },
+      'Order-expiry sweep exceeded the lease deadline — releasing the lock so the fleet is not stalled; the in-flight sweep degrades to the pre-S4-8 per-machine posture',
+    );
+    return { swept: 0, skippedLocked: false };
+  }
+  return { swept: locked.value, skippedLocked: false };
+}
+
 export function startPaymentWatcher(args: {
   account: string;
   usdcIssuer?: string | undefined;
@@ -104,7 +161,16 @@ export function startPaymentWatcher(args: {
       if (r.scanned > 0 || r.paid > 0 || r.skippedAmount > 0) {
         log.info(r, 'Payment watcher tick complete');
       }
-      markWorkerTickSuccess('payment_watcher');
+      // S4-8 /health honesty: a lock-skipped tick still proves this
+      // machine's loop is alive (liveness stamp), but is recorded
+      // separately from a led tick so a machine that NEVER wins the
+      // lock doesn't masquerade as doing the work — /health shows
+      // "alive but hasn't led in N minutes" instead of green-forever.
+      if (r.skippedLocked) {
+        markWorkerTickSkippedLocked('payment_watcher');
+      } else {
+        markWorkerTickSuccess('payment_watcher');
+      }
     } catch (err) {
       markWorkerTickFailure('payment_watcher', err);
       log.error({ err }, 'Payment watcher tick failed');
@@ -115,12 +181,9 @@ export function startPaymentWatcher(args: {
       // S4-8: single-flighted fleet-wide — see orderExpirySweepLockKey
       // doc-comment. A machine that doesn't win the lock this tick
       // just skips (another machine already covers the same window).
-      const locked = await withAdvisoryLock(orderExpirySweepLockKey(), async () => {
-        const cutoff = new Date(Date.now() - PAYMENT_EXPIRY_MS);
-        return await sweepExpiredOrders(cutoff);
-      });
-      if (locked.ran && locked.value > 0) {
-        log.info({ swept: locked.value }, 'Marked abandoned pending_payment orders as expired');
+      const r = await runOrderExpirySweepTick();
+      if (r.swept > 0) {
+        log.info({ swept: r.swept }, 'Marked abandoned pending_payment orders as expired');
       }
     } catch (err) {
       log.error({ err }, 'Expiry sweep failed');

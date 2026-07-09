@@ -454,6 +454,32 @@ describe('runAssetDriftTick', () => {
     expect(mocks.sumOutstandingLiability).not.toHaveBeenCalled();
     expect(mocks.notifyAssetDrift).not.toHaveBeenCalled();
   });
+
+  it('releases the lock + returns empty when the tick body exceeds the lease deadline', async () => {
+    // A hung Horizon: the circulation read never resolves. The lease
+    // must fire so the fleet-wide lock is released and the drift
+    // check is not stalled on every machine.
+    vi.useFakeTimers();
+    try {
+      mocks.configuredLoopPayableAssets.mockReturnValue([{ code: 'USDLOOP', issuer: 'GABC' }]);
+      let releaseHang: () => void = () => {};
+      mocks.getLoopAssetCirculation.mockReturnValue(
+        new Promise((resolve) => {
+          releaseHang = () =>
+            resolve({ stroops: 0n, assetCode: 'USDLOOP', issuer: 'GABC', asOfMs: 0 });
+        }),
+      );
+      const tickPromise = runAssetDriftTick({ thresholdStroops: 1_000n });
+      // Advance past the 240s lease — the Promise.race timeout wins.
+      await vi.advanceTimersByTimeAsync(240_001);
+      const r = await tickPromise;
+      expect(r).toEqual({ checked: 0, skipped: 0, samples: [], skippedLocked: false });
+      expect(mocks.notifyAssetDrift).not.toHaveBeenCalled();
+      releaseHang();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('getAssetDriftState', () => {

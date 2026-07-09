@@ -548,14 +548,48 @@ async function runPaymentWatcherTickLocked(args: {
   return result;
 }
 
+/** Zeroed tick result for the not-run paths (lock lost / lease expired). */
+function emptyTickResult(skippedLocked: boolean): TickResult {
+  return {
+    scanned: 0,
+    matched: 0,
+    paid: 0,
+    skippedAmount: 0,
+    unmatchedMemo: 0,
+    errors: 0,
+    skipsRecovered: 0,
+    skippedLocked,
+  };
+}
+
+/**
+ * Hard ceiling on how long the lock holder may run one tick
+ * (`db/client.ts` puts lease responsibility on the CALLER — the
+ * payout worker's `PAYOUT_TICK_LEASE_MS` is the established pattern,
+ * INV-9). A hung-but-alive holder (a blackholed Horizon that accepts
+ * TCP and never responds) would otherwise hold the session lock
+ * forever and stall deposit processing for the WHOLE fleet. 60s is
+ * generous for one Horizon page + a handful of DB writes, and the
+ * watcher re-ticks every 10s, so an expired lease costs at most one
+ * cadence. On expiry the lock releases and the orphaned tick body
+ * degrades to the pre-S4-8 per-machine concurrency (which the tick's
+ * own idempotency — CAS-guarded transitions + skip table — already
+ * tolerates), never a fleet stall.
+ */
+const PAYMENT_WATCHER_TICK_LEASE_MS = 60_000;
+
+/** Distinct sentinel so the lease-timeout path is testable + loggable. */
+const TICK_LEASE_TIMED_OUT = Symbol('payment-watcher-tick-lease-timeout');
+
 /**
  * S4-8: fleet-wide single-flight wrapper around
  * `runPaymentWatcherTickLocked`, copying the `withAdvisoryLock` +
  * zeroed-result pattern from `runInterestMintTick`
- * (`../credits/interest-mint.ts`). With N Fly machines running the
- * same 10s-cadence interval, only the lock holder polls Horizon and
- * writes the cursor this tick; the rest return immediately with
- * `skippedLocked: true` and no I/O.
+ * (`../credits/interest-mint.ts`) plus the payout worker's lease
+ * deadline. With N Fly machines running the same 10s-cadence
+ * interval, only the lock holder polls Horizon and writes the cursor
+ * this tick; the rest return immediately with `skippedLocked: true`
+ * and no I/O.
  *
  * Public API unchanged for existing callers (`watcher-bootstrap.ts`,
  * the integration suite, the admin recovery tool) — this is still
@@ -566,29 +600,32 @@ export async function runPaymentWatcherTick(args: {
   usdcIssuer?: string | undefined;
   limit?: number;
 }): Promise<TickResult> {
+  let leaseTimer: ReturnType<typeof setTimeout> | undefined;
   const locked = await withAdvisoryLock(paymentWatcherLockKey(), () =>
-    runPaymentWatcherTickLocked(args),
+    Promise.race([
+      runPaymentWatcherTickLocked(args),
+      new Promise<typeof TICK_LEASE_TIMED_OUT>((resolve) => {
+        leaseTimer = setTimeout(() => resolve(TICK_LEASE_TIMED_OUT), PAYMENT_WATCHER_TICK_LEASE_MS);
+      }),
+    ]),
   );
+  if (leaseTimer !== undefined) clearTimeout(leaseTimer);
   if (!locked.ran) {
-    return {
-      scanned: 0,
-      matched: 0,
-      paid: 0,
-      skippedAmount: 0,
-      unmatchedMemo: 0,
-      errors: 0,
-      skipsRecovered: 0,
-      skippedLocked: true,
-    };
+    return emptyTickResult(true);
+  }
+  if (locked.value === TICK_LEASE_TIMED_OUT) {
+    log.error(
+      { leaseMs: PAYMENT_WATCHER_TICK_LEASE_MS },
+      'Payment watcher tick exceeded the lease deadline — releasing the lock so the fleet is not stalled; the in-flight tick degrades to the pre-S4-8 per-machine posture',
+    );
+    return emptyTickResult(false);
   }
   return locked.value;
 }
 
 // Cursor-age watchdog (A2-626) lives in `./cursor-watchdog.ts`.
-// Re-exported here so the test suite (`./__tests__/watcher.test.ts`
-// imports `__resetCursorWatchdogForTests` from `../watcher.js`)
-// keeps working without re-targeting.
-export { __resetCursorWatchdogForTests } from './cursor-watchdog.js';
+// (Its per-process test seam was deleted in the S4-8 follow-up — the
+// fire-once state is now persisted in `watchdog_alert_state`.)
 
 // `startPaymentWatcher` / `stopPaymentWatcher` (the periodic-loop
 // bootstrap — deposit-poll tick + expiry-sweep + cursor-age

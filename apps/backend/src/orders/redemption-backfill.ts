@@ -43,6 +43,7 @@ import {
   markWorkerStarted,
   markWorkerStopped,
   markWorkerTickFailure,
+  markWorkerTickSkippedLocked,
   markWorkerTickSuccess,
 } from '../runtime-health.js';
 
@@ -241,13 +242,43 @@ async function runRedemptionBackfillTickLocked(args?: {
   return result;
 }
 
+/** Zeroed tick result for the not-run paths (lock lost / lease expired). */
+function emptyBackfillTickResult(skippedLocked: boolean): RedemptionBackfillTickResult {
+  return {
+    picked: 0,
+    notDueYet: 0,
+    recovered: 0,
+    stillEmpty: 0,
+    exhausted: 0,
+    errors: 0,
+    abortedPoolUnavailable: false,
+    skippedLocked,
+  };
+}
+
+/**
+ * Hard ceiling on how long the lock holder may run one sweep
+ * (`db/client.ts` puts lease responsibility on the CALLER — the
+ * payout worker's `PAYOUT_TICK_LEASE_MS` is the established pattern,
+ * INV-9). A batch of 20 CTX re-fetches at a few seconds each fits
+ * comfortably in 240s. On expiry the lock releases and the orphaned
+ * sweep body degrades to the pre-S4-8 per-machine concurrency (safe:
+ * every mutation is a guarded compare-and-set — see the tick
+ * doc-comment), never a fleet stall.
+ */
+const REDEMPTION_BACKFILL_TICK_LEASE_MS = 240_000;
+
+/** Distinct sentinel so the lease-timeout path is testable + loggable. */
+const TICK_LEASE_TIMED_OUT = Symbol('redemption-backfill-tick-lease-timeout');
+
 /**
  * S4-8: fleet-wide single-flight wrapper around
  * `runRedemptionBackfillTickLocked`, copying the `withAdvisoryLock` +
  * zeroed-result pattern from `runInterestMintTick`
- * (`../credits/interest-mint.ts`). With N Fly machines running the
- * same 60s-cadence interval, only the lock holder sweeps this tick;
- * the rest return immediately with `skippedLocked: true` and no I/O.
+ * (`../credits/interest-mint.ts`) plus the payout worker's lease
+ * deadline. With N Fly machines running the same 60s-cadence
+ * interval, only the lock holder sweeps this tick; the rest return
+ * immediately with `skippedLocked: true` and no I/O.
  *
  * Public API unchanged for existing callers (`startRedemptionBackfill`,
  * the ADR-037 admin one-shot uses `refetchOrderRedemption` directly
@@ -259,20 +290,28 @@ export async function runRedemptionBackfillTick(args?: {
   limit?: number;
   now?: number;
 }): Promise<RedemptionBackfillTickResult> {
+  let leaseTimer: ReturnType<typeof setTimeout> | undefined;
   const locked = await withAdvisoryLock(redemptionBackfillLockKey(), () =>
-    runRedemptionBackfillTickLocked(args),
+    Promise.race([
+      runRedemptionBackfillTickLocked(args),
+      new Promise<typeof TICK_LEASE_TIMED_OUT>((resolve) => {
+        leaseTimer = setTimeout(
+          () => resolve(TICK_LEASE_TIMED_OUT),
+          REDEMPTION_BACKFILL_TICK_LEASE_MS,
+        );
+      }),
+    ]),
   );
+  if (leaseTimer !== undefined) clearTimeout(leaseTimer);
   if (!locked.ran) {
-    return {
-      picked: 0,
-      notDueYet: 0,
-      recovered: 0,
-      stillEmpty: 0,
-      exhausted: 0,
-      errors: 0,
-      abortedPoolUnavailable: false,
-      skippedLocked: true,
-    };
+    return emptyBackfillTickResult(true);
+  }
+  if (locked.value === TICK_LEASE_TIMED_OUT) {
+    log.error(
+      { leaseMs: REDEMPTION_BACKFILL_TICK_LEASE_MS },
+      'Redemption-backfill tick exceeded the lease deadline — releasing the lock so the fleet is not stalled; the in-flight sweep degrades to the pre-S4-8 per-machine posture',
+    );
+    return emptyBackfillTickResult(false);
   }
   return locked.value;
 }
@@ -479,7 +518,14 @@ export function startRedemptionBackfill(args?: { intervalMs?: number }): void {
       if (r.picked > 0) {
         log.info(r, 'Redemption-backfill tick complete');
       }
-      markWorkerTickSuccess('redemption_backfill');
+      // S4-8 /health honesty: a lock-skipped tick proves liveness but
+      // is recorded separately from a led tick — see
+      // markWorkerTickSkippedLocked's doc-comment.
+      if (r.skippedLocked) {
+        markWorkerTickSkippedLocked('redemption_backfill');
+      } else {
+        markWorkerTickSuccess('redemption_backfill');
+      }
     } catch (err) {
       markWorkerTickFailure('redemption_backfill', err);
       log.error({ err }, 'Redemption-backfill tick failed');

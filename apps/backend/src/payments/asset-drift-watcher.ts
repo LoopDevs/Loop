@@ -72,6 +72,7 @@ import {
   markWorkerStarted,
   markWorkerStopped,
   markWorkerTickFailure,
+  markWorkerTickSkippedLocked,
   markWorkerTickSuccess,
 } from '../runtime-health.js';
 import type { HomeCurrency } from '@loop/shared';
@@ -497,25 +498,59 @@ async function runAssetDriftTickLocked(args: RunDriftTickArgs): Promise<DriftTic
 }
 
 /**
+ * Hard ceiling on how long the lock holder may run one tick
+ * (`db/client.ts` puts lease responsibility on the CALLER — the
+ * payout worker's `PAYOUT_TICK_LEASE_MS` is the established pattern,
+ * INV-9). The tick does 2-4 Horizon reads + 3 DB reads per configured
+ * asset (3 assets max) plus up to 4 awaited Discord sends (5s cap
+ * each) — 240s is generous headroom under the 300s default cadence.
+ * On expiry the lock releases and the orphaned tick body degrades to
+ * the pre-S4-8 per-machine concurrency (safe: the A3 persisted-state
+ * repo already serialises transition claims via row locks + the
+ * staleness fence), never a fleet stall.
+ */
+const ASSET_DRIFT_TICK_LEASE_MS = 240_000;
+
+/** Distinct sentinel so the lease-timeout path is testable + loggable. */
+const TICK_LEASE_TIMED_OUT = Symbol('asset-drift-tick-lease-timeout');
+
+/**
  * S4-8: fleet-wide single-flight wrapper around
  * `runAssetDriftTickLocked`, copying the `withAdvisoryLock` +
  * zeroed-result pattern from `runInterestMintTick`
- * (`../credits/interest-mint.ts`). With N Fly machines running the
- * same interval, only the lock holder reads Horizon + the ledger this
- * tick; the rest return immediately with `skippedLocked: true` and no
- * I/O. `lastTickMs` (surfaced by `getAssetDriftState`) only advances
- * on a machine that actually won the lock and ran the full pass — the
- * per-asset `lastCheckedMs` from the persisted `asset_drift_state`
- * table (A3) remains the fleet-wide-authoritative freshness signal.
+ * (`../credits/interest-mint.ts`) plus the payout worker's lease
+ * deadline. With N Fly machines running the same interval, only the
+ * lock holder reads Horizon + the ledger this tick; the rest return
+ * immediately with `skippedLocked: true` and no I/O. `lastTickMs`
+ * (surfaced by `getAssetDriftState`) only advances on a machine that
+ * actually won the lock and ran the full pass — the per-asset
+ * `lastCheckedMs` from the persisted `asset_drift_state` table (A3)
+ * remains the fleet-wide-authoritative freshness signal.
  *
  * Public API unchanged for existing callers (`startAssetDriftWatcher`,
  * the test suite) — this is still `runAssetDriftTick`, just now
  * single-flighted.
  */
 export async function runAssetDriftTick(args: RunDriftTickArgs): Promise<DriftTickResult> {
-  const locked = await withAdvisoryLock(assetDriftLockKey(), () => runAssetDriftTickLocked(args));
+  let leaseTimer: ReturnType<typeof setTimeout> | undefined;
+  const locked = await withAdvisoryLock(assetDriftLockKey(), () =>
+    Promise.race([
+      runAssetDriftTickLocked(args),
+      new Promise<typeof TICK_LEASE_TIMED_OUT>((resolve) => {
+        leaseTimer = setTimeout(() => resolve(TICK_LEASE_TIMED_OUT), ASSET_DRIFT_TICK_LEASE_MS);
+      }),
+    ]),
+  );
+  if (leaseTimer !== undefined) clearTimeout(leaseTimer);
   if (!locked.ran) {
     return { checked: 0, skipped: 0, samples: [], skippedLocked: true };
+  }
+  if (locked.value === TICK_LEASE_TIMED_OUT) {
+    log.error(
+      { leaseMs: ASSET_DRIFT_TICK_LEASE_MS },
+      'Asset-drift tick exceeded the lease deadline — releasing the lock so the fleet is not stalled; the in-flight tick degrades to the pre-S4-8 per-machine posture',
+    );
+    return { checked: 0, skipped: 0, samples: [], skippedLocked: false };
   }
   return locked.value;
 }
@@ -602,7 +637,14 @@ export function startAssetDriftWatcher(args: {
           'Asset drift tick complete',
         );
       }
-      markWorkerTickSuccess('asset_drift_watcher');
+      // S4-8 /health honesty: a lock-skipped tick proves liveness but
+      // is recorded separately from a led tick — see
+      // markWorkerTickSkippedLocked's doc-comment.
+      if (r.skippedLocked) {
+        markWorkerTickSkippedLocked('asset_drift_watcher');
+      } else {
+        markWorkerTickSuccess('asset_drift_watcher');
+      }
     } catch (err) {
       markWorkerTickFailure('asset_drift_watcher', err);
       log.error({ err }, 'Asset drift tick failed');

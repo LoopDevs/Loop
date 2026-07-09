@@ -74,23 +74,28 @@ export function notifyStuckProcurementSwept(args: {
 
 /**
  * A2-626: notify when the payment watcher's cursor hasn't advanced
- * past the stale-threshold. Fires once per stuck period — if the
- * cursor moves again, the per-process gate resets and a future stall
- * can alert fresh.
+ * past the stale-threshold. Fires once per stuck period — the
+ * fired/re-arm dedup lives in `watchdog_alert_state` (S4-8 follow-up,
+ * durable + fleet-consistent), managed by `cursor-watchdog.ts`.
  *
  * Distinct signal from circuit breaker or health-change: the
  * watcher can be "running" (no exception loop-killing) but stuck
  * on an upstream Horizon issue, a DB write failure on cursor
  * persistence, or a subtle bug in the tick. The cursor-age probe
  * is the only independent observation that catches all of those.
+ *
+ * PURE SENDER (same contract as `notifyInterestPoolLow`, C10a):
+ * returns the `sendWebhook` promise so the watchdog only persists
+ * `alert_active=true` after delivery confirms — a send lost to a
+ * Discord outage stays due and is retried on the next tick.
  */
 export function notifyPaymentWatcherStuck(args: {
   cursorAgeMs: number;
   lastCursor: string;
   lastUpdatedAtMs: number;
-}): void {
+}): Promise<boolean> {
   const ageMin = Math.round(args.cursorAgeMs / 60_000);
-  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+  return sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
     title: '🔴 Payment Watcher Cursor Stuck',
     description: truncate(
       `The payment watcher cursor has not advanced in ${ageMin} min. Fresh deposits are not being observed. Check the watcher process, Horizon reachability, and the DB's ability to persist the cursor row.`,
@@ -164,6 +169,15 @@ export function notifyRedemptionBackfillExhausted(args: {
   });
 }
 
+/**
+ * Stuck-payout backlog alert. Fired once per incident by
+ * `stuck-payout-watchdog.ts`, whose fired/re-arm dedup lives in
+ * `watchdog_alert_state` (S4-8 follow-up).
+ *
+ * PURE SENDER (same contract as `notifyPaymentWatcherStuck` above):
+ * returns the `sendWebhook` promise so the watchdog only persists
+ * `alert_active=true` after delivery confirms — at-least-once.
+ */
 export function notifyStuckPayouts(args: {
   rowCount: number;
   thresholdMinutes: number;
@@ -172,8 +186,8 @@ export function notifyStuckPayouts(args: {
   submittedCount: number;
   payoutId: string | null;
   assetCode: string | null;
-}): void {
-  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+}): Promise<boolean> {
+  return sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
     title: '🔴 Stuck Payout Backlog Detected',
     description: truncate(
       `One or more payout rows have exceeded the ${args.thresholdMinutes}-minute watchdog window. Check the payout worker, Horizon reachability, and operator funding before manually retrying anything.`,

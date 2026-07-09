@@ -34,6 +34,7 @@ import { db } from '../../db/client.js';
 const TABLES_TO_TRUNCATE = [
   'asset_drift_state',
   'interest_pool_alert_state',
+  'watchdog_alert_state',
   'otp_attempt_counters',
   'ctx_settlements',
   'pending_payouts',

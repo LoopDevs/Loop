@@ -8,6 +8,7 @@ import {
   uuid,
   text,
   bigint,
+  boolean,
   timestamp,
   integer,
   index,
@@ -148,6 +149,42 @@ export const interestPoolAlertState = pgTable(
     ),
   ],
 );
+
+/**
+ * Persistence for the fire-once watchdog alerts (S4-8 follow-up,
+ * money-review 2026-07-09; same ADR-038 D2 at-least-once shape as
+ * `interest_pool_alert_state`, minus the per-asset dimension).
+ *
+ * The cursor-age watchdog (`payments/cursor-watchdog.ts`) and the
+ * stuck-payout watchdog (`payments/stuck-payout-watchdog.ts`) each
+ * page Discord once per incident and re-arm when the condition
+ * clears. That fired-state previously lived in a per-process boolean
+ * — with the S4-8 advisory-lock single-flight, a machine whose
+ * boolean latched `true` during incident 1 (and which never held the
+ * lock during the recovery window) could win the lock during a
+ * FUTURE, distinct incident and silently skip paging: worst case
+ * zero pages for a live money incident. One row per watchdog makes
+ * the fired-state durable + fleet-consistent:
+ *
+ *   - `alert_active` is set `true` only AFTER `sendWebhook` confirms
+ *     delivery, so a failed send stays unfired and the next tick
+ *     (any machine) retries — at-least-once, never silently lost.
+ *   - A healthy tick resets it to `false` (re-arm), so the next
+ *     distinct incident pages fresh regardless of which machine wins
+ *     the lock.
+ *
+ * Reads/writes happen only under each watchdog's fleet-wide
+ * transaction-scoped advisory lock, so no row lock (`FOR UPDATE`) is
+ * needed — the advisory lock already serialises the read→send→write
+ * sequence.
+ */
+export const watchdogAlertState = pgTable('watchdog_alert_state', {
+  /** Stable watchdog identifier, e.g. 'cursor-watchdog'. */
+  watchdogName: text('watchdog_name').primaryKey(),
+  /** True while ops has been (confirmed-delivery) paged about an open incident. */
+  alertActive: boolean('alert_active').notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
 
 /**
  * Durable record of operator→CTX settlement payments (hardening A4,

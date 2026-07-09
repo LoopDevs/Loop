@@ -825,6 +825,39 @@ describe('runPaymentWatcherTick', () => {
     expect(listPaymentsMock).not.toHaveBeenCalled();
     expect(state.writtenCursors).toEqual([]);
   });
+
+  it('releases the lock + returns empty when the tick body exceeds the lease deadline', async () => {
+    // A hung Horizon: listAccountPayments never resolves. The lease
+    // must fire so the fleet-wide lock is released and deposit
+    // processing is not stalled on every machine.
+    vi.useFakeTimers();
+    try {
+      let releaseHang: () => void = () => {};
+      listPaymentsMock.mockReturnValue(
+        new Promise((resolve) => {
+          releaseHang = () => resolve({ records: [], nextCursor: null });
+        }),
+      );
+      const tickPromise = runPaymentWatcherTick({ account: ACCOUNT, usdcIssuer: 'GCENTRE' });
+      // Advance past the 60s lease — the Promise.race timeout wins.
+      await vi.advanceTimersByTimeAsync(60_001);
+      const r = await tickPromise;
+      expect(r).toEqual({
+        scanned: 0,
+        matched: 0,
+        paid: 0,
+        skippedAmount: 0,
+        unmatchedMemo: 0,
+        errors: 0,
+        skipsRecovered: 0,
+        skippedLocked: false,
+      });
+      expect(state.writtenCursors).toEqual([]);
+      releaseHang();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('skip persistence + poison isolation (comprehensive-audit CRIT #1/#2)', () => {
