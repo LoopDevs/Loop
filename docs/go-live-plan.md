@@ -107,7 +107,7 @@ _The cashback model replaces discounts. The ADR 015/016 surface + the ADR 030 Pr
 - [ ] **Past-30-day APY computation + display** (ADR 031) — on-chain share-price + mint history → "past 30d: X.XX%" + no-guarantee disclaimer. 🟢/💰
 - [ ] **Privy/dfns Soroban custody DD** + **asset rename cleanup** (USDLOOP/EURLOOP retired). 👤/🟢
 - [ ] **Multi-jurisdictional regulatory review** — vault curation + GBPLOOP issuance + Privy custody; 4–6 weeks crypto-fintech counsel. 👤
-- [ ] **Flip `LOOP_PHASE_1_ONLY=false`** (launch cashback) — server-side, once the above + T1 are solid. 🧭
+- [ ] **Flip `LOOP_PHASE_1_ONLY=false`** (launch cashback) — server-side, once the above + T1 are solid. 🧭 **Decision resolved 2026-07-09: gated on the operator demoing the Phase-1 discount version first; date TBD after that demo.**
 - [ ] **Mobile enhancements:** push notifications (order/cashback) · Capacitor Live Update (OTA web assets) · deep linking (= M-3).
 - Retired by ADR 030 (no action): external wallet-linking, on-device key gen, 2-of-3 multisig, recovery-key escrow, SEP-24 withdrawal UX.
 
@@ -115,7 +115,7 @@ _The cashback model replaces discounts. The ADR 015/016 surface + the ADR 030 Pr
 
 # §T3 · MAINNET, OPEN BANKING, CARDS (Tranche 3 — contract deliverables)
 
-- [ ] **Plaid SDK integration** 🧭💰 — open-banking USD/GBP/EUR/CAD rails so users buy via **bank transfer** (not just crypto — the mainstream-funding unlock). Backend accepts Plaid Auth + ACH/SEPA/FPS settlement; web/mobile SDK for account linking. **Needs an ADR + money-transmitter/KYC posture per jurisdiction first.** Rough scope 2–3 months. _(Decision: pull earlier as a T1 fiat on-ramp, or hold for T3? See §Decisions.)_
+- [ ] **Plaid SDK integration** 🧭💰 — open-banking USD/GBP/EUR/CAD rails so users buy via **bank transfer** (not just crypto — the mainstream-funding unlock). Backend accepts Plaid Auth + ACH/SEPA/FPS settlement; web/mobile SDK for account linking. **Needs an ADR + money-transmitter/KYC posture per jurisdiction first.** Rough scope 2–3 months. _(Decision resolved 2026-07-09: hold for T3 as contracted; no Plaid ADR now. See §Decisions.)_
 - [ ] **Virtual cashback Visa/Mastercard** 👤💰 — card issuance for cashback spend; BIN-sponsor partnership (Marqeta/Stripe Issuing/Galileo) + KYC + compliance program. Rough scope 4–6 months.
 - [ ] **Mainnet launch** 👤💰 — flip testnet→mainnet across stablecoins/vaults/wallet; requires custody + vault + GBPLOOP-issuance audits, **regulatory authorisations (UK FCA EMI for GBPLOOP + US/EU/CA posture)**, testnet-balance migration.
 - [ ] **Four-country launch (US/UK/EU/CA)** 👤 — verify CTX catalog coverage per country; jurisdictional reg posture; localise strings + currency display.
@@ -136,11 +136,11 @@ _The cashback model replaces discounts. The ADR 015/016 surface + the ADR 030 Pr
 
 # §Decisions I need from you
 
-- [ ] 🧭 **Plaid timing** — T3 as contracted, or pull forward as a T1 **fiat on-ramp** (crypto-only funding is a mainstream conversion barrier)? Determines whether I spin up a Plaid ADR now.
+- [x] 🧭 **Plaid timing** — **resolved 2026-07-09: hold for T3; no Plaid ADR now.**
 - [ ] 🧭 **Launch audience** — mainstream vs crypto-native (upstream of the Plaid call and the whole sequence).
-- [ ] 🧭 **Money/auth go-ahead** — OK to start drafting §T1-B / §T1-H items as review-ready PRs (I open, you review, never self-merge)?
+- [x] 🧭 **Money/auth go-ahead** — **GRANTED 2026-07-09.** Agent drafts §T1-B / §T1-H money/auth items as review-ready PRs per `money-auth-worklist.md`'s review-first workflow (open, CI-green, reviewer-pass posted, never self-merged).
 - [ ] 🔑 **Creds** — CTX_TOKEN + read-only supplier keys → I finish merchant data end-to-end.
-- [ ] 🧭 **Cashback flip** — target date for `LOOP_PHASE_1_ONLY=false` (T2 go-live) relative to T1.
+- [x] 🧭 **Cashback flip** — **resolved 2026-07-09: flip gated on the Phase-1 discount demo happening first; date TBD after demo.**
 
 ---
 

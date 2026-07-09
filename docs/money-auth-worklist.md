@@ -6,6 +6,8 @@
 > of truth for each item's full **Why / Do / Done-when**; this doc adds priority,
 > effort, review type, and the workflow. Keep the two in sync (tick both).
 >
+> **Go-ahead granted 2026-07-09** — items below are now being worked review-first.
+>
 > **Workflow — review-first.** Every item here touches money, auth, or Stellar,
 > which `CLAUDE.md` requires a human to review before merge. So these are worked
 > **one at a time as review-ready PRs that are NOT self-merged** — each PR states
