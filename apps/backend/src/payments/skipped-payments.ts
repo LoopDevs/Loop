@@ -25,7 +25,11 @@ import { db } from '../db/client.js';
 import { paymentWatcherSkips } from '../db/schema.js';
 import { logger } from '../logger.js';
 import { HorizonPaymentSchema, type HorizonPayment } from './horizon.js';
-import { notifyDepositSkipRecorded, notifyDepositSkipAbandoned } from '../discord/monitoring.js';
+import {
+  notifyDepositSkipRecorded,
+  notifyDepositSkipAbandoned,
+  notifyUnrecognizedDepositRecorded,
+} from '../discord/monitoring.js';
 import { refundDeposit } from './deposit-refund.js';
 
 /**
@@ -102,15 +106,17 @@ export type SkipReason =
  */
 export const MAX_SKIP_ATTEMPTS = 2880;
 
-/** Reasons that page ops the moment the first skip is recorded. */
+/**
+ * Reasons that page ops the moment the first skip is recorded. These
+ * need an internal bug or corrupt state to trigger, so a per-row page
+ * is safe. `unrecognized_deposit` is deliberately NOT here — it is
+ * externally + cheaply triggerable (the deposit address is public), so
+ * it routes to the throttled + rolled-up `notifyUnrecognizedDeposit-
+ * Recorded` instead (see `recordSkip` below), not this per-row pager.
+ */
 const ALERT_ON_FIRST_RECORD: ReadonlySet<SkipReason> = new Set([
   'missing_credit_row',
   'processing_error',
-  // AUDIT-2 finding C: real value landed at Loop's custody account and
-  // matched nothing — worth immediate ops eyes (misconfigured asset,
-  // user error, or a probe), same urgency tier as the other "something
-  // is actually wrong" reasons above.
-  'unrecognized_deposit',
 ]);
 
 export interface SkipRow {
@@ -173,13 +179,27 @@ export async function recordSkip(args: {
     },
     'Deposit skipped — recorded for retry before cursor advance',
   );
-  if (attempts === 1 && ALERT_ON_FIRST_RECORD.has(args.reason)) {
-    notifyDepositSkipRecorded({
-      paymentId: args.payment.id,
-      orderId: args.orderId,
-      reason: args.reason,
-      detail: args.detail ?? null,
-    });
+  // Alert only on the FIRST record of a given payment id (`attempts === 1`)
+  // — a sweep retry bumps `attempts` and must not re-page the same row.
+  if (attempts === 1) {
+    if (args.reason === 'unrecognized_deposit') {
+      // AUDIT-2 finding C: externally + cheaply triggerable (public
+      // deposit address), so this goes through the throttled + rolled-up
+      // pager rather than one page per row. The DB row above is written
+      // unconditionally regardless — recovery visibility is never
+      // throttled, only the Discord page.
+      notifyUnrecognizedDepositRecorded({
+        paymentId: args.payment.id,
+        detail: args.detail ?? null,
+      });
+    } else if (ALERT_ON_FIRST_RECORD.has(args.reason)) {
+      notifyDepositSkipRecorded({
+        paymentId: args.payment.id,
+        orderId: args.orderId,
+        reason: args.reason,
+        detail: args.detail ?? null,
+      });
+    }
   }
 }
 

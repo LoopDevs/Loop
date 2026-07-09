@@ -136,11 +136,19 @@
       filter/dropdown list independent of the shared constant, so the new
       reason (and, pre-existing, `order_gone`) couldn't actually be
       filtered on; fixed in the same PR by deriving from
-      `WATCHER_SKIP_REASONS` instead (closes the drift class). **Known
-      residual** (not blocking, noted in-code at `deposit-refund.ts`): the
-      A6 automated refund path still only handles `type === 'payment'`, so
-      a path-payment skip row is visible/recoverable but not yet
-      one-click-refundable — separate follow-up.
+      `WATCHER_SKIP_REASONS` instead (closes the drift class). A second
+      money-review pass caught that alerting on every `unrecognized_deposit`
+      row (added to `ALERT_ON_FIRST_RECORD`) was itself a public-deposit-
+      address Discord-flood vector — a ~1¢ tx with 100 dust ops could fire
+      ~50 pages/tick on the shared monitoring channel and push real pages
+      past Discord's rate limit; fixed by routing the reason to a throttled + rolled-up `notifyUnrecognizedDepositRecorded` (leading-edge page,
+      one count-bearing page per ~15-min window, mirrors the circuit-breaker
+      dedup) while every row is still written to the DB unconditionally.
+      **Known residuals** (not blocking): the A6 automated refund path still
+      only handles `type === 'payment'` (path-payment skip rows are
+      visible/recoverable but not yet one-click-refundable — noted in-code at
+      `deposit-refund.ts`); and `account_merge` deliveries stay outside the
+      recovery trail (see P2-d below).
 - [ ] **AUDIT-2-D · `interest-mint.ts` idempotency-skip catch never matches the real error shape.** _S · 💰._
       `credits/interest-mint.ts:324-337` (same pattern in
       `credits/accrue-interest.ts:183-201`, P2/legacy-gated-off) string-matches
@@ -316,6 +324,18 @@ payment_method='loop_asset' AND state='pending_payment'` — plus a
       periodic monitoring query (any `loop_asset` order re-entering
       `pending_payment` post-cleanup is unexpected in Phase 1 and worth an
       alert) so the residual doesn't silently reopen.
+- [ ] **P2-d · `account_merge` into the deposit address is outside the
+      recovery trail.** _S · 💰._ Found in the #1604 (AUDIT-2-C) money
+      review. AUDIT-2-C surfaced unrecognized `payment` /
+      `path_payment_strict_*` deliveries, but an `account_merge` op moves
+      the entire source account's XLM into the deposit account via
+      Horizon's `account` / `into` fields (not `to`), so
+      `isInboundDeliveryToAccount` (`payments/horizon.ts`) doesn't see it
+      and no skip row is written. Rare/unusual vector (not the normal
+      wallet-funding path the finding targeted) and pre-existing (the same
+      op type was already excluded from `isMatchingIncomingPayment`), so
+      it's a residual to track, not a launch blocker — extending the
+      discriminator to the merge fields would close it.
 
 ## Ongoing — remaining money/auth test coverage
 

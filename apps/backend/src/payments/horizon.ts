@@ -279,6 +279,13 @@ export function isMatchingIncomingPayment(
  * address IS the operator account (ADR 010), so both directions share
  * one Horizon `/payments` stream. Recording outbound traffic here would
  * flood `payment_watcher_skips` with noise on every routine payout.
+ *
+ * Edge (harmless, documented): a self-payment `from === account &&
+ * to === account` classifies as inbound here (`to === account` holds).
+ * No net value moves besides the network fee, so at worst it records an
+ * `unrecognized_deposit` row an operator can dismiss — never a
+ * mispaid order — and the operator never sends itself memo-less dust in
+ * normal operation. Not special-cased.
  */
 export function isInboundDeliveryToAccount(p: HorizonPayment, account: string): boolean {
   if (

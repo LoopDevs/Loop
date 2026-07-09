@@ -9,9 +9,15 @@ vi.mock('../../logger.js', () => ({
 
 const notifyRecordedMock = vi.fn();
 const notifyAbandonedMock = vi.fn();
+const notifyUnrecognizedMock = vi.fn();
 vi.mock('../../discord/monitoring.js', () => ({
   notifyDepositSkipRecorded: (args: unknown) => notifyRecordedMock(args),
   notifyDepositSkipAbandoned: (args: unknown) => notifyAbandonedMock(args),
+  // The throttle/roll-up inside the REAL notifier is asserted in
+  // discord/__tests__/monitoring.test.ts (there the sendWebhook collapse
+  // is countable). Here we mock it to assert recordSkip's ROUTING: an
+  // unrecognized_deposit goes to this pager, not the per-row one.
+  notifyUnrecognizedDepositRecorded: (args: unknown) => notifyUnrecognizedMock(args),
 }));
 
 // In-memory stand-in for the payment_watcher_skips table. Replicates
@@ -165,6 +171,7 @@ beforeEach(() => {
   mem.seq = 0;
   notifyRecordedMock.mockReset();
   notifyAbandonedMock.mockReset();
+  notifyUnrecognizedMock.mockReset();
 });
 
 describe('recordSkip', () => {
@@ -197,6 +204,54 @@ describe('recordSkip', () => {
     });
     expect(notifyRecordedMock).not.toHaveBeenCalled();
     expect(mem.rows.get('p2')?.status).toBe('pending');
+  });
+
+  it('AUDIT-2 finding C: routes unrecognized_deposit to the throttled pager, NOT the per-row one — and still writes every row', async () => {
+    // A burst of unrecognized deposits (the public-deposit-address flood
+    // vector). Each row must still be written to the DB unconditionally
+    // (that's the /admin/skips recovery surface), and each first-record
+    // must hit the THROTTLED notifier — never the per-row
+    // notifyDepositSkipRecorded, which would flood the shared channel.
+    const K = 25;
+    for (let i = 0; i < K; i++) {
+      await recordSkip({
+        payment: payment(`u${i}`, `memo-u${i}`),
+        memo: `memo-u${i}`,
+        orderId: null,
+        reason: 'unrecognized_deposit',
+        detail: `unrecognized op u${i}`,
+      });
+    }
+    // Every deposit got a durable row (recovery visibility is never
+    // throttled — only the Discord page is).
+    for (let i = 0; i < K; i++) {
+      expect(mem.rows.get(`u${i}`)?.reason).toBe('unrecognized_deposit');
+    }
+    // Routed to the throttled pager (once per first-record), never the
+    // per-row investigation pager.
+    expect(notifyUnrecognizedMock).toHaveBeenCalledTimes(K);
+    expect(notifyRecordedMock).not.toHaveBeenCalled();
+  });
+
+  it('AUDIT-2 finding C: a sweep RETRY of an unrecognized_deposit row does not re-page', async () => {
+    await recordSkip({
+      payment: payment('u-retry'),
+      memo: 'memo-u-retry',
+      orderId: null,
+      reason: 'unrecognized_deposit',
+      detail: 'first record',
+    });
+    expect(notifyUnrecognizedMock).toHaveBeenCalledTimes(1);
+    // Same payment id again (attempts → 2): no re-page.
+    await recordSkip({
+      payment: payment('u-retry'),
+      memo: 'memo-u-retry',
+      orderId: null,
+      reason: 'unrecognized_deposit',
+      detail: 'retry',
+    });
+    expect(notifyUnrecognizedMock).toHaveBeenCalledTimes(1);
+    expect(mem.rows.get('u-retry')?.attempts).toBe(2);
   });
 
   it('never reopens a terminal row', async () => {

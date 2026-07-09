@@ -28,9 +28,10 @@
  *     (per-(name,state) 10-minute dedup so a flapping circuit
  *     doesn't flood the channel — A2-1326).
  *
- * Two test seams (`__resetCircuitNotifyDedupForTests` /
- * `__resetCtxSchemaDriftDedupForTests`) wipe the per-process
- * dedup maps so tests can exercise the throttles deterministically.
+ * Test seams (`__resetCircuitNotifyDedupForTests` /
+ * `__resetCtxSchemaDriftDedupForTests` /
+ * `__resetUnrecognizedDepositDedupForTests`) wipe the per-process
+ * dedup state so tests can exercise the throttles deterministically.
  *
  * Pulled out of `discord.ts` so the per-channel surfaces are
  * traceable to one file each. Shared infrastructure
@@ -175,6 +176,94 @@ export function notifyDepositSkipRecorded(args: {
         ? [
             {
               name: 'Detail',
+              value: truncate(escapeMarkdown(args.detail), FIELD_VALUE_MAX),
+              inline: false,
+            },
+          ]
+        : []),
+    ],
+  });
+}
+
+/**
+ * AUDIT-2 finding C — throttled + rolled-up notifier for
+ * `unrecognized_deposit` skip rows (a payment that delivered value to
+ * the deposit address but matched no order rail).
+ *
+ * WHY THIS IS SEPARATE FROM `notifyDepositSkipRecorded`'s per-row page:
+ * unlike `missing_credit_row` / `processing_error` (which need an
+ * internal bug or corrupt state to trigger, so a per-row page is safe),
+ * the deposit address is PUBLIC — it's the operator account, disclosed
+ * to every payer and fully visible on Horizon. A single ~1¢ transaction
+ * can carry up to 100 payment ops, each a dust-floor deposit with a
+ * garbage memo, so a per-row first-record page would let anyone fire up
+ * to ~50 embeds/tick at `DISCORD_WEBHOOK_MONITORING` — which is SHARED
+ * with asset-drift / cursor / stuck-payout / ledger-invariant /
+ * circuit-breaker pages. Past Discord's ~5-req/2s webhook limit, a real
+ * page (a genuine stranded deposit, or a stuck-payout page timed to
+ * coincide) gets silently dropped.
+ *
+ * So this pages at most once per `UNRECOGNIZED_DEPOSIT_NOTIFY_WINDOW_MS`
+ * with a ROLLED-UP count of how many rows accumulated since the last
+ * page (mirrors the circuit-breaker `CIRCUIT_NOTIFY_DEDUP_MS` +
+ * asset-drift per-key dedup precedents — docs/alerting.md). A genuine
+ * lone stranded deposit landing into a quiet channel still pages
+ * promptly (leading edge); a burst collapses to one count-bearing page.
+ * The DURABLE recovery surface is unchanged — every row is still written
+ * to `payment_watcher_skips` unconditionally by `recordSkip` and shows
+ * on `/admin/skips`; only the Discord page is bounded here.
+ *
+ * Per-process state (module-level), matching every other dedup in this
+ * file. The payment-watcher tick is itself fleet-single-flighted (S4-8
+ * advisory lock), so in practice only the lock-holding machine records
+ * these rows per tick — the window is effectively fleet-consistent for
+ * this path modulo an occasional lock handoff, which is bounded by the
+ * same ~window as the circuit-breaker precedent tolerates.
+ */
+const UNRECOGNIZED_DEPOSIT_NOTIFY_WINDOW_MS = 15 * 60 * 1000;
+let unrecognizedDepositLastAlertAt = 0;
+/** Rows recorded but not yet reflected in a page since the last alert. */
+let unrecognizedDepositPending = 0;
+
+/** Test helper — wipe the throttle + roll-up counter. */
+export function __resetUnrecognizedDepositDedupForTests(): void {
+  unrecognizedDepositLastAlertAt = 0;
+  unrecognizedDepositPending = 0;
+}
+
+export function notifyUnrecognizedDepositRecorded(args: {
+  paymentId: string;
+  detail: string | null;
+}): void {
+  // Each call is one freshly-recorded row — the DB write + /admin/skips
+  // visibility already happened unconditionally in recordSkip. Accumulate
+  // first so a suppressed burst still rolls into the next page's count.
+  unrecognizedDepositPending += 1;
+  const now = Date.now();
+  if (now - unrecognizedDepositLastAlertAt < UNRECOGNIZED_DEPOSIT_NOTIFY_WINDOW_MS) {
+    // Inside the window — hold the page; the count carries forward.
+    return;
+  }
+  const count = unrecognizedDepositPending;
+  unrecognizedDepositPending = 0;
+  unrecognizedDepositLastAlertAt = now;
+
+  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+    title: '🟠 Unrecognized inbound deposit — recovery needed',
+    color: ORANGE,
+    description: truncate(
+      count === 1
+        ? 'A deposit landed at the deposit address that matched no order rail (wrong/no memo, or an unrecognized asset). It is recorded on /admin/skips for manual reconciliation.'
+        : `${count} deposits landed at the deposit address that matched no order rail since the last alert (~15 min). All are recorded on /admin/skips for manual reconciliation. This page is throttled + rolled up — the deposit address is public and can be cheaply spammed with dust, so a burst collapses to one count-bearing page.`,
+      DESCRIPTION_MAX,
+    ),
+    fields: [
+      { name: 'Recorded since last alert', value: String(count), inline: true },
+      { name: 'Latest payment', value: `\`${args.paymentId.slice(-8)}\``, inline: true },
+      ...(args.detail !== null
+        ? [
+            {
+              name: 'Latest detail',
               value: truncate(escapeMarkdown(args.detail), FIELD_VALUE_MAX),
               inline: false,
             },

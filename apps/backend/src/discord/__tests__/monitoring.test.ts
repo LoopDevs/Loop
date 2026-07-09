@@ -70,13 +70,16 @@ import {
   notifyUsdcBelowFloor,
   notifyOperatorPoolExhausted,
   notifyOperatorCredentialExpired,
+  notifyUnrecognizedDepositRecorded,
   __resetOperatorCredentialDedupForTests,
+  __resetUnrecognizedDepositDedupForTests,
 } from '../monitoring.js';
 
 beforeEach(() => {
   sendWebhookMock.mockReset();
   sendWebhookMock.mockResolvedValue(true);
   __resetOperatorCredentialDedupForTests();
+  __resetUnrecognizedDepositDedupForTests();
 });
 
 interface Embed {
@@ -278,5 +281,58 @@ describe('notifyOperatorCredentialExpired (CF-13)', () => {
     // A different operator is a distinct dedup key — fires independently.
     notifyOperatorCredentialExpired({ operatorId: 'op-b', poolSize: 2, failedOver: true });
     expect(sendWebhookMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('notifyUnrecognizedDepositRecorded (AUDIT-2 finding C — flood-resistant page)', () => {
+  it('emits an orange, count-bearing page on the first (leading-edge) record', () => {
+    notifyUnrecognizedDepositRecorded({ paymentId: '12345678901234', detail: 'op X asset EURC' });
+    expect(sendWebhookMock).toHaveBeenCalledTimes(1);
+    const e = lastEmbed();
+    expect(e.title).toContain('Unrecognized inbound deposit');
+    expect(e.color).toBe(0xe67e22);
+    expect(e.fields!.find((f) => f.name === 'Recorded since last alert')!.value).toBe('1');
+    // Only the last-8 of the Horizon op id is echoed (no full-id leak).
+    expect(e.fields!.find((f) => f.name === 'Latest payment')!.value).toContain('01234');
+  });
+
+  it('a burst of 100 recordings in one window pages at most ONCE (anti-flood dedup)', () => {
+    // The threat: the deposit address is public, so an attacker can pack
+    // ~100 dust ops into one ~1¢ tx. Before the throttle each would fire a
+    // page on the SHARED monitoring channel and drown real alerts past
+    // Discord's rate limit. Assert the whole burst collapses to one page.
+    for (let i = 0; i < 100; i++) {
+      notifyUnrecognizedDepositRecorded({ paymentId: `op-${i}`, detail: null });
+    }
+    expect(sendWebhookMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('pages again after the window elapses, rolling up the suppressed count', () => {
+    vi.useFakeTimers();
+    try {
+      // Realistic epoch base so the first (idle-channel) record fires
+      // promptly — a genuine lone stranded deposit must still page fast.
+      vi.setSystemTime(1_700_000_000_000);
+      __resetUnrecognizedDepositDedupForTests();
+
+      notifyUnrecognizedDepositRecorded({ paymentId: 'a', detail: null }); // fires (count 1)
+      notifyUnrecognizedDepositRecorded({ paymentId: 'b', detail: null }); // held
+      notifyUnrecognizedDepositRecorded({ paymentId: 'c', detail: null }); // held
+      expect(sendWebhookMock).toHaveBeenCalledTimes(1);
+      expect(lastEmbed().fields!.find((f) => f.name === 'Recorded since last alert')!.value).toBe(
+        '1',
+      );
+
+      // Advance past the ~15-min window; the next record pages again and
+      // carries the two held + itself = 3.
+      vi.advanceTimersByTime(15 * 60 * 1000 + 1);
+      notifyUnrecognizedDepositRecorded({ paymentId: 'd', detail: null });
+      expect(sendWebhookMock).toHaveBeenCalledTimes(2);
+      expect(lastEmbed().fields!.find((f) => f.name === 'Recorded since last alert')!.value).toBe(
+        '3',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
