@@ -664,6 +664,16 @@ Note the **sweep** arm already maps a skip-row that goes `unmatched` → `order_
       **Why:** No axe/jsx-a11y/pa11y/keyboard tests. Consumer finance app targeting the Eurozone — the **European Accessibility Act** mandates accessibility for e-commerce/banking there. Compliance, not nice-to-have.
       **Do:** add `eslint-plugin-jsx-a11y` (lint gate) + `axe`/`jest-axe` on key routes; do a keyboard + screen-reader pass on onboarding/purchase/wallet; fix the findings. (New devDeps → ADR per policy, but a11y tooling is low-controversy.)
       **Done when:** a11y lint + automated checks gate CI on the core routes; a manual audit is recorded.
+      **Progress note (2026-07-09):** WUM-10 residue closed — the CF-35 aria-live
+      copy-confirmation pattern (`PaymentStep` / `LoopPaymentStep.Row`) is now
+      rolled out to all 5 of 5 "copy to clipboard" sites in the web-ui-money
+      vertical (`PurchaseComplete.CodeField`, `RedeemFlow`'s challenge-code copy,
+      `LoopOrdersList.RedemptionField`, and the shared admin `CopyButton` that
+      `TrustlineSetupCard` depends on for issuer-pubkey copy). See
+      `docs/audit-2026-06-30-cold/raw/v-web-ui-money.md` WUM-10. This is one
+      point fix within B-2's much larger scope — the axe/jsx-a11y/pa11y tooling
+      and the full keyboard/screen-reader audit are still not started; B-2 stays
+      unchecked.
 
 ### B-3 · User-level fraud/abuse controls (absent) `[code]`
 

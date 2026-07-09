@@ -121,3 +121,65 @@ describe('<CopyButton />', () => {
     expect(screen.queryByText(/Copied/)).toBeNull();
   });
 });
+
+// WUM-10 (2026-06-30 cold audit): CF-35's aria-live copy-confirmation
+// pattern rolled out to the shared admin CopyButton — the "most
+// consequential" gap the finding called out, since TrustlineSetupCard
+// depends on this component for the LOOP-asset issuer-pubkey copy.
+describe('<CopyButton /> — aria-live copy confirmation (WUM-10)', () => {
+  it('announces the copy using the label\'s subject, not the raw "Copy X" verb phrase', async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+
+    render(<CopyButton text="GABC...ISSUER" label="Copy USDLOOP issuer" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Copy USDLOOP issuer' }));
+    await waitFor(() => {
+      expect(screen.getByText('USDLOOP issuer copied to clipboard.')).toBeDefined();
+    });
+  });
+
+  it('resets the announcement after the flash window', async () => {
+    vi.useFakeTimers();
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+
+    render(<CopyButton text="abc" label="Copy order id" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Copy order id' }));
+    await vi.waitFor(() => {
+      expect(screen.getByText('Order id copied to clipboard.')).toBeDefined();
+    });
+    vi.advanceTimersByTime(1_500);
+    await vi.waitFor(() => {
+      expect(screen.queryByText('Order id copied to clipboard.')).toBeNull();
+    });
+    vi.useRealTimers();
+  });
+
+  it('does not announce when both clipboard paths fail (silent-failure design)', async () => {
+    const writeText = vi.fn(async () => {
+      throw new Error('denied');
+    });
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    const execCommand = vi.fn(() => false);
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: execCommand,
+    });
+
+    render(<CopyButton text="abc" label="Copy user id" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Copy user id' }));
+    await waitFor(() => {
+      expect(execCommand).toHaveBeenCalled();
+    });
+    expect(screen.queryByText(/copied to clipboard\.$/)).toBeNull();
+  });
+});

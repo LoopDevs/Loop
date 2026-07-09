@@ -228,6 +228,29 @@ describe('LoopOrdersList', () => {
     expect(screen.queryByText(/Send /i)).toBeNull();
   });
 
+  // WUM-10 (2026-06-30 cold audit): CF-35's aria-live copy-confirmation
+  // pattern rolled out from LoopPaymentStep's Row to RedemptionField —
+  // this component is that Row's structural sibling in the orders list.
+  it('WUM-10: announces the copied field to assistive tech, then resets', async () => {
+    vi.useFakeTimers();
+    listMock.mockResolvedValue({ orders: [mkOrder()] });
+    const writeText = vi.fn();
+    Object.assign(navigator, { clipboard: { writeText } });
+    render(wrap(<LoopOrdersList enabled={true} />));
+    const toggle = await vi.waitFor(() => screen.getByRole('button', { name: /Target/ }));
+    fireEvent.click(toggle);
+    const copyCode = await vi.waitFor(() => screen.getByRole('button', { name: /Copy code/i }));
+    fireEvent.click(copyCode);
+    await vi.waitFor(() => {
+      expect(screen.getByText('Code copied to clipboard.')).toBeDefined();
+    });
+    vi.advanceTimersByTime(1_500);
+    await vi.waitFor(() => {
+      expect(screen.queryByText('Code copied to clipboard.')).toBeNull();
+    });
+    vi.useRealTimers();
+  });
+
   it('shows the redeem URL anchor with noopener when present', async () => {
     listMock.mockResolvedValue({
       orders: [

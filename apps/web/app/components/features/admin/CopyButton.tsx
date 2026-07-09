@@ -71,6 +71,19 @@ async function tryClipboardCopy(text: string): Promise<boolean> {
   }
 }
 
+/**
+ * `label` is always phrased "Copy <noun>" (the convention every call site
+ * in this codebase follows — "Copy order id", "Copy USDLOOP issuer", etc).
+ * Strip that verb prefix and capitalise so the aria-live announcement reads
+ * as a natural sentence — "Order id copied to clipboard." — matching the
+ * "<field> copied to clipboard." phrasing PaymentStep / LoopPaymentStep's
+ * Row already use.
+ */
+function announceSubject(label: string): string {
+  const stripped = label.replace(/^copy\s+/i, '');
+  return stripped.length > 0 ? stripped[0]!.toUpperCase() + stripped.slice(1) : stripped;
+}
+
 export function CopyButton({ text, label }: Props): React.JSX.Element {
   const [copied, setCopied] = useState(false);
 
@@ -89,44 +102,54 @@ export function CopyButton({ text, label }: Props): React.JSX.Element {
   };
 
   return (
-    <button
-      type="button"
-      onClick={() => void handleClick()}
-      aria-label={label}
-      className="inline-flex items-center gap-1 rounded border border-transparent px-1.5 py-0.5 text-xs text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
-    >
-      {copied ? (
-        <>
-          <svg
-            aria-hidden="true"
-            viewBox="0 0 20 20"
-            fill="currentColor"
-            className="h-3 w-3 text-green-600 dark:text-green-400"
-          >
-            <path
-              fillRule="evenodd"
-              d="M16.704 5.29a.75.75 0 0 1 .006 1.06l-7.5 7.56a.75.75 0 0 1-1.07.004l-3.75-3.76a.75.75 0 1 1 1.064-1.058l3.217 3.226 6.968-7.026a.75.75 0 0 1 1.065-.006Z"
-              clipRule="evenodd"
-            />
-          </svg>
-          Copied
-        </>
-      ) : (
-        <>
-          <svg
-            aria-hidden="true"
-            viewBox="0 0 20 20"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={1.5}
-            className="h-3 w-3"
-          >
-            <rect x="5" y="5" width="11" height="11" rx="1.5" />
-            <rect x="3" y="3" width="11" height="11" rx="1.5" />
-          </svg>
-          Copy
-        </>
-      )}
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={() => void handleClick()}
+        aria-label={label}
+        className="inline-flex items-center gap-1 rounded border border-transparent px-1.5 py-0.5 text-xs text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+      >
+        {copied ? (
+          <>
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+              className="h-3 w-3 text-green-600 dark:text-green-400"
+            >
+              <path
+                fillRule="evenodd"
+                d="M16.704 5.29a.75.75 0 0 1 .006 1.06l-7.5 7.56a.75.75 0 0 1-1.07.004l-3.75-3.76a.75.75 0 1 1 1.064-1.058l3.217 3.226 6.968-7.026a.75.75 0 0 1 1.065-.006Z"
+                clipRule="evenodd"
+              />
+            </svg>
+            Copied
+          </>
+        ) : (
+          <>
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 20 20"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={1.5}
+              className="h-3 w-3"
+            >
+              <rect x="5" y="5" width="11" height="11" rx="1.5" />
+              <rect x="3" y="3" width="11" height="11" rx="1.5" />
+            </svg>
+            Copy
+          </>
+        )}
+      </button>
+      {/* WUM-10 (2026-06-30 cold audit) / CF-35 rollout: confirm copy to
+          assistive tech. Highest-stakes site in the rollout — this button
+          backs TrustlineSetupCard's LOOP-asset issuer-pubkey copy, and the
+          click handler above is silent-by-design on failure, so this is
+          the only success signal a screen-reader user gets. */}
+      <span aria-live="polite" className="sr-only">
+        {copied ? `${announceSubject(label)} copied to clipboard.` : ''}
+      </span>
+    </>
   );
 }
