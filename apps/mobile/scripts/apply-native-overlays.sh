@@ -303,30 +303,53 @@ fi
 # drifted copy in the live Info.plist, this overlay would never
 # reconcile it. Fixed by Set-or-Add: read the current value, compare
 # with the canonical, and rewrite only if they differ. Idempotent —
-# match → no plutil write at all, drift / missing → single
-# `plutil -replace`. We use `plutil` instead of `PlistBuddy -c "Set …"`
-# because PlistBuddy's `-c` string is parsed with single-quote pairing,
-# so an apostrophe in the canonical value (e.g. "someone else's") aborts
-# the Set with `Parse Error: Unclosed Quotes`. `plutil -replace` takes
-# the value as a normal argv and creates the key if missing, so the
-# same call covers both Add and Set without escape gymnastics.
+# match → no write at all, drift / missing → single rewrite.
+#
+# M-4: implemented via python3's plistlib rather than the earlier
+# `plutil -replace` (or `PlistBuddy -c "Set …"`, whose `-c` string is
+# parsed with single-quote pairing, so an apostrophe in the canonical
+# value — "someone else's" — aborts the Set with `Parse Error:
+# Unclosed Quotes`). plutil and PlistBuddy are macOS-only binaries,
+# and the mobile-overlay-guard CI job now runs this script on
+# ubuntu-latest; python3 is already a hard requirement of the pbxproj
+# patch below, so plistlib is the one portable code path. Values pass
+# through the environment (normal strings, no escape gymnastics), and
+# the key is created when missing so the same call covers both Add
+# and Set.
 plist_set_or_add_string() {
-  local key=$1
-  local desired=$2
-  local current
-  if current=$(/usr/libexec/PlistBuddy -c "Print :$key" "$IOS_PLIST" 2>/dev/null); then
-    if [ "$current" = "$desired" ]; then
-      say "Info.plist :$key already matches — skipping"
-      return 0
-    fi
-    say "Info.plist :$key drifted — reconciling to canonical copy"
-  else
-    say "Adding :$key to Info.plist"
-  fi
-  plutil -replace "$key" -string "$desired" "$IOS_PLIST"
+  PLIST_PATH="$IOS_PLIST" PLIST_KEY="$1" PLIST_VALUE="$2" python3 - <<'PY'
+import os
+import plistlib
+
+path = os.environ["PLIST_PATH"]
+key = os.environ["PLIST_KEY"]
+desired = os.environ["PLIST_VALUE"]
+
+with open(path, "rb") as f:
+    data = plistlib.load(f)
+
+if data.get(key) == desired:
+    print(f"[apply-native-overlays] Info.plist :{key} already matches — skipping")
+else:
+    if key in data:
+        print(f"[apply-native-overlays] Info.plist :{key} drifted — reconciling to canonical copy")
+    else:
+        print(f"[apply-native-overlays] Adding :{key} to Info.plist")
+    data[key] = desired
+    with open(path, "wb") as f:
+        plistlib.dump(data, f, sort_keys=False)
+PY
 }
 
 if [ -f "$IOS_PLIST" ]; then
+  # python3 backs both the plist reconciliation above and the pbxproj
+  # patch below — check once, up front, before any iOS write happens.
+  if ! command -v python3 >/dev/null 2>&1; then
+    say "ERROR: python3 is required for the iOS overlay steps (Info.plist"
+    say "       reconciliation + project.pbxproj patching) and was not found on PATH."
+    exit 1
+  fi
+
   plist_set_or_add_string \
     "NSFaceIDUsageDescription" \
     "Loop uses Face ID to lock the app so your gift cards stay private, even if your unlocked device is in someone else's hands."
@@ -418,11 +441,6 @@ if [ -f "$IOS_PLIST" ]; then
   # rather than silently no-op'ing, and again if post-patch
   # verification doesn't find what it just wrote.
   if [ -f "$IOS_PBXPROJ" ]; then
-    if ! command -v python3 >/dev/null 2>&1; then
-      say "ERROR: python3 is required to patch project.pbxproj (release.xcconfig +"
-      say "       PrivacyInfo.xcprivacy wiring) and was not found on PATH."
-      exit 1
-    fi
     python3 - "$IOS_PBXPROJ" <<'PY'
 import re
 import sys
