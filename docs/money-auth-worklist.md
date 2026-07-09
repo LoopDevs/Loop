@@ -285,7 +285,7 @@
       accepted-risk row.
 - [x] **T0-3 · Make the money-invariant DB layer a required merge check.** _S · 💰 + operator._
       Enforcement, not a fix — promote the invariant checks to a required CI gate.
-      **Code half done 2026-07-10 (#TBD):** added
+      **Code half done 2026-07-10 (#1614):** added
       `scripts/check-money-invariants.mjs` (`npm run check:money-invariants`)
       — a static (no live DB) presence + shape check for every
       money-critical DB object `docs/invariants.md` lists as "DB:" tier:
