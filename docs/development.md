@@ -268,6 +268,13 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # Phase 1 user proposition. UI-side equivalent of the backend Phase 2
 # gates (LOOP_WORKERS_ENABLED / LOOP_AUTH_NATIVE_ENABLED /
 # INTEREST_APY_BASIS_POINTS — keep those off in a Phase 1 deploy too).
+# AUDIT-2 finding B (2026-07 hardening): also STRUCTURALLY gates the
+# loop_asset spend surface server-side — POST /api/orders/loop
+# (create) and POST /api/orders/loop/:id/redeem (redemption,
+# fail-closed even for pre-existing orders) both 400
+# LOOP_ASSET_UNAVAILABLE_PHASE_1 while this flag is true. Admin
+# emission (credits/emissions.ts) is deliberately not gated — see
+# AGENTS.md.
 # Flip back to false to launch cashback — server-side only, no app store
 # resubmission. Default false.
 # LOOP_PHASE_1_ONLY=true

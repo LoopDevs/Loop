@@ -419,6 +419,34 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
     }
   }
 
+  // AUDIT-2 finding B (2026-07 hardening): `loop_asset` is a Phase-2
+  // spend surface — token redemption assumes wallet provisioning +
+  // an on-chain LOOP balance, both Phase-2 UI. Before this gate,
+  // nothing server-side stopped a direct API caller who already had
+  // (or acquired) a provisioned wallet with a nonzero LOOP balance
+  // from creating and redeeming a loop_asset order at full face
+  // value in production, where LOOP_WORKERS_ENABLED=true coexists
+  // with LOOP_PHASE_1_ONLY=true (fly.toml) — only zero balances +
+  // the client's UI hardcode held the line, both incidental rather
+  // than structural. Mirrors the `credit`/CREDIT_METHOD_RETIRED gate
+  // above: a clean, explicit rejection instead of relying on the
+  // absence of funded wallets. Does NOT gate `credit`/`xlm`/`usdc` —
+  // those keep working exactly as today in both phases.
+  if (parsed.data.paymentMethod === 'loop_asset' && env.LOOP_PHASE_1_ONLY) {
+    log.info(
+      { userId: auth.userId, merchantId: parsed.data.merchantId },
+      'loop_asset order rejected — LOOP_PHASE_1_ONLY gate (AUDIT-2 finding B)',
+    );
+    return c.json(
+      {
+        code: 'LOOP_ASSET_UNAVAILABLE_PHASE_1',
+        message:
+          'Paying with your Loop balance is not available yet. Use a card, XLM, or USDC payment method instead.',
+      },
+      400,
+    );
+  }
+
   // XLM / USDC / loop_asset orders need a configured deposit
   // address; without one the watcher has nowhere to see payments,
   // so we must reject before writing the row (the row's memo

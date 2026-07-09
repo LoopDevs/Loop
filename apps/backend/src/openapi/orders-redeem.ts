@@ -44,7 +44,7 @@ export function registerOrdersRedeemOpenApi(
       },
       400: {
         description:
-          'Non-uuid id (`VALIDATION_ERROR`), order not payable — wrong method or terminal state (`ORDER_NOT_PAYABLE`), wallet not provisioned/activated (`WALLET_NOT_ACTIVATED`), concurrent call in flight (`PAYMENT_IN_FLIGHT`), or on-chain balance below the charge (`INSUFFICIENT_BALANCE`)',
+          'Non-uuid id (`VALIDATION_ERROR`), order not payable — wrong method or terminal state (`ORDER_NOT_PAYABLE`), redemption unavailable while `LOOP_PHASE_1_ONLY=true` (`LOOP_ASSET_UNAVAILABLE_PHASE_1` — AUDIT-2 finding B; fails closed even for orders created before this gate existed), wallet not provisioned/activated (`WALLET_NOT_ACTIVATED`), concurrent call in flight (`PAYMENT_IN_FLIGHT`), or on-chain balance below the charge (`INSUFFICIENT_BALANCE`)',
         content: { 'application/json': { schema: errorResponse } },
       },
       401: {
