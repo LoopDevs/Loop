@@ -100,6 +100,7 @@ function CurrencyPicker({
 
 function Legend(): React.JSX.Element {
   return (
+    // eslint-disable-next-line jsx-a11y/no-redundant-roles -- ADR 042: Tailwind Preflight sets `list-style: none` on <ul>, which strips the implicit list/listitem role in Safari VoiceOver (a known WebKit quirk — Chrome/Firefox are unaffected). role="list" restores it. The rule can't see the CSS interaction, so this is a documented false positive, not a mistake. Tracked: docs/readiness-backlog-2026-07-03.md B-2.
     <ul
       role="list"
       className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-600 dark:text-gray-400"
@@ -160,6 +161,7 @@ function Chart({
   }
 
   return (
+    // eslint-disable-next-line jsx-a11y/no-redundant-roles -- ADR 042: Tailwind Preflight sets `list-style: none` on <ul>, which strips the implicit list/listitem role in Safari VoiceOver (a known WebKit quirk — Chrome/Firefox are unaffected). role="list" restores it. The rule can't see the CSS interaction, so this is a documented false positive, not a mistake. Tracked: docs/readiness-backlog-2026-07-03.md B-2.
     <ul role="list" className="space-y-1">
       {days.map((d) => (
         <DayRow key={`${d.day}-${d.currency}`} day={d} currency={currency} max={max} />

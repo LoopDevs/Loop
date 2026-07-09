@@ -390,6 +390,7 @@ function OrdersPage({
     <>
       {/* Header row once per mount — only on the first page. */}
       {cursor === undefined && <OrdersTableHeader />}
+      {/* eslint-disable-next-line jsx-a11y/no-redundant-roles -- ADR 042: Tailwind Preflight sets `list-style: none` on <ul>, which strips the implicit list/listitem role in Safari VoiceOver (a known WebKit quirk — Chrome/Firefox are unaffected). role="list" restores it. The rule can't see the CSS interaction, so this is a documented false positive, not a mistake. Tracked: docs/readiness-backlog-2026-07-03.md B-2. */}
       <ul role="list">
         {rows.map((row) => (
           <OrderRow key={row.id} row={row} />

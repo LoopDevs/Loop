@@ -83,6 +83,7 @@ export function CashbackByMerchantCard(): React.JSX.Element | null {
           Where your cashback comes from — last 180 days.
         </p>
       </header>
+      {/* eslint-disable-next-line jsx-a11y/no-redundant-roles -- ADR 042: Tailwind Preflight sets `list-style: none` on <ul>, which strips the implicit list/listitem role in Safari VoiceOver (a known WebKit quirk — Chrome/Firefox are unaffected). role="list" restores it. The rule can't see the CSS interaction, so this is a documented false positive, not a mistake. Tracked: docs/readiness-backlog-2026-07-03.md B-2. */}
       <ul role="list" className="divide-y divide-gray-100 dark:divide-gray-900">
         {query.data.rows.map((row: CashbackByMerchantRow) => {
           const { name, slug } = resolve(row.merchantId);

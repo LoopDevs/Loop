@@ -331,6 +331,7 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
               value={authOtp}
               onChange={setAuthOtp}
               required
+              // eslint-disable-next-line jsx-a11y/no-autofocus -- ADR 042: deliberate UX — this is the sole input on a step that just became active after an explicit user action (submit email / advance a wizard step), not an unexpected focus jump. eslint-plugin-jsx-a11y blanket-disallows autoFocus; WCAG does not. Tracked: docs/readiness-backlog-2026-07-03.md B-2.
               autoFocus
               label="Verification code"
             />

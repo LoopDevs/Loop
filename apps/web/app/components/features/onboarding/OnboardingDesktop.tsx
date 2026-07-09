@@ -147,6 +147,7 @@ export function OnboardingDesktop({ onComplete }: OnboardingDesktopProps = {}): 
                   }}
                   required
                   autoComplete="email"
+                  // eslint-disable-next-line jsx-a11y/no-autofocus -- ADR 042: deliberate UX — this is the sole input on a step that just became active after an explicit user action (submit email / advance a wizard step), not an unexpected focus jump. eslint-plugin-jsx-a11y blanket-disallows autoFocus; WCAG does not. Tracked: docs/readiness-backlog-2026-07-03.md B-2.
                   autoFocus
                   {...(emailError !== null ? { error: emailError } : {})}
                 />
@@ -193,6 +194,7 @@ export function OnboardingDesktop({ onComplete }: OnboardingDesktopProps = {}): 
                     clearErrors();
                   }}
                   required
+                  // eslint-disable-next-line jsx-a11y/no-autofocus -- ADR 042: deliberate UX — this is the sole input on a step that just became active after an explicit user action (submit email / advance a wizard step), not an unexpected focus jump. eslint-plugin-jsx-a11y blanket-disallows autoFocus; WCAG does not. Tracked: docs/readiness-backlog-2026-07-03.md B-2.
                   autoFocus
                   autoComplete="one-time-code"
                   {...(otpError !== null ? { error: otpError } : {})}

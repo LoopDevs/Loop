@@ -102,6 +102,7 @@ export function AdminAuditTail(): React.JSX.Element {
       ) : query.data.rows.length === 0 ? (
         <p className="px-6 py-4 text-sm text-gray-500 dark:text-gray-400">No admin writes yet.</p>
       ) : (
+        // eslint-disable-next-line jsx-a11y/no-redundant-roles -- ADR 042: Tailwind Preflight sets `list-style: none` on <ul>, which strips the implicit list/listitem role in Safari VoiceOver (a known WebKit quirk — Chrome/Firefox are unaffected). role="list" restores it. The rule can't see the CSS interaction, so this is a documented false positive, not a mistake. Tracked: docs/readiness-backlog-2026-07-03.md B-2.
         <ul role="list" className="divide-y divide-gray-100 dark:divide-gray-900">
           {query.data.rows.map((row: AdminAuditTailRow) => (
             <li

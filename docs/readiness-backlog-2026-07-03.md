@@ -674,6 +674,29 @@ Note the **sweep** arm already maps a skip-row that goes `unmatched` → `order_
       point fix within B-2's much larger scope — the axe/jsx-a11y/pa11y tooling
       and the full keyboard/screen-reader audit are still not started; B-2 stays
       unchecked.
+      **Progress note (2026-07-09): tooling landed** — `eslint-plugin-jsx-a11y`
+      (recommended set, `apps/web/app/**/*.tsx`, gates `npm run lint`) +
+      `jest-axe` route smokes (`MobileHome`, `PurchaseContainer`, `AuthRoute`,
+      `LoopOrdersList`, `Onboarding` — WCAG 2.1 A/AA tags) landed via ADR 042.
+      Initial lint sweep found 26 violations across 4 rules: 2 were real gaps
+      (fixed — `Navbar` combobox missing `aria-controls`, documented in ADR
+      042); 24 were codebase-specific false positives (19× `role="list"` on
+      `<ul>` — a deliberate Safari/VoiceOver fix that Tailwind Preflight's
+      `list-style: none` would otherwise break; 5× `autoFocus` on the sole
+      input of a freshly-active auth/onboarding step; 1× a modal
+      stopPropagation handler) suppressed with scoped, reasoned
+      `eslint-disable-next-line` comments rather than a blanket rule
+      downgrade — the repo's `eslint . --max-warnings=0` gate means a
+      rule-level `warn` would still fail CI on every existing hit, so a
+      per-line documented exception was the only way to both keep the rule
+      at `error` for new code and land a green `npm run verify`. All 5
+      `jest-axe` route smokes pass with zero violations — no rule exclusions
+      needed there. **Still missing** (B-2 stays unchecked): the manual
+      keyboard-only navigation walkthrough, the screen-reader pass
+      (VoiceOver/TalkBack/NVDA), and real-browser color-contrast checking
+      (jsdom has no layout engine, so `jest-axe` structurally cannot catch
+      contrast — see ADR 042's alternatives section for the pa11y/
+      `@axe-core/playwright` follow-up that would close that gap).
 
 ### B-3 · User-level fraud/abuse controls (absent) `[code]`
 

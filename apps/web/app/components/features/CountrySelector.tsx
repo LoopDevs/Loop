@@ -117,6 +117,7 @@ export function CountrySelector(): React.JSX.Element {
           onMouseDown={() => setOpen(false)}
           className="fixed inset-0 z-[1300] flex items-start justify-center bg-black/40 px-4 pt-[12vh]"
         >
+          {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- ADR 042: onMouseDown here only stops propagation to the backdrop's close-on-outside-click handler above (standard modal pattern) — it offers no interaction of its own that needs a keyboard equivalent. Tracked: docs/readiness-backlog-2026-07-03.md B-2. */}
           <div
             ref={dialogRef}
             role="dialog"

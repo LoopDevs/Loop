@@ -182,6 +182,7 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
         aria-expanded={open && results.length > 0}
         aria-haspopup="listbox"
         aria-owns="search-listbox"
+        aria-controls="search-listbox"
       >
         <div className="relative">
           <input
