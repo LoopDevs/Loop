@@ -774,7 +774,20 @@ Note the **sweep** arm already maps a skip-row that goes `unmatched` → `order_
 
 ### U-2 · Onboarding marketing copy unconditionally promises Phase-2 cashback `[code]` (small)
 
-- [ ] **Status:** ☐ Not started — found in U-1 (finding UX-01, `docs/ux-pass-2026-07-09.md`)
+- [x] **Status:** ✅ Done 2026-07-09 (PR #1595) — `getOnboardingCopy(phase1Only)`
+      in `apps/web/app/components/features/onboarding/Onboarding.tsx` overlays
+      Phase-1 (discount-framed) copy onto `COPY[1]`/`COPY[2]`/`COPY[3]`; both
+      `Onboarding.tsx` (native/mobile) and `OnboardingDesktop.tsx` (web
+      `SlidePanel`) call it instead of referencing `COPY` directly, so they
+      can't drift apart again. Also threaded a `phase1Only` prop into
+      `TrustWelcome`/`TrustHowItWorks` (`screens-trust.tsx`) for the two
+      hardcoded (non-`copy`-sourced) strings the audit called out by name —
+      the "Total cashback $2,847.00" receipt card (→ "Total saved") and the
+      "Cashback lands in your bank" how-it-works step (→ "Your discount
+      applies instantly"). Tests:
+      `apps/web/app/components/features/onboarding/__tests__/onboarding-phase1-copy.test.tsx`
+      asserts both phases on both surfaces; the existing a11y/skip-nav
+      onboarding tests stay green unmodified.
 
 **Why:** The onboarding slideshow's first screen (both the native
 multi-screen `Onboarding.tsx` and the web `/onboarding` split-layout
@@ -806,7 +819,22 @@ promises, on both native and web onboarding; `npm run verify` green.
 
 ### U-3 · `/calculator` is reachable in Phase 1 and shows a misleading empty state `[code]` (small)
 
-- [ ] **Status:** ☐ Not started — found in U-1 (findings UX-02 + UX-03, `docs/ux-pass-2026-07-09.md`)
+- [x] **Status:** ✅ Done 2026-07-09 (PR #1595) — `apps/web/app/routes/calculator.tsx`
+      now wraps its body in the same `Phase2Gate` `/cashback` uses (default
+      export renders `<Phase2Gate><CalculatorRouteBody /></Phase2Gate>`), so
+      `LOOP_PHASE_1_ONLY=true` shows the identical "Coming soon" panel
+      instead of the live LOOP-stablecoin copy + misleading "No merchants
+      available right now" empty state. Also fixed UX-03 (bundled per its
+      own note — same file): `<main>` now takes `pt-20` so the H1 clears the
+      fixed Navbar, matching `brand.$slug.tsx`'s existing offset. Verified no
+      navbar/footer link exists to `/calculator` (grepped — none found) so
+      there was no nav-link gating to match; the sitemap still lists
+      `/calculator` unconditionally, consistent with how it already lists
+      the equally-gated `/cashback` and `/trustlines`. Tests:
+      `apps/web/app/routes/__tests__/calculator.test.tsx` adds a
+      `<CalculatorRoute /> Phase-1 gate` block asserting the gate renders
+      (and skips the merchants fetch) when `phase1Only` is true, and the
+      real page renders when false.
 
 **Why:** `/cashback` correctly Phase-1-gates with a clean "Coming soon —
 this part of Loop is under construction" screen. `/calculator`

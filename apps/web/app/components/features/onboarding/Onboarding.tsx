@@ -30,6 +30,16 @@ interface ScreenCopy {
 // we end on Welcome-in right after OTP verify. Step 6 is an
 // optional biometric-enable step between OTP and Welcome-in; it
 // self-skips on devices without biometrics.
+// Steps 1-3 (the marketing trust screens, rendered as steps 0-2 by
+// `renderStep`) are Phase-2 (cashback / bank-transfer) by default.
+// U-2 / UX-01 (docs/ux-pass-2026-07-09.md): these were the last
+// screens in the app still making that promise unconditionally under
+// `LOOP_PHASE_1_ONLY=true` — every other surface already branches on
+// `phase1Only` (see home.tsx's hero copy). `PHASE1_TRUST_COPY` below
+// overrides just those three entries with discount-flavoured copy;
+// `getOnboardingCopy()` merges it in when the flag is set. Steps 4-9
+// are phase-neutral or already skipped outright by the effect below,
+// so they don't need a split.
 export const COPY: Record<1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9, ScreenCopy> = {
   1: {
     eyebrow: 'Welcome to Loop',
@@ -71,6 +81,43 @@ export const COPY: Record<1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9, ScreenCopy> = {
   },
 };
 
+// Phase-1 (discount-framed) overrides for the three marketing trust
+// screens — mirrors the "save up to 15% instantly" framing home.tsx
+// already uses for `phase1Only`, with no cashback/bank-transfer
+// claims. Kept as a small overlay (rather than duplicating all nine
+// `COPY` entries) so the Phase-2 copy stays the single source of
+// truth for steps 4-9 and a flag flip-back needs no code change.
+const PHASE1_TRUST_COPY: Record<1 | 2 | 3, ScreenCopy> = {
+  1: {
+    eyebrow: 'Welcome to Loop',
+    title: 'Shop. Save.\nRepeat.',
+    sub: 'The smart way to shop — save up to 15% instantly on gift cards from stores you already use.',
+  },
+  2: {
+    eyebrow: 'How it works',
+    title: 'Buy gift cards, save instantly.',
+    sub: 'When you shop at stores you already love, buy a Loop gift card first. You save up to 15% off the sticker price, right away.',
+  },
+  3: {
+    eyebrow: 'Where it works',
+    title: '500+ brands you’ll actually use.',
+    sub: 'Groceries, gas, dining, everyday runs. Your savings add up fast.',
+  },
+};
+
+/**
+ * Resolves the onboarding copy bank for the current phase. Both the
+ * native multi-screen flow (`Onboarding`) and the web split-layout
+ * (`OnboardingDesktop`) call this instead of referencing `COPY`
+ * directly, so the two surfaces can never drift back out of sync.
+ */
+export function getOnboardingCopy(
+  phase1Only: boolean,
+): Record<1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9, ScreenCopy> {
+  if (!phase1Only) return COPY;
+  return { ...COPY, ...PHASE1_TRUST_COPY };
+}
+
 const TOTAL_STEPS = 9;
 
 /**
@@ -111,6 +158,12 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
   // Stellar passkey wallet that ships in Tranche 2). Auto-advance
   // when we render those indices so users see only steps 0-4, 6, 8.
   const phase1Only = config.phase1Only;
+  // U-2 / UX-01: steps 0-2 (the marketing trust screens) show
+  // discount-flavoured copy in Phase 1 instead of the default
+  // cashback/bank-transfer copy — see `getOnboardingCopy()`. Named
+  // `stepCopy` (not `copy`) to stay unambiguous next to the `copy`
+  // prop every screen component below takes.
+  const stepCopy = getOnboardingCopy(phase1Only);
   const [step, setStep] = useState(0);
   const [email, setEmail] = useState('');
   const [otp, setOtp] = useState('');
@@ -361,14 +414,16 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
   const currentCta = stepCta[step]!;
 
   const renderStep = (idx: number, active: boolean): React.JSX.Element | null => {
-    if (idx === 0) return <TrustWelcome active={active} copy={COPY[1]} />;
-    if (idx === 1) return <TrustHowItWorks active={active} copy={COPY[2]} />;
-    if (idx === 2) return <TrustMerchants active={active} copy={COPY[3]} />;
+    if (idx === 0)
+      return <TrustWelcome active={active} copy={stepCopy[1]} phase1Only={phase1Only} />;
+    if (idx === 1)
+      return <TrustHowItWorks active={active} copy={stepCopy[2]} phase1Only={phase1Only} />;
+    if (idx === 2) return <TrustMerchants active={active} copy={stepCopy[3]} />;
     if (idx === 3)
       return (
         <EmailEntry
           active={active}
-          copy={COPY[4]}
+          copy={stepCopy[4]}
           email={email}
           setEmail={setEmail}
           error={emailError}
@@ -379,7 +434,7 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
       return (
         <OtpEntry
           active={active}
-          copy={COPY[5]}
+          copy={stepCopy[5]}
           email={email}
           otp={otp}
           setOtp={setOtp}
@@ -392,7 +447,7 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
       return (
         <CurrencyPickerScreen
           active={active}
-          copy={COPY[6]}
+          copy={stepCopy[6]}
           selected={currency}
           onSelect={handlePickCurrency}
           error={currencyError}
@@ -402,7 +457,7 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
       return (
         <BiometricSetup
           active={active}
-          copy={COPY[7]}
+          copy={stepCopy[7]}
           available={biometricsChecked ? biometrics.available : null}
           onEnabled={next}
           triggerRef={biometricTriggerRef}
@@ -412,7 +467,7 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
       return (
         <WalletIntroScreen
           active={active}
-          copy={COPY[8]}
+          copy={stepCopy[8]}
           homeCurrency={currency}
           onLinkWallet={() => {
             // Leave onboarding and drop into the real trustline flow.
@@ -422,7 +477,7 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
           }}
         />
       );
-    if (idx === 8) return <WelcomeIn active={active} copy={COPY[9]} />;
+    if (idx === 8) return <WelcomeIn active={active} copy={stepCopy[9]} />;
     return null;
   };
 

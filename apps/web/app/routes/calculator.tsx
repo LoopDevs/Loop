@@ -8,6 +8,7 @@ import { shouldRetry } from '~/hooks/query-retry';
 import { useLocale } from '~/i18n/locale';
 import { Navbar } from '~/components/features/Navbar';
 import { Footer } from '~/components/features/Footer';
+import { Phase2Gate } from '~/components/Phase2Gate';
 import { Spinner } from '~/components/ui/Spinner';
 import { CashbackCalculator } from '~/components/features/cashback/CashbackCalculator';
 
@@ -42,6 +43,14 @@ export function meta({ params }: Route.MetaArgs): Route.MetaDescriptors {
 }
 
 export default function CalculatorRoute(): React.JSX.Element {
+  return (
+    <Phase2Gate>
+      <CalculatorRouteBody />
+    </Phase2Gate>
+  );
+}
+
+function CalculatorRouteBody(): React.JSX.Element {
   // CAT-02 (2026-06-30 cold audit): this route was the last of three
   // country-blind catalog surfaces — the dropdown showed every
   // merchant globally regardless of the visitor's locale, unlike
@@ -62,7 +71,11 @@ export default function CalculatorRoute(): React.JSX.Element {
   return (
     <>
       <Navbar />
-      <main className="container mx-auto max-w-3xl px-4 py-12">
+      {/* UX-03 (docs/ux-pass-2026-07-09.md, bundled into U-3): the H1
+          below used to render with its top ~15px clipped under the
+          fixed Navbar on load. `pt-20` clears it — same offset
+          brand.$slug.tsx uses for the same fixed-Navbar overlap. */}
+      <main className="container mx-auto max-w-3xl px-4 pb-12 pt-20">
         <header className="text-center">
           <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-3">
             Cashback calculator

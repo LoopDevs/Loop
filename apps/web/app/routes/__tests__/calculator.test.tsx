@@ -12,13 +12,26 @@ import CalculatorRoute from '../calculator';
 vi.mock('~/components/features/Navbar', () => ({ Navbar: () => null }));
 vi.mock('~/components/features/Footer', () => ({ Footer: () => null }));
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  mocks.phase1Only = false;
+});
 
 const { mocks } = vi.hoisted(() => ({
   mocks: {
     getPublicTopCashbackMerchants: vi.fn(),
     getPublicCashbackPreview: vi.fn(),
+    phase1Only: false,
   },
+}));
+
+// U-3 / UX-02 (docs/ux-pass-2026-07-09.md): `/calculator` is now
+// wrapped in `Phase2Gate`, same as `/cashback`. Default the mock to
+// phase1Only=false so the existing body-rendering tests below keep
+// exercising the real page; the dedicated gate tests further down
+// flip this per-case. Mirrors `cashback.test.tsx`'s mocking pattern.
+vi.mock('~/hooks/use-app-config', () => ({
+  useAppConfig: () => ({ config: { phase1Only: mocks.phase1Only }, isLoading: false }),
 }));
 
 vi.mock('~/services/public-stats', async (importActual) => {
@@ -155,6 +168,42 @@ describe('<CalculatorRoute />', () => {
       expect(mocks.getPublicTopCashbackMerchants).toHaveBeenCalledWith(
         expect.objectContaining({ country: 'us' }),
       );
+    });
+  });
+});
+
+/**
+ * U-3 / UX-02 (docs/ux-pass-2026-07-09.md): `/calculator` had no
+ * `LOOP_PHASE_1_ONLY` gate at all, so it rendered live with
+ * Phase-2 copy and a "No merchants available right now" empty state
+ * that read as a data glitch rather than "not launched yet." Fixed
+ * by wrapping the route in the same `Phase2Gate` `/cashback` already
+ * uses (`apps/web/app/routes/cashback.tsx`). These tests assert the
+ * gate itself, on both settings of the flag — the block above always
+ * forces `phase1Only: false` and never exercised the gate.
+ */
+describe('<CalculatorRoute /> Phase-1 gate', () => {
+  it('renders the "Coming soon" gate when phase1Only is true and never fetches merchants', () => {
+    mocks.phase1Only = true;
+    mocks.getPublicTopCashbackMerchants.mockClear();
+    renderRoute();
+    expect(screen.getByRole('heading', { name: /coming soon/i })).toBeDefined();
+    expect(screen.queryByText(/Cashback calculator/)).toBeNull();
+    expect(screen.queryByText(/No merchants available right now/)).toBeNull();
+    expect(mocks.getPublicTopCashbackMerchants).not.toHaveBeenCalled();
+  });
+
+  it('renders the real calculator page when phase1Only is false', async () => {
+    mocks.phase1Only = false;
+    mocks.getPublicTopCashbackMerchants.mockResolvedValue({
+      merchants: [],
+      asOf: new Date().toISOString(),
+    });
+    renderRoute();
+    expect(screen.getByRole('heading', { name: /cashback calculator/i })).toBeDefined();
+    expect(screen.queryByRole('heading', { name: /coming soon/i })).toBeNull();
+    await waitFor(() => {
+      expect(mocks.getPublicTopCashbackMerchants).toHaveBeenCalled();
     });
   });
 });
