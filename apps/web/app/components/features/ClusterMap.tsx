@@ -30,14 +30,29 @@ function escapeHtml(value: string): string {
 
 interface ClusterMapProps {
   onMerchantSelect?: ((merchantId: string) => void) | undefined;
+  /**
+   * Initial center/zoom (UX-08 — `docs/ux-pass-2026-07-09.md`), typically
+   * `mapViewOf(locale.country)` from `@loop/shared`. `undefined` (unrouted
+   * country, or caller doesn't pass one) falls back to the US-wide default
+   * below so the map always renders something.
+   */
+  initialView?: { lat: number; lng: number; zoom: number } | undefined;
 }
 
 /**
  * Full-screen Leaflet map with protobuf cluster data from the Loop backend.
  * This component is lazy-loaded — Leaflet requires browser APIs.
  */
-export default function ClusterMap({ onMerchantSelect }: ClusterMapProps): React.JSX.Element {
+export default function ClusterMap({
+  onMerchantSelect,
+  initialView,
+}: ClusterMapProps): React.JSX.Element {
   const mapContainerRef = useRef<HTMLDivElement>(null);
+  // UX-08: captured once at mount, not kept reactive to a later locale
+  // change while the map stays mounted — this is deliberately just the
+  // *initial* viewport, not a live re-center (a bigger behavior change
+  // than "open looking at roughly the right part of the world").
+  const initialViewRef = useRef(initialView ?? { lat: 40, lng: -98, zoom: 4 });
   const mapRef = useRef<LeafletMap | null>(null);
   const markersRef = useRef<Layer[]>([]);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -413,8 +428,8 @@ export default function ClusterMap({ onMerchantSelect }: ClusterMapProps): React
       });
 
       const map = L.map(mapContainerRef.current, {
-        center: [40, -98],
-        zoom: 4,
+        center: [initialViewRef.current.lat, initialViewRef.current.lng],
+        zoom: initialViewRef.current.zoom,
         // A11Y-006: restore the +/- zoom control. Gestures (pinch /
         // double-tap) are the primary affordance on mobile, but the
         // buttons are the only keyboard-operable zoom for users who can't

@@ -105,6 +105,62 @@ export const COUNTRIES: readonly Country[] = [
   { code: 'MX', label: 'Mexico', flag: '🇲🇽', currency: 'MXN' },
 ];
 
+/**
+ * Rough initial map viewport per country (UX-08 — `docs/ux-pass-2026-07-09.md`).
+ * Deliberately not survey-precise centroids — just enough that `/map` opens
+ * looking at roughly the right part of the world for the active locale
+ * instead of a fixed North-America-wide default for every country. `zoom` is
+ * a Leaflet zoom level chosen so the country's populated area is broadly in
+ * frame. Every {@link COUNTRIES} entry must have a row here —
+ * `countries.test.ts` enforces that so a newly-added country doesn't
+ * silently fall back to the US view.
+ */
+export interface MapView {
+  lat: number;
+  lng: number;
+  zoom: number;
+}
+
+const MAP_VIEW_BY_COUNTRY: Readonly<Record<string, MapView>> = {
+  US: { lat: 39.8, lng: -98.6, zoom: 4 },
+  GB: { lat: 54.0, lng: -2.5, zoom: 5 },
+  CA: { lat: 56.1, lng: -106.3, zoom: 3 },
+  FR: { lat: 46.6, lng: 2.2, zoom: 5 },
+  DE: { lat: 51.2, lng: 10.4, zoom: 5 },
+  IT: { lat: 42.8, lng: 12.6, zoom: 5 },
+  ES: { lat: 40.2, lng: -3.7, zoom: 5 },
+  NL: { lat: 52.2, lng: 5.3, zoom: 7 },
+  IE: { lat: 53.4, lng: -8.0, zoom: 6 },
+  BE: { lat: 50.6, lng: 4.5, zoom: 7 },
+  AT: { lat: 47.6, lng: 14.1, zoom: 6 },
+  FI: { lat: 63.2, lng: 25.7, zoom: 4 },
+  PT: { lat: 39.6, lng: -8.0, zoom: 6 },
+  GR: { lat: 39.1, lng: 22.9, zoom: 6 },
+  LU: { lat: 49.8, lng: 6.1, zoom: 9 },
+  SK: { lat: 48.7, lng: 19.5, zoom: 7 },
+  SI: { lat: 46.1, lng: 14.8, zoom: 8 },
+  LT: { lat: 55.2, lng: 23.9, zoom: 7 },
+  LV: { lat: 56.9, lng: 24.6, zoom: 7 },
+  EE: { lat: 58.6, lng: 25.0, zoom: 7 },
+  CY: { lat: 35.1, lng: 33.4, zoom: 8 },
+  MT: { lat: 35.9, lng: 14.4, zoom: 10 },
+  HR: { lat: 45.1, lng: 15.2, zoom: 7 },
+  AE: { lat: 23.4, lng: 53.8, zoom: 6 },
+  IN: { lat: 22.4, lng: 78.7, zoom: 4 },
+  SA: { lat: 23.9, lng: 45.1, zoom: 5 },
+  AU: { lat: -25.3, lng: 133.8, zoom: 4 },
+  MX: { lat: 23.6, lng: -102.5, zoom: 4 },
+};
+
+/**
+ * Initial map view for a country code; `undefined` if unrouted (callers
+ * fall back to the {@link MAP_VIEW_BY_COUNTRY}.US-equivalent default).
+ */
+export function mapViewOf(code: string | null | undefined): MapView | undefined {
+  if (!code) return undefined;
+  return MAP_VIEW_BY_COUNTRY[code.toUpperCase()];
+}
+
 /** The country a bare `/` (or an unrecognised locale) falls back to. */
 export const DEFAULT_COUNTRY = 'US';
 /** The language a bare locale falls back to. */

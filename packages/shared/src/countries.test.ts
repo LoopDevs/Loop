@@ -10,6 +10,7 @@ import {
   currencyOf,
   isSupportedCountryCode,
   isSupportedLang,
+  mapViewOf,
   merchantInCountry,
   resolveCountryPath,
 } from './countries.js';
@@ -166,5 +167,35 @@ describe('country model consistency', () => {
 
   it('the default country is routable', () => {
     expect(isSupportedCountryCode(DEFAULT_COUNTRY)).toBe(true);
+  });
+});
+
+// UX-08 (docs/ux-pass-2026-07-09.md): the map's initial viewport is
+// locale-aware via a per-country centroid/zoom table instead of a fixed
+// North-America-wide default for every country.
+describe('mapViewOf (UX-08)', () => {
+  it('every routable country has a map view — no silent fallback to the US default', () => {
+    for (const c of COUNTRIES) {
+      const view = mapViewOf(c.code);
+      expect(view, `missing MAP_VIEW_BY_COUNTRY row for ${c.code}`).toBeDefined();
+      expect(Number.isFinite(view?.lat)).toBe(true);
+      expect(Number.isFinite(view?.lng)).toBe(true);
+      expect(view?.zoom).toBeGreaterThan(0);
+    }
+  });
+
+  it('resolves case-insensitively', () => {
+    expect(mapViewOf('gb')).toEqual(mapViewOf('GB'));
+  });
+
+  it('is undefined for an unrouted country', () => {
+    expect(mapViewOf('JP')).toBeUndefined();
+    expect(mapViewOf(null)).toBeUndefined();
+    expect(mapViewOf(undefined)).toBeUndefined();
+  });
+
+  it('gives different countries a different initial view', () => {
+    expect(mapViewOf('US')).not.toEqual(mapViewOf('CA'));
+    expect(mapViewOf('US')).not.toEqual(mapViewOf('GB'));
   });
 });
