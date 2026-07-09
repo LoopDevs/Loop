@@ -774,7 +774,7 @@ Note the **sweep** arm already maps a skip-row that goes `unmatched` → `order_
 
 ### U-2 · Onboarding marketing copy unconditionally promises Phase-2 cashback `[code]` (small)
 
-- [x] **Status:** ✅ Done 2026-07-09 (PR #TBD) — `getOnboardingCopy(phase1Only)`
+- [x] **Status:** ✅ Done 2026-07-09 (PR #1595) — `getOnboardingCopy(phase1Only)`
       in `apps/web/app/components/features/onboarding/Onboarding.tsx` overlays
       Phase-1 (discount-framed) copy onto `COPY[1]`/`COPY[2]`/`COPY[3]`; both
       `Onboarding.tsx` (native/mobile) and `OnboardingDesktop.tsx` (web
@@ -819,7 +819,7 @@ promises, on both native and web onboarding; `npm run verify` green.
 
 ### U-3 · `/calculator` is reachable in Phase 1 and shows a misleading empty state `[code]` (small)
 
-- [x] **Status:** ✅ Done 2026-07-09 (PR #TBD) — `apps/web/app/routes/calculator.tsx`
+- [x] **Status:** ✅ Done 2026-07-09 (PR #1595) — `apps/web/app/routes/calculator.tsx`
       now wraps its body in the same `Phase2Gate` `/cashback` uses (default
       export renders `<Phase2Gate><CalculatorRouteBody /></Phase2Gate>`), so
       `LOOP_PHASE_1_ONLY=true` shows the identical "Coming soon" panel
