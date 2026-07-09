@@ -91,7 +91,7 @@ Phase-2 surfaces ship dark behind `LOOP_PHASE_1_ONLY=true`, so T1 launches witho
 
 ## §T1-BS · Hardening / blind-spots (before real growth)
 
-- [ ] **B-1** load/stress/soak testing (absent) 🟢 · [ ] **B-2** accessibility / WCAG 2.1 AA audit (EU exposure; a11y-contract tests started this session) 🟢 · [ ] **B-4** DR: PITR + offsite backup 👤+🟢 · [ ] **B-5** observability depth (Prometheus scraping tier/dashboards/alerts — endpoint exists) 🟢+👤 · [ ] **B-6** i18n (English-only scaffold, hardcoded copy, no RTL — large) 🟢.
+- [ ] **B-1** load/stress/soak testing (absent) 🟢 · [ ] **B-2** accessibility / WCAG 2.1 AA audit (EU exposure; a11y-contract tests started this session; 2026-07-09: mechanical floor landed — `eslint-plugin-jsx-a11y` lint gate + 5 `jest-axe` route smokes, ADR 042 — manual keyboard/screen-reader pass + contrast checking still open, see readiness-backlog B-2) 🟢 · [ ] **B-4** DR: PITR + offsite backup 👤+🟢 · [ ] **B-5** observability depth (Prometheus scraping tier/dashboards/alerts — endpoint exists) 🟢+👤 · [ ] **B-6** i18n (English-only scaffold, hardcoded copy, no RTL — large) 🟢.
 
 ---
 

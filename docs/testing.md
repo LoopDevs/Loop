@@ -61,6 +61,9 @@ spinning up a browser. Covers:
 - Utilities — `error-messages`, `image` (proxy URL builder), `money` (currency-aware formatter), `security-headers`.
 - Purchase-flow components (jsdom opt-in per file) — `AmountSelection`, `PaymentStep`, `PurchaseComplete`, `RedeemFlow` — render + event assertions via `@testing-library/react`.
 - Hooks — `use-auth`, `use-native-platform`, `use-session-restore`, `query-retry`.
+- **Accessibility (ADR 042 / B-2)** — two layers, not one:
+  - **Static:** `eslint-plugin-jsx-a11y`'s `recommended` rule set gates `npm run lint` on `apps/web/app/**/*.tsx` (structural JSX mistakes — missing `alt`, unlabeled controls, invalid ARIA, non-interactive elements wired to click handlers). A handful of rule hits are codebase-specific false positives (documented inline + in ADR 042's Consequences section) suppressed with scoped, reasoned `eslint-disable-next-line` comments rather than a blanket rule downgrade — the repo's `--max-warnings=0` lint gate means a rule-level `warn` would still fail CI, so precision matters here.
+  - **Runtime:** `jest-axe` (`*.a11y.test.tsx`, jsdom) scans the rendered DOM at the `wcag2a`/`wcag2aa`/`wcag21a`/`wcag21aa` rule tags on one smoke test per key surface — `MobileHome`, `PurchaseContainer` (signed-out inline auth), `AuthRoute` (`/auth` sign-in form), `LoopOrdersList`, `Onboarding` (first screen). These are regression smoke tests, not an audit — jsdom has no layout engine so `jest-axe` cannot catch color-contrast violations; that + the keyboard/screen-reader pass remain manual (tracked at `docs/readiness-backlog-2026-07-03.md` B-2).
 
 ### E2E (`tests/e2e` + `tests/e2e-mocked` + `tests/e2e-flywheel`)
 

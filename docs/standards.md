@@ -415,7 +415,20 @@ no-debugger                                   error
 no-var                                        error
 prefer-const                                  error
 eqeqeq                                        error
+jsx-a11y/* (recommended set, apps/web/app/**/*.tsx only — ADR 042)  error
 ```
+
+`eslint-plugin-jsx-a11y` needed the same peer-dependency workaround
+`eslint-plugin-import` is still waiting on (see the note above and
+ADR-005 §3): its published `peerDependencies` cap `eslint` at `^9`,
+one major behind this repo's `eslint@10`. Unlike `eslint-plugin-react`
+and `eslint-plugin-import`, the fix didn't require waiting for an
+upstream release — root `package.json`'s `overrides` field pins
+`eslint-plugin-jsx-a11y`'s own `eslint` dependency to `$eslint` (the
+root-resolved version), which satisfies npm's resolver without
+`--legacy-peer-deps`. The plugin's flat-config export
+(`flatConfigs.recommended`) works unchanged under ESLint 10 in
+practice — only the published peer range is stale.
 
 ### Git hook behaviour
 

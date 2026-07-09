@@ -1,6 +1,7 @@
 import tseslint from '@typescript-eslint/eslint-plugin';
 import tsParser from '@typescript-eslint/parser';
 import reactHooksPlugin from 'eslint-plugin-react-hooks';
+import jsxA11y from 'eslint-plugin-jsx-a11y';
 
 // eslint-plugin-react intentionally NOT imported: we never opted into its
 // `recommended` config, and the only two rules we referenced
@@ -130,6 +131,21 @@ export default [
           ],
         },
       ],
+    },
+  },
+  // ─── Web app — accessibility lint gate (ADR 042 / B-2) ──────────────────────
+  //
+  // eslint-plugin-jsx-a11y's `recommended` flat config, scoped to the web
+  // app's JSX. Static structural checks only (missing alt text, unlabeled
+  // form controls, click handlers on non-interactive elements without a
+  // role/keyboard handler, invalid ARIA, etc.) — the runtime-DOM half of the
+  // gate (contrast, computed accessible names) lives in the jest-axe smoke
+  // tests instead (ADR 042 explains why both layers exist).
+  {
+    files: ['apps/web/app/**/*.tsx'],
+    plugins: { 'jsx-a11y': jsxA11y },
+    rules: {
+      ...jsxA11y.flatConfigs.recommended.rules,
     },
   },
   // ─── Media-tooling deps must never enter backend/shared bundles (ADR 041) ────
