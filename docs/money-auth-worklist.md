@@ -303,7 +303,17 @@
 
 ## Phase 4 — Admin / support money tooling (ops can't intervene today)
 
-- [ ] **A5-1 · Order re-drive lever** (biggest hole). _M · 💰._
+- [x] **A5-1 · Order re-drive lever** (biggest hole). _M · 💰._
+      **Done 2026-07-09, paid-only after money-review (review-first PR #1609 open, not yet
+      merged):** `POST /api/admin/orders/:orderId/redrive` — admin-tier + step-up (`order-redrive`
+      scope), ADR-017 envelope. Re-runs `procureOne` for a stuck **`paid`** order the worker never
+      drained (the recovery sweep only touches `procuring`). Safe under concurrency:
+      `markOrderProcuring`'s CAS is a hard single-flight gate, so never a double-procure or
+      double-pay (INV-7). **`procuring` orders refused** (`ORDER_REDRIVE_IN_PROGRESS`) — a
+      money-reviewer found force-reverting a procuring order to re-procure it can strand a CTX-paid
+      order (INV-6) and narrowly double-pay (INV-7); stuck procuring orders are auto-recovered by
+      the sweep, and safe manual re-procure needs a liveness signal + bounded Horizon I/O (follow-up).
+      No new money logic — reuses `procureOne` / `ctx_settlements`. Cancel-and-refund deferred to A5-4.
 - [ ] **A5-4 · Order-bound refund UI + fulfilled-order policy.** _M · 💰 + policy._
 - [ ] **A5-6 · Make stuck-orders / stuck-payouts support-visible.** _M · 💰._
 - [ ] **A5-9 · Bulk actions + drift-correction action.** _M · 💰._

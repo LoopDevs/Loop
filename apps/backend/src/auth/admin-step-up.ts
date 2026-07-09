@@ -52,7 +52,7 @@ const STEP_UP_ISSUER = 'loop-api';
  * narrower scope (`'credit-adjustment'` / `'refund'` / `'withdrawal'`
  * / `'emission'` / `'payout-retry'` / `'payout-compensation'` /
  * `'home-currency'` / `'operator-float'` / `'staff-role-grant'` /
- * `'staff-role-revoke'`)
+ * `'staff-role-revoke'` / `'order-redrive'`)
  * is opt-in and binds the token to that single class — the gate
  * middleware rejects it on any other class with `STEP_UP_PURPOSE_MISMATCH`.
  */
@@ -79,6 +79,10 @@ export const STEP_UP_SCOPES = [
   // captured bearer alone must not be able to drain the operator to
   // attacker-chosen deposits.
   'deposit-refund',
+  // A5-1: re-driving a stuck order re-runs `procureOne`, which can
+  // submit a real outbound Stellar payment to CTX (`payCtxOrder`) — a
+  // captured bearer alone must not be able to trigger that.
+  'order-redrive',
 ] as const;
 export type AdminStepUpScope = (typeof STEP_UP_SCOPES)[number];
 

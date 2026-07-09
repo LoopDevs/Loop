@@ -247,3 +247,18 @@ export async function findAnyOrderByMemo(memo: string): Promise<Order | null> {
   });
   return row ?? null;
 }
+
+/**
+ * Looks up a single order by id, in any state. A5-1: shared read used
+ * by the admin order re-drive handler (`admin/order-redrive.ts`) for
+ * both its initial state check and its post-procurement re-fetch —
+ * kept here rather than inlined so it isn't a third copy of the
+ * `adminGetOrderHandler` select (admin/orders.ts already has one; this
+ * is the repo-layer equivalent for non-admin-view callers).
+ */
+export async function getOrderById(orderId: string): Promise<Order | null> {
+  const row = await db.query.orders.findFirst({
+    where: eq(orders.id, orderId),
+  });
+  return row ?? null;
+}

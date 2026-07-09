@@ -565,11 +565,12 @@ max_connections`, including the release-command migration machine
 
 ### A5-1 · Order re-drive lever (biggest hole) `[code]`
 
-- [ ] **Status:** ☐ Not started
+- [x] **Status:** ✅ Shipped 2026-07-09 (PR #1609 — review-first, not yet merged).
       **Why:** A stuck `paid`/`procuring` order has **no** operator action — no requeue/reprocure/manual-fulfill/cancel. Resolution relies on the worker eventually retrying, else raw SQL/kill-switch.
       **Do:** add admin endpoint(s) + UI to re-drive a stuck order: re-enqueue procurement, or (with step-up + reason + audit) mark for retry/cancel-and-refund. Reuse the procurement worker path; don't duplicate its money logic.
       **⚠️** Money-review — a re-drive must be idempotent (can't double-procure/double-pay CTX; the `ctx_settlements` guard must hold).
       **Done when:** an operator can unstick a paid/procuring order from `/admin/orders/:id` without SQL; test.
+      **Shipped (paid-only after money-review):** `POST /api/admin/orders/:orderId/redrive` — admin-tier + step-up (`order-redrive` scope), ADR-017 envelope. Re-runs `procureOne` for a stuck **`paid`** order the worker never drained (the recovery sweep only touches `procuring` rows, so a paid order stranded by a downed worker otherwise sits forever). Safe under concurrency: `markOrderProcuring`'s `WHERE state='paid'` CAS is a hard single-flight gate — a live worker / another redrive all contend and exactly one wins the claim; the rest return `'skipped'` before reaching `payCtxOrder`, so never a double-procure or double-pay (INV-7). **`procuring` orders are refused** (`ORDER_REDRIVE_IN_PROGRESS`, 409): a money-reviewer found that force-reverting a `procuring` order to re-procure it can strand a CTX-paid order in `failed` with no refund (INV-6) and, in a narrow window, double-pay CTX (INV-7), because nothing reliably distinguishes a crashed worker from a genuinely-live one (`submitNativePayment`'s `loadAccount` has no client timeout). Stuck `procuring` orders already have the automatic recovery sweep as a backstop; safe manual re-procure needs a liveness signal + bounded Horizon I/O (core-payment-path follow-up). No new money logic — reuses `procureOne` + `ctx_settlements` unchanged. Web: admin-only `OrderRedrivePanel` on `/admin/orders/:orderId`, step-up + reason-dialog gated. **Scope decision:** cancel-and-refund also OUT of scope — deferred to A5-4. Tests: `apps/backend/src/admin/__tests__/order-redrive.test.ts` (state routing, procuring-refused, idempotent double-click) + `apps/web/app/components/features/admin/__tests__/OrderRedrivePanel.test.tsx` + `staff-route-gating.test.ts` / `rate-limit-route-inventory.test.ts` updates.
 
 ### A5-2 · Admin session-revocation UI `[code]`
 

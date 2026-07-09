@@ -9,9 +9,10 @@ import AdminOrderDetailRoute, { fmtMinor } from '../admin.orders.$orderId';
 
 afterEach(cleanup);
 
-// The route now mounts OrderDeliveryPanel (ADR 037), which reads the
-// ui.store for toasts — the store resolves the initial theme via
-// window.matchMedia at import time, which jsdom doesn't implement.
+// The route now mounts OrderDeliveryPanel (ADR 037) and
+// OrderRedrivePanel (A5-1), both of which read the ui.store for
+// toasts — the store resolves the initial theme via window.matchMedia
+// at import time, which jsdom doesn't implement.
 vi.hoisted(() => {
   Object.defineProperty(window, 'matchMedia', {
     writable: true,
@@ -251,5 +252,30 @@ describe('<AdminOrderDetailRoute />', () => {
     await waitFor(() => {
       expect(screen.getByText(/No payout row for this order yet/)).toBeDefined();
     });
+  });
+
+  // A5-1: the order re-drive panel is admin-only and only shows for
+  // the two redrivable states. Component-level flow coverage (reason
+  // dialog, service call, toasts, step-up) lives in
+  // OrderRedrivePanel.test.tsx — this just proves the route wires it
+  // in with the right state.
+  it('A5-1: shows the re-drive panel for an admin on a stuck paid order', async () => {
+    adminMock.getAdminOrder.mockResolvedValue({ ...baseRow, state: 'paid', fulfilledAt: null });
+    adminMock.getAdminPayoutByOrder.mockRejectedValue(
+      new ApiException(404, { code: 'NOT_FOUND', message: 'Not found' }),
+    );
+    renderAt();
+    await waitFor(() => {
+      expect(screen.getByText(/Re-drive \(A5-1\)/i)).toBeDefined();
+    });
+  });
+
+  it('A5-1: hides the re-drive panel for a fulfilled order (nothing to redrive)', async () => {
+    adminMock.getAdminOrder.mockResolvedValue(baseRow); // state: 'fulfilled'
+    renderAt();
+    await waitFor(() => {
+      expect(screen.getByText('bbbb2222')).toBeDefined();
+    });
+    expect(screen.queryByText(/Re-drive \(A5-1\)/i)).toBeNull();
   });
 });

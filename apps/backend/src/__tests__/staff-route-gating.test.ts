@@ -206,6 +206,7 @@ const ADMIN_ONLY_PROBES: Array<[string, string]> = [
   ['POST', '/api/admin/deposits/op-123/refund'],
   ['POST', '/api/admin/payouts/00000000-0000-4000-8000-00000000aaaa/retry'],
   ['POST', '/api/admin/payouts/00000000-0000-4000-8000-00000000aaaa/compensate'],
+  ['POST', `/api/admin/orders/${NOBODY_ID}/redrive`],
   ['PUT', '/api/admin/merchant-cashback-configs/some-merchant'],
   ['POST', '/api/admin/merchants/resync'],
   ['POST', '/api/admin/step-up'],
@@ -330,14 +331,15 @@ describe('ADR 037 mount inventory (default-deny)', () => {
       (g) => !g.gates.includes('requireStaff(admin)') && g.gates.includes('requireStaff(support)'),
     );
     const riders = groups.length - adminTier.length - supportExplicit.length;
-    // 37 = 23 CSV exports + 10 non-CSV admin writes (3 credit writes,
+    // 38 = 23 CSV exports + 10 non-CSV admin writes (3 credit writes,
     //      home-currency, cashback-config PUT, merchants/resync,
     //      B4 revoke-sessions, A6 deposit-refund, R3-1 operator-float
     //      baseline/manual explanations) + payout retry/compensate
-    //      + 3 Discord surfaces + step-up mint... see
-    //      the mount-by-mount table in the PR; the exact membership is
-    //      pinned by the matrix test above and the money-write list below.
-    expect(adminTier).toHaveLength(37);
+    //      + A5-1 order redrive + 3 Discord surfaces + step-up
+    //      mint... see the mount-by-mount table in the PR; the exact
+    //      membership is pinned by the matrix test above and the
+    //      money-write list below.
+    expect(adminTier).toHaveLength(38);
     // 7 = lookup, watcher-skips ×3, wallet ×2, refetch-redemption.
     expect(supportExplicit).toHaveLength(7);
     expect(riders).toBeGreaterThanOrEqual(50);
@@ -351,6 +353,7 @@ describe('ADR 037 mount inventory (default-deny)', () => {
       'POST /api/admin/users/:userId/home-currency',
       'POST /api/admin/payouts/:id/retry',
       'POST /api/admin/payouts/:id/compensate',
+      'POST /api/admin/orders/:orderId/redrive',
       'PUT /api/admin/merchant-cashback-configs/:merchantId',
       'POST /api/admin/operator-float/baselines',
       'POST /api/admin/operator-float/manual-movements',
@@ -381,6 +384,8 @@ describe('ADR 037 mount inventory (default-deny)', () => {
       'POST /api/admin/users/:userId/home-currency': 'requireAdminStepUp(home-currency)',
       'POST /api/admin/payouts/:id/retry': 'requireAdminStepUp(payout-retry)',
       'POST /api/admin/payouts/:id/compensate': 'requireAdminStepUp(payout-compensation)',
+      // A5-1: re-driving a stuck order can submit a real outbound Stellar payment to CTX.
+      'POST /api/admin/orders/:orderId/redrive': 'requireAdminStepUp(order-redrive)',
       'PUT /api/admin/staff/:userId/role': 'requireAdminStepUp(staff-role-grant)',
       'DELETE /api/admin/staff/:userId/role': 'requireAdminStepUp(staff-role-revoke)',
       // Sets future emission rates — see the route mount's comment.

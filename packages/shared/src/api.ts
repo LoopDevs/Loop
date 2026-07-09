@@ -223,6 +223,14 @@ export const ApiErrorCode = {
   SKIP_NOT_ABANDONED: 'SKIP_NOT_ABANDONED',
   WALLET_ALREADY_ACTIVATED: 'WALLET_ALREADY_ACTIVATED',
   REDEMPTION_NOT_REFETCHABLE: 'REDEMPTION_NOT_REFETCHABLE',
+  // A5-1 — admin order re-drive lever (paid-only). NOT_REDRIVABLE
+  // (400): the order is not `paid` (a terminal / pre-payment state —
+  // nothing to redrive). IN_PROGRESS (409): the order is `procuring`
+  // — force-re-procuring an in-flight order is a double-pay / stranding
+  // risk, so it's refused; stuck procuring orders are auto-recovered by
+  // the recovery sweep instead.
+  ORDER_NOT_REDRIVABLE: 'ORDER_NOT_REDRIVABLE',
+  ORDER_REDRIVE_IN_PROGRESS: 'ORDER_REDRIVE_IN_PROGRESS',
 } as const;
 
 export type ApiErrorCodeValue = (typeof ApiErrorCode)[keyof typeof ApiErrorCode];
