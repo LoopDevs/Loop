@@ -125,11 +125,11 @@ Required as a set when `LOOP_AUTH_NATIVE_ENABLED=true` in production — the OTP
 
 #### Database (ADR 012)
 
-| Variable                        | Required | Default | Description                                                                                                                                   |
-| ------------------------------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DATABASE_URL`                  | Yes      | —       | `postgres://` or `postgresql://` URL. Dev points at the docker-compose Postgres on `:5433`; prod Fly-managed.                                 |
-| `DATABASE_POOL_MAX`             | No       | `10`    | Drizzle pool size per Node process. Tune if a machine hosts multiple workers.                                                                 |
-| `DATABASE_STATEMENT_TIMEOUT_MS` | No       | `30000` | A2-724: per-session `statement_timeout` sent as a connection startup parameter so a runaway query can't monopolise a pool slot. `0` disables. |
+| Variable                        | Required | Default | Description                                                                                                                                                                                                                          |
+| ------------------------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `DATABASE_URL`                  | Yes      | —       | `postgres://` or `postgresql://` URL. Dev points at the docker-compose Postgres on `:5433`; prod Fly-managed.                                                                                                                        |
+| `DATABASE_POOL_MAX`             | No       | `10`    | Drizzle pool size per Node process. Tune if a machine hosts multiple workers. See §Database pool sizing & PgBouncer below (S4-5) for the sizing formula and the PgBouncer/advisory-lock risk before raising this or adding a pooler. |
+| `DATABASE_STATEMENT_TIMEOUT_MS` | No       | `30000` | A2-724: per-session `statement_timeout` sent as a connection startup parameter so a runaway query can't monopolise a pool slot. `0` disables.                                                                                        |
 
 ##### Postgres role hygiene (A2-1614)
 
@@ -156,6 +156,96 @@ multiplexes our queries, and PgBouncer's transaction-mode pooling
 breaks the `LISTEN` / `NOTIFY` and prepared-statement features the
 ledger code relies on (we do `SELECT ... FOR UPDATE` inside
 `db.transaction(...)` in the credits primitives, ADR-009).
+
+##### Database pool sizing & PgBouncer (S4-5)
+
+`DATABASE_POOL_MAX` defaults to **10** per Node process
+(`apps/backend/src/env/sections/core.ts:239`, wired into the pool at
+`apps/backend/src/db/client.ts:58`). `apps/backend/fly.toml`'s
+`[http_service.concurrency]` sets `hard_limit = 250` per machine — a
+**25× gap** between what the DB pool admits and what the machine's
+edge will let through. A burst of concurrent authed/admin work queues
+on 10 connections while CPU and the 250-request ceiling are nowhere
+near hit. Tracked as `docs/readiness-backlog-2026-07-03.md` §S4-5
+(Scale-#4).
+
+**Sizing formula:**
+
+```
+DATABASE_POOL_MAX × running machines + headroom ≤ Postgres max_connections
+```
+
+- **Running machines** — `apps/backend/fly.toml` sets
+  `min_machines_running = 1` and `auto_start_machines = true`, so the
+  count isn't fixed; `AGENTS.md`'s env-var summary documents
+  `RATE_LIMIT_MACHINE_COUNT_ESTIMATE=2` as the current production
+  fleet-size baseline. Confirm the live count with `fly machine list
+-a loopfinance-api` before sizing — autoscaling can grow it under
+  load.
+- **Headroom** — every deploy's `[deploy] release_command`
+  (`node apps/backend/dist/migrate-cli.js`) runs as a **separate
+  one-shot machine** against the same `DATABASE_URL`, and
+  `migrate-cli.ts` imports the same `db/client.ts`, so it opens its
+  own pool up to `DATABASE_POOL_MAX` too. Peak connections during a
+  rollout are briefly `(running machines + 1) × DATABASE_POOL_MAX`,
+  not just `running machines × DATABASE_POOL_MAX`. Add further
+  headroom for `loop_readonly` analytics/reconciliation scripts and
+  any operator `fly postgres connect` / `psql` session.
+- **Check the real ceiling before raising the pool** — don't assume a
+  number, read it:
+  ```bash
+  fly postgres list                          # confirm the live app name
+  psql "$DATABASE_URL" -c "SHOW max_connections;"
+  ```
+
+**Recommended starting point — PROPOSED, operator sets via `fly
+secrets set` (this doc does not change the code default).** For the
+current 2-machine fleet, **~25/machine** (`DATABASE_POOL_MAX=25`) is a
+reasonable starting point once the release-command machine and a
+couple of ops connections are counted against a typical Fly Postgres
+`max_connections` ceiling — but confirm the actual `max_connections`
+first (above) and size against that, not this number. The `10` code
+default in `apps/backend/src/env/sections/core.ts` is deliberately
+left unchanged here — the right pool size depends on the live
+Postgres plan's `max_connections`, which only an operator with
+`flyctl` access can read.
+
+**⚠️ PgBouncer transaction-mode pooling silently disables session
+advisory locks.** `withAdvisoryLock` (`apps/backend/src/db/client.ts`)
+is the fleet-wide single-flight primitive behind the payout worker,
+wallet provisioning, the interest-mint tick, the payment watcher, the
+order-expiry sweep, redemption backfill, operator-float
+reconciliation, and the redeem-order fence (`orders/redeem.ts`) —
+S4-2/S4-3/S4-8 all sit on top of it. `isPooledPostgresUrl()` detects a
+pooler `DATABASE_URL` (`pgbouncer`/`pooler` in the host — matches Fly
+MPG's `pgbouncer.*.flympg.net` and Supabase's pooler) and, rather than
+risk a session lock whose unlock lands on a different pooled backend
+and leaks forever, **degrades to running the tick UNLOCKED with a
+`log.warn`** instead of erroring. Point `DATABASE_URL` at a
+transaction-mode pooler and every one of those workers silently goes
+back to every machine running it independently — undoing
+S4-2/S4-3/S4-8 with no loud failure, only a warn log. Most call sites
+are separately CAS/DB-fenced against an actual double-spend, but
+`orders/redeem.ts`'s in-process `inFlightOrders` fence is explicitly
+documented in its own comment as covering only same-machine
+double-taps — under a pooler, cross-machine double-redemption-
+submission would no longer be fenced at all.
+
+The **transaction-scoped** locks are unaffected:
+`credits/ledger-invariant-watcher.ts`, `payments/cursor-watchdog.ts`,
+and `payments/stuck-payout-watchdog.ts` use
+`pg_try_advisory_xact_lock` inside `db.transaction(...)`, which stays
+pinned to one backend for the transaction's duration under
+transaction-mode pooling — lock and unlock land together regardless.
+Only the **session**-scoped `withAdvisoryLock` primitive is at risk.
+
+**Bottom line for the money path:** do not point `DATABASE_URL` at a
+transaction-mode pooler (PgBouncer, Fly MPG's pooler port, Supabase's
+pooler) without first revisiting every `withAdvisoryLock` call site
+above — either give each a session-mode connection, or explicitly
+accept and test the unlocked-degraded behavior per call site. Raising
+`DATABASE_POOL_MAX` (the other half of S4-5) does not touch this risk
+on its own; it only becomes live if/when a pooler is introduced later.
 
 **Verifying the prod posture.** The repo can't introspect the live
 DB roles, so this section is the source of truth for what ops should
