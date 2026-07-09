@@ -81,7 +81,8 @@ export function mountAdminOrderDrillRoutes(app: Hono): void {
   );
   // POST /api/admin/orders/:orderId/redrive — A5-1 order re-drive
   // lever. Re-runs the SAME procurement path the worker uses
-  // (procureOne) for a stuck `paid`/`procuring` order. Admin-tier +
+  // (procureOne) for a stuck `paid` order (`procuring` is refused with
+  // 409 — see the handler). Admin-tier +
   // step-up: unlike the ADR 037 support-tier delivery-unsticking
   // actions this can submit a real outbound Stellar payment to CTX.
   // 10/min: every call can be a CTX round-trip + up to ~5 minutes

@@ -17,7 +17,7 @@
  *   when the id doesn't match.
  * - `POST /api/admin/orders/:orderId/redrive` — A5-1 order re-drive
  *   lever. Re-runs the same procurement path the worker uses for a
- *   stuck `paid`/`procuring` order. Admin-tier + step-up (ADR 028
+ *   stuck `paid` order (`procuring` is refused with 409). Admin-tier + step-up (ADR 028
  *   `order-redrive` scope) — unlike the ADR 037 support-tier
  *   delivery-unsticking actions this can submit a real outbound
  *   Stellar payment to CTX.
