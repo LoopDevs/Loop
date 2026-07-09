@@ -6,7 +6,9 @@
  *
  *   1. Mint a real loop-native access/refresh token pair via the
  *      test-only `/__test__/mint-loop-token` endpoint (gated on
- *      NODE_ENV=test, identical guard to the existing /__test__/reset).
+ *      NODE_ENV=test AND a shared secret sent via the
+ *      X-Test-Endpoints-Secret header — AUDIT-2-E — identical guard
+ *      to the existing /__test__/reset).
  *   2. Plant the refresh token + email breadcrumb in browser storage
  *      so the existing `use-session-restore.ts` boot flow refreshes
  *      the access token through the production refresh endpoint.
@@ -35,6 +37,13 @@ import { test, expect, type Page } from '@playwright/test';
 const BACKEND_URL = 'http://localhost:8082';
 const SEEDED_EMAIL = 'flywheel-walk@test.local';
 
+// AUDIT-2-E: `/__test__/*` now requires this shared secret via the
+// `X-Test-Endpoints-Secret` header in addition to NODE_ENV=test — see
+// apps/backend/src/test-endpoints.ts. Must match the
+// LOOP_TEST_ENDPOINTS_SECRET set on the backend webServer in
+// playwright.flywheel.config.ts.
+const TEST_ENDPOINTS_SECRET = 'loop-flywheel-e2e-test-endpoints-secret';
+
 interface MintResponse {
   userId: string;
   email: string;
@@ -44,6 +53,7 @@ interface MintResponse {
 
 async function mintLoopSession(page: Page, email: string): Promise<MintResponse> {
   const res = await page.request.post(`${BACKEND_URL}/__test__/mint-loop-token`, {
+    headers: { 'X-Test-Endpoints-Secret': TEST_ENDPOINTS_SECRET },
     data: { email },
   });
   if (!res.ok()) {

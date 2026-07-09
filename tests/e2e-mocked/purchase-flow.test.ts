@@ -15,12 +15,22 @@ const MOCK_CTX_URL = 'http://localhost:9091';
 const BACKEND_URL = 'http://localhost:8081';
 const FIXED_OTP = '123456';
 
+// AUDIT-2-E: `/__test__/*` now requires this shared secret via the
+// `X-Test-Endpoints-Secret` header in addition to NODE_ENV=test — see
+// apps/backend/src/test-endpoints.ts. Must match the
+// LOOP_TEST_ENDPOINTS_SECRET set on the backend webServer in
+// playwright.mocked.config.ts.
+const TEST_ENDPOINTS_SECRET = 'loop-mocked-e2e-test-endpoints-secret';
+
 async function resetMock(page: Page): Promise<void> {
   await page.request.post(`${MOCK_CTX_URL}/_test/reset`);
   // Also reset backend per-IP rate-limit state so retries across tests
   // don't stack up against the 5/min /api/auth/request-otp budget.
-  // Endpoint is gated on NODE_ENV=test (see apps/backend/src/app.ts).
-  await page.request.post(`${BACKEND_URL}/__test__/reset`);
+  // Endpoint is gated on NODE_ENV=test + the shared secret above (see
+  // apps/backend/src/app.ts + test-endpoints.ts).
+  await page.request.post(`${BACKEND_URL}/__test__/reset`, {
+    headers: { 'X-Test-Endpoints-Secret': TEST_ENDPOINTS_SECRET },
+  });
 }
 
 async function markOrderFulfilled(

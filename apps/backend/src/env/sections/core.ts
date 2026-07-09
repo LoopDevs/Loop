@@ -136,6 +136,23 @@ export const coreEnvFields = {
   // every per-IP limit on every route.
   DISABLE_RATE_LIMITING: envBoolean.default(false),
 
+  // AUDIT-2-E: second, independent control required (in addition to
+  // `NODE_ENV==='test'`) before `test-endpoints.ts` mounts the
+  // `/__test__/*` surface — notably `/__test__/mint-loop-token`, which
+  // mints a full session token pair (admin-eligible if the email is on
+  // `ADMIN_EMAILS`) with zero credential check. `NODE_ENV==='test'`
+  // alone is a single string compare; a misconfigured staging/preview
+  // deploy that copies `NODE_ENV=test` would otherwise expose
+  // unauthenticated admin-session minting. Every request under
+  // `/__test__/*` must present this exact value via the
+  // `X-Test-Endpoints-Secret` header; unset → the router never mounts
+  // at all (identical to production's "route doesn't exist" posture).
+  // Set ONLY in test configs (playwright.mocked.config.ts,
+  // playwright.flywheel.config.ts) — never in production (env.ts boot
+  // guard refuses to start if it's set there). Min 16 chars so a blank
+  // or trivially-guessable value can't satisfy the gate.
+  LOOP_TEST_ENDPOINTS_SECRET: z.string().min(16).optional(),
+
   // CF2-10 (2026-06-30 cold audit) → S4-4 (2026-07-09 dynamic fix):
   // `rateLimitMap` is an in-memory, per-machine Map — every configured
   // per-route budget (`rateLimit(name, max, windowMs)`) is actually

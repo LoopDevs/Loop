@@ -172,6 +172,22 @@ export function parseEnv(source: NodeJS.ProcessEnv): Env {
     );
   }
 
+  // AUDIT-2-E: LOOP_TEST_ENDPOINTS_SECRET only has meaning alongside
+  // `NODE_ENV==='test'` (it gates the test-only `/__test__/*` mount in
+  // `test-endpoints.ts`, notably the zero-credential-check session
+  // minter). `test-endpoints.ts` already re-checks `NODE_ENV==='test'`
+  // itself before honouring the secret, so this can't by itself expose
+  // the surface in production — but the secret has no business being
+  // *present* in a production env at all, and refusing to boot with it
+  // set catches a copy-pasted env file before it becomes a standing
+  // leaked-secret risk sitting next to real production secrets.
+  if (parsed.data.NODE_ENV === 'production' && parsed.data.LOOP_TEST_ENDPOINTS_SECRET) {
+    throw new Error(
+      'Invalid environment variables — LOOP_TEST_ENDPOINTS_SECRET must not be set in production (AUDIT-2-E). ' +
+        'It only unlocks the test-only /__test__/* endpoints; unset it and redeploy.',
+    );
+  }
+
   // ADR 030 Phase B cross-field requirement: selecting the Privy
   // wallet provider without its credentials would otherwise only
   // surface on the first wallet call (as a terminal provider error).

@@ -378,6 +378,53 @@ describe('parseEnv', () => {
     });
   });
 
+  // AUDIT-2-E: LOOP_TEST_ENDPOINTS_SECRET only has meaning alongside
+  // NODE_ENV==='test' (it gates the test-only /__test__/* mount) and
+  // has no business being present in a production env at all.
+  describe('AUDIT-2-E: LOOP_TEST_ENDPOINTS_SECRET production guard', () => {
+    it('refuses to start in production when LOOP_TEST_ENDPOINTS_SECRET is set', () => {
+      expect(() =>
+        parseEnv({
+          ...base,
+          NODE_ENV: 'production',
+          IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
+          DISABLE_NATIVE_AUTH_ENFORCEMENT: '1',
+          LOOP_TEST_ENDPOINTS_SECRET: 'a-secret-that-is-long-enough-16',
+        }),
+      ).toThrow(/LOOP_TEST_ENDPOINTS_SECRET/);
+    });
+
+    it('accepts production when LOOP_TEST_ENDPOINTS_SECRET is unset', () => {
+      expect(() =>
+        parseEnv({
+          ...base,
+          NODE_ENV: 'production',
+          IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
+          LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
+          DISABLE_NATIVE_AUTH_ENFORCEMENT: '1',
+          LOOP_STELLAR_USDC_ISSUER: USDC_ISSUER,
+        }),
+      ).not.toThrow();
+    });
+
+    it('accepts LOOP_TEST_ENDPOINTS_SECRET in development + test', () => {
+      for (const nodeEnv of ['development', 'test'] as const) {
+        const env = parseEnv({
+          ...base,
+          NODE_ENV: nodeEnv,
+          LOOP_TEST_ENDPOINTS_SECRET: 'a-secret-that-is-long-enough-16',
+        });
+        expect(env.LOOP_TEST_ENDPOINTS_SECRET).toBe('a-secret-that-is-long-enough-16');
+      }
+    });
+
+    it('rejects a secret shorter than 16 chars in any NODE_ENV', () => {
+      expect(() =>
+        parseEnv({ ...base, NODE_ENV: 'test', LOOP_TEST_ENDPOINTS_SECRET: 'too-short' }),
+      ).toThrow();
+    });
+  });
+
   // Hardening B7 (2026-07 plan): HS256 retirement tripwire.
   describe('B7: HS256 retirement tripwire', () => {
     it('warns on every boot while both the RSA and HS256 keys are set', () => {
