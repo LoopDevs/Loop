@@ -64,7 +64,7 @@ Phase-2 surfaces ship dark behind `LOOP_PHASE_1_ONLY=true`, so T1 launches witho
 
 ## T1-E · Launch-blocker code
 
-- [ ] **C2-1 · Redemption-null re-validation** (the 2026-05-14 fulfilled-but-`redeemUrl/Code/Pin`-false bug + `Body already read` polling fallback; add to Tranche-1 acceptance checks). 💰
+- [ ] **C2-1 · Redemption-null re-validation** _(partial: characterized 2026-07-09 — the `Body already read` polling-fallback bug was already fixed as a test-fixture-only defect by PR #1419 (2026-06-11), and no double-body-read exists anywhere in current backend source (audited every `.json()`/`.text()`/`.arrayBuffer()` call site); the fulfilled-with-null-redemption path is a deliberate design (fulfil on `ctxOrderId`, not on redemption data) already backstopped by the `redemption-backfill` sweeper (60s cadence, 10-attempt backoff, Discord page on exhaustion). Closed the actual gap — no regression coverage existed — with a real-postgres flywheel assertion + a hard `scripts/e2e-real.mjs` assertion (with backfill-grace retry). Still open: a live real-order smoke test re-run to confirm in production — operator action, needs `E2E_REFRESH_TOKEN`/`STELLAR_TEST_SECRET_KEY`)_. 💰
 - [ ] **C2-2 · Apple Sign-In native rework (CF-27).** 🧭 operator decision → 🔐
 
 ## T1-F · Product polish + geo

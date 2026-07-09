@@ -292,6 +292,17 @@ describeIf('flywheel integration — XLM order → fulfilment → cashback credi
     expect(fulfilledRow!.state).toBe('fulfilled');
     expect(fulfilledRow!.ctxOrderId).toBe('ctx-test-order-1');
     expect(fulfilledRow!.fulfilledAt).not.toBeNull();
+    // C2-1 (2026-05-14 fulfilled-with-null-redemption bug): the
+    // redemption payload `waitForRedemption` fetched (mocked above)
+    // must land on the SAME row/UPDATE as the state transition
+    // (fulfillment.ts). No LOOP_REDEEM_ENCRYPTION_KEY is set in this
+    // suite, so encryptRedeemField is a plaintext passthrough — assert
+    // exact equality, not just non-null, so a future regression that
+    // silently drops/blanks the redemption fields on the fulfilling
+    // UPDATE fails this real-postgres walk instead of only unit-level
+    // mocks.
+    expect(fulfilledRow!.redeemCode).toBe('TEST-CODE-12345');
+    expect(fulfilledRow!.redeemPin).toBe('1234');
 
     // credit_transactions row — type='cashback', positive amount,
     // CHECK constraint `credit_transactions_amount_sign` passes
