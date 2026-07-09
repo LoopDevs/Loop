@@ -36,6 +36,7 @@ import { startInterestMintWorker, stopInterestMintWorker } from './credits/inter
 import { resolveIssuerSigners } from './payments/issuer-signers.js';
 import { startWalletProvisioning, stopWalletProvisioning } from './wallet/provisioning.js';
 import { markWorkerBlocked, markWorkerDisabled } from './runtime-health.js';
+import { getGeoDbStatus } from './public/geo.js';
 
 // A4-093: production gate for loop-native auth. The OTP send path
 // requires a real email provider; today only the `console` provider
@@ -70,6 +71,26 @@ if (
 if (env.LOOP_REDEEM_ENCRYPTION_KEY === undefined || env.LOOP_REDEEM_ENCRYPTION_KEY === '') {
   logger.warn(
     'LOOP_REDEEM_ENCRYPTION_KEY is unset — gift-card redeem codes/PINs are stored PLAINTEXT at rest (CF-25 / X-PRIV-03). Set a 32-byte key (e.g. `openssl rand -base64 32`) to encrypt them with AES-256-GCM.',
+  );
+}
+
+// go-live-plan §T1-F: one-time boot diagnostic for the GeoLite2-Country
+// `.mmdb` staleness signal. `stale` covers BOTH "configured but failed to
+// open" (bad path / a deploy that forgot the BuildKit secrets) and "opened
+// fine but the build is old" — it's deliberately false when
+// MAXMIND_GEOLITE2_PATH was never set at all, since that's a valid
+// dev/staging posture, not a misconfiguration. `/health` re-surfaces this
+// live on every probe (`geoDbStale` + `geo_db_stale` in
+// softDegradedReasons) and pages Discord at most once a week
+// (`notifyGeoDbStale` in health.ts) — this boot line is just the earliest
+// possible signal for an operator watching deploy logs.
+const geoDbStatus = await getGeoDbStatus();
+if (geoDbStatus.stale) {
+  logger.warn(
+    { available: geoDbStatus.available, buildEpoch: geoDbStatus.buildEpoch },
+    geoDbStatus.available
+      ? `GeoLite2-Country .mmdb is stale (built ${geoDbStatus.ageDays} days ago) — redeploy with the two --build-secret flags (docs/deployment.md §GeoLite2) to refresh it.`
+      : 'MAXMIND_GEOLITE2_PATH is configured but the .mmdb failed to open — the `/` geo-redirect first-guess is falling back to the US default (ADR 034). Redeploy with the two --build-secret flags (docs/deployment.md §GeoLite2).',
   );
 }
 

@@ -44,8 +44,9 @@ import { getLocations, isLocationLoading } from './clustering/data-store.js';
 import { getMerchants } from './merchants/sync.js';
 import { getRuntimeHealthSnapshot } from './runtime-health.js';
 import { upstreamUrl } from './upstream.js';
-import { notifyHealthChange } from './discord.js';
+import { notifyHealthChange, notifyGeoDbStale } from './discord.js';
 import { getOperatorHealth } from './ctx/operator-pool.js';
+import { getGeoDbStatus, GEO_DB_STALE_AFTER_DAYS } from './public/geo.js';
 
 const healthLog = logger.child({ component: 'health' });
 
@@ -57,6 +58,28 @@ const healthReadings: Array<'healthy' | 'degraded'> = [];
 
 const HEALTH_NOTIFY_COOLDOWN_MS = 30 * 60 * 1000;
 let lastHealthNotifyAt = 0;
+
+/**
+ * GeoLite2 staleness is a slow-changing, weeks-long condition (unlike the
+ * healthy/degraded flap this file otherwise damps), so it gets its own,
+ * much longer cooldown rather than piggy-backing on
+ * `HEALTH_NOTIFY_COOLDOWN_MS` / the rolling-window flip detector — without
+ * this a stale-but-not-fixed DB would otherwise either page every 30
+ * minutes (too noisy for a "remember to redeploy" nudge) or never re-page
+ * once the initial degraded→healthy/healthy→degraded transition already
+ * fired for an unrelated reason. 7 days: MaxMind's own refresh cadence, so
+ * a forgotten refresh surfaces at roughly the same cadence it should have
+ * happened.
+ */
+const GEO_DB_NOTIFY_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
+let lastGeoDbNotifyAt = 0;
+
+function maybeNotifyGeoDbStale(buildEpoch: string | null, ageDays: number | null): void {
+  const now = Date.now();
+  if (now - lastGeoDbNotifyAt < GEO_DB_NOTIFY_COOLDOWN_MS) return;
+  lastGeoDbNotifyAt = now;
+  notifyGeoDbStale({ buildEpoch, ageDays, thresholdDays: GEO_DB_STALE_AFTER_DAYS });
+}
 
 const UPSTREAM_PROBE_TTL_MS = 10_000;
 /**
@@ -186,7 +209,11 @@ export async function healthHandler(c: Context): Promise<Response> {
   const merchantsStale = now - merLoadedAt > merchantStaleMs;
   const locationsStale = now - locLoadedAt > locationStaleMs;
 
-  const [upstreamReachable, databaseReachable] = await Promise.all([probeUpstream(), probeDb()]);
+  const [upstreamReachable, databaseReachable, geoDbStatus] = await Promise.all([
+    probeUpstream(),
+    probeDb(),
+    getGeoDbStatus(),
+  ]);
   const runtime = getRuntimeHealthSnapshot();
 
   // CF2-01 (2026-06-30 cold audit): the operator-pool circuit-breaker
@@ -224,7 +251,11 @@ export async function healthHandler(c: Context): Promise<Response> {
   //     Discord stays quiet on upstream blips.
   const criticalDegraded = !databaseReachable || runtime.degraded;
   const softDegraded =
-    merchantsStale || locationsStale || !upstreamReachable || operatorPoolExhausted;
+    merchantsStale ||
+    locationsStale ||
+    !upstreamReachable ||
+    operatorPoolExhausted ||
+    geoDbStatus.stale;
   const degraded = criticalDegraded || softDegraded;
 
   // Raw reading → rolling window. Keep the last N readings, flip
@@ -317,6 +348,15 @@ export async function healthHandler(c: Context): Promise<Response> {
   if (locationsStale) softDegradedReasons.push('locations_stale');
   if (!upstreamReachable) softDegradedReasons.push('upstream_unreachable');
   if (operatorPoolExhausted) softDegradedReasons.push('operator_pool_exhausted');
+  if (geoDbStatus.stale) {
+    softDegradedReasons.push('geo_db_stale');
+    // go-live-plan §T1-F: unlike the other soft-degraded reasons above,
+    // this one deliberately pages — a forgotten GeoLite2 refresh is a
+    // silent config-drift that nobody would otherwise notice, and the
+    // long cooldown (7 days) keeps it a once-a-week nudge rather than
+    // incident-grade noise.
+    maybeNotifyGeoDbStale(geoDbStatus.buildEpoch, geoDbStatus.ageDays);
+  }
   return c.json(
     {
       status: degraded ? 'degraded' : 'healthy',
@@ -327,6 +367,14 @@ export async function healthHandler(c: Context): Promise<Response> {
       locationsLoadedAt: new Date(locLoadedAt).toISOString(),
       merchantsStale,
       locationsStale,
+      // go-live-plan §T1-F: staleness/absence signal for the operator-
+      // provided GeoLite2-Country .mmdb (docs/deployment.md §GeoLite2).
+      // `geoDbStale` is false both when fresh AND when
+      // MAXMIND_GEOLITE2_PATH was never configured — see
+      // `GeoDbStatus.stale` in `public/geo.ts` for why "unconfigured"
+      // must not read as "degraded".
+      geoDbStale: geoDbStatus.stale,
+      geoDbBuildEpoch: geoDbStatus.buildEpoch,
       upstreamReachable,
       // A4-034: DB readiness component. False = pool exhausted /
       // credentials rotated / network partition / DB hard-down.
@@ -365,6 +413,7 @@ export function __resetHealthProbeCacheForTests(): void {
   lastHealthStatus = null;
   healthReadings.length = 0;
   lastHealthNotifyAt = 0;
+  lastGeoDbNotifyAt = 0;
 }
 
 /**

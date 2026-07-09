@@ -59,6 +59,43 @@ export function notifyHealthChange(status: 'healthy' | 'degraded', details: stri
   });
 }
 
+/**
+ * Notify: the operator-provided GeoLite2-Country `.mmdb` is stale (built
+ * more than `thresholdDays` ago) or configured-but-unopenable
+ * (`buildEpoch: null` — bad path / unreadable file / a deploy that forgot
+ * the BuildKit secrets). go-live-plan §T1-F: the fix is always the same —
+ * redeploy with the two `--build-secret` flags (docs/deployment.md
+ * §GeoLite2). This is a "remember to redeploy" nudge, not an incident, so
+ * the call site (`health.ts`) throttles it to once per
+ * `GEO_DB_NOTIFY_COOLDOWN_MS` (7 days) rather than firing on every
+ * `/health` probe while the condition persists.
+ */
+export function notifyGeoDbStale(args: {
+  buildEpoch: string | null;
+  ageDays: number | null;
+  thresholdDays: number;
+}): void {
+  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+    title: '🟡 GeoLite2 database stale',
+    description: truncate(
+      args.buildEpoch === null
+        ? `MAXMIND_GEOLITE2_PATH is configured but the .mmdb failed to open — the \`/\` geo-redirect first-guess is silently falling back to the US default (ADR 034). Redeploy with the two --build-secret flags (docs/deployment.md §GeoLite2) to restore it.`
+        : `The baked-in GeoLite2-Country .mmdb was built ${args.ageDays ?? '?'} day(s) ago (built ${args.buildEpoch}), past the ${args.thresholdDays}-day staleness threshold. MaxMind ships weekly — redeploy with the two --build-secret flags (docs/deployment.md §GeoLite2) to pick up a fresh database.`,
+      DESCRIPTION_MAX,
+    ),
+    color: ORANGE,
+    fields: [
+      { name: 'Build epoch', value: args.buildEpoch ?? '_open failed_', inline: true },
+      {
+        name: 'Age (days)',
+        value: args.ageDays === null ? '_n/a_' : String(args.ageDays),
+        inline: true,
+      },
+      { name: 'Threshold (days)', value: String(args.thresholdDays), inline: true },
+    ],
+  });
+}
+
 /** Notify: operator XLM/USDC float conservation drifted or cannot classify wallet flow. */
 export function notifyOperatorFloatDrift(args: OperatorFloatRunSummary): void {
   const suffix = args.state === 'error' ? 'check failed' : args.state;

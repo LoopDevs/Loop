@@ -102,6 +102,14 @@ export function registerHealthOpenApi(
       locationsLoadedAt: z.string().openapi({ format: 'date-time' }),
       merchantsStale: z.boolean(),
       locationsStale: z.boolean(),
+      geoDbStale: z.boolean().openapi({
+        description:
+          'GeoLite2-Country .mmdb staleness/absence signal (go-live-plan §T1-F). False both when fresh AND when MAXMIND_GEOLITE2_PATH was never configured (deliberate — see docs/deployment.md §GeoLite2); true when stale (>45 days old) or configured-but-unopenable.',
+      }),
+      geoDbBuildEpoch: z.string().nullable().openapi({
+        format: 'date-time',
+        description: 'GeoLite2 .mmdb build timestamp, null when unavailable.',
+      }),
       upstreamReachable: z.boolean(),
       otpDelivery: z.object({
         enabled: z.boolean(),

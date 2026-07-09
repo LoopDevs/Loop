@@ -20,6 +20,7 @@ export {
 // sites keep working without re-targeting.
 export {
   notifyHealthChange,
+  notifyGeoDbStale,
   notifyPayoutFailed,
   notifyPayoutAwaitingTrustline,
   notifyOrderFailedAfterCtxPaid,
