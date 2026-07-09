@@ -707,6 +707,49 @@ describe('app-level middleware', () => {
     expect(body).toContain('loop_worker_degraded{worker="payout_worker"} 0');
     expect(body).toContain('# TYPE loop_worker_last_success_timestamp_ms gauge');
     expect(body).toMatch(/loop_worker_last_success_timestamp_ms\{worker="payout_worker"\} \d{13}/);
+    // B-5: the wedged-fleet lead-tick signal (S4-8) — a worker that
+    // ticked via markWorkerTickSuccess led this tick, so its lead-tick
+    // timestamp should be stamped alongside lastSuccessAtMs.
+    expect(body).toContain('# TYPE loop_worker_last_lead_tick_timestamp_ms gauge');
+    expect(body).toMatch(
+      /loop_worker_last_lead_tick_timestamp_ms\{worker="payout_worker"\} \d{13}/,
+    );
+    expect(body).toContain('# TYPE loop_worker_stale gauge');
+    expect(body).toContain('loop_worker_stale{worker="payout_worker"} 0');
+  });
+
+  it('/metrics exposes catalog freshness gauges (B-5, docs/slo.md §Freshness)', async () => {
+    // The integration harness mocks getMerchants()/getLocations() with a
+    // fresh loadedAt (Date.now()), so both catalogs should read as
+    // fresh (0) and their loaded timestamps should be present as gauges.
+    const res = await app.request('/metrics');
+    const body = await res.text();
+
+    expect(body).toContain('# TYPE loop_catalog_loaded_timestamp_ms gauge');
+    expect(body).toMatch(/loop_catalog_loaded_timestamp_ms\{catalog="merchants"\} \d{13}/);
+    expect(body).toMatch(/loop_catalog_loaded_timestamp_ms\{catalog="locations"\} \d{13}/);
+    expect(body).toContain('# TYPE loop_catalog_stale gauge');
+    expect(body).toContain('loop_catalog_stale{catalog="merchants"} 0');
+    expect(body).toContain('loop_catalog_stale{catalog="locations"} 0');
+  });
+
+  it('/metrics exposes geo-db and rate-limit-fleet gauges (B-5)', async () => {
+    // MAXMIND_GEOLITE2_PATH is unset in the mocked env, so the geo DB
+    // reads as unconfigured (not stale — see GeoDbStatus's doc comment)
+    // and the age gauge is omitted entirely (ageDays is null). FLY_APP_NAME
+    // is also unset, so the fleet estimate falls back to the static
+    // default (1, source "static" → gauge value 0).
+    const res = await app.request('/metrics');
+    const body = await res.text();
+
+    expect(body).toContain('# TYPE loop_geo_db_stale gauge');
+    expect(body).toContain('loop_geo_db_stale 0');
+    expect(body).not.toContain('loop_geo_db_build_age_days');
+
+    expect(body).toContain('# TYPE loop_rate_limit_fleet_estimate gauge');
+    expect(body).toMatch(/loop_rate_limit_fleet_estimate \d+/);
+    expect(body).toContain('# TYPE loop_rate_limit_fleet_estimate_source gauge');
+    expect(body).toContain('loop_rate_limit_fleet_estimate_source 0');
   });
 
   it('/metrics emits exactly one HELP line per metric (audit A-016)', async () => {
@@ -720,6 +763,13 @@ describe('app-level middleware', () => {
       'loop_rate_limit_hits_total',
       'loop_requests_total',
       'loop_circuit_state',
+      'loop_worker_last_lead_tick_timestamp_ms',
+      'loop_worker_stale',
+      'loop_catalog_loaded_timestamp_ms',
+      'loop_catalog_stale',
+      'loop_geo_db_stale',
+      'loop_rate_limit_fleet_estimate',
+      'loop_rate_limit_fleet_estimate_source',
     ]) {
       const helpLines = body.split('\n').filter((l) => l.startsWith(`# HELP ${metric} `));
       expect(helpLines, `expected exactly one HELP line for ${metric}`).toHaveLength(1);

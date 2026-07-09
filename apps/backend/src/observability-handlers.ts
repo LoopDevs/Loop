@@ -16,6 +16,11 @@ import { getAllCircuitStates } from './circuit-breaker.js';
 import { generateOpenApiSpec } from './openapi.js';
 import { probeGateAllows } from './middleware/probe-gate.js';
 import { getRuntimeHealthSnapshot } from './runtime-health.js';
+import { getMerchants } from './merchants/sync.js';
+import { getLocations } from './clustering/data-store.js';
+import { merchantCatalogStaleAfterMs, locationCatalogStaleAfterMs } from './health.js';
+import { getGeoDbStatus } from './public/geo.js';
+import { currentFleetSizeEstimate, currentFleetSizeSource } from './middleware/fleet-size.js';
 
 /** Closed-by-default response when the gate rejects a request. */
 function gateRejection(c: Context, expected: string | undefined): Response {
@@ -36,7 +41,7 @@ function probeScopedHeaders(): Record<string, string> {
  * for rate-limit hits + per-(method, route, status) request totals
  * + a circuit-breaker state gauge per upstream endpoint.
  */
-export function metricsHandler(c: Context): Response {
+export async function metricsHandler(c: Context): Promise<Response> {
   if (!probeGateAllows(c, env.METRICS_BEARER_TOKEN)) {
     return gateRejection(c, env.METRICS_BEARER_TOKEN);
   }
@@ -142,6 +147,96 @@ export function metricsHandler(c: Context): Response {
       );
     }
   }
+  lines.push('');
+
+  // B-5: S4-8's "alive but not leading" distinction wasn't previously
+  // scrapeable — only /health's JSON carried lastLeadTickAtMs/stale. A
+  // fleet where every machine is alive (lastSuccessAtMs fresh) but NONE
+  // of them has led a tick in a while is wedged even though the existing
+  // loop_worker_running/loop_worker_degraded gauges read healthy.
+  lines.push(
+    "# HELP loop_worker_last_lead_tick_timestamp_ms Unix timestamp in ms this machine last won a single-flighted worker's fleet-wide lock (or last ticked, for workers with no lock).",
+  );
+  lines.push('# TYPE loop_worker_last_lead_tick_timestamp_ms gauge');
+  for (const worker of runtime.workers) {
+    if (worker.lastLeadTickAtMs !== null) {
+      lines.push(
+        `loop_worker_last_lead_tick_timestamp_ms{worker="${worker.name}"} ${worker.lastLeadTickAtMs}`,
+      );
+    }
+  }
+  lines.push('');
+
+  lines.push('# HELP loop_worker_stale Worker staleness state (1=stale, 0=fresh).');
+  lines.push('# TYPE loop_worker_stale gauge');
+  for (const worker of runtime.workers) {
+    lines.push(`loop_worker_stale{worker="${worker.name}"} ${worker.stale ? 1 : 0}`);
+  }
+  lines.push('');
+
+  // B-5: docs/slo.md §Freshness pins "merchant catalog age ≤ 2x
+  // REFRESH_INTERVAL_HOURS" / "location clusters age ≤ 2x
+  // LOCATION_REFRESH_INTERVAL_HOURS" as SLOs, but until now that data
+  // only reached operators via /health's JSON body (not scrapeable /
+  // dashboard-able / alertable via Prometheus). Both reads are in-memory
+  // cache lookups (merchants/sync.js, clustering/data-store.js) — no DB
+  // or upstream call, so this stays as cheap as the rest of /metrics.
+  const { loadedAt: merchantsLoadedAtMs } = getMerchants();
+  const { loadedAt: locationsLoadedAtMs } = getLocations();
+  const merchantsStale = Date.now() - merchantsLoadedAtMs > merchantCatalogStaleAfterMs();
+  const locationsStale = Date.now() - locationsLoadedAtMs > locationCatalogStaleAfterMs();
+
+  lines.push(
+    "# HELP loop_catalog_loaded_timestamp_ms Unix timestamp in ms of the catalog's last successful load.",
+  );
+  lines.push('# TYPE loop_catalog_loaded_timestamp_ms gauge');
+  lines.push(`loop_catalog_loaded_timestamp_ms{catalog="merchants"} ${merchantsLoadedAtMs}`);
+  lines.push(`loop_catalog_loaded_timestamp_ms{catalog="locations"} ${locationsLoadedAtMs}`);
+  lines.push('');
+
+  lines.push(
+    '# HELP loop_catalog_stale Catalog freshness state vs its docs/slo.md Freshness target (1=stale, 0=fresh).',
+  );
+  lines.push('# TYPE loop_catalog_stale gauge');
+  lines.push(`loop_catalog_stale{catalog="merchants"} ${merchantsStale ? 1 : 0}`);
+  lines.push(`loop_catalog_stale{catalog="locations"} ${locationsStale ? 1 : 0}`);
+  lines.push('');
+
+  // B-5: mirrors /health's geoDbStale soft-degraded reason. `stale` is
+  // already false-for-both-fresh-and-unconfigured (see GeoDbStatus's doc
+  // comment in public/geo.ts) so this gauge can't false-alarm on a
+  // deployment that never configured MAXMIND_GEOLITE2_PATH. The reader
+  // is memoized after first open (no repeated file I/O per scrape).
+  const geoDbStatus = await getGeoDbStatus();
+  lines.push('# HELP loop_geo_db_stale GeoLite2 database staleness state (1=stale, 0=fresh).');
+  lines.push('# TYPE loop_geo_db_stale gauge');
+  lines.push(`loop_geo_db_stale ${geoDbStatus.stale ? 1 : 0}`);
+  lines.push('');
+  if (geoDbStatus.ageDays !== null) {
+    lines.push('# HELP loop_geo_db_build_age_days Age in whole days of the loaded GeoLite2 build.');
+    lines.push('# TYPE loop_geo_db_build_age_days gauge');
+    lines.push(`loop_geo_db_build_age_days ${geoDbStatus.ageDays}`);
+    lines.push('');
+  }
+
+  // B-5: S4-4's per-machine → fleet-wide rate-limit budget divisor,
+  // previously only visible via /health JSON. `source` is a label
+  // rather than folded into the gauge value so both facts stay queryable
+  // independently (mirrors the loop_circuit_state 0/1/2 gauge pattern).
+  lines.push(
+    '# HELP loop_rate_limit_fleet_estimate Current divisor the rate limiter uses for its per-machine to fleet-wide budget conversion.',
+  );
+  lines.push('# TYPE loop_rate_limit_fleet_estimate gauge');
+  lines.push(`loop_rate_limit_fleet_estimate ${currentFleetSizeEstimate()}`);
+  lines.push('');
+
+  lines.push(
+    '# HELP loop_rate_limit_fleet_estimate_source Source of the fleet-size estimate (0=static fallback, 1=dynamic DNS-derived).',
+  );
+  lines.push('# TYPE loop_rate_limit_fleet_estimate_source gauge');
+  lines.push(
+    `loop_rate_limit_fleet_estimate_source ${currentFleetSizeSource() === 'dynamic' ? 1 : 0}`,
+  );
 
   return c.text(lines.join('\n') + '\n', 200, {
     'Content-Type': 'text/plain; version=0.0.4',

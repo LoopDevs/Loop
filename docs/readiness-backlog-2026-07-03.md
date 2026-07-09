@@ -785,6 +785,37 @@ max_connections`, including the release-command migration machine
       **Why:** No distributed tracing (a multi-worker money incident = grep-by-request-id); alerting is Discord-webhook-only (no paging/escalation — a missed message is a missed page, `docs/alerting.md`); SLOs are defined (`docs/slo.md`) but nothing computes burn-rate or alerts.
       **Do:** add OpenTelemetry tracing across the order→payment-watcher→procurement→payout chain; add a paging tier (PagerDuty/Twilio) for P0 signals (payout-failed, over-mint drift); wire burn-rate alerts to the SLOs. `[operator]` for the paging vendor.
       **Done when:** a money incident is traceable end-to-end and a P0 alert actually pages a human.
+      **Progress note (2026-07-09) — scrape/dashboard 🟢 half done:**
+      `docs/observability.md` (new) documents everything `/metrics`
+      emits + its bearer-token scrape auth, and indexes two committed
+      artifacts under `docs/observability/`: `prometheus.yml` (an
+      example scrape config, `promtool check config`-validated
+      locally) and `grafana-dashboard.json` (a schema-v39 dashboard,
+      JSON-parse-checked in `scripts/lint-docs.sh` §11) with one row
+      per `docs/slo.md` section (Availability / Latency / Freshness /
+      Worker health / Infra). `/metrics` gained new gauges so those
+      panels have real data to plot: `loop_catalog_stale` +
+      `loop_catalog_loaded_timestamp_ms` (Freshness SLO — merchants +
+      locations, same staleness formula as `/health` via the new
+      shared `merchantCatalogStaleAfterMs()`/`locationCatalogStaleAfterMs()`
+      helpers in `health.ts`), `loop_worker_stale` +
+      `loop_worker_last_lead_tick_timestamp_ms` (surfaces S4-8's
+      "alive but never leading" wedged-fleet signal, previously only
+      in `/health`'s JSON body), `loop_geo_db_stale` +
+      `loop_geo_db_build_age_days`, and `loop_rate_limit_fleet_estimate` + `loop_rate_limit_fleet_estimate_source` (S4-4's per-machine →
+      fleet-wide divisor). All new reads are in-memory/cached (no new
+      DB or upstream calls from a `/metrics` scrape) — see
+      `docs/observability.md` for why settlement-lag and on-chain
+      asset-drift stay un-panelled (they're DB-backed admin reads, not
+      in-memory state, so wiring them in would change `/metrics`'s
+      cost profile — flagged as a future follow-up, not invented here).
+      **Still open (👤+`[code]`):** OpenTelemetry tracing across
+      order→payment-watcher→procurement→payout, a paging tier
+      (PagerDuty/Twilio) for P0 signals, burn-rate alerting wired to
+      the SLOs, and actually standing up a Prometheus + Grafana
+      instance (or Grafana Cloud) pointed at the committed config —
+      see `docs/observability.md` "Operator actions". B-5 stays
+      unchecked until that half lands.
 
 ### B-6 · i18n is English-only behind a good scaffold `[code]` (large)
 
