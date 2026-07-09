@@ -1,0 +1,85 @@
+{
+  "copy": {
+    "1": {
+      "eyebrow": "Welcome to Loop",
+      "title": "Shop. Save.\nRepeat.",
+      "sub": "The smart way to pay — earn cashback on every purchase, paid by instant bank transfer."
+    },
+    "2": {
+      "eyebrow": "How it works",
+      "title": "Buy gift cards, get cash back.",
+      "sub": "When you shop at stores you already love, buy a Loop gift card first. You get up to 7% back instantly."
+    },
+    "3": {
+      "eyebrow": "Where it works",
+      "title": "500+ brands you’ll actually use.",
+      "sub": "Groceries, gas, dining, everyday runs. Your cashback adds up fast."
+    },
+    "4": {
+      "title": "What’s your email?",
+      "sub": "We’ll send you a 6-digit code to verify. Your email is never shared."
+    },
+    "5": {
+      "title": "Check your inbox",
+      "sub": "We sent a 6-digit code to"
+    },
+    "6": {
+      "eyebrow": "Your region",
+      "title": "Pick your currency.",
+      "sub": "Prices, purchases and cashback all land in this currency. You can change it later with our support team."
+    },
+    "7": {
+      "title": "One-tap sign in",
+      "sub": "Use biometrics to lock Loop on app launch. If biometrics are unavailable later, Loop can fall back to your device passcode. Your biometric data never leaves the device."
+    },
+    "8": {
+      "eyebrow": "Stellar wallet",
+      "title": "Your cashback,\nyour wallet.",
+      "sub": "Cashback lands in your Loop balance instantly. Move it to your own Stellar wallet any time — Loop mints a branded stablecoin for your currency."
+    },
+    "9": {
+      "title": "You’re in.",
+      "sub": "Your Loop account is ready. Start earning on your first purchase."
+    }
+  },
+  "copyPhase1": {
+    "1": {
+      "eyebrow": "Welcome to Loop",
+      "title": "Shop. Save.\nRepeat.",
+      "sub": "The smart way to shop — save up to 15% instantly on gift cards from stores you already use."
+    },
+    "2": {
+      "eyebrow": "How it works",
+      "title": "Buy gift cards, save instantly.",
+      "sub": "When you shop at stores you already love, buy a Loop gift card first. You save up to 15% off the sticker price, right away."
+    },
+    "3": {
+      "eyebrow": "Where it works",
+      "title": "500+ brands you’ll actually use.",
+      "sub": "Groceries, gas, dining, everyday runs. Your savings add up fast."
+    }
+  },
+  "cta": {
+    "getStarted": "Get started",
+    "continue": "Continue",
+    "sending": "Sending…",
+    "sendCode": "Send code",
+    "verifying": "Verifying…",
+    "verify": "Verify",
+    "saving": "Saving…",
+    "checking": "Checking…",
+    "openLoop": "Open Loop",
+    "back": "Back",
+    "alreadyHaveAccount": "I already have an account"
+  },
+  "trust": {
+    "totalSaved": "Total saved",
+    "totalCashback": "Total cashback",
+    "thisYearSoFar": "This year so far",
+    "step1": "Open Loop before you shop",
+    "step2": "Buy a gift card at the store",
+    "step3Phase1": "Your discount applies instantly",
+    "step3Phase2": "Cashback lands in your bank",
+    "moreBrands": "+ 500 more brands"
+  }
+}

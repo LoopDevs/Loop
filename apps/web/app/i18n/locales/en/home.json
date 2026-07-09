@@ -1,0 +1,33 @@
+{
+  "hero": {
+    "badgePhase1": "Up to 15% off, instantly",
+    "badgePhase2": "Cashback on every order",
+    "titlePhase1Prefix": "Instant",
+    "titlePhase1Highlight": "cashback",
+    "titlePhase1Suffix": "everywhere you shop.",
+    "titlePhase2Prefix": "Earn cashback on",
+    "titlePhase2Middle": "every",
+    "titlePhase2Highlight": "gift card",
+    "subtitlePhase1": "Buy from merchants you already shop at. Save up to 15% instantly. Pay with XLM or USDC, redeem online or in-store.",
+    "subtitlePhase2": "Buy from merchants you already shop at. Every order pays back to your Loop balance — withdraw on-chain whenever you’re ready.",
+    "getStarted": "Get started — it’s free",
+    "browseBrands": "Browse brands",
+    "featureInstantDelivery": "Instant delivery",
+    "featureLocations": "500,000+ locations",
+    "featureSavePhase1": "Save on every order",
+    "featureSavePhase2": "Cashback every order"
+  },
+  "errorLoadingMerchants": "Failed to load merchants. Please try again.",
+  "featured": {
+    "heading": "Top cashback rates",
+    "subheading": "Featured merchants with the highest cashback on Loop right now."
+  },
+  "directory": {
+    "heading": "All merchants",
+    "subheading": "Browse our complete collection of gift cards."
+  },
+  "error": {
+    "message": "We couldn't load the merchant directory.",
+    "reload": "Reload page"
+  }
+}

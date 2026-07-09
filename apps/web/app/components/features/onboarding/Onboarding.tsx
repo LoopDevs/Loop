@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { checkBiometrics } from '~/native/biometrics';
 import type { BiometricResult } from '~/native/biometrics';
 import { setHomeCurrency } from '~/services/user';
@@ -35,87 +37,51 @@ interface ScreenCopy {
 // U-2 / UX-01 (docs/ux-pass-2026-07-09.md): these were the last
 // screens in the app still making that promise unconditionally under
 // `LOOP_PHASE_1_ONLY=true` — every other surface already branches on
-// `phase1Only` (see home.tsx's hero copy). `PHASE1_TRUST_COPY` below
-// overrides just those three entries with discount-flavoured copy;
-// `getOnboardingCopy()` merges it in when the flag is set. Steps 4-9
-// are phase-neutral or already skipped outright by the effect below,
+// `phase1Only` (see home.tsx's hero copy). The `onboarding:copyPhase1.*`
+// catalogue keys (see `getOnboardingCopy()` below) override just those
+// three entries with discount-flavoured copy when the flag is set. Steps
+// 4-9 are phase-neutral or already skipped outright by the effect below,
 // so they don't need a split.
-export const COPY: Record<1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9, ScreenCopy> = {
-  1: {
-    eyebrow: 'Welcome to Loop',
-    title: 'Shop. Save.\nRepeat.',
-    sub: 'The smart way to pay — earn cashback on every purchase, paid by instant bank transfer.',
-  },
-  2: {
-    eyebrow: 'How it works',
-    title: 'Buy gift cards, get cash back.',
-    sub: 'When you shop at stores you already love, buy a Loop gift card first. You get up to 7% back instantly.',
-  },
-  3: {
-    eyebrow: 'Where it works',
-    title: '500+ brands you\u2019ll actually use.',
-    sub: 'Groceries, gas, dining, everyday runs. Your cashback adds up fast.',
-  },
-  4: {
-    title: 'What\u2019s your email?',
-    sub: 'We\u2019ll send you a 6-digit code to verify. Your email is never shared.',
-  },
-  5: { title: 'Check your inbox', sub: 'We sent a 6-digit code to' },
-  6: {
-    eyebrow: 'Your region',
-    title: 'Pick your currency.',
-    sub: 'Prices, purchases and cashback all land in this currency. You can change it later with our support team.',
-  },
-  7: {
-    title: 'One-tap sign in',
-    sub: 'Use biometrics to lock Loop on app launch. If biometrics are unavailable later, Loop can fall back to your device passcode. Your biometric data never leaves the device.',
-  },
-  8: {
-    eyebrow: 'Stellar wallet',
-    title: 'Your cashback,\nyour wallet.',
-    sub: 'Cashback lands in your Loop balance instantly. Move it to your own Stellar wallet any time — Loop mints a branded stablecoin for your currency.',
-  },
-  9: {
-    title: 'You\u2019re in.',
-    sub: 'Your Loop account is ready. Start earning on your first purchase.',
-  },
-};
-
-// Phase-1 (discount-framed) overrides for the three marketing trust
-// screens — mirrors the "save up to 15% instantly" framing home.tsx
-// already uses for `phase1Only`, with no cashback/bank-transfer
-// claims. Kept as a small overlay (rather than duplicating all nine
-// `COPY` entries) so the Phase-2 copy stays the single source of
-// truth for steps 4-9 and a flag flip-back needs no code change.
-const PHASE1_TRUST_COPY: Record<1 | 2 | 3, ScreenCopy> = {
-  1: {
-    eyebrow: 'Welcome to Loop',
-    title: 'Shop. Save.\nRepeat.',
-    sub: 'The smart way to shop — save up to 15% instantly on gift cards from stores you already use.',
-  },
-  2: {
-    eyebrow: 'How it works',
-    title: 'Buy gift cards, save instantly.',
-    sub: 'When you shop at stores you already love, buy a Loop gift card first. You save up to 15% off the sticker price, right away.',
-  },
-  3: {
-    eyebrow: 'Where it works',
-    title: '500+ brands you’ll actually use.',
-    sub: 'Groceries, gas, dining, everyday runs. Your savings add up fast.',
-  },
-};
-
-/**
- * Resolves the onboarding copy bank for the current phase. Both the
- * native multi-screen flow (`Onboarding`) and the web split-layout
- * (`OnboardingDesktop`) call this instead of referencing `COPY`
- * directly, so the two surfaces can never drift back out of sync.
- */
+//
+// ADR 043 (B-6): the literal copy bank that used to live here (`COPY` +
+// `PHASE1_TRUST_COPY`) is now the `onboarding:copy.*` / `onboarding:copyPhase1.*`
+// catalogue (`~/i18n/locales/en/onboarding.json`); `getOnboardingCopy()`
+// below builds the same `Record<1..9, ScreenCopy>` shape via `t()` lookups
+// instead of an object-literal merge.
 export function getOnboardingCopy(
+  t: TFunction<'onboarding'>,
   phase1Only: boolean,
 ): Record<1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9, ScreenCopy> {
-  if (!phase1Only) return COPY;
-  return { ...COPY, ...PHASE1_TRUST_COPY };
+  const copy: Record<1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9, ScreenCopy> = {
+    1: { eyebrow: t('copy.1.eyebrow'), title: t('copy.1.title'), sub: t('copy.1.sub') },
+    2: { eyebrow: t('copy.2.eyebrow'), title: t('copy.2.title'), sub: t('copy.2.sub') },
+    3: { eyebrow: t('copy.3.eyebrow'), title: t('copy.3.title'), sub: t('copy.3.sub') },
+    4: { title: t('copy.4.title'), sub: t('copy.4.sub') },
+    5: { title: t('copy.5.title'), sub: t('copy.5.sub') },
+    6: { eyebrow: t('copy.6.eyebrow'), title: t('copy.6.title'), sub: t('copy.6.sub') },
+    7: { title: t('copy.7.title'), sub: t('copy.7.sub') },
+    8: { eyebrow: t('copy.8.eyebrow'), title: t('copy.8.title'), sub: t('copy.8.sub') },
+    9: { title: t('copy.9.title'), sub: t('copy.9.sub') },
+  };
+  if (!phase1Only) return copy;
+  return {
+    ...copy,
+    1: {
+      eyebrow: t('copyPhase1.1.eyebrow'),
+      title: t('copyPhase1.1.title'),
+      sub: t('copyPhase1.1.sub'),
+    },
+    2: {
+      eyebrow: t('copyPhase1.2.eyebrow'),
+      title: t('copyPhase1.2.title'),
+      sub: t('copyPhase1.2.sub'),
+    },
+    3: {
+      eyebrow: t('copyPhase1.3.eyebrow'),
+      title: t('copyPhase1.3.title'),
+      sub: t('copyPhase1.3.sub'),
+    },
+  };
 }
 
 const TOTAL_STEPS = 9;
@@ -153,6 +119,7 @@ interface OnboardingProps {
 export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Element {
   const navigate = useNavigate();
   const { config } = useAppConfig();
+  const { t } = useTranslation('onboarding');
   // Tranche 1 (MVP) launch: skip steps 5 (CurrencyPicker — needs
   // multi-currency cashback) and 7 (WalletIntro — needs the
   // Stellar passkey wallet that ships in Tranche 2). Auto-advance
@@ -163,7 +130,7 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
   // cashback/bank-transfer copy — see `getOnboardingCopy()`. Named
   // `stepCopy` (not `copy`) to stay unambiguous next to the `copy`
   // prop every screen component below takes.
-  const stepCopy = getOnboardingCopy(phase1Only);
+  const stepCopy = getOnboardingCopy(t, phase1Only);
   const [step, setStep] = useState(0);
   const [email, setEmail] = useState('');
   const [otp, setOtp] = useState('');
@@ -332,30 +299,33 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
   // device has (fingerprint on most Android, Face ID on iPhone),
   // so the OS-level prompt is correct. When biometrics aren't
   // available, flip to "Continue" since the screen auto-skips.
+  //
+  // "Enable Face ID" is an Apple product name — never translated, same
+  // convention as auth.tsx's biometric-label handling.
   const biometricCtaLabel = !biometricsChecked
-    ? 'Checking\u2026'
+    ? t('cta.checking')
     : !biometrics.available
-      ? 'Continue'
+      ? t('cta.continue')
       : 'Enable Face ID';
 
   // CTA label + handler + enabled flag per step. Centralised so the
   // footer doesn't have to branch on step internally.
   const stepCta: Array<{ label: string; act: () => void; enabled: boolean }> = [
-    { label: 'Get started', act: next, enabled: true },
-    { label: 'Continue', act: next, enabled: true },
-    { label: 'Continue', act: goToEmail, enabled: true },
+    { label: t('cta.getStarted'), act: next, enabled: true },
+    { label: t('cta.continue'), act: next, enabled: true },
+    { label: t('cta.continue'), act: goToEmail, enabled: true },
     {
-      label: sendingOtp ? 'Sending…' : 'Send code',
+      label: sendingOtp ? t('cta.sending') : t('cta.sendCode'),
       act: () => void handleEmailCta(),
       enabled: emailValid && !sendingOtp,
     },
     {
-      label: verifyingOtp ? 'Verifying…' : 'Verify',
+      label: verifyingOtp ? t('cta.verifying') : t('cta.verify'),
       act: () => void handleOtpVerify(),
       enabled: otpValid && !verifyingOtp,
     },
     {
-      label: savingCurrency ? 'Saving…' : 'Continue',
+      label: savingCurrency ? t('cta.saving') : t('cta.continue'),
       act: () => void handleCurrencyCta(),
       enabled: !savingCurrency,
     },
@@ -378,8 +348,8 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
     // Step 7: wallet intro — informational. CTA always advances;
     // the "Link a wallet now" button inside the screen handles the
     // early-exit case by navigating to /settings/wallet.
-    { label: 'Continue', act: next, enabled: true },
-    { label: 'Open Loop', act: handleFinish, enabled: true },
+    { label: t('cta.continue'), act: next, enabled: true },
+    { label: t('cta.openLoop'), act: handleFinish, enabled: true },
   ];
 
   // Re-clear error messages when the user advances past a network
@@ -541,7 +511,7 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
             onClick={back}
             className="w-full h-10 bg-transparent border-0 text-[15px] font-medium text-gray-500 dark:text-gray-400 cursor-pointer"
           >
-            Back
+            {t('cta.back')}
           </button>
         ) : step === 0 ? (
           <button
@@ -549,7 +519,7 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
             onClick={() => setStep(3)}
             className="w-full h-10 bg-transparent border-0 text-[15px] font-medium text-gray-500 dark:text-gray-400 cursor-pointer"
           >
-            I already have an account
+            {t('cta.alreadyHaveAccount')}
           </button>
         ) : (
           <div className="h-10" />

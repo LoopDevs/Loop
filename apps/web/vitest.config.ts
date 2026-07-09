@@ -16,6 +16,11 @@ export default defineConfig({
   test: {
     globals: false,
     environment: 'node',
+    // ADR 043 (B-6): initializes the i18next singleton (side-effect import)
+    // before every test file's module registry, so `useTranslation()` in
+    // any rendered component resolves real English copy instead of raw
+    // "namespace:key" fallback strings. See vitest.setup.ts.
+    setupFiles: ['./vitest.setup.ts'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov'],

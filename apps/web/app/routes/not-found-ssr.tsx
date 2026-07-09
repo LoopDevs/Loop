@@ -1,4 +1,5 @@
 import type { Route } from './+types/not-found-ssr';
+import i18n from '~/i18n/i18next';
 import { NotFoundContent } from './not-found';
 
 // A2-1111: SSR-only splat route. The loader unconditionally throws a
@@ -14,7 +15,7 @@ export function loader(_: Route.LoaderArgs): never {
 }
 
 export function meta(): Route.MetaDescriptors {
-  return [{ title: 'Page not found — Loop' }];
+  return [{ title: i18n.t('notFound:meta.title') }];
 }
 
 // Renders for the loader-thrown 404 so the dedicated 404 UI shows

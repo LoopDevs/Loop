@@ -60,8 +60,11 @@ app/
 │                       query-error-reporting (A2-1322),
 │                       sentry-error-scrubber (A2-1312), sentry-scrubber (A2-1308)
 ├── i18n/             ← ADR 034 locale seam: locale (useLocale/localizedHref over the
-│                       URL params), format (Intl currency/number, localeTag),
-│                       messages (keyed copy catalogue), t() lookup — route-driven, SSR-safe
+│                       URL params), format (Intl currency/number, localeTag), seo
+│                       (canonical/hreflang). ADR 043 (B-6) string-translation seam:
+│                       i18next.ts (bootstrap — route-driven, SSR/static-export-safe
+│                       synchronous init, no browser-language detection) + locales/en/*.json
+│                       (per-feature-area catalogues, English-only) — see docs/i18n.md
 └── root.tsx          ← Layout, QueryClientProvider (QueryCache + MutationCache
                         forwarding to Sentry), Sentry.init with LOOP_ENV, meta, links
 ```

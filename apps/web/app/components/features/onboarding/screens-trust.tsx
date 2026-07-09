@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAllMerchants } from '~/hooks/use-merchants';
 import { getImageProxyUrl } from '~/utils/image';
 import { LoopLogo } from '~/components/ui/LoopLogo';
@@ -37,9 +38,10 @@ export function TrustWelcome({
   copy,
   phase1Only = false,
 }: TrustWelcomeProps): React.JSX.Element {
+  const { t } = useTranslation('onboarding');
   const savings = useCountUp(2847, active, 1600);
   const [dollars, cents] = savings.toFixed(2).split('.');
-  const totalLabel = phase1Only ? 'Total saved' : 'Total cashback';
+  const totalLabel = phase1Only ? t('trust.totalSaved') : t('trust.totalCashback');
   return (
     <div className="flex-1 flex flex-col px-6">
       <div className="flex-1 flex flex-col items-center justify-center gap-6">
@@ -58,7 +60,7 @@ export function TrustWelcome({
             <span className="text-[28px] font-bold text-gray-400 dark:text-gray-500">.{cents}</span>
           </div>
           <div className="mt-3.5 pt-3.5 border-t border-dashed border-gray-200 dark:border-gray-700 flex justify-between text-[13px] text-gray-600 dark:text-gray-300">
-            <span>This year so far</span>
+            <span>{t('trust.thisYearSoFar')}</span>
             <span className="font-semibold text-green-700 dark:text-green-400">+$2,847</span>
           </div>
         </div>
@@ -153,12 +155,13 @@ export function TrustHowItWorks({
   copy,
   phase1Only = false,
 }: TrustHowItWorksProps): React.JSX.Element {
+  const { t } = useTranslation('onboarding');
   const steps: { num: string; label: string; visual: StepVisual }[] = [
-    { num: '1', label: 'Open Loop before you shop', visual: 'app' },
-    { num: '2', label: 'Buy a gift card at the store', visual: 'card' },
+    { num: '1', label: t('trust.step1'), visual: 'app' },
+    { num: '2', label: t('trust.step2'), visual: 'card' },
     {
       num: '3',
-      label: phase1Only ? 'Your discount applies instantly' : 'Cashback lands in your bank',
+      label: phase1Only ? t('trust.step3Phase1') : t('trust.step3Phase2'),
       visual: 'bank',
     },
   ];
@@ -220,6 +223,7 @@ interface TileMerchant {
  * catalog hasn't loaded yet, so the grid always reads as populated.
  */
 export function TrustMerchants({ active, copy }: ScreenProps): React.JSX.Element {
+  const { t } = useTranslation('onboarding');
   const { merchants } = useAllMerchants();
 
   const tiles = useMemo<TileMerchant[]>(() => {
@@ -287,7 +291,9 @@ export function TrustMerchants({ active, copy }: ScreenProps): React.JSX.Element
           </div>
         ))}
       </div>
-      <div className="text-center text-xs text-gray-500 dark:text-gray-400">+ 500 more brands</div>
+      <div className="text-center text-xs text-gray-500 dark:text-gray-400">
+        {t('trust.moreBrands')}
+      </div>
     </div>
   );
 }

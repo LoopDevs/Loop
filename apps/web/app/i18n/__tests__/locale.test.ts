@@ -1,4 +1,12 @@
-/** ADR 034 Phase 1 — Intl formatting seam + `t()` message lookup. */
+/**
+ * ADR 034 Phase 1 — Intl formatting seam.
+ *
+ * The `t()` message-lookup tests that used to live here (against the
+ * hand-rolled `t.ts`/`messages.ts` PHASE-2 SCAFFOLD) moved to
+ * `../__tests__/i18next.test.tsx` — ADR 043 (B-6) replaced that scaffold
+ * with i18next/react-i18next; `t.ts`/`messages.ts` are deleted (they were
+ * imported by nobody — see ADR 043's "supersedes" note).
+ */
 import { describe, it, expect } from 'vitest';
 import {
   localeTag,
@@ -8,8 +16,6 @@ import {
   currencySymbol,
   formatNumber,
 } from '../format.js';
-import { t } from '../t.js';
-import type { MessageKey } from '../messages.js';
 
 describe('localeTag', () => {
   it('builds a BCP-47 tag from lang + country', () => {
@@ -82,23 +88,5 @@ describe('formatMinorCurrency (locale-threaded web wrapper)', () => {
   });
   it('supports the 0-decimal summary variant', () => {
     expect(formatMinorCurrency('35000', 'USD', 'en-US', { fractionDigits: 0 })).toBe('$350');
-  });
-});
-
-describe('t', () => {
-  it('returns a plain message', () => {
-    expect(t('home.cta.start')).toBe("Get started — it's free");
-  });
-  it('interpolates placeholders', () => {
-    expect(t('merchant.savings', { percent: 5 })).toBe('5% off');
-  });
-  it('leaves an unmatched placeholder intact', () => {
-    expect(t('home.hero.subtitle')).toContain('{inCountry}');
-  });
-  it('falls back to English for an unknown language', () => {
-    expect(t('home.cta.start', undefined, 'de')).toBe("Get started — it's free");
-  });
-  it('returns the key itself for an unknown key (debuggable fallback)', () => {
-    expect(t('not.a.real.key' as MessageKey)).toBe('not.a.real.key');
   });
 });

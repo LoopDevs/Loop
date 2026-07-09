@@ -1,5 +1,6 @@
 import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { groupMerchants, merchantInCountry } from '@loop/shared';
 import type { Route } from './+types/home';
 import { canonicalHref, countryLabel } from '~/i18n/seo';
@@ -50,6 +51,7 @@ export function links(): Route.LinkDescriptors {
 
 /** Thin wrapper that owns the QueryClient for this route tree. */
 function HomeContent(): React.JSX.Element {
+  const { t } = useTranslation('home');
   const [hydrated, setHydrated] = useState(false);
   const { isNative } = useNativePlatform();
   const { isAuthenticated } = useAuth();
@@ -140,26 +142,25 @@ function HomeContent(): React.JSX.Element {
               <div className="relative mx-auto max-w-4xl text-center px-6 pt-20 pb-16 sm:pt-28 sm:pb-20">
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 ring-1 ring-blue-100">
                   <span className="h-1.5 w-1.5 rounded-full bg-blue-600" />
-                  {phase1Only ? 'Up to 15% off, instantly' : 'Cashback on every order'}
+                  {phase1Only ? t('hero.badgePhase1') : t('hero.badgePhase2')}
                 </span>
                 <h1 className="mt-6 text-4xl sm:text-6xl font-semibold tracking-[-0.03em] text-ink leading-[1.05]">
                   {phase1Only ? (
                     <>
-                      Instant <span className="text-blue-600">cashback</span>
-                      <br className="hidden sm:block" /> everywhere you shop.
+                      {t('hero.titlePhase1Prefix')}{' '}
+                      <span className="text-blue-600">{t('hero.titlePhase1Highlight')}</span>
+                      <br className="hidden sm:block" /> {t('hero.titlePhase1Suffix')}
                     </>
                   ) : (
                     <>
-                      Earn cashback on
-                      <br className="hidden sm:block" /> every{' '}
-                      <span className="text-blue-600">gift card</span>
+                      {t('hero.titlePhase2Prefix')}
+                      <br className="hidden sm:block" /> {t('hero.titlePhase2Middle')}{' '}
+                      <span className="text-blue-600">{t('hero.titlePhase2Highlight')}</span>
                     </>
                   )}
                 </h1>
                 <p className="mt-5 text-lg text-ink-muted max-w-xl mx-auto">
-                  {phase1Only
-                    ? 'Buy from merchants you already shop at. Save up to 15% instantly. Pay with XLM or USDC, redeem online or in-store.'
-                    : 'Buy from merchants you already shop at. Every order pays back to your Loop balance — withdraw on-chain whenever you’re ready.'}
+                  {phase1Only ? t('hero.subtitlePhase1') : t('hero.subtitlePhase2')}
                 </p>
                 <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3">
                   {!isAuthenticated && (
@@ -167,14 +168,14 @@ function HomeContent(): React.JSX.Element {
                       to="/onboarding"
                       className="inline-flex items-center justify-center rounded-md bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-xs hover:bg-blue-700 active:bg-blue-800 transition-colors"
                     >
-                      Get started — it’s free
+                      {t('hero.getStarted')}
                     </Link>
                   )}
                   <a
                     href="#directory"
                     className="inline-flex items-center justify-center gap-1 rounded-md border border-line-strong bg-white px-5 py-3 text-sm font-semibold text-ink hover:bg-gray-50 transition-colors"
                   >
-                    Browse brands
+                    {t('hero.browseBrands')}
                     <span aria-hidden="true">→</span>
                   </a>
                 </div>
@@ -195,7 +196,7 @@ function HomeContent(): React.JSX.Element {
                         />
                       </svg>
                     }
-                    label="Instant delivery"
+                    label={t('hero.featureInstantDelivery')}
                   />
                   <Feature
                     icon={
@@ -219,7 +220,7 @@ function HomeContent(): React.JSX.Element {
                         />
                       </svg>
                     }
-                    label="500,000+ locations"
+                    label={t('hero.featureLocations')}
                   />
                   <Feature
                     icon={
@@ -237,7 +238,7 @@ function HomeContent(): React.JSX.Element {
                         />
                       </svg>
                     }
-                    label={phase1Only ? 'Save on every order' : 'Cashback every order'}
+                    label={phase1Only ? t('hero.featureSavePhase1') : t('hero.featureSavePhase2')}
                   />
                 </div>
               </div>
@@ -246,9 +247,7 @@ function HomeContent(): React.JSX.Element {
 
           <div className="container mx-auto px-4 py-12 lg:py-20">
             {isError && (
-              <p className="text-center text-red-500 mb-8">
-                Failed to load merchants. Please try again.
-              </p>
+              <p className="text-center text-red-500 mb-8">{t('errorLoadingMerchants')}</p>
             )}
 
             {/* "Recently purchased" + "Your favourites" strips — both
@@ -268,10 +267,10 @@ function HomeContent(): React.JSX.Element {
               <section className="mb-16">
                 <div className="text-center mb-10">
                   <h2 className="text-3xl font-semibold tracking-[-0.02em] text-ink mb-3">
-                    Top cashback rates
+                    {t('featured.heading')}
                   </h2>
                   <p className="text-base text-ink-muted max-w-2xl mx-auto">
-                    Featured merchants with the highest cashback on Loop right now.
+                    {t('featured.subheading')}
                   </p>
                 </div>
                 <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
@@ -296,10 +295,10 @@ function HomeContent(): React.JSX.Element {
             <section id="directory" className="scroll-mt-24">
               <div className="text-center mb-12">
                 <h2 className="text-3xl font-semibold tracking-[-0.02em] text-ink mb-3">
-                  All merchants
+                  {t('directory.heading')}
                 </h2>
                 <p className="text-base text-ink-muted max-w-2xl mx-auto">
-                  Browse our complete collection of gift cards.
+                  {t('directory.subheading')}
                 </p>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
@@ -360,16 +359,15 @@ export default function Home(): React.JSX.Element {
 }
 
 export function ErrorBoundary(): React.JSX.Element {
+  const { t } = useTranslation(['home', 'common']);
   return (
     <div className="container mx-auto px-4 py-16 text-center">
       <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
-        Something went wrong
+        {t('common:errorBoundary.heading')}
       </h1>
-      <p className="text-gray-600 dark:text-gray-300 mb-6">
-        We couldn&apos;t load the merchant directory.
-      </p>
+      <p className="text-gray-600 dark:text-gray-300 mb-6">{t('home:error.message')}</p>
       <a href="/" className="text-blue-600 underline">
-        Reload page
+        {t('home:error.reload')}
       </a>
     </div>
   );

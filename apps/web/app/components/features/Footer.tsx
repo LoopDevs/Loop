@@ -1,9 +1,11 @@
+import { useTranslation } from 'react-i18next';
 import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import { useAppConfig } from '~/hooks/use-app-config';
 import { LoopLogo } from '~/components/ui/LoopLogo';
 
 export function Footer(): React.JSX.Element {
   const { config } = useAppConfig();
+  const { t } = useTranslation('footer');
   // Tranche 1 (MVP): hide the cashback / trustlines footer links
   // until Tranche 2 turns on the Stellar wallet.
   const showCashback = !config.phase1Only;
@@ -17,30 +19,30 @@ export function Footer(): React.JSX.Element {
           </Link>
           <nav className="flex flex-wrap justify-center gap-x-6 gap-y-3 text-sm font-medium">
             <Link to="/" className={linkClass}>
-              Directory
+              {t('directory')}
             </Link>
             <Link to="/map" className={linkClass}>
-              Map
+              {t('map')}
             </Link>
             {showCashback && (
               <>
                 <Link to="/cashback" className={linkClass}>
-                  Cashback rates
+                  {t('cashbackRates')}
                 </Link>
                 <Link to="/trustlines" className={linkClass}>
-                  Trustlines
+                  {t('trustlines')}
                 </Link>
               </>
             )}
             <Link to="/privacy" className={linkClass}>
-              Privacy
+              {t('privacy')}
             </Link>
             <Link to="/terms" className={linkClass}>
-              Terms
+              {t('terms')}
             </Link>
           </nav>
           <p className="text-xs text-ink-subtle tabular">
-            &copy; {new Date().getFullYear()} Loop. All rights reserved.
+            {t('copyright', { year: new Date().getFullYear() })}
           </p>
         </div>
       </div>

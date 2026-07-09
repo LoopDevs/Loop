@@ -178,14 +178,17 @@ as forward scaffolding.
   no longer a second live currency formatter (closes P2-QUAL-02). Admin/ops surfaces keep
   the deliberately stable `ADMIN_LOCALE = 'en-US'`.
 
-- **String translation — PHASE-2 SCAFFOLD, intentionally not wired.** `i18n/t.ts` +
-  `i18n/messages.ts` stay a documented scaffold. With `SUPPORTED_LANGS = ['en']` there is no
-  language to translate _to_, so routing ~137 components' copy through `t()` now would be pure
-  churn with zero user-visible effect. The exhaustive string extraction is deferred to the
-  **first non-`en` locale** (Phase 3, above). The seam is kept — not deleted — precisely so
-  that adding a language later remains the "JSON drop, not a refactor" §7 promised. Both files
-  carry a `PHASE-2 SCAFFOLD` header making this explicit; do **not** mass-extract copy through
-  `t()` while only English ships.
+- **String translation — SUPERSEDED (2026-07-10, ADR 043 / B-6).** The `i18n/t.ts` +
+  `i18n/messages.ts` PHASE-2 SCAFFOLD described in this section historically (a hand-rolled,
+  dependency-free `t()` lookup, deliberately unwired, deferring extraction to "the first
+  non-`en` locale") has been **replaced and deleted**. ADR 043 decouples the framework +
+  extraction work (language-agnostic, can happen now) from actual translations (still gated
+  on the 🧭 language-set decision this section originally deferred to) — i18next +
+  react-i18next are now wired into the app bootstrap (`root.tsx`), and a first tranche of
+  customer-facing copy (home/auth/onboarding/footer/404) is extracted into
+  `i18n/locales/en/*.json`, English-only. See ADR 043 for the full reasoning and
+  `docs/i18n.md` for the extraction/language-add mechanics. `SUPPORTED_LANGS = ['en']` is
+  still the routing source of truth here — unchanged by ADR 043.
 
 So ADR 034's "market-correct page" is now true for rendered **amounts/numbers/dates** as well
 as `<title>`/meta; market-correct **copy** waits on the second locale.

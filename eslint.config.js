@@ -26,6 +26,10 @@ export default [
       '**/packages/shared/src/proto/**',
       '**/*.generated.ts',
       '**/vitest.config.ts',
+      // ADR 043 (B-6): vitest global setup — same shape as vitest.config.ts
+      // (framework-invoked, no app tsconfig project covers it), same reason
+      // for the exclusion.
+      '**/vitest.setup.ts',
       '**/tsup.config.ts',
       '**/vite.config.ts',
       '**/react-router.config.ts',
