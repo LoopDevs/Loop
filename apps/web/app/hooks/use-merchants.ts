@@ -1,10 +1,16 @@
-import { useQuery } from '@tanstack/react-query';
-import type { Merchant, MerchantAllResponse, MerchantListResponse } from '@loop/shared';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import type {
+  Merchant,
+  MerchantAllResponse,
+  MerchantListResponse,
+  MerchantSearchResponse,
+} from '@loop/shared';
 import {
   fetchMerchants,
   fetchMerchant,
   fetchMerchantBySlug,
   fetchAllMerchants,
+  fetchMerchantSearch,
   fetchMerchantCashbackRate,
   fetchMerchantsCashbackRates,
   type MerchantCashbackRateResponse,
@@ -95,6 +101,72 @@ export function useAllMerchants(): {
     isLoading: query.isLoading,
     isError: query.isError,
     error: query.error,
+  };
+}
+
+export interface UseMerchantSearchOptions {
+  /** ISO 3166-1 alpha-2 country code — ranks in-country matches first (ADR 034). */
+  country?: string;
+  /** Bounded result count passed to the server. Server default 20, max 50. */
+  limit?: number;
+  /**
+   * Extra gate beyond the built-in "non-empty query" check — e.g. the
+   * Navbar wants a length>1 floor before it fires (matching its
+   * pre-existing client-filter behaviour). Defaults to `true`.
+   */
+  enabled?: boolean;
+}
+
+export interface UseMerchantSearchResult {
+  merchants: Merchant[];
+  /** True only on the very first fetch for a query with no cached data yet. */
+  isLoading: boolean;
+  /** True whenever a request is in flight, including a background refetch
+   *  for a new query while the previous query's results are still shown
+   *  (see `placeholderData: keepPreviousData` below). */
+  isFetching: boolean;
+  isError: boolean;
+  error: Error | null;
+}
+
+/**
+ * Server-side merchant name search (go-live-plan §P3 / S4-7 §3 tail).
+ * Replaces the client-side pattern of fetching the full catalog
+ * (`useAllMerchants`) and filtering it on every keystroke — the Navbar
+ * dropdown and MobileHome search both now call this instead.
+ *
+ * Callers debounce the raw input themselves (both already do, 150ms)
+ * and pass the debounced value here so this doesn't fire a request on
+ * every keystroke. `placeholderData: keepPreviousData` keeps the prior
+ * result set on screen while a new debounced query is in flight,
+ * instead of flashing to an empty state between keystrokes.
+ */
+export function useMerchantSearch(
+  query: string,
+  options: UseMerchantSearchOptions = {},
+): UseMerchantSearchResult {
+  const trimmed = query.trim();
+  const enabled = (options.enabled ?? true) && trimmed.length > 0;
+  const search = useQuery<MerchantSearchResponse, Error>({
+    queryKey: ['merchant-search', trimmed, options.country ?? null, options.limit ?? null],
+    queryFn: () =>
+      fetchMerchantSearch({
+        q: trimmed,
+        ...(options.country !== undefined ? { country: options.country } : {}),
+        ...(options.limit !== undefined ? { limit: options.limit } : {}),
+      }),
+    enabled,
+    staleTime: 60_000,
+    placeholderData: keepPreviousData,
+    retry: shouldRetry,
+  });
+
+  return {
+    merchants: search.data?.merchants ?? [],
+    isLoading: search.isLoading,
+    isFetching: search.isFetching,
+    isError: search.isError,
+    error: search.error,
   };
 }
 

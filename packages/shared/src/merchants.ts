@@ -74,6 +74,31 @@ export interface MerchantListParams {
   q?: string | undefined;
 }
 
+/** Query params for GET /api/merchants/search. */
+export interface MerchantSearchParams {
+  q: string;
+  /**
+   * ISO 3166-1 alpha-2 country code (ADR 034). Ranks in-country matches
+   * first; never filters results out.
+   */
+  country?: string | undefined;
+  /** Bounded result count. Server default 20, max 50. */
+  limit?: number | undefined;
+}
+
+/**
+ * Response for `GET /api/merchants/search` — server-side merchant name
+ * search (go-live-plan §P3 / S4-7 §3 tail). Replaces the client-side
+ * full-catalog fetch + filter previously used by the Navbar dropdown and
+ * MobileHome search. Bounded + ranked; lite merchant projection (no
+ * description/instructions/terms, matching `/api/merchants/all?fields=lite`).
+ */
+export interface MerchantSearchResponse {
+  merchants: Merchant[];
+  /** Full match count before the `limit` truncation. */
+  total: number;
+}
+
 /** Geographic location point for a single merchant location. */
 export interface LocationPoint {
   type: 'Feature';

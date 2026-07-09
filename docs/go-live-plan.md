@@ -124,7 +124,7 @@ _The cashback model replaces discounts. The ADR 015/016 surface + the ADR 030 Pr
 
 # §P3 · GROWTH & POLISH (post-contract, not a tranche)
 
-- [ ] **Server-side merchant search** (replace the client-side full-catalog fetch — the S4-7 §3 tail). 🟢
+- [x] **Server-side merchant search** (replace the client-side full-catalog fetch — the S4-7 §3 tail). 🟢 **Done 2026-07-10:** `GET /api/merchants/search?q=&country=&limit=` (memory-backed, no migration — see readiness-backlog S4-7). Navbar + MobileHome search now call it (debounced) instead of filtering the full `/api/merchants/all` catalog; browse/directory grids still use the full catalog by design.
 - [ ] **MapLibre GL JS** swap for Leaflet (WebGL, better mobile marker perf). 🟢
 - [ ] **Referral program.** 🟢/💰
 - [ ] **Analytics** (privacy-respecting, no PII) + **Core Web Vitals / API-latency perf monitoring.** 🟢+👤

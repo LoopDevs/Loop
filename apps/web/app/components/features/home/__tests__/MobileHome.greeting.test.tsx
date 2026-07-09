@@ -24,6 +24,13 @@ const { authMock } = vi.hoisted(() => ({
 
 vi.mock('~/hooks/use-merchants', () => ({
   useAllMerchants: () => ({ merchants: [], isLoading: false, isError: false }),
+  useMerchantSearch: () => ({
+    merchants: [],
+    isLoading: false,
+    isFetching: false,
+    isError: false,
+    error: null,
+  }),
   useMerchantsCashbackRatesMap: () => ({ lookup: () => null }),
 }));
 

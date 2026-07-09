@@ -91,6 +91,16 @@ export function registerMerchantsOpenApi(
     }),
   );
 
+  const MerchantSearchResponse = registry.register(
+    'MerchantSearchResponse',
+    z.object({
+      merchants: z.array(Merchant),
+      total: z.number().openapi({
+        description: 'Full match count before the `limit` truncation.',
+      }),
+    }),
+  );
+
   registry.registerPath({
     method: 'get',
     path: '/api/merchants',
@@ -136,6 +146,40 @@ export function registerMerchantsOpenApi(
       },
       429: {
         description: 'Rate limit exceeded (60/min per IP) — A2-650',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/merchants/search',
+    summary:
+      'Server-side merchant name search — bounded, ranked (go-live-plan §P3 / S4-7 §3 tail).',
+    tags: ['Merchants'],
+    request: {
+      query: z.object({
+        q: z.string().max(100).optional().openapi({
+          description:
+            'Search text — accent/case-insensitive substring match on name (same semantics as `/api/merchants?q=`). Empty/missing returns an empty result rather than the full catalog.',
+        }),
+        country: z.string().min(1).max(2).optional().openapi({
+          description:
+            'ISO 3166-1 alpha-2 code (ADR 034). Ranks in-country matches first; never filters results out — search still spans every country.',
+        }),
+        limit: z.coerce.number().int().min(1).max(50).optional().openapi({
+          description: 'Bounded result count. Default 20, max 50.',
+        }),
+      }),
+    },
+    responses: {
+      200: {
+        description:
+          'Search results — lite merchant projection (no description/instructions/terms, matching `/api/merchants/all?fields=lite`)',
+        content: { 'application/json': { schema: MerchantSearchResponse } },
+      },
+      429: {
+        description: 'Rate limit exceeded (180/min per IP)',
         content: { 'application/json': { schema: errorResponse } },
       },
     },
