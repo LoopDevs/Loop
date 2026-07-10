@@ -14,19 +14,24 @@
 -- convention->DB-constraint pattern used throughout the 2026-07
 -- hardening pass.
 --
--- Any pre-existing ACTIVE baseline missing a cursor is deactivated
--- (not backfilled — there is no correct cursor value to invent for a
--- row that never recorded one) so it can't block this migration and
--- so the reconciler falls back to its existing fail-closed
--- `needs_baseline` state for that (account, asset) instead of being
--- left active with an unusable cursor. As of this migration no
--- production baseline has been created yet (R3-1 baseline creation is
--- an operator step that lands after this migration), so this is
--- expected to be a no-op in practice.
-UPDATE operator_wallet_baselines
-  SET active = 0, updated_at = now()
-  WHERE (starting_horizon_cursor IS NULL OR current_horizon_cursor IS NULL)
-    AND active = 1;
+-- Any pre-existing baseline missing a cursor (active OR inactive) is
+-- DELETED — not backfilled (there is no correct cursor value to invent
+-- for a row that never recorded one) and not merely deactivated. A
+-- deactivate (`SET active = 0`) would leave the NULL in the column, and
+-- `ALTER COLUMN ... SET NOT NULL` below scans the literal value of
+-- EVERY row regardless of the active flag — so a lingering NULL (active
+-- or already-inactive) would abort the whole migration and block the
+-- deploy in exactly the scenario this defense exists for (a staging
+-- raw-SQL row, a DR restore predating the Zod hardening, a future
+-- non-API writer). The DELETE clears the NULL that blocks the ALTER,
+-- and such a row can never be reconciled anyway — so its fail-closed
+-- successor is the reconciler's existing `needs_baseline` state for
+-- that (account, asset) once an operator creates a fresh, anchored
+-- baseline. As of this migration no production baseline has been
+-- created yet (R3-1 baseline creation is an operator step that lands
+-- after this migration), so this is expected to be a no-op in practice.
+DELETE FROM operator_wallet_baselines
+  WHERE starting_horizon_cursor IS NULL OR current_horizon_cursor IS NULL;
 
 ALTER TABLE operator_wallet_baselines
   ALTER COLUMN starting_horizon_cursor SET NOT NULL;

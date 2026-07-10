@@ -131,7 +131,7 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
     name: 'notifyOperatorFloatDrift',
     channel: 'monitoring',
     description:
-      'R3-1: fires when the operator XLM/USDC wallet no longer conserves from its active baseline, or when a Horizon wallet movement is unclassified. Triage via Treasury and the operator-float movement drilldown before treating float as healthy.',
+      'R3-1: fires when the operator XLM/USDC wallet no longer conserves from its active baseline, when a Horizon wallet movement is unclassified, or when no active baseline is configured yet (needs_baseline — a deployed reconciler with nothing to check must not read as healthy). Triage via Treasury and the operator-float movement drilldown before treating float as healthy.',
   },
   {
     name: 'notifyCtxSchemaDrift',
