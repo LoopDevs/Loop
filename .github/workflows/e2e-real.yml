@@ -1,10 +1,28 @@
 name: E2E (real Tranche-1 purchase + wallet)
 
-# Manually triggered only — this spends real XLM (or USDC) and creates
-# a real order against the upstream CTX sandbox/production via the
-# loop-native order surface (POST /api/orders/loop). Never run
-# automatically. Default per run: ~$0.02 USD on Aerie + Stellar fees.
+# Runs weekly on a schedule PLUS on manual dispatch. Each run spends
+# real XLM (or USDC) and creates a real order against the upstream CTX
+# sandbox/production via the loop-native order surface
+# (POST /api/orders/loop). Default per run: ~$0.02 USD on Aerie +
+# Stellar fees — trivially cheap weekly, and it's the only signal that
+# catches a real-CTX/real-Stellar contract break proactively instead
+# of only when someone remembers to click "Run workflow" (Q6-7,
+# docs/money-auth-worklist.md).
+#
+# Needs the LOOP_E2E_REFRESH_TOKEN + STELLAR_TEST_SECRET_KEY repo
+# secrets (docs/deployment.md's secrets table). The scheduled trigger
+# skips cleanly — no failure, just a log line — if either is missing,
+# so an unprovisioned repo doesn't get a weekly red X; workflow_dispatch
+# keeps its existing behavior (hard-fails inside scripts/e2e-real.mjs
+# if secrets are missing, since a human explicitly asked it to run).
+#
+# To change cadence or disable: edit/remove the `cron:` line below.
+# workflow_dispatch keeps working either way.
 on:
+  schedule:
+    # Every Monday 03:00 UTC. Off-peak, once a week — see header above
+    # for why weekly is enough and cheap enough.
+    - cron: '0 3 * * 1'
   workflow_dispatch:
     inputs:
       backend_url:
@@ -45,8 +63,42 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  preflight:
+    name: Check real-chain e2e secrets are configured
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      secrets_ready: ${{ steps.check.outputs.secrets_ready }}
+    steps:
+      # Secrets can't be referenced directly in a job-level `if:`, so
+      # this step converts their presence into a plain string job
+      # output (`true`/`false`) that the `run` job's `if:` can safely
+      # read. Only the schedule trigger uses this to skip — see the
+      # `run` job's `if:` below for why workflow_dispatch is unaffected.
+      - id: check
+        env:
+          E2E_REFRESH_TOKEN: ${{ secrets.LOOP_E2E_REFRESH_TOKEN }}
+          STELLAR_TEST_SECRET_KEY: ${{ secrets.STELLAR_TEST_SECRET_KEY }}
+        run: |
+          if [ -n "$E2E_REFRESH_TOKEN" ] && [ -n "$STELLAR_TEST_SECRET_KEY" ]; then
+            echo "secrets_ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "secrets_ready=false" >> "$GITHUB_OUTPUT"
+            if [ "${{ github.event_name }}" = "schedule" ]; then
+              echo "::notice::secrets not configured — skipping scheduled real-chain e2e; set E2E_REFRESH_TOKEN + STELLAR_TEST_SECRET_KEY to enable"
+            fi
+          fi
+
   run:
     name: Tranche-1 loop-native purchase flow
+    needs: preflight
+    # Scheduled runs skip cleanly (job shows as "skipped", not
+    # "failed") when the secrets aren't configured yet — an
+    # unprovisioned repo shouldn't get a weekly red X. Manual dispatch
+    # is unaffected: it always runs and, same as before this change,
+    # fails loudly inside scripts/e2e-real.mjs if secrets are missing
+    # (a human explicitly asked it to run, so silence would be wrong).
+    if: needs.preflight.outputs.secrets_ready == 'true' || github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # No `services:` block — this workflow drives a deployed backend
@@ -74,7 +126,7 @@ jobs:
       - name: Confirm backend reachable
         run: |
           set -euo pipefail
-          BACKEND_URL="${{ inputs.backend_url }}"
+          BACKEND_URL="${{ inputs.backend_url || 'https://api.loopfinance.io' }}"
           echo "Driving backend at: $BACKEND_URL"
           curl -fsS --max-time 10 "$BACKEND_URL/health" > /dev/null
           # Confirm the loop-native order surface is gated on.
@@ -85,13 +137,18 @@ jobs:
       - name: Run real Tranche-1 purchase workflow
         run: node scripts/e2e-real.mjs
         env:
-          BACKEND_URL: ${{ inputs.backend_url }}
+          # `inputs.*` are only populated on workflow_dispatch — a
+          # schedule-triggered run sees an empty `inputs` context, so
+          # every field here falls back to the same default the
+          # workflow_dispatch form itself uses (or, for amount/merchant,
+          # to scripts/e2e-real.mjs's own blank-means-default handling).
+          BACKEND_URL: ${{ inputs.backend_url || 'https://api.loopfinance.io' }}
           E2E_REFRESH_TOKEN: ${{ secrets.LOOP_E2E_REFRESH_TOKEN }}
           STELLAR_TEST_SECRET_KEY: ${{ secrets.STELLAR_TEST_SECRET_KEY }}
           E2E_AMOUNT_USD: ${{ inputs.amount_usd }}
           E2E_MERCHANT_ID: ${{ inputs.merchant_id }}
-          LOOP_E2E_PAYMENT_METHOD: ${{ inputs.payment_method }}
-          LOOP_E2E_CURRENCY: ${{ inputs.currency }}
+          LOOP_E2E_PAYMENT_METHOD: ${{ inputs.payment_method || 'xlm' }}
+          LOOP_E2E_CURRENCY: ${{ inputs.currency || 'USD' }}
           # Script writes the rotated refresh token here immediately
           # after the refresh call succeeds. The next step persists it
           # back to the repo secret regardless of whether the rest of
@@ -128,3 +185,28 @@ jobs:
             < "$TOKEN_FILE"
           rm -f "$TOKEN_FILE"
           echo "Rotated LOOP_E2E_REFRESH_TOKEN."
+      # Q6-7: a scheduled run fails silently unless something watches it —
+      # the weekly cron isn't a required PR check, so nobody's CI view
+      # surfaces a break. Mirrors audit-cron.yml's failure notify (same
+      # webhook/monitoring channel) so a real-CTX/real-Stellar contract
+      # break pages the same place other unattended checks do.
+      - name: Notify Discord on failure
+        if: failure()
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_MONITORING }}
+          SERVER_URL: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          URL="$SERVER_URL/$REPO/actions/runs/$RUN_ID"
+          TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          PAYLOAD=$(jq -cn \
+            --arg title "⚠️ Real Tranche-1 e2e (real CTX + real Stellar) failed" \
+            --arg desc  "Trigger: $EVENT_NAME. A real-money purchase against the deployed backend didn't reach fulfilled — likely a real-CTX or real-Stellar contract break. See the run log. docs/money-auth-worklist.md Q6-7." \
+            --argjson color 15158332 \
+            --arg url   "$URL" \
+            --arg ts    "$TIMESTAMP" \
+            '{embeds:[{title:$title,description:$desc,color:$color,url:$url,timestamp:$ts}]}')
+          curl -s -H "Content-Type: application/json" -d "$PAYLOAD" "$DISCORD_WEBHOOK" || true
