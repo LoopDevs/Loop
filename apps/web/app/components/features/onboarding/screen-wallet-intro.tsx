@@ -18,6 +18,8 @@
  * This mirrors the two-phase framing in ADR 015 — users are always
  * onboarded to the ledger; the wallet is an optional upgrade.
  */
+import { useTranslation } from 'react-i18next';
+
 interface ScreenCopy {
   eyebrow?: string;
   title: string;
@@ -51,6 +53,7 @@ export function WalletIntroScreen({
   homeCurrency,
   onLinkWallet,
 }: WalletIntroScreenProps): React.JSX.Element {
+  const { t } = useTranslation('onboarding');
   const asset = ASSET_FOR[homeCurrency];
   const symbol = SYMBOL_FOR[homeCurrency];
 
@@ -87,10 +90,10 @@ export function WalletIntroScreen({
               </span>
               <div className="min-w-0">
                 <p className="text-[15px] font-semibold text-gray-950 dark:text-white">
-                  Cashback lands instantly
+                  {t('wallet.instantTitle')}
                 </p>
                 <p className="mt-0.5 text-[13px] text-gray-600 dark:text-gray-400">
-                  Every order credits your in-app balance right away — no wallet needed.
+                  {t('wallet.instantBody')}
                 </p>
               </div>
             </div>
@@ -106,12 +109,12 @@ export function WalletIntroScreen({
               </span>
               <div className="min-w-0">
                 <p className="text-[15px] font-semibold text-gray-950 dark:text-white">
-                  Withdraw to your own wallet
+                  {t('wallet.withdrawTitle')}
                 </p>
                 <p className="mt-0.5 text-[13px] text-gray-600 dark:text-gray-400">
-                  Link a Stellar address any time to pull your balance out as{' '}
-                  <span className="font-mono text-[12px]">{asset}</span> — Loop&apos;s branded
-                  stablecoin.
+                  {t('wallet.withdrawBodyPrefix')}
+                  <span className="font-mono text-[12px]">{asset}</span>
+                  {t('wallet.withdrawBodySuffix')}
                 </p>
               </div>
             </div>
@@ -124,7 +127,7 @@ export function WalletIntroScreen({
           onClick={onLinkWallet}
           className="text-center text-[14px] font-medium text-blue-600 dark:text-blue-400 hover:underline"
         >
-          Link a wallet now →
+          {t('wallet.linkCta')}
         </button>
       </div>
     </div>

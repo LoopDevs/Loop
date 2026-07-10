@@ -949,7 +949,7 @@ max_connections`, including the release-command migration machine
 
 ### B-6 · i18n is English-only behind a good scaffold `[code]` (large)
 
-- [ ] **Status:** 🟡 In progress (2026-07-10) — **framework + first two
+- [ ] **Status:** 🟡 In progress (2026-07-10) — **framework + first three
       extraction tranches done** (ADR 043): i18next + react-i18next chosen and
       wired into `root.tsx` (route-driven locale via
       `~/i18n/locale.ts#useLocale()`, synchronous bundled-resources init so
@@ -958,30 +958,49 @@ max_connections`, including the release-command migration machine
       `not-found.tsx`/`not-found-ssr.tsx`, `home.tsx`'s desktop hero +
       section headers, `auth.tsx` in full (OTP flow + Account view),
       `Onboarding.tsx`'s copy bank + CTA labels, `screens-trust.tsx`. Tranche 2
-      (this pass) extracted: the three `/settings/*` pages (privacy, wallet,
+      extracted: the three `/settings/*` pages (privacy, wallet,
       cashback), the orders surfaces (`orders.tsx`, `orders.$id.tsx`,
       `LoopOrdersList.tsx`, `OrdersSummaryHeader.tsx`), and the gift-card
-      detail page (`gift-card.$name.tsx`) — new `settings.json`, `orders.json`,
-      `giftCard.json` namespaces. Catalogs at
+      detail page (`gift-card.$name.tsx`) — `settings.json`, `orders.json`,
+      `giftCard.json` namespaces. Tranche 3 (this pass) extracted:
+      `MobileHome.tsx` (browse/greeting/section/directory copy, excluding the
+      search-input widget itself — a concurrent lane owns that pattern),
+      `brand.$slug.tsx` in full, the remaining onboarding screens
+      (`OnboardingDesktop.tsx`'s own email/OTP capture form,
+      `signup-tail.tsx`'s shared trust/resend/paste copy,
+      `screen-currency.tsx`'s currency options, `screen-biometric.tsx`,
+      `screen-wallet-intro.tsx`), `map.tsx`'s meta title + `ErrorBoundary`,
+      and the Phase-2-gated cashback marketing pages (`calculator.tsx`,
+      `cashback.tsx`, `cashback.$slug.tsx`) — new `mobileHome.json`,
+      `brand.json`, `map.json`, `cashback.json` namespaces, plus new keys in
+      `onboarding.json`. Catalogs at
       `apps/web/app/i18n/locales/en/*.json`, English-only — see
       `docs/i18n.md`. Supersedes the old CF-22 `i18n/t.ts`/`messages.ts`
       scaffold (deleted; see ADR 034's updated "i18n seam status"). RTL wiring
       (`<html dir>`) predates this and is unchanged — still unverified against
-      a real RTL language since none ships yet. **Still open:** the remaining
-      customer-facing tranches (`MobileHome.tsx`, `brand.$slug.tsx`, the other
-      onboarding screens, `OnboardingDesktop.tsx`'s own OTP-capture copy, the
-      purchase flow), and actual non-English translations — both gated on the
-      🧭 language-set decision (which language(s) to ship). Also deferred:
-      `services/orders-loop.ts#loopOrderStateLabel()` (a plain helper shared
-      by `LoopOrdersList.tsx` and the purchase flow's `LoopPaymentStep.tsx`)
-      stayed hardcoded English rather than threading `t` through both call
-      sites, to keep this tranche's diff scoped to orders/settings/gift-card
-      surfaces — pick it up with the purchase-flow tranche.
+      a real RTL language since none ships yet. **Still open:** the purchase
+      flow (`PurchaseContainer`/`LoopPaymentStep` and friends — a concurrent
+      lane owns this surface) and actual non-English translations — both
+      gated on the 🧭 language-set decision (which language(s) to ship). Also
+      still deferred: `services/orders-loop.ts#loopOrderStateLabel()` (a
+      plain helper shared by `LoopOrdersList.tsx` and the purchase flow's
+      `LoopPaymentStep.tsx`) stayed hardcoded English — it pulls into the
+      fenced purchase-flow import graph, so extracting it belongs with that
+      tranche, not this one. `Phase2Gate.tsx`'s shared "Coming soon" panel
+      (wraps `calculator.tsx`/`cashback.tsx`/`cashback.$slug.tsx` plus the
+      already-extracted `settings.wallet.tsx`/`settings.cashback.tsx`) also
+      stayed hardcoded — it's shared infrastructure outside any one tranche's
+      named surface list, left for a small dedicated follow-up.
       Watch `scripts/check-bundle-budget.sh`'s `MAX_SSR_KB` — tranche 1 used
-      56 of the prior 60 KB headroom (3296/3300 KB); this tranche's new
-      catalogs pushed the SSR client to 3320 KB, so `MAX_SSR_KB` was raised to
-      3400 (documented escape hatch in that script) — the next tranche that
-      adds meaningful catalog JSON should watch it again.
+      56 of the prior 60 KB headroom (3296/3300 KB); tranche 2's new catalogs
+      pushed the SSR client to 3320 KB, so `MAX_SSR_KB` was raised to 3400
+      (documented escape hatch in that script). Tranche 3 added ~6 KB
+      (i18next chunk 55.69 → 61.42 KB) and stayed at 3340/3400 KB — no bump
+      needed this pass, but three tranches in a row have each consumed a
+      meaningful slice of headroom; if a future tranche needs another bump,
+      it's worth considering lazy-loading locale namespaces / code-splitting
+      the catalogs instead of repeatedly raising the ceiling (flagged, not
+      solved, here).
 
 ---
 

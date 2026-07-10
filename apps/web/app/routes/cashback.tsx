@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import type { Route } from './+types/cashback';
 import { canonicalHref, countryLabel } from '~/i18n/seo';
@@ -56,6 +57,7 @@ export default function CashbackIndexRoute(): React.JSX.Element {
 }
 
 function CashbackIndexBody(): React.JSX.Element {
+  const { t } = useTranslation('cashback');
   // CAT-02 (2026-06-30 cold audit): scope the index to the visitor's
   // country, same rule home.tsx / brand.$slug.tsx already use — this
   // was one of three country-blind catalog surfaces.
@@ -73,11 +75,10 @@ function CashbackIndexBody(): React.JSX.Element {
       <main className="container mx-auto max-w-4xl px-4 py-12">
         <header className="text-center mb-10">
           <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-3">
-            Best cashback rates on Loop
+            {t('index.heading')}
           </h1>
           <p className="text-lg text-gray-600 dark:text-gray-300 max-w-2xl mx-auto">
-            Earn cashback every time you buy a gift card. Paid in LOOP-asset stablecoin that
-            compounds when you spend it on your next order.
+            {t('index.sub')}
           </p>
         </header>
 
@@ -86,13 +87,9 @@ function CashbackIndexBody(): React.JSX.Element {
             <Spinner />
           </div>
         ) : query.isError ? (
-          <p className="py-8 text-center text-red-600 dark:text-red-400">
-            Couldn&rsquo;t load the cashback list. Please refresh.
-          </p>
+          <p className="py-8 text-center text-red-600 dark:text-red-400">{t('index.loadError')}</p>
         ) : query.data.merchants.length === 0 ? (
-          <p className="py-8 text-center text-gray-500 dark:text-gray-400">
-            No merchants with cashback configured yet — check back soon.
-          </p>
+          <p className="py-8 text-center text-gray-500 dark:text-gray-400">{t('index.empty')}</p>
         ) : (
           <ul className="space-y-3">
             {query.data.merchants.map((m) => (
@@ -103,18 +100,12 @@ function CashbackIndexBody(): React.JSX.Element {
 
         <section className="mt-12 rounded-xl border border-gray-200 bg-white p-8 dark:border-gray-800 dark:bg-gray-900">
           <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">
-            How Loop cashback works
+            {t('index.howItWorks.heading')}
           </h2>
           <ol className="list-decimal list-outside pl-6 space-y-3 text-gray-700 dark:text-gray-300">
-            <li>Pick a merchant and buy a gift card — pay in XLM, USDC, or your LOOP balance.</li>
-            <li>
-              Cashback lands in LOOP-asset stablecoin (USDLOOP / GBPLOOP / EURLOOP), pinned 1:1 to
-              your home currency.
-            </li>
-            <li>
-              Spend LOOP on your next order. Cashback from order #1 pays for order #2 — the
-              flywheel.
-            </li>
+            <li>{t('index.howItWorks.step1')}</li>
+            <li>{t('index.howItWorks.step2')}</li>
+            <li>{t('index.howItWorks.step3')}</li>
           </ol>
         </section>
       </main>
@@ -124,13 +115,14 @@ function CashbackIndexBody(): React.JSX.Element {
 }
 
 function MerchantRow({ merchant }: { merchant: TopCashbackMerchant }): React.JSX.Element {
+  const { t } = useTranslation('cashback');
   const slug = merchant.slug;
   return (
     <li>
       <Link
         to={`/cashback/${slug}`}
         className="flex items-center gap-4 rounded-xl border border-gray-200 bg-white p-4 hover:border-blue-400 hover:shadow-sm dark:border-gray-800 dark:bg-gray-900 dark:hover:border-blue-500"
-        aria-label={`${merchant.name}: ${merchant.userCashbackPct}% cashback`}
+        aria-label={t('index.rowAriaLabel', { name: merchant.name, pct: merchant.userCashbackPct })}
       >
         <div className="h-12 w-12 shrink-0">
           {merchant.logoUrl !== null ? (
@@ -152,7 +144,9 @@ function MerchantRow({ merchant }: { merchant: TopCashbackMerchant }): React.JSX
           <span className="text-xl font-semibold text-green-700 dark:text-green-400 tabular-nums">
             {merchant.userCashbackPct}%
           </span>
-          <span className="ml-1 text-xs text-gray-500 dark:text-gray-400">back</span>
+          <span className="ml-1 text-xs text-gray-500 dark:text-gray-400">
+            {t('index.rowBack')}
+          </span>
         </div>
       </Link>
     </li>

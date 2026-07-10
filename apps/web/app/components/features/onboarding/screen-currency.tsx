@@ -7,6 +7,8 @@
  * backend, but onboarding is necessarily pre-any-order so the
  * endpoint's 409 branch is unreachable here).
  */
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { currencyOf } from '@loop/shared';
 import { useRadioGroupKeys } from '~/hooks/use-radio-group-keys';
 
@@ -38,11 +40,28 @@ interface CurrencyOption {
   hint: string;
 }
 
-const OPTIONS: readonly CurrencyOption[] = [
-  { code: 'USD', symbol: '$', label: 'US Dollar', hint: 'United States' },
-  { code: 'GBP', symbol: '£', label: 'British Pound', hint: 'United Kingdom' },
-  { code: 'EUR', symbol: '€', label: 'Euro', hint: 'Eurozone' },
-];
+function buildOptions(t: TFunction<'onboarding'>): readonly CurrencyOption[] {
+  return [
+    {
+      code: 'USD',
+      symbol: '$',
+      label: t('currency.options.usd.label'),
+      hint: t('currency.options.usd.hint'),
+    },
+    {
+      code: 'GBP',
+      symbol: '£',
+      label: t('currency.options.gbp.label'),
+      hint: t('currency.options.gbp.hint'),
+    },
+    {
+      code: 'EUR',
+      symbol: '€',
+      label: t('currency.options.eur.label'),
+      hint: t('currency.options.eur.hint'),
+    },
+  ];
+}
 
 interface CurrencyPickerScreenProps {
   active: boolean;
@@ -60,6 +79,8 @@ export function CurrencyPickerScreen({
   onSelect,
   error,
 }: CurrencyPickerScreenProps): React.JSX.Element {
+  const { t } = useTranslation('onboarding');
+  const OPTIONS = buildOptions(t);
   // A11Y-007 / CF-35: proper WAI-ARIA radiogroup keyboard behaviour — a
   // single roving tab stop + Arrow/Home/End navigation. The previous
   // `tabIndex={active?0:-1}` on every radio made all three simultaneous tab
@@ -87,7 +108,7 @@ export function CurrencyPickerScreen({
           <p className="mt-3 text-[15px] text-gray-600 dark:text-gray-300">{copy.sub}</p>
         </header>
 
-        <div role="radiogroup" aria-label="Home currency" className="flex flex-col gap-3">
+        <div role="radiogroup" aria-label={t('currency.ariaLabel')} className="flex flex-col gap-3">
           {OPTIONS.map((opt, i) => {
             const isSelected = selected === opt.code;
             return (

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '~/stores/auth.store';
 import { requestOtp, verifyOtp } from '~/services/auth';
 import { readClipboard } from '~/native/clipboard';
@@ -41,6 +42,7 @@ export function EmailEntry({
   error,
   inputRef,
 }: EmailEntryProps): React.JSX.Element {
+  const { t } = useTranslation('onboarding');
   // Lightweight client check — the real validity is whatever the
   // backend accepts, but this gates the "looks ok" border colour.
   const valid = /.+@.+\..+/.test(email);
@@ -73,7 +75,7 @@ export function EmailEntry({
           type="email"
           inputMode="email"
           autoComplete="email"
-          placeholder="you@example.com"
+          placeholder={t('emailPlaceholder')}
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           className="flex-1 border-0 outline-0 bg-transparent text-[17px] font-medium text-gray-950 dark:text-white placeholder-gray-400 dark:placeholder-gray-500"
@@ -92,7 +94,7 @@ export function EmailEntry({
               strokeWidth="1.2"
             />
           </svg>
-          <span>Your email stays yours. We never sell contacts.</span>
+          <span>{t('trust.emailPrivacy')}</span>
         </div>
       )}
     </div>
@@ -136,6 +138,7 @@ export function OtpEntry({
   onResend,
   onVerified,
 }: OtpEntryProps): React.JSX.Element {
+  const { t } = useTranslation('onboarding');
   const inputs = useRef<Array<HTMLInputElement | null>>([]);
   const [clipboardCode, setClipboardCode] = useState<string | null>(null);
   const digits = useMemo(
@@ -256,7 +259,8 @@ export function OtpEntry({
             />
           </svg>
           <span>
-            Paste <span className="font-mono">{clipboardCode}</span>
+            {t('otp.pastePrefix')}
+            <span className="font-mono">{clipboardCode}</span>
           </span>
         </button>
       )}
@@ -296,7 +300,7 @@ export function OtpEntry({
         onClick={onResend}
         className="h-10 self-start bg-transparent border-0 text-[15px] font-medium text-gray-600 dark:text-gray-300 cursor-pointer"
       >
-        Resend code
+        {t('resend.code')}
       </button>
     </div>
   );
@@ -441,6 +445,7 @@ export function useOnboardingAuth(): {
   verify: (email: string, otp: string) => Promise<boolean>;
   clearErrors: () => void;
 } {
+  const { t } = useTranslation('onboarding');
   const [sendingOtp, setSendingOtp] = useState(false);
   const [verifyingOtp, setVerifyingOtp] = useState(false);
   const [emailError, setEmailError] = useState<string | null>(null);
@@ -453,7 +458,7 @@ export function useOnboardingAuth(): {
       await requestOtp(email);
       return true;
     } catch (err) {
-      setEmailError(friendlyError(err, 'Failed to send verification code.'));
+      setEmailError(friendlyError(err, t('error.sendOtpFallback')));
       return false;
     } finally {
       setSendingOtp(false);
@@ -468,7 +473,7 @@ export function useOnboardingAuth(): {
       useAuthStore.getState().setSession(email, accessToken, refreshToken ?? null);
       return true;
     } catch (err) {
-      setOtpError(friendlyError(err, 'Invalid code. Please try again.'));
+      setOtpError(friendlyError(err, t('error.verifyFallback')));
       return false;
     } finally {
       setVerifyingOtp(false);

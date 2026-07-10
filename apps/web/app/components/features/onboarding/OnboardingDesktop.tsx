@@ -77,7 +77,7 @@ function SlidePanel(): React.JSX.Element {
           <button
             type="button"
             onClick={() => go(-1)}
-            aria-label="Previous"
+            aria-label={t('desktop.slideshow.previous')}
             className="flex h-10 w-10 items-center justify-center rounded-md border border-line-strong bg-white text-ink-muted transition-colors hover:bg-gray-50 hover:text-ink"
           >
             <svg
@@ -93,7 +93,7 @@ function SlidePanel(): React.JSX.Element {
           <button
             type="button"
             onClick={() => go(1)}
-            aria-label="Next"
+            aria-label={t('desktop.slideshow.next')}
             className="flex h-10 w-10 items-center justify-center rounded-md border border-line-strong bg-white text-ink-muted transition-colors hover:bg-gray-50 hover:text-ink"
           >
             <svg
@@ -123,6 +123,7 @@ interface OnboardingDesktopProps {
 const RESEND_COOLDOWN_SECONDS = 30;
 
 export function OnboardingDesktop({ onComplete }: OnboardingDesktopProps = {}): React.JSX.Element {
+  const { t } = useTranslation('onboarding');
   const navigate = useNavigate();
   const [step, setStep] = useState<'email' | 'otp'>('email');
   const [email, setEmail] = useState('');
@@ -190,16 +191,14 @@ export function OnboardingDesktop({ onComplete }: OnboardingDesktopProps = {}): 
           {step === 'email' ? (
             <>
               <h1 className="text-3xl font-semibold tracking-[-0.02em] text-ink">
-                Welcome to the club.
+                {t('desktop.emailStep.heading')}
               </h1>
-              <p className="mt-2 text-ink-muted">
-                Drop your email below and we’ll send you a 6-digit code to verify.
-              </p>
+              <p className="mt-2 text-ink-muted">{t('desktop.emailStep.sub')}</p>
               <form onSubmit={(e) => void handleEmail(e)} className="mt-8">
                 <Input
                   type="email"
-                  label="Email address"
-                  placeholder="you@example.com"
+                  label={t('desktop.emailStep.emailLabel')}
+                  placeholder={t('emailPlaceholder')}
                   value={email}
                   onChange={(v) => {
                     setEmail(v);
@@ -219,26 +218,28 @@ export function OnboardingDesktop({ onComplete }: OnboardingDesktopProps = {}): 
                   >
                     <path d="M12 21s-7.5-4.9-10-9.2C.4 8.6 2 5 5.5 5c2 0 3.4 1.1 4.5 2.6C11.1 6.1 12.5 5 14.5 5 18 5 19.6 8.6 22 11.8 19.5 16.1 12 21 12 21z" />
                   </svg>
-                  Your email stays yours. We never sell contacts.
+                  {t('trust.emailPrivacy')}
                 </p>
                 <Button type="submit" size="lg" className="mt-4 w-full" loading={sendingOtp}>
-                  Send verification code
+                  {t('desktop.emailStep.sendButton')}
                 </Button>
               </form>
               <p className="mt-6 text-sm text-ink-muted">
-                Already have an account?{' '}
+                {t('desktop.emailStep.alreadyHaveAccountPrefix')}
                 <Link to="/auth" className="font-medium text-blue-600 hover:text-blue-700">
-                  Log in
+                  {t('desktop.emailStep.logIn')}
                 </Link>
               </p>
             </>
           ) : (
             <>
               <h1 className="text-3xl font-semibold tracking-[-0.02em] text-ink">
-                Check your email
+                {t('desktop.otpStep.heading')}
               </h1>
               <p className="mt-2 text-ink-muted">
-                We sent a 6-digit code to <span className="font-medium text-ink">{email}</span>.
+                {t('desktop.otpStep.subPrefix')}
+                <span className="font-medium text-ink">{email}</span>
+                {t('desktop.otpStep.subSuffix')}
               </p>
               <form onSubmit={(e) => void handleOtp(e)} className="mt-8 space-y-4">
                 <Input
@@ -246,7 +247,7 @@ export function OnboardingDesktop({ onComplete }: OnboardingDesktopProps = {}): 
                   inputMode="numeric"
                   pattern="[0-9]{6}"
                   maxLength={6}
-                  label="Verification code"
+                  label={t('desktop.otpStep.otpLabel')}
                   placeholder="000000"
                   value={otp}
                   onChange={(v) => {
@@ -260,7 +261,7 @@ export function OnboardingDesktop({ onComplete }: OnboardingDesktopProps = {}): 
                   {...(otpError !== null ? { error: otpError } : {})}
                 />
                 <Button type="submit" size="lg" className="w-full" loading={verifyingOtp}>
-                  Verify &amp; continue
+                  {t('desktop.otpStep.verifyButton')}
                 </Button>
                 {/* UX-07: explicit resend, mirroring the native flow's
                     "Resend code" (signup-tail.tsx's OtpEntry). Disabled
@@ -272,7 +273,9 @@ export function OnboardingDesktop({ onComplete }: OnboardingDesktopProps = {}): 
                   disabled={resendCooldown > 0 || sendingOtp}
                   className="w-full text-sm text-ink-muted hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {resendCooldown > 0 ? `Resend code in ${resendCooldown}s` : 'Resend code'}
+                  {resendCooldown > 0
+                    ? t('resend.in', { seconds: resendCooldown })
+                    : t('resend.code')}
                 </button>
                 <button
                   type="button"
@@ -285,7 +288,7 @@ export function OnboardingDesktop({ onComplete }: OnboardingDesktopProps = {}): 
                   }}
                   className="w-full text-sm text-ink-muted hover:text-ink"
                 >
-                  Use a different email
+                  {t('desktop.otpStep.useDifferentEmail')}
                 </button>
               </form>
             </>

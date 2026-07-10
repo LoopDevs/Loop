@@ -1,0 +1,10 @@
+{
+  "meta": {
+    "title": "Map — Loop"
+  },
+  "error": {
+    "heading": "Map unavailable",
+    "body": "We couldn't load the map.",
+    "retry": "Try again"
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "greeting": {
+    "welcomeBack": "Welcome back",
+    "welcome": "Welcome",
+    "toLoop": "to Loop",
+    "accountAriaLabel": "Account"
+  },
+  "hero": {
+    "savedLabel": "You’ve saved",
+    "cashbackLabel": "Cashback earned",
+    "savedEmptySub": "Buy a gift card to start saving.",
+    "cashbackEmptySub": "Buy a gift card to start earning cashback.",
+    "activitySub_one": "Across {{count}} order — keep going.",
+    "activitySub_other": "Across {{count}} orders — keep going.",
+    "ordersLabel": "Orders",
+    "avgSavingLabel": "Avg saving",
+    "avgBackLabel": "Avg back"
+  },
+  "section": {
+    "quickBuy": "Quick buy",
+    "browseAll": "Browse all",
+    "recentActivity": "Recent activity",
+    "allOrders": "All orders",
+    "results": "Results",
+    "browse": "Browse",
+    "resultsMeta_one": "{{count}} brand",
+    "resultsMeta_other": "{{count}} brands"
+  },
+  "directory": {
+    "giftCards": "Gift cards",
+    "options": "{{count}} options",
+    "searchUnavailable": "Search is unavailable right now. Try again in a moment.",
+    "noMatch": "No brands match “{{query}}”"
+  },
+  "activity": {
+    "today": "Today · {{time}}",
+    "yesterday": "Yesterday · {{time}}"
+  }
+}

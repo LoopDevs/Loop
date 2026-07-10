@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router';
+import { useTranslation } from 'react-i18next';
 import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import type { Route } from './+types/brand.$slug';
 import { brandSlug, groupMerchants, merchantInCountry, variantLabel } from '@loop/shared';
@@ -10,6 +11,7 @@ import { Navbar } from '~/components/features/Navbar';
 import { Footer } from '~/components/features/Footer';
 import { MerchantCard } from '~/components/features/MerchantCard';
 import { Spinner } from '~/components/ui/Spinner';
+import i18n from '~/i18n/i18next';
 
 export function meta({ params }: Route.MetaArgs): Route.MetaDescriptors {
   let name = params.slug ?? '';
@@ -20,10 +22,10 @@ export function meta({ params }: Route.MetaArgs): Route.MetaDescriptors {
   }
   name = name.replace(/-/g, ' ');
   return [
-    { title: `${name} gift cards — Loop` },
+    { title: i18n.t('brand:meta.title', { name }) },
     {
       name: 'description',
-      content: `Choose from every ${name} gift card option and save with XLM.`,
+      content: i18n.t('brand:meta.description', { name }),
     },
   ];
 }
@@ -36,6 +38,7 @@ export function meta({ params }: Route.MetaArgs): Route.MetaDescriptors {
  * — the same source the directory groups — so this needs no new endpoint.
  */
 export default function BrandRoute(): React.JSX.Element {
+  const { t } = useTranslation('brand');
   const { slug = '' } = useParams<{ slug: string }>();
   const { isNative } = useNativePlatform();
   const navigate = useNavigate();
@@ -88,7 +91,7 @@ export default function BrandRoute(): React.JSX.Element {
             onClick={handleBack}
             className="text-sm text-ink-muted hover:text-ink mb-6 inline-flex items-center gap-1"
           >
-            ← Back
+            {t('back')}
           </button>
 
           {isLoading ? (
@@ -97,12 +100,10 @@ export default function BrandRoute(): React.JSX.Element {
             </div>
           ) : isError || group === undefined ? (
             <div className="text-center py-24">
-              <h1 className="text-2xl font-semibold text-ink mb-3">Brand not found</h1>
-              <p className="text-ink-muted mb-6">
-                We couldn&apos;t find that brand. It may have moved or be unavailable.
-              </p>
+              <h1 className="text-2xl font-semibold text-ink mb-3">{t('notFound.heading')}</h1>
+              <p className="text-ink-muted mb-6">{t('notFound.body')}</p>
               <Link to="/" className="text-blue-600 underline">
-                Back to directory
+                {t('notFound.link')}
               </Link>
             </div>
           ) : (
@@ -112,7 +113,7 @@ export default function BrandRoute(): React.JSX.Element {
                   {group.name}
                 </h1>
                 <p className="text-base text-ink-muted">
-                  {group.members.length} gift card options. Pick the one you want.
+                  {t('header.sub', { count: group.members.length })}
                 </p>
               </header>
               <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">

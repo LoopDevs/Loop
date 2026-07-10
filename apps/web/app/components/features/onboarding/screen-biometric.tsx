@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { authenticateWithBiometrics } from '~/native/biometrics';
 import { setAppLockEnabled, markAppLockJustVerified } from '~/native/app-lock';
 
@@ -41,6 +42,7 @@ export function BiometricSetup({
   onEnabled,
   triggerRef,
 }: BiometricSetupProps): React.JSX.Element {
+  const { t } = useTranslation('onboarding');
   const [scanning, setScanning] = useState(false);
   const [done, setDone] = useState(false);
 
@@ -75,7 +77,7 @@ export function BiometricSetup({
       if (done || scanning || available !== true) return;
       void (async () => {
         setScanning(true);
-        const ok = await authenticateWithBiometrics('Enable app lock');
+        const ok = await authenticateWithBiometrics(t('biometric.enableReason'));
         if (!ok) {
           setScanning(false);
           return;
@@ -96,20 +98,26 @@ export function BiometricSetup({
     return () => {
       triggerRef.current = null;
     };
-  }, [active, available, done, scanning, onEnabled, triggerRef]);
+  }, [active, available, done, scanning, onEnabled, triggerRef, t]);
 
+  // "Face ID" is an Apple product name \u2014 never translated, same convention
+  // as auth.tsx's biometric-label handling (docs/i18n.md #7). The design
+  // deliberately shows Face-ID-shaped copy regardless of what the device
+  // actually has (see the file header comment), so this is a fixed literal
+  // rather than a device-derived value like auth.tsx's `biometryType`.
+  const biometricLabel = 'Face ID';
   const statusTitle = done
-    ? 'Face ID enabled'
+    ? t('biometric.status.enabled', { type: biometricLabel })
     : scanning
-      ? 'Scanning\u2026'
+      ? t('biometric.status.scanning')
       : available === false
-        ? 'Not available'
-        : 'Use Face ID';
+        ? t('biometric.status.unavailable')
+        : t('biometric.status.use', { type: biometricLabel });
   const statusSub = done
-    ? 'You\u2019ll use Face ID or your device passcode to unlock Loop on app launch.'
+    ? t('biometric.sub.enabled', { type: biometricLabel })
     : available === false
-      ? 'We\u2019ll skip this \u2014 you can turn it on later from your account.'
-      : 'Lock Loop on app launch and fall back to your device passcode if biometrics are unavailable.';
+      ? t('biometric.sub.unavailable')
+      : t('biometric.sub.default');
 
   return (
     <div className="flex-1 flex flex-col justify-center gap-6 px-6 py-6">
@@ -222,7 +230,7 @@ export function BiometricSetup({
           <rect x="4" y="8" width="10" height="7" rx="1.2" stroke="#22c55e" strokeWidth="1.4" />
           <path d="M6 8V6a3 3 0 0 1 6 0v2" stroke="#22c55e" strokeWidth="1.4" />
         </svg>
-        <span>Face data stays on your device. Loop never sees it.</span>
+        <span>{t('biometric.privacyNote')}</span>
       </div>
 
       <style>{`@keyframes loop-onboard-biometric-spin { to { transform: rotate(360deg); } }`}</style>

@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router';
+import { useTranslation } from 'react-i18next';
 import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import { ApiException } from '@loop/shared';
 import type { Route } from './+types/cashback.$slug';
@@ -14,6 +15,7 @@ import { Phase2Gate } from '~/components/Phase2Gate';
 import { Spinner } from '~/components/ui/Spinner';
 import { LazyImage } from '~/components/ui/LazyImage';
 import { getImageProxyUrl } from '~/utils/image';
+import i18n from '~/i18n/i18next';
 
 /**
  * `/cashback/:slug` — SEO landing page for one merchant (#648).
@@ -49,28 +51,27 @@ export function meta({ params }: Route.MetaArgs): Route.MetaDescriptors {
   }
   const name = niceName(slug);
   return [
-    { title: `Cashback at ${name} — Loop` },
+    { title: i18n.t('cashback:merchant.meta.title', { name }) },
     {
       name: 'description',
-      content: `Earn cashback on ${name} gift cards with Loop. Paid in LOOP-asset stablecoin — recycle it into more orders for compounding rewards.`,
+      content: i18n.t('cashback:merchant.meta.description', { name }),
     },
     { tagName: 'link', rel: 'canonical', href: canonicalHref(params, `/cashback/${slug}`) },
   ];
 }
 
 export function ErrorBoundary(): React.JSX.Element {
+  const { t } = useTranslation('cashback');
   return (
     <>
       <Navbar />
       <main className="container mx-auto px-4 py-16 text-center">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
-          Something went wrong
+          {t('common:errorBoundary.heading')}
         </h1>
-        <p className="text-gray-600 dark:text-gray-300 mb-6">
-          We couldn&apos;t load this merchant. Try again in a minute.
-        </p>
+        <p className="text-gray-600 dark:text-gray-300 mb-6">{t('merchant.errorBoundary.body')}</p>
         <Link to="/" className="text-blue-600 underline">
-          Back to home
+          {t('merchant.errorBoundary.link')}
         </Link>
       </main>
       <Footer />
@@ -87,6 +88,7 @@ export default function CashbackMerchantLanding(): React.JSX.Element {
 }
 
 function CashbackMerchantLandingBody(): React.JSX.Element {
+  const { t } = useTranslation('cashback');
   const { slug = '' } = useParams<{ slug: string }>();
   // CAT-02 (2026-06-30 cold audit): a merchant out of the visitor's
   // country/currency scope now 404s server-side (same rule
@@ -133,18 +135,12 @@ function CashbackMerchantLandingBody(): React.JSX.Element {
 
         <section className="mt-12 rounded-xl border border-gray-200 bg-white p-8 dark:border-gray-800 dark:bg-gray-900">
           <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">
-            How cashback compounds on Loop
+            {t('merchant.howItWorks.heading')}
           </h2>
           <ol className="list-decimal list-outside pl-6 space-y-3 text-gray-700 dark:text-gray-300">
-            <li>Buy a gift card and pay with XLM, USDC, or your existing LOOP-asset balance.</li>
-            <li>
-              Earn cashback in LOOP-asset stablecoin (USDLOOP / GBPLOOP / EURLOOP), pinned 1:1 to
-              your home currency.
-            </li>
-            <li>
-              Spend that LOOP-asset balance on your next order. The cashback you earned on this
-              purchase pays for the next one — flywheel.
-            </li>
+            <li>{t('merchant.howItWorks.step1')}</li>
+            <li>{t('merchant.howItWorks.step2')}</li>
+            <li>{t('merchant.howItWorks.step3')}</li>
           </ol>
         </section>
 
@@ -153,7 +149,7 @@ function CashbackMerchantLandingBody(): React.JSX.Element {
             to="/"
             className="text-sm text-gray-600 underline hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200"
           >
-            Browse all merchants →
+            {t('merchant.browseAll')}
           </Link>
         </section>
       </main>
@@ -175,6 +171,7 @@ function HeroCopy({
   merchantId: string;
   isPending: boolean;
 }): React.JSX.Element {
+  const { t } = useTranslation('cashback');
   return (
     <section className="text-center">
       {logoUrl !== null ? (
@@ -187,47 +184,51 @@ function HeroCopy({
           />
         </div>
       ) : null}
-      <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-3">Cashback at {name}</h1>
+      <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-3">
+        {t('merchant.hero.heading', { name })}
+      </h1>
       {isPending ? (
         <div className="flex justify-center py-4">
           <Spinner />
         </div>
       ) : userCashbackPct !== null ? (
         <p className="text-2xl text-green-700 dark:text-green-400 mb-6">
-          Earn <span className="font-semibold">{userCashbackPct}%</span> back on every {name} gift
-          card
+          {t('merchant.hero.earnPrefix')}
+          <span className="font-semibold">{userCashbackPct}%</span>
+          {t('merchant.hero.earnSuffix', { name })}
         </p>
       ) : (
         <p className="text-lg text-gray-600 dark:text-gray-400 mb-6">
-          {name} is coming soon — sign up to be notified when cashback goes live.
+          {t('merchant.hero.comingSoon', { name })}
         </p>
       )}
       <Link
         to={`/gift-card/${encodeURIComponent(merchantId)}`}
         className="inline-block rounded-lg bg-blue-600 px-6 py-3 text-base font-semibold text-white hover:bg-blue-700"
       >
-        Shop {name} gift cards
+        {t('merchant.hero.shopCta', { name })}
       </Link>
     </section>
   );
 }
 
 function NotFoundCopy({ slug, name }: { slug: string; name: string }): React.JSX.Element {
+  const { t } = useTranslation('cashback');
   return (
     <section className="text-center">
       <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-3">
-        {name} isn&rsquo;t on Loop
+        {t('merchant.notFound.heading', { name })}
       </h1>
       <p className="text-gray-600 dark:text-gray-400 mb-6">
-        We couldn&rsquo;t find a merchant with slug{' '}
-        <code className="font-mono text-sm">{slug}</code>. Browse the full catalog to see
-        what&rsquo;s available.
+        {t('merchant.notFound.bodyPrefix')}
+        <code className="font-mono text-sm">{slug}</code>
+        {t('merchant.notFound.bodySuffix')}
       </p>
       <Link
         to="/"
         className="inline-block rounded-lg bg-blue-600 px-6 py-3 text-base font-semibold text-white hover:bg-blue-700"
       >
-        Browse merchants
+        {t('merchant.notFound.browse')}
       </Link>
     </section>
   );

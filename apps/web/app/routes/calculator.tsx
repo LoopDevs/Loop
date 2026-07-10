@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import type { Route } from './+types/calculator';
 import { canonicalHref } from '~/i18n/seo';
@@ -11,6 +12,7 @@ import { Footer } from '~/components/features/Footer';
 import { Phase2Gate } from '~/components/Phase2Gate';
 import { Spinner } from '~/components/ui/Spinner';
 import { CashbackCalculator } from '~/components/features/cashback/CashbackCalculator';
+import i18n from '~/i18n/i18next';
 
 /**
  * `/calculator` — standalone pre-signup cashback calculator
@@ -32,11 +34,10 @@ import { CashbackCalculator } from '~/components/features/cashback/CashbackCalcu
 
 export function meta({ params }: Route.MetaArgs): Route.MetaDescriptors {
   return [
-    { title: 'Cashback calculator — Loop' },
+    { title: i18n.t('cashback:calculator.meta.title') },
     {
       name: 'description',
-      content:
-        'See how much cashback you would earn on any merchant. Pick a store, enter an amount — Loop pays cashback in LOOP-asset stablecoin pinned 1:1 to your home currency.',
+      content: i18n.t('cashback:calculator.meta.description'),
     },
     { tagName: 'link', rel: 'canonical', href: canonicalHref(params, '/calculator') },
   ];
@@ -51,6 +52,7 @@ export default function CalculatorRoute(): React.JSX.Element {
 }
 
 function CalculatorRouteBody(): React.JSX.Element {
+  const { t } = useTranslation('cashback');
   // CAT-02 (2026-06-30 cold audit): this route was the last of three
   // country-blind catalog surfaces — the dropdown showed every
   // merchant globally regardless of the visitor's locale, unlike
@@ -78,12 +80,9 @@ function CalculatorRouteBody(): React.JSX.Element {
       <main className="container mx-auto max-w-3xl px-4 pb-12 pt-20">
         <header className="text-center">
           <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-3">
-            Cashback calculator
+            {t('calculator.heading')}
           </h1>
-          <p className="text-lg text-gray-600 dark:text-gray-400 mb-10">
-            Pick a merchant and see what you&rsquo;d earn on Loop — paid in LOOP-asset stablecoin
-            you can spend on your next order.
-          </p>
+          <p className="text-lg text-gray-600 dark:text-gray-400 mb-10">{t('calculator.sub')}</p>
         </header>
 
         {query.isPending ? (
@@ -92,7 +91,7 @@ function CalculatorRouteBody(): React.JSX.Element {
           </div>
         ) : merchants.length === 0 ? (
           <p className="text-center text-gray-600 dark:text-gray-400">
-            No merchants available right now. Check back shortly.
+            {t('calculator.noMerchants')}
           </p>
         ) : (
           <section className="space-y-6">
@@ -114,7 +113,7 @@ function CalculatorRouteBody(): React.JSX.Element {
                 to="/auth"
                 className="inline-block rounded-lg bg-blue-600 px-6 py-3 text-base font-semibold text-white hover:bg-blue-700"
               >
-                Start earning cashback →
+                {t('calculator.cta')}
               </Link>
             </div>
           </section>
@@ -134,18 +133,22 @@ function MerchantPicker({
   selectedId: string | null;
   onSelect: (id: string) => void;
 }): React.JSX.Element {
+  const { t } = useTranslation('cashback');
   return (
     <label className="flex flex-col gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-      Merchant
+      {t('calculator.merchantPicker.label')}
       <select
         value={selectedId ?? ''}
         onChange={(e) => onSelect(e.target.value)}
-        aria-label="Select merchant"
+        aria-label={t('calculator.merchantPicker.ariaLabel')}
         className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-base text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
       >
         {merchants.map((m) => (
           <option key={m.id} value={m.id}>
-            {m.name} · {Number(m.userCashbackPct).toFixed(2).replace(/\.0+$/, '')}% cashback
+            {t('calculator.merchantPicker.option', {
+              name: m.name,
+              pct: Number(m.userCashbackPct).toFixed(2).replace(/\.0+$/, ''),
+            })}
           </option>
         ))}
       </select>
