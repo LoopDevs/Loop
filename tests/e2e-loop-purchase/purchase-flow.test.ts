@@ -108,6 +108,22 @@ async function signIn(page: Page): Promise<MintResponse> {
   // token, calls the real /api/auth/refresh, and the app renders
   // authenticated from here on.
   await page.goto('/');
+  // Flake fix (Q6-4 follow-up): WAIT for the authenticated state to
+  // fully settle before doing anything else. `use-session-restore.ts`
+  // fires the `/api/auth/refresh` round-trip asynchronously on boot;
+  // if we race ahead and start the purchase before it resolves, the
+  // auth-store update lands mid-flow and re-renders/remounts the
+  // merchant route subtree — which fires `PurchaseContainer`'s
+  // `useEffect` cleanup (`store.reset()` + `setLoopCreate(null)`),
+  // silently dropping the user from the payment screen back to the
+  // amount form (observed once in the merge CI run: the order was
+  // fine server-side but the UI had reset to a fresh amount form —
+  // USDC re-selected, amount cleared). A real user completes the OTP
+  // form and auth settles before they ever navigate to a merchant, so
+  // gating on the authenticated avatar here makes the synthetic login
+  // faithful to that ordering. The "Account menu" button
+  // (Navbar.tsx) renders only when `accessToken !== null`.
+  await expect(page.getByRole('button', { name: 'Account menu' })).toBeVisible({ timeout: 15_000 });
   return session;
 }
 
@@ -221,27 +237,43 @@ test.describe('loop-native purchase-through-the-UI', () => {
     });
     expect(injectRes.ok()).toBe(true);
 
-    // ─── paid → procuring: watcher, then procurement worker ────────
-    // Money-critical: the order must move OFF `pending_payment` once
-    // the deposit lands (proves the watcher matched it end to end —
-    // amount + memo + asset all had to line up). The `paid` label
-    // itself ("Payment received") isn't asserted as its own visible
-    // frame: this suite deliberately ticks the payment watcher +
-    // procurement worker every 1s (for a fast test) against the UI's
-    // 3s poll (LoopPaymentStep.tsx), so a fast backend can legitimately
-    // race straight through `paid` into `procuring` before the UI ever
-    // samples it — a property of this suite's speed tuning, not a
-    // production behavior to pin. `procuring` ("Buying your gift
-    // card") is longer-lived (it holds until the CTX order below is
-    // marked fulfilled), so it's the reliable intermediate checkpoint.
-    await expect(page.getByText('Waiting for payment')).not.toBeVisible({ timeout: 15_000 });
-    await expect(page.getByText(/Payment received|Buying your gift card/)).toBeVisible({
-      timeout: 10_000,
+    // ─── paid → procuring → fulfilled ──────────────────────────────
+    // Money-critical, asserted DETERMINISTICALLY against the backend
+    // (not a racy UI frame): the order must move OFF `pending_payment`
+    // once the deposit lands — that transition is the proof the payment
+    // watcher matched the deposit end to end (amount + memo + asset all
+    // had to line up). `toPass` polls the authoritative order API, so
+    // it's immune to the UI's 3s poll cadence.
+    await expect(async () => {
+      const res = await page.request.get(`${BACKEND_URL}/api/orders/loop/${created.orderId}`, {
+        headers: { Authorization: `Bearer ${session.accessToken}` },
+      });
+      expect(res.ok()).toBe(true);
+      const body = (await res.json()) as { state: string };
+      expect(['paid', 'procuring', 'fulfilled']).toContain(body.state);
+    }).toPass({ timeout: 20_000, intervals: [300] });
+
+    // …and the payment-step UI reflects the progressed state. The exact
+    // intermediate label ("Payment received" for `paid` vs "Buying your
+    // gift card" for `procuring`) is deliberately NOT pinned to one
+    // frame: with the watcher + procurement worker both ticking at 1s
+    // (this suite's speed tuning) against the UI's 3s poll, a fast
+    // backend can race `paid`→`procuring`→`fulfilled` past a single
+    // sampled frame. Matching ANY progressed label (including "Ready")
+    // is race-free while staying non-vacuous — the amount-selection
+    // fallback form shows none of these three, so a regression that
+    // dropped the user off the payment step (e.g. a mid-flow remount)
+    // still fails here rather than passing silently.
+    await expect(page.getByText(/Payment received|Buying your gift card|Ready/)).toBeVisible({
+      timeout: 15_000,
     });
 
-    // ─── Complete the operator-side CTX order (procurement is
-    //     already polling for the redemption payload by the time the
-    //     "Buying your gift card" state above appears) ─────────────
+    // ─── Complete the operator-side CTX order. Procurement began its
+    //     redemption wait the moment the order hit `procuring`; marking
+    //     the CTX-side order fulfilled here delivers the redemption
+    //     payload it is polling for (well inside its 25s budget, so the
+    //     order fulfils WITH the mock redeem URL rather than a
+    //     budget-exhausted null). ─────────────────────────────────────
     await waitForCtxOrderAndMarkFulfilled(page);
 
     // ─── fulfilled: state label + redemption reveal ────────────────
