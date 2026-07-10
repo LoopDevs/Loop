@@ -1136,6 +1136,24 @@ on a newly-rated advisory indefinitely. The cron job posts to
   required-checks list. It runs against `spend.ctx.com` on every
   PR and depending on upstream health can be flaky in ways that
   aren't about our code. The mocked suite is the hermetic gate.
+- **👤 operator follow-up (T0-3, `docs/money-auth-worklist.md`):**
+  `Flywheel integration (real postgres)` is also NOT in the
+  required-checks list today, even though it's the only CI job
+  that runs `check:migration-parity` and the integration
+  ledger-drift assertion (INV-1) against a real Postgres — the
+  layer where the DB-tier money invariants
+  (`docs/invariants.md`) get their deepest exercise. The static
+  `check:money-invariants` gate (Quality job, required — see
+  quick commands in `AGENTS.md`) now catches a dropped/narrowed
+  money-critical trigger/index/CHECK without needing a live DB,
+  so this isn't blocking, but it's belt-and-suspenders worth
+  doing: add `flywheel-integration` to the required-status-checks
+  set via
+  `gh api repos/LoopDevs/Loop/branches/main/protection/required_status_checks`
+  (PATCH/PUT with the existing checks array plus
+  `"Flywheel integration (real postgres)"`). This is a
+  branch-protection change — per `AGENTS.md`'s guardrails, only
+  the operator makes it, never an agent.
 
 ### Deployment
 

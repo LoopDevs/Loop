@@ -119,7 +119,7 @@ npm run mobile:sync && cd apps/mobile && npx cap open ios
 # survive the native-project regeneration (ADR-007).
 
 # Code quality
-npm run verify               # typecheck + lint + format:check + lint:docs + shared-type-parity + openapi-parity + dead-flags + env-perms + test + audit (one command — runs ./scripts/verify.sh)
+npm run verify               # typecheck + lint + format:check + lint:docs + shared-type-parity + openapi-parity + dead-flags + money-invariants + env-perms + test + audit (one command — runs ./scripts/verify.sh)
 npm run typecheck            # tsc across all packages
 npm run lint                 # ESLint across all packages
 npm run format               # Prettier across all packages
@@ -147,6 +147,19 @@ npm run check:openapi-parity # Route ↔ OpenAPI registration parity (static)
 # guards). Dead config that LOOKS wired fails CI; deliberate
 # exceptions live in the script's reasoned allowlist.
 npm run check:dead-flags     # Declared-but-never-read env var detector
+# T0-3 (docs/money-auth-worklist.md): static presence + shape check for
+# every money-critical DB object docs/invariants.md documents as "DB:"
+# tier — the assert_emission_conservation trigger/function (migration
+# 0044), the payout/settlement/interest-mint unique indexes, and the
+# ledger/order CHECK constraints. Textually replays the migration
+# chain's CREATE/DROP events (last-write-wins, no live postgres) so a
+# diff that drops or narrows one of these — even if it updates
+# schema.ts to match, which check:migration-parity alone would not
+# catch — fails CI here. Runs in `npm run verify` + the CI quality job
+# (a REQUIRED merge check), so it doesn't need flywheel-integration
+# (the real-DB job that also runs check:migration-parity — see below —
+# and the ledger-drift assertion) to be in the required-checks set.
+npm run check:money-invariants # Money-invariant DB-object presence (static)
 # Replays migrations 0000→latest into a scratch DB and diffs the
 # resulting catalog against schema.ts materialised by drizzle-kit.
 # Needs a disposable postgres (DATABASE_URL is only the maintenance
@@ -241,6 +254,14 @@ intentional.
 - `check-openapi-parity` / `check-shared-type-parity` / `check-migration-parity`
   — the three drift contracts.
 - `check-dead-flags.mjs` — every env var is actually read.
+- `check-money-invariants.mjs` (T0-3) — every money-critical DB object
+  `docs/invariants.md` lists as "DB:" tier (the emission-conservation
+  trigger, the payout/settlement/ledger unique indexes, the ledger/order
+  CHECK constraints) still exists with its documented shape. Static
+  (no live DB), so it runs in the REQUIRED Quality job — closes the gap
+  where `check-migration-parity` alone would pass a diff that drops a
+  DB-tier invariant from both the migration chain and `schema.ts`
+  consistently.
 - The integration `afterEach` ledger assertion — no flow desyncs the mirror.
 - `env.ts` boot guards — misconfiguration fails at deploy, not at request time.
 

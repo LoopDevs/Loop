@@ -28,6 +28,7 @@
     "check:bundle-budget": "./scripts/check-bundle-budget.sh",
     "check:openapi-parity": "node ./scripts/check-openapi-parity.mjs",
     "check:dead-flags": "node ./scripts/check-dead-flags.mjs",
+    "check:money-invariants": "node ./scripts/check-money-invariants.mjs",
     "check:migration-parity": "npm run check:migration-parity -w @loop/backend",
     "test:tools": "./scripts/test-catalog-tools.sh",
     "audit": "node ./scripts/check-audit-policy.mjs",

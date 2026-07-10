@@ -283,8 +283,44 @@
       secret is set at all. Mocked-e2e + flywheel-e2e Playwright configs
       thread the secret through. See `docs/threat-model.md`'s AUDIT-2-E
       accepted-risk row.
-- [ ] **T0-3 · Make the money-invariant DB layer a required merge check.** _S · 💰 + operator._
+- [x] **T0-3 · Make the money-invariant DB layer a required merge check.** _S · 💰 + operator._
       Enforcement, not a fix — promote the invariant checks to a required CI gate.
+      **Code half done 2026-07-10 (#1614):** added
+      `scripts/check-money-invariants.mjs` (`npm run check:money-invariants`)
+      — a static (no live DB) presence + shape check for every
+      money-critical DB object `docs/invariants.md` lists as "DB:" tier:
+      the `assert_emission_conservation` trigger/function (migration
+      0044, both the insert and re-entry triggers, kind-set asserted),
+      the payout/settlement/interest-mint unique indexes
+      (`credit_transactions_reference_unique`,
+      `pending_payouts_active_emission_unique`,
+      `pending_payouts_order_unique`, `pending_payouts_burn_order_unique`,
+      `ctx_settlements_order_unique`,
+      `interest_mint_snapshots_user_asset_period_unique`,
+      `credit_transactions_interest_period_unique`), and the ledger/order
+      CHECK constraints (`user_credits_non_negative`,
+      `credit_transactions_amount_sign`, `orders_state_known`,
+      `pending_payouts_interest_mint_asset_pinned`,
+      `credit_transactions_reason_length`). Textually replays the
+      migration chain's CREATE/DROP events in apply order
+      (last-write-wins) so it catches both "the object was never added"
+      and "a later migration dropped/narrowed it" — verified against a
+      scratch copy of the migrations directory with (a) a deleted
+      migration file, (b) an appended migration that `DROP INDEX`s a
+      tracked unique index, and (c) a narrowed trigger `WHEN` clause; all
+      three failed the check as expected, and the unmodified tree passes.
+      Wired into the CI Quality job (a REQUIRED merge check) and
+      `npm run verify`, so the money-invariant presence gate is live
+      immediately — it does not depend on the 👤 step below.
+      **👤 operator follow-up (not yet done):** `flywheel-integration`
+      (the real-postgres job that runs `check:migration-parity` + the
+      INV-1 ledger-drift assertion) is still not in the
+      required-status-checks set. Belt-and-suspenders, not blocking —
+      add it via
+      `gh api repos/LoopDevs/Loop/branches/main/protection/required_status_checks`
+      (see `docs/standards.md` §Branch protection on `main`). This is a
+      branch-protection change; per repo guardrails only the operator
+      makes it.
 
 ## Phase 3 — Scale / concurrency on the money path (before real volume)
 

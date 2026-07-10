@@ -90,6 +90,17 @@ jobs:
       # (currently empty) and ratchet down — stale entries fail.
       - run: npm run check:openapi-parity
       - run: npm run check:dead-flags
+      # T0-3 (docs/money-auth-worklist.md): static presence + shape
+      # assertion for the money-critical DB objects docs/invariants.md
+      # documents as "DB:" tier (the emission-conservation trigger,
+      # the payout/settlement/ledger unique indexes, the ledger/order
+      # CHECK constraints). Replays the migration chain's CREATE/DROP
+      # events textually (no live postgres) so it runs here in the
+      # REQUIRED Quality job rather than waiting on flywheel-integration
+      # (which validates the same objects against a real DB but isn't
+      # a required merge check today — see docs/invariants.md and
+      # docs/money-auth-worklist.md T0-3 for the follow-up).
+      - run: npm run check:money-invariants
       # Catalog media-pipeline tool self-tests (tools/ isn't a vitest workspace,
       # so this is their only regression guard). Network-free subset — see
       # scripts/test-catalog-tools.sh.
