@@ -19,9 +19,20 @@
  *          gets the admin-retry path).
  *        - terminal → markPayoutFailed immediately.
  *
- * No parallelism across rows WITHIN a tick — each row's submit awaits
- * the previous one so the operator account's sequence numbers
- * serialise. Small batch per tick (default 5) caps outstanding risk.
+ * No parallelism across rows WITHIN a tick on the SAME account — each
+ * row's submit awaits the previous one so that account's sequence
+ * numbers serialise. Small batch per tick (default 5) caps outstanding
+ * risk.
+ *
+ * ADR 044 / S4-1: when payout channel accounts are configured
+ * (`LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS`), the claimed batch is
+ * sharded across them and the shards run concurrently — each shard is
+ * still a strictly serial queue against its own channel's sequence
+ * number (so the "no parallelism on one sequence" guarantee above
+ * holds per-channel), but N channels give N sequence numbers, so N
+ * shards can have a submit in flight at once. Zero channels configured
+ * (the default) is the exact pre-ADR-044 single-queue path — see
+ * `docs/adr/044-payout-throughput.md`.
  *
  * CF-14 (x-concurrency-financial X-2): that single-process serialise
  * assumption does NOT hold across Fly machines — every machine runs
@@ -44,6 +55,7 @@ import { isKilled } from '../kill-switches.js';
 import { withAdvisoryLock } from '../db/client.js';
 import { listClaimablePayouts } from '../credits/pending-payouts.js';
 import { resolveIssuerSigners } from './issuer-signers.js';
+import { resolvePayoutChannels, type ChannelSigner } from './channel-accounts.js';
 import {
   runStuckPayoutWatchdog,
   STUCK_PAYOUT_WATCHDOG_INTERVAL_MS,
@@ -98,6 +110,16 @@ export interface RunPayoutTickArgs {
    * change nothing.
    */
   issuerSigners?: ReadonlyMap<string, { secret: string; account: string }>;
+  /**
+   * ADR 044 / S4-1: configured payout channel accounts, in order.
+   * Empty/omitted (default) → the legacy single-sequence path, every
+   * row processed by one serial queue with no `channelSecret` ever
+   * passed downstream — byte-identical to pre-ADR-044 behaviour. N
+   * channels → the claimed batch is sharded N ways and each shard runs
+   * concurrently with the others (still serial within itself). See
+   * `runPayoutTickLocked` and `docs/adr/044-payout-throughput.md`.
+   */
+  channels?: readonly ChannelSigner[];
   horizonUrl: string;
   networkPassphrase: string;
   maxAttempts: number;
@@ -226,14 +248,44 @@ async function runPayoutTickLocked(args: RunPayoutTickArgs): Promise<PayoutTickR
   // — renamed with the emission re-scope; `kind='burn'` issuer-return
   // rows are likewise never gated, same rationale as order-cashback.)
   const emissionsKilled = isKilled('emissions');
-  for (const row of rows) {
-    if (emissionsKilled && row.kind === 'emission') {
-      result.skippedKilled++;
-      continue;
+
+  // ADR 044 / S4-1: shard the claimed batch across configured channel
+  // accounts and run the shards concurrently. Partition is a pure
+  // in-memory split of THIS process's own already-claimed rows (no
+  // second DB claim, so there's nothing for two shards to race on —
+  // row i belongs to shard i % shardCount by construction). Each
+  // shard is its own strictly-sequential queue — a shard never has two
+  // in-flight submits against its own channel — so the "no parallel
+  // submits on one sequence number" guarantee holds per-shard exactly
+  // as it held fleet-wide pre-ADR-044. Zero channels configured
+  // collapses to shardCount=1 with `channelSecret` never set — the
+  // exact pre-ADR-044 single-queue loop, unchanged.
+  const channels = args.channels ?? [];
+  const shardCount = channels.length > 0 ? channels.length : 1;
+  const shards: (typeof rows)[number][][] = Array.from({ length: shardCount }, (_unused, i) =>
+    rows.filter((_row, rowIndex) => rowIndex % shardCount === i),
+  );
+
+  const runShard = async (
+    shardRows: (typeof rows)[number][],
+    channelSecret: string | undefined,
+  ): Promise<void> => {
+    for (const row of shardRows) {
+      if (emissionsKilled && row.kind === 'emission') {
+        result.skippedKilled++;
+        continue;
+      }
+      const outcome = await payOne(row, { ...args, channelSecret });
+      // Safe under JS's single-threaded cooperative concurrency: this
+      // increment never interleaves with another shard's increment
+      // mid-operation, even though multiple `runShard` calls are
+      // in-flight together via the `Promise.all` below.
+      result[outcome]++;
     }
-    const outcome = await payOne(row, args);
-    result[outcome]++;
-  }
+  };
+
+  await Promise.all(shards.map((shardRows, i) => runShard(shardRows, channels[i]?.secret)));
+
   if (emissionsKilled && result.skippedKilled > 0) {
     log.warn(
       { skippedKilled: result.skippedKilled },
@@ -265,6 +317,8 @@ export function startPayoutWorker(args: {
   operatorSecret: string;
   operatorAccount: string;
   issuerSigners?: ReadonlyMap<string, { secret: string; account: string }>;
+  /** ADR 044 / S4-1 — see `RunPayoutTickArgs.channels`. */
+  channels?: readonly ChannelSigner[];
   horizonUrl: string;
   networkPassphrase: string;
   intervalMs: number;
@@ -274,13 +328,17 @@ export function startPayoutWorker(args: {
 }): void {
   if (payoutTimer !== null) return;
   markWorkerStarted('payout_worker', { staleAfterMs: Math.max(args.intervalMs * 3, 60_000) });
-  log.info({ intervalMs: args.intervalMs }, 'Starting payout worker');
+  log.info(
+    { intervalMs: args.intervalMs, channelCount: args.channels?.length ?? 0 },
+    'Starting payout worker',
+  );
   const tick = async (): Promise<void> => {
     try {
       const r = await runPayoutTick({
         operatorSecret: args.operatorSecret,
         operatorAccount: args.operatorAccount,
         ...(args.issuerSigners !== undefined ? { issuerSigners: args.issuerSigners } : {}),
+        ...(args.channels !== undefined ? { channels: args.channels } : {}),
         horizonUrl: args.horizonUrl,
         networkPassphrase: args.networkPassphrase,
         maxAttempts: args.maxAttempts,
@@ -354,6 +412,12 @@ export function resolvePayoutConfig(): {
    * rows sign with these; everything else uses the operator pair.
    */
   issuerSigners: ReadonlyMap<string, { secret: string; account: string }>;
+  /**
+   * ADR 044 / S4-1: validated payout channel accounts (empty array
+   * when `LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS` is unset — the default,
+   * fully-serial legacy path).
+   */
+  channels: readonly ChannelSigner[];
   horizonUrl: string;
   networkPassphrase: string;
   maxAttempts: number;
@@ -382,6 +446,10 @@ export function resolvePayoutConfig(): {
     // parseEnv boot-validated every configured issuer secret against
     // its issuer address, so this resolve cannot throw at this point.
     issuerSigners: resolveIssuerSigners(),
+    // parseEnv boot-validated every configured channel secret (format +
+    // no collision with operator/issuer accounts), so this resolve
+    // cannot throw at this point either.
+    channels: resolvePayoutChannels(),
     horizonUrl,
     networkPassphrase: env.LOOP_STELLAR_NETWORK_PASSPHRASE,
     maxAttempts: env.LOOP_PAYOUT_MAX_ATTEMPTS,

@@ -37,14 +37,33 @@ const { sdkState, mocks } = vi.hoisted(() => {
   });
   const fromSecretMock = vi.fn((s: string) => {
     if (s === 'invalid') throw new Error('bad secret');
-    return { publicKey: () => 'GOPERATOR' };
+    if (s === 'SABCDEF') return { publicKey: () => 'GOPERATOR' };
+    // ADR 044: channel-account tests use distinct secrets (e.g.
+    // 'SCHANNEL1') and need a distinct derived pubkey per secret so
+    // assertions can tell "loaded the channel" from "loaded the
+    // funding account" apart. Every pre-existing test only ever uses
+    // 'SABCDEF' or 'invalid', so this branch is additive.
+    return { publicKey: () => `G${s}` };
   });
   const assetCtorMock = vi.fn();
   const txBuilderMock = vi.fn();
+  // ADR 044: records every `tx.sign(keypair)` call (by the keypair's
+  // derived pubkey) so channel-account tests can assert BOTH the
+  // channel and funding keypairs signed — Stellar requires a
+  // signature from every distinct `source` referenced (tx-level +
+  // any op-level override).
+  const signMock = vi.fn<(pubkey: string) => void>();
 
   return {
     sdkState: state,
-    mocks: { loadAccountMock, submitTransactionMock, fromSecretMock, assetCtorMock, txBuilderMock },
+    mocks: {
+      loadAccountMock,
+      submitTransactionMock,
+      fromSecretMock,
+      assetCtorMock,
+      txBuilderMock,
+      signMock,
+    },
   };
 });
 
@@ -91,7 +110,9 @@ vi.mock('@stellar/stellar-sdk', () => {
         fee: this.opts.fee,
       };
       return {
-        sign: (_kp: unknown) => undefined,
+        sign: (kp: unknown) => {
+          mocks.signMock((kp as { publicKey: () => string }).publicKey());
+        },
         hash: () => ({ toString: () => 'client-computed-hash' }),
         _fingerprint: fingerprint,
       } as unknown as { sign: (k: unknown) => void; hash: () => { toString: () => string } };
@@ -172,6 +193,7 @@ beforeEach(() => {
   mocks.fromSecretMock.mockClear();
   mocks.assetCtorMock.mockClear();
   mocks.txBuilderMock.mockClear();
+  mocks.signMock.mockClear();
 });
 
 describe('submitPayout — happy path', () => {
@@ -246,6 +268,76 @@ describe('submitPayout — CF-18 onSigned (persist hash before submit)', () => {
     const res = await submitPayout(BASE_ARGS);
     expect(res.txHash).toBe('tx-hash-from-horizon');
     expect(mocks.submitTransactionMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('submitPayout — ADR 044 channel accounts', () => {
+  it('without channelSecret: unchanged from pre-ADR-044 — one sequence source, one signature, no op-level source', async () => {
+    await submitPayout(BASE_ARGS);
+    // loadAccount ran against the FUNDING account (no channel).
+    expect(mocks.loadAccountMock).toHaveBeenCalledWith('GOPERATOR');
+    expect(mocks.loadAccountMock).toHaveBeenCalledTimes(1);
+    // Exactly one signature — the funding keypair.
+    expect(mocks.signMock).toHaveBeenCalledTimes(1);
+    expect(mocks.signMock).toHaveBeenCalledWith('GOPERATOR');
+    // The Payment op carries no `source` override.
+    const tx = sdkState.submittedTxs[0] as {
+      _fingerprint?: { ops: Array<{ arg?: { source?: string } }> };
+    };
+    expect(tx._fingerprint?.ops[0]?.arg?.source).toBeUndefined();
+  });
+
+  it('with channelSecret: the CHANNEL is the sequence source (loadAccount + tx-level source)', async () => {
+    await submitPayout({ ...BASE_ARGS, channelSecret: 'SCHANNEL1' });
+    // loadAccount ran against the CHANNEL account, not the operator.
+    expect(mocks.loadAccountMock).toHaveBeenCalledWith('GSCHANNEL1');
+    expect(mocks.loadAccountMock).not.toHaveBeenCalledWith('GOPERATOR');
+  });
+
+  it('with channelSecret: the Payment op gets an explicit source override naming the FUNDING account', async () => {
+    await submitPayout({ ...BASE_ARGS, channelSecret: 'SCHANNEL1' });
+    const tx = sdkState.submittedTxs[0] as {
+      _fingerprint?: { ops: Array<{ arg?: { source?: string; destination?: string } }> };
+    };
+    expect(tx._fingerprint?.ops[0]?.arg?.source).toBe('GOPERATOR');
+    expect(tx._fingerprint?.ops[0]?.arg?.destination).toBe('GDESTINATION');
+  });
+
+  it('with channelSecret: BOTH the channel and funding keypairs sign', async () => {
+    await submitPayout({ ...BASE_ARGS, channelSecret: 'SCHANNEL1' });
+    expect(mocks.signMock).toHaveBeenCalledTimes(2);
+    expect(mocks.signMock).toHaveBeenCalledWith('GSCHANNEL1');
+    expect(mocks.signMock).toHaveBeenCalledWith('GOPERATOR');
+  });
+
+  it('two different channels load two different sequence sources (per-channel isolation)', async () => {
+    await submitPayout({ ...BASE_ARGS, channelSecret: 'SCHANNEL1' });
+    await submitPayout({ ...BASE_ARGS, channelSecret: 'SCHANNEL2' });
+    expect(mocks.loadAccountMock).toHaveBeenNthCalledWith(1, 'GSCHANNEL1');
+    expect(mocks.loadAccountMock).toHaveBeenNthCalledWith(2, 'GSCHANNEL2');
+  });
+
+  it('throws terminal_bad_auth when channelSecret is undecodable', async () => {
+    await expect(submitPayout({ ...BASE_ARGS, channelSecret: 'invalid' })).rejects.toMatchObject({
+      kind: 'terminal_bad_auth',
+    });
+    // Never reached loadAccount/submit — fails before any network call.
+    expect(mocks.loadAccountMock).not.toHaveBeenCalled();
+    expect(mocks.submitTransactionMock).not.toHaveBeenCalled();
+  });
+
+  it('the deterministic hash still fires onSigned BEFORE the network submit when a channel is used', async () => {
+    const order: string[] = [];
+    mocks.submitTransactionMock.mockImplementationOnce(async (tx: unknown) => {
+      order.push('submit');
+      sdkState.submittedTxs.push(tx);
+      return sdkState.submitResult;
+    });
+    const onSigned = vi.fn(async (hash: string) => {
+      order.push(`onSigned:${hash}`);
+    });
+    await submitPayout({ ...BASE_ARGS, channelSecret: 'SCHANNEL1', onSigned });
+    expect(order).toEqual(['onSigned:client-computed-hash', 'submit']);
   });
 });
 

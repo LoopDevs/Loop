@@ -258,6 +258,80 @@ export function parseEnv(source: NodeJS.ProcessEnv): Env {
     }
   }
 
+  // ADR 044 / S4-1: payout channel accounts must each be well-formed
+  // (the schema regex above already covers gross format), mutually
+  // distinct, and distinct from the operator + every configured
+  // issuer account. A channel that collides with any of those would
+  // silently reintroduce the exact sequence-number race channels
+  // exist to eliminate — two submitters (the channel-as-itself path
+  // and the direct operator/issuer path, or two duplicated channel
+  // entries) fighting over the same account's sequence number.
+  if (parsed.data.LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS !== undefined) {
+    // Best-effort: the operator/issuer secrets are used here only to
+    // detect a COLLISION with a channel entry, not to (re-)validate
+    // their own checksum — that's not this block's job, and today a
+    // checksum-invalid-but-regex-matching operator/issuer secret
+    // already boots fine (it fails gracefully at first use — e.g.
+    // `resolvePayoutConfig` logs and disables the payout worker rather
+    // than throwing). A derivation failure here just means "no
+    // collision to check against"; it must not turn into a NEW boot
+    // failure as a side effect of adding channel-account validation.
+    const reservedAccounts = new Map<string, string>(); // account -> owning env var label
+    const tryReserve = (secret: string, label: string): void => {
+      try {
+        reservedAccounts.set(Keypair.fromSecret(secret).publicKey(), label);
+      } catch {
+        // Undecodable — leave it out of the collision set; whatever
+        // consumes this secret at runtime surfaces the real problem.
+      }
+    };
+    if (parsed.data.LOOP_STELLAR_OPERATOR_SECRET !== undefined) {
+      tryReserve(parsed.data.LOOP_STELLAR_OPERATOR_SECRET, 'LOOP_STELLAR_OPERATOR_SECRET');
+    }
+    for (const [asset, , issuerSecret] of issuerPairs) {
+      if (issuerSecret === undefined) continue;
+      tryReserve(issuerSecret, `LOOP_STELLAR_${asset}_ISSUER_SECRET`);
+    }
+    const channelSecrets = parsed.data.LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS.split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    const seenChannelAccounts = new Map<string, number>(); // account -> first 1-based index
+    channelSecrets.forEach((secret, i) => {
+      const index = i + 1;
+      // Unlike the collision lookups above, a channel entry's OWN
+      // checksum validity IS this block's job (mirrors the issuer-
+      // secret pattern's `catch { throw ... }` for its own secret) —
+      // a channel that can't derive an account can't submit anything.
+      let account: string;
+      try {
+        account = Keypair.fromSecret(secret).publicKey();
+      } catch {
+        throw new Error(
+          `Invalid environment variables — LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS entry ${index} ` +
+            `is not a valid Stellar secret key (Keypair derivation failed).`,
+        );
+      }
+      const collidesWith = reservedAccounts.get(account);
+      if (collidesWith !== undefined) {
+        throw new Error(
+          `Invalid environment variables — LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS entry ${index} ` +
+            `derives account ${account}, which is also ${collidesWith}. A channel account must ` +
+            `be distinct from the operator and every issuer account (ADR 044) — reusing one ` +
+            `reintroduces the sequence-number race channels exist to eliminate.`,
+        );
+      }
+      const firstIndex = seenChannelAccounts.get(account);
+      if (firstIndex !== undefined) {
+        throw new Error(
+          `Invalid environment variables — LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS entries ${firstIndex} ` +
+            `and ${index} derive the same account (${account}). Each channel must be a distinct ` +
+            `account (ADR 044).`,
+        );
+      }
+      seenChannelAccounts.set(account, index);
+    });
+  }
+
   // Hardening B3 (2026-07 plan): cross-field boot guards for the two
   // auth misconfigurations that previously only surfaced at request
   // time.

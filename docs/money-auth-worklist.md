@@ -367,6 +367,15 @@
       **Done 2026-07-07:** admin reconciliation now uses a transaction-local
       2s statement timeout and a 30s success cache, with focused unit coverage.
 - [ ] **S4-1 · Stellar payout throughput ceiling** (the one architectural item). _L · 💰._
+      **2026-07-10: code shipped** (review-first PR open, not yet merged) —
+      `docs/adr/044-payout-throughput.md` picks Stellar channel accounts (N
+      pre-funded sequence-owning accounts; op-level `source` override keeps
+      the operator/issuer as the real funder) over operator/issuer account
+      sharding or batching. `LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS` unset
+      (default) is byte-identical to pre-ADR-044 behaviour — the A8
+      fleet-wide leader lock is unchanged, channels add parallelism WITHIN
+      one leader's tick. **Still open (👤):** operator provisions + funds N
+      channel accounts and confirms real throughput scaling.
 
 ## Phase 4 — Admin / support money tooling (ops can't intervene today)
 

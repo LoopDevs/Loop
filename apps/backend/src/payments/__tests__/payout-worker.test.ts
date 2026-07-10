@@ -1161,6 +1161,161 @@ describe('ADR 036 — issuer-return burn rows', () => {
   });
 });
 
+describe('ADR 044 / S4-1 — payout channel accounts (sharding)', () => {
+  it('zero channels configured (default): channelSecret is never passed to submitPayout — the exact pre-ADR-044 path', async () => {
+    repoMocks.listClaimablePayouts.mockResolvedValue([
+      makeRow({ id: 'p-1', memoText: 'm1' }),
+      makeRow({ id: 'p-2', memoText: 'm2' }),
+      makeRow({ id: 'p-3', memoText: 'm3' }),
+    ]);
+    const r = await runPayoutTick(BASE_ARGS); // BASE_ARGS carries no `channels`
+    expect(r.confirmed).toBe(3);
+    expect(sdkMock.submitPayout).toHaveBeenCalledTimes(3);
+    for (const call of sdkMock.submitPayout.mock.calls) {
+      expect((call[0] as { channelSecret?: string }).channelSecret).toBeUndefined();
+    }
+  });
+
+  it('an explicit empty channels array behaves identically to omitting channels', async () => {
+    repoMocks.listClaimablePayouts.mockResolvedValue([makeRow({ id: 'p-1' })]);
+    const r = await runPayoutTick({ ...BASE_ARGS, channels: [] });
+    expect(r.confirmed).toBe(1);
+    expect(
+      (sdkMock.submitPayout.mock.calls[0]?.[0] as { channelSecret?: string }).channelSecret,
+    ).toBeUndefined();
+  });
+
+  it('shards a claimed batch across N channels round-robin by claim order', async () => {
+    const channels = [
+      { secret: 'SCHAN1', account: 'GCHAN1' },
+      { secret: 'SCHAN2', account: 'GCHAN2' },
+    ];
+    repoMocks.listClaimablePayouts.mockResolvedValue([
+      makeRow({ id: 'p-1', memoText: 'm1' }),
+      makeRow({ id: 'p-2', memoText: 'm2' }),
+      makeRow({ id: 'p-3', memoText: 'm3' }),
+      makeRow({ id: 'p-4', memoText: 'm4' }),
+    ]);
+    const channelByMemo = new Map<string, string | undefined>();
+    sdkMock.submitPayout.mockImplementation(async (args: unknown) => {
+      const a = args as {
+        intent: { memoText: string };
+        channelSecret?: string;
+        onSigned?: (h: string) => Promise<void> | void;
+      };
+      channelByMemo.set(a.intent.memoText, a.channelSecret);
+      await a.onSigned?.(`tx-${a.intent.memoText}`);
+      return { txHash: `tx-${a.intent.memoText}`, ledger: 1 };
+    });
+    const r = await runPayoutTick({ ...BASE_ARGS, channels });
+    expect(r.confirmed).toBe(4);
+    // Round-robin by claim order: p-1/p-3 → channel 0, p-2/p-4 → channel 1.
+    expect(channelByMemo.get('m1')).toBe('SCHAN1');
+    expect(channelByMemo.get('m2')).toBe('SCHAN2');
+    expect(channelByMemo.get('m3')).toBe('SCHAN1');
+    expect(channelByMemo.get('m4')).toBe('SCHAN2');
+  });
+
+  it('runs channel shards CONCURRENTLY, while each shard stays strictly serial internally', async () => {
+    const channels = [
+      { secret: 'SCHAN1', account: 'GCHAN1' },
+      { secret: 'SCHAN2', account: 'GCHAN2' },
+    ];
+    repoMocks.listClaimablePayouts.mockResolvedValue([
+      makeRow({ id: 'p-1', memoText: 'm1' }),
+      makeRow({ id: 'p-2', memoText: 'm2' }),
+      makeRow({ id: 'p-3', memoText: 'm3' }),
+      makeRow({ id: 'p-4', memoText: 'm4' }),
+    ]);
+    const started: string[] = [];
+    const resolvers = new Map<string, () => void>();
+    sdkMock.submitPayout.mockImplementation(async (args: unknown) => {
+      const a = args as {
+        intent: { memoText: string };
+        onSigned?: (h: string) => Promise<void> | void;
+      };
+      started.push(a.intent.memoText);
+      await new Promise<void>((resolve) => resolvers.set(a.intent.memoText, resolve));
+      await a.onSigned?.(`tx-${a.intent.memoText}`);
+      return { txHash: `tx-${a.intent.memoText}`, ledger: 1 };
+    });
+
+    const tickPromise = runPayoutTick({ ...BASE_ARGS, channels });
+
+    // Both shards' FIRST row (m1 on channel 0, m2 on channel 1) start
+    // without waiting on each other — proves cross-shard concurrency.
+    await vi.waitFor(
+      () => {
+        if (!started.includes('m1') || !started.includes('m2')) {
+          throw new Error('both shards have not started their first row yet');
+        }
+      },
+      { timeout: 2000, interval: 5 },
+    );
+    // Neither shard's SECOND row may have started — a shard must
+    // finish its in-flight submit before starting its next one
+    // (per-channel sequence isolation: never two in-flight submits on
+    // the same channel).
+    expect(started).not.toContain('m3');
+    expect(started).not.toContain('m4');
+
+    resolvers.get('m1')?.();
+    resolvers.get('m2')?.();
+
+    await vi.waitFor(
+      () => {
+        if (!started.includes('m3') || !started.includes('m4')) {
+          throw new Error('shards have not started their second row yet');
+        }
+      },
+      { timeout: 2000, interval: 5 },
+    );
+
+    resolvers.get('m3')?.();
+    resolvers.get('m4')?.();
+
+    const r = await tickPromise;
+    expect(r.confirmed).toBe(4);
+  });
+
+  it('the emissions kill switch is still honoured per-row inside each shard', async () => {
+    const channels = [
+      { secret: 'SCHAN1', account: 'GCHAN1' },
+      { secret: 'SCHAN2', account: 'GCHAN2' },
+    ];
+    killMock.isKilled.mockImplementation((s: string) => s === 'emissions');
+    repoMocks.listClaimablePayouts.mockResolvedValue([
+      makeRow({ id: 'p-1', kind: 'emission', memoText: 'm1' }),
+      makeRow({ id: 'p-2', memoText: 'm2' }),
+    ]);
+    const r = await runPayoutTick({ ...BASE_ARGS, channels });
+    expect(r.skippedKilled).toBe(1);
+    expect(r.confirmed).toBe(1);
+  });
+
+  it('a claimed-but-unsubmitted row from a crashed tick is reclaimed on a later tick regardless of channel config', async () => {
+    // A2-602 watchdog path: a row stuck in `submitted` past staleSeconds
+    // is re-picked. This must keep working unchanged when channels are
+    // configured — the reclaim/idempotency logic lives above the
+    // sharding split and doesn't know about channels at all.
+    const channels = [{ secret: 'SCHAN1', account: 'GCHAN1' }];
+    repoMocks.listClaimablePayouts.mockResolvedValue([
+      makeRow({ state: 'submitted', attempts: 1 }),
+    ]);
+    horizonMock.findOutboundPaymentByMemo.mockResolvedValue(null);
+    const r = await runPayoutTick({ ...BASE_ARGS, channels });
+    expect(r.confirmed).toBe(1);
+    expect(repoMocks.reclaimSubmittedPayout).toHaveBeenCalledWith({
+      id: 'p-1',
+      expectedAttempts: 1,
+    });
+    // The reclaimed submit still routes through the configured channel.
+    expect(
+      (sdkMock.submitPayout.mock.calls[0]?.[0] as { channelSecret?: string }).channelSecret,
+    ).toBe('SCHAN1');
+  });
+});
+
 describe('ADR 031 — interest_mint rows sign with the issuer keypair', () => {
   // Real ed25519 material: the assertion is cryptographic — the
   // secret handed to submitPayout must DERIVE the row's pinned
@@ -1277,5 +1432,31 @@ describe('ADR 031 — interest_mint rows sign with the issuer keypair', () => {
     expect(r.retriedLater).toBe(1);
     expect(sdkMock.submitPayout).not.toHaveBeenCalled();
     expect(discordMock.notifyPayoutAwaitingTrustline).toHaveBeenCalledOnce();
+  });
+
+  it('ADR 044 × ADR 031: an interest_mint routed through a channel signs with the ISSUER secret AND the channelSecret (orthogonal — the channel is the tx source, the issuer is the payment funder/minter)', async () => {
+    trustDestination();
+    repoMocks.listClaimablePayouts.mockResolvedValue([makeMintRow()]);
+    const r = await runPayoutTick({
+      ...ISSUER_ARGS,
+      channels: [{ secret: 'SCHAN1', account: 'GCHAN1' }],
+    });
+    expect(r.confirmed).toBe(1);
+    const submitArg = sdkMock.submitPayout.mock.calls[0]?.[0] as {
+      secret: string;
+      channelSecret?: string;
+    };
+    // `secret` (the payment funder = mint source) is still the ISSUER,
+    // untouched by channel plumbing — signer resolution is independent
+    // of channel assignment.
+    expect(Keypair.fromSecret(submitArg.secret).publicKey()).toBe(issuerKp.publicKey());
+    // The channel is the tx source that owns the sequence number + pays
+    // the fee — threaded through orthogonally.
+    expect(submitArg.channelSecret).toBe('SCHAN1');
+    // Idempotency pre-check still scans the ISSUER account (the funder),
+    // not the channel.
+    expect(horizonMock.findOutboundPaymentByMemo).toHaveBeenCalledWith(
+      expect.objectContaining({ account: issuerKp.publicKey() }),
+    );
   });
 });

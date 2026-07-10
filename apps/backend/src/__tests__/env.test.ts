@@ -908,3 +908,84 @@ describe('parseEnv — ADR 031 issuer-secret pinning', () => {
     );
   });
 });
+
+describe('parseEnv — ADR 044 / S4-1 payout channel accounts', () => {
+  // Real ed25519 material: the checks derive public keys from the
+  // secrets, so the fixtures must be genuine keypairs.
+  const operatorKp = Keypair.random();
+  const issuerKp = Keypair.random();
+  const chan1 = Keypair.random();
+  const chan2 = Keypair.random();
+
+  it('accepts an unset LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS (default — no channels)', () => {
+    const env = parseEnv(base);
+    expect(env.LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS).toBeUndefined();
+  });
+
+  it('accepts a single well-formed channel secret', () => {
+    const env = parseEnv({ ...base, LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS: chan1.secret() });
+    expect(env.LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS).toBe(chan1.secret());
+  });
+
+  it('accepts multiple comma-separated channel secrets distinct from operator/issuer', () => {
+    const env = parseEnv({
+      ...base,
+      LOOP_STELLAR_OPERATOR_SECRET: operatorKp.secret(),
+      LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS: `${chan1.secret()},${chan2.secret()}`,
+    });
+    expect(env.LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS).toBe(`${chan1.secret()},${chan2.secret()}`);
+  });
+
+  it('rejects a malformed entry at the schema layer', () => {
+    expect(() =>
+      parseEnv({ ...base, LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS: 'not-a-secret' }),
+    ).toThrow(/LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS/);
+    expect(() =>
+      parseEnv({
+        ...base,
+        LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS: `${chan1.secret()},not-a-secret`,
+      }),
+    ).toThrow(/LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS/);
+  });
+
+  it('boot-fails on two channel entries deriving the same account', () => {
+    expect(() =>
+      parseEnv({
+        ...base,
+        LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS: `${chan1.secret()},${chan1.secret()}`,
+      }),
+    ).toThrow(/derive the same account/);
+  });
+
+  it('boot-fails when a channel collides with the configured operator account', () => {
+    expect(() =>
+      parseEnv({
+        ...base,
+        LOOP_STELLAR_OPERATOR_SECRET: operatorKp.secret(),
+        LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS: `${chan1.secret()},${operatorKp.secret()}`,
+      }),
+    ).toThrow(/LOOP_STELLAR_OPERATOR_SECRET/);
+  });
+
+  it('boot-fails when a channel collides with a configured issuer account', () => {
+    expect(() =>
+      parseEnv({
+        ...base,
+        LOOP_STELLAR_GBPLOOP_ISSUER: issuerKp.publicKey(),
+        LOOP_STELLAR_GBPLOOP_ISSUER_SECRET: issuerKp.secret(),
+        LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS: `${chan1.secret()},${issuerKp.secret()}`,
+      }),
+    ).toThrow(/LOOP_STELLAR_GBPLOOP_ISSUER_SECRET/);
+  });
+
+  it('does not require an operator or any issuer to be configured at all', () => {
+    // Channels are validated on their own merits; the only cross-field
+    // checks are collision checks against whatever IS configured.
+    const env = parseEnv({
+      ...base,
+      LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS: `${chan1.secret()},${chan2.secret()}`,
+    });
+    expect(env.LOOP_STELLAR_OPERATOR_SECRET).toBeUndefined();
+    expect(env.LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS).toBe(`${chan1.secret()},${chan2.secret()}`);
+  });
+});
