@@ -9,7 +9,7 @@ import {
   type StuckPayoutRow,
 } from '~/services/admin';
 import { AdminNav } from '~/components/features/admin/AdminNav';
-import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
+import { RequireStaff } from '~/components/features/admin/RequireAdmin';
 import { Spinner } from '~/components/ui/Spinner';
 import { fmtStroops } from '~/utils/format-stellar';
 
@@ -36,16 +36,27 @@ export function ageClass(ageMinutes: number, thresholdMinutes: number): string {
  * `/admin/stuck-orders` — SLO-triage view. The landing card shows a
  * count; this page shows the rows themselves. Clicking an id deep-
  * links to /admin/orders/:orderId for the full state + cashback-
- * split + timeline drill-down. Ops uses this page during a supplier
- * incident — paid/procuring rows piling up means the CTX operator
- * pool can't clear the backlog fast enough.
+ * split + timeline drill-down, or /admin/payouts/:id for a stuck
+ * payout. Ops uses this page during a supplier incident — paid/
+ * procuring rows piling up means the CTX operator pool can't clear
+ * the backlog fast enough.
+ *
+ * A5-6: gated at `minimum="support"`, not admin. The backend read
+ * (`GET /api/admin/stuck-orders` / `/stuck-payouts`) already rides
+ * the ADR 037 support-tier blanket (see `staff-route-gating.test.ts`
+ * — GET, non-CSV, non-Discord admin mounts default to support-
+ * visible); this page previously gated stricter than its own API,
+ * which meant a support agent could never actually SEE which orders
+ * to explain to a customer — the exact "find → explain → unstick"
+ * job ADR 037 §Decision.4 scoped support for. Money-moving actions
+ * reached from here (order re-drive, payout retry) stay admin +
+ * step-up on their own endpoints regardless of this page's gate.
  */
-// A2-1101: see RequireAdmin.tsx for the shell-gate rationale.
 export default function AdminStuckOrdersRoute(): React.JSX.Element {
   return (
-    <RequireAdmin>
+    <RequireStaff minimum="support">
       <AdminStuckOrdersRouteInner />
-    </RequireAdmin>
+    </RequireStaff>
   );
 }
 

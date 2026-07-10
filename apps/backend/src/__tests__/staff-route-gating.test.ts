@@ -235,6 +235,29 @@ describe('ADR 037 tier behaviour', () => {
     expect(unauthed.status).toBe(401);
   });
 
+  // A5-6: stuck-orders/stuck-payouts triage is the concrete surface
+  // support needs to do the ADR 037 "find → explain → unstick" job —
+  // an operator can't point a customer at an A5-1 re-drive or a
+  // payout retry without first SEEING the row is stuck. Both mounts
+  // are blanket riders (no explicit requireStaff gate — see
+  // admin-dashboard.ts), so this pins the tier explicitly rather
+  // than leaving it to the generic "riders" bucket count below.
+  it('support can read stuck-orders and stuck-payouts (A5-6)', async () => {
+    const orders = await app.request('/api/admin/stuck-orders', asUser(SUPPORT_ID));
+    expect(orders.status).toBe(200);
+    expect(await orders.json()).toEqual({ thresholdMinutes: 5, rows: [] });
+
+    const payouts = await app.request('/api/admin/stuck-payouts', asUser(SUPPORT_ID));
+    expect(payouts.status).toBe(200);
+    expect(await payouts.json()).toEqual({ thresholdMinutes: 5, rows: [] });
+
+    const ordersDenied = await app.request('/api/admin/stuck-orders', asUser(NOBODY_ID));
+    expect(ordersDenied.status).toBe(404);
+
+    const payoutsDenied = await app.request('/api/admin/stuck-payouts', asUser(NOBODY_ID));
+    expect(payoutsDenied.status).toBe(404);
+  });
+
   it('support can use the new ADR 037 surfaces', async () => {
     const skips = await app.request('/api/admin/watcher-skips', asUser(SUPPORT_ID));
     expect(skips.status).toBe(200);

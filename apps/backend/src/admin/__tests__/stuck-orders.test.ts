@@ -53,7 +53,8 @@ vi.mock('../../logger.js', () => ({
   },
 }));
 
-import { adminStuckOrdersHandler } from '../stuck-orders.js';
+import { adminStuckOrdersHandler, DEFAULT_THRESHOLD_MINUTES } from '../stuck-orders.js';
+import { PROCUREMENT_TIMEOUT_MS } from '../../orders/procurement-constants.js';
 
 function makeCtx(query: Record<string, string> = {}): Context {
   return {
@@ -191,6 +192,19 @@ describe('adminStuckOrdersHandler', () => {
     state.throwErr = new Error('db exploded');
     const res = await adminStuckOrdersHandler(makeCtx());
     expect(res.status).toBe(500);
+  });
+
+  // A5-6: this endpoint is the early-warning view an operator checks
+  // BEFORE the automatic recovery sweep (`sweepStuckProcurement`,
+  // `PROCUREMENT_TIMEOUT_MS`) silently fails + auto-refunds a
+  // procuring row. If someone ever raised the display default at or
+  // past the sweep's terminal cutoff, a stuck order would go straight
+  // from "healthy" to "already resolved by the sweep" with no window
+  // where ops could see it and intervene — pin the ordering so that
+  // regression fails loudly here instead of showing up as a support
+  // complaint.
+  it('the default triage threshold fires strictly before the procurement-sweep terminal cutoff (A5-6)', () => {
+    expect(DEFAULT_THRESHOLD_MINUTES * 60_000).toBeLessThan(PROCUREMENT_TIMEOUT_MS);
   });
 
   it('surfaces paymentMethod on each row (ADR-015 triage signal)', async () => {

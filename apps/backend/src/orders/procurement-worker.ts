@@ -30,20 +30,17 @@ import {
 } from '../runtime-health.js';
 import { sweepStuckProcurement } from './transitions.js';
 import { runProcurementTick } from './procurement.js';
+import { PROCUREMENT_TIMEOUT_MS } from './procurement-constants.js';
 
 const log = logger.child({ area: 'procurement' });
 
 let procurementTimer: ReturnType<typeof setInterval> | null = null;
 let sweepTimer: ReturnType<typeof setInterval> | null = null;
 
-/**
- * How stale a `procuring` order must be before the recovery sweep
- * marks it failed. 15 minutes is plenty — CTX procurement in the
- * happy path completes in a few seconds; anything hanging at the
- * 15-minute mark is a crashed worker or a deep upstream issue the
- * user shouldn't be left waiting on.
- */
-const PROCUREMENT_TIMEOUT_MS = 15 * 60 * 1000;
+// `PROCUREMENT_TIMEOUT_MS` now lives in `./procurement-constants.js`
+// (A5-6 — see that file's docstring) and is re-exported here so
+// existing imports of it from this module keep resolving.
+export { PROCUREMENT_TIMEOUT_MS };
 
 /** How often the recovery sweep runs. Once a minute is generous. */
 const SWEEP_INTERVAL_MS = 60 * 1000;
