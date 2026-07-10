@@ -8,6 +8,7 @@
  * mutations to `process.env` land before `import { env } from
  * '../env.js'` triggers anywhere in the test graph.
  */
+import { Keypair } from '@stellar/stellar-sdk';
 
 // Real DB: docker-compose's `loop_test` (locally) or the postgres
 // service container in CI. Either way the URL points at port 5433
@@ -38,11 +39,15 @@ process.env['LOOP_ADMIN_STEP_UP_SIGNING_KEY'] ??=
 process.env['GIFT_CARD_API_BASE_URL'] ??= 'http://ctx.test.local';
 
 // Stellar deposit address — `loopCreateOrderHandler` 503s when this
-// is unset for non-credit payment methods. Pin a syntactically-valid
-// G-address fixture; the integration test never broadcasts to
-// Stellar so the address only needs to satisfy the `STELLAR_PUBKEY_REGEX`.
-process.env['LOOP_STELLAR_DEPOSIT_ADDRESS'] ??=
-  'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+// is unset for non-credit payment methods. Most of the suite only
+// needs a value that satisfies `STELLAR_PUBKEY_REGEX` (a text-column
+// fixture, never SDK-validated) — but the Q6-6 wallet-spend
+// (`orders/redeem.ts`) integration test builds a REAL Stellar
+// `Operation.payment` with this as the destination, and the SDK does
+// full StrKey checksum validation (unlike the regex), which a
+// repeated-character placeholder fails ("destination is invalid").
+// A real (never-funded) keypair's public key satisfies both.
+process.env['LOOP_STELLAR_DEPOSIT_ADDRESS'] ??= Keypair.random().publicKey();
 
 // LOOP-asset issuers (ADR 015) — `payoutAssetFor` returns `null` for
 // the issuer when the env var is unset, in which case
@@ -52,10 +57,41 @@ process.env['LOOP_STELLAR_DEPOSIT_ADDRESS'] ??=
 // address fixture above.
 process.env['LOOP_STELLAR_USDLOOP_ISSUER'] ??=
   'GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB';
-process.env['LOOP_STELLAR_GBPLOOP_ISSUER'] ??=
-  'GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC';
+// GBPLOOP is the one interest-mint-eligible asset (ADR 031 v7 —
+// ONCHAIN_MINT_ELIGIBLE_ASSETS). Unlike its USDLOOP/EURLOOP siblings
+// above (address-only fixtures — no on-chain minting exercises them),
+// the Q6-6 interest-mint integration suite drives
+// `runInterestMintTick`, which resolves a real issuer SIGNER via
+// `resolveIssuerSigners()` and requires the derived public key to
+// match this address exactly (env.ts's ADR-031 cross-field boot
+// check, re-asserted defence-in-depth by issuer-signers.ts) — a
+// placeholder string address with no matching secret would leave
+// GBPLOOP filtered out of `configuredLoopPayableAssets()` and the
+// whole mint path a no-op. Generated fresh per process (never
+// hardcoded — `scripts/lint-docs.sh` §5b rejects any committed
+// `S[A-Z2-7]{55}` literal, and a real keypair proves the boot-time
+// derivation check rather than a memorised fixture, same policy as
+// `orders/__tests__/redeem.test.ts`). Issuer + secret are set as a
+// PAIR, gated on the issuer var alone — independent `??=` on each
+// could desync if only one were pre-set externally, which would fail
+// the boot-time derived-key match below instead of just no-op'ing.
+if (process.env['LOOP_STELLAR_GBPLOOP_ISSUER'] === undefined) {
+  const gbploopIssuerKeypair = Keypair.random();
+  process.env['LOOP_STELLAR_GBPLOOP_ISSUER'] = gbploopIssuerKeypair.publicKey();
+  process.env['LOOP_STELLAR_GBPLOOP_ISSUER_SECRET'] ??= gbploopIssuerKeypair.secret();
+}
 process.env['LOOP_STELLAR_EURLOOP_ISSUER'] ??=
   'GDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD';
+
+// Operator fee-bump signer (ADR 016 / ADR 030 Phase C3). The Q6-6
+// wallet-spend (`orders/redeem.ts`) integration suite drives the real
+// `redeemLoopOrderHandler`, which 503s NOT_CONFIGURED without this —
+// it signs the outer fee-bump envelope wrapping the user's inner
+// payment. Same "generate fresh, never hardcode a secret literal"
+// policy as the GBPLOOP issuer pair above (`scripts/lint-docs.sh`
+// §5b). No cross-field address to match (unlike the issuer pair) —
+// only the secret is configured.
+process.env['LOOP_STELLAR_OPERATOR_SECRET'] ??= Keypair.random().secret();
 
 // Workers stay off — the test drives transitions directly to keep
 // timing deterministic.
