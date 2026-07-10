@@ -39,6 +39,11 @@ const TABLES_TO_TRUNCATE = [
   // like every other suite here.
   'loop_vaults',
   'vault_share_price_snapshots',
+  // ADR 031 §D5 (V3, migration 0061): the vault cashback-emission
+  // state-machine table. References orders/users/pending_payouts —
+  // CASCADE sweeps it transitively, listed explicitly for the same
+  // self-documenting reason as its V1 siblings above.
+  'vault_emissions',
   'interest_pool_alert_state',
   'watchdog_alert_state',
   'otp_attempt_counters',

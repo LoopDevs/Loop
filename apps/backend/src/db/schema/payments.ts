@@ -307,11 +307,26 @@ export const pendingPayouts = pgTable(
     // The matching env vars (LOOP_STELLAR_*_ISSUER) all carry
     // Stellar pubkeys, so the asset_issuer regex matches the
     // to_address regex above (56-char base32 G-prefix).
+    //
+    // ADR 031 V3 (migration 0061): widened to admit 'LOOPUSD' /
+    // 'LOOPEUR' — the vault-emission flow (`credits/vaults/
+    // vault-emissions.ts`) writes a `kind='emission'` audit row here
+    // (already `state='confirmed'`, never picked up by the classic
+    // submit worker — see that module's header) purely so the SAME
+    // `assert_emission_conservation` trigger that guards admin
+    // emissions also guards vault mints. `docs/invariants.md` INV-V1.
     check(
       'pending_payouts_asset_code_known',
-      sql`${t.assetCode} IN ('USDLOOP', 'GBPLOOP', 'EURLOOP')`,
+      sql`${t.assetCode} IN ('USDLOOP', 'GBPLOOP', 'EURLOOP', 'LOOPUSD', 'LOOPEUR')`,
     ),
-    check('pending_payouts_asset_issuer_format', sql`${t.assetIssuer} ~ '^G[A-Z2-7]{55}$'`),
+    // ADR 031 V3: widened from `^G...` to `^[GC]...` — a DeFindex
+    // vault share's on-chain identity is its Soroban CONTRACT id
+    // (strkey `C...`, same length as a classic `G...` account id),
+    // not a classic-asset issuer account — see
+    // `loop_vaults.share_asset_issuer`'s doc comment. Vault-emission
+    // rows write that contract id into this column; the three classic
+    // LOOP assets keep writing a `G...` issuer as before.
+    check('pending_payouts_asset_issuer_format', sql`${t.assetIssuer} ~ '^[GC][A-Z2-7]{55}$'`),
     // 2026-06-15 cold audit v-wallet P0 follow-up: the app-layer
     // allowlist (ONCHAIN_MINT_ELIGIBLE_ASSETS in credits/interest-mint.ts)
     // is the only thing stopping a future writer from enqueuing an

@@ -87,13 +87,26 @@ src/
 │       │                 sendTransaction → pollTransaction, classified SorobanSubmitError,
 │       │                 CF-18 at-most-once fence (onSigned hook + priorTxHash pre-check);
 │       │                 simulateSorobanCall is the separate read-only (never signs) path
-│       └── vault-client.ts ← V2: public API — depositToVault / withdrawFromVault /
-│                           transferShares (signWith='operator' only; 'provider' is a
-│                           V4 stub, ADR 031 §D6) / readVaultState (share-price ppm).
-│                           Client library only — NOT wired into any emission/withdraw
-│                           flow yet; mock-tested against a faked Soroban RPC, no real
-│                           testnet vault call has validated the exact on-chain return
-│                           shapes (see ADR 049 §Negative)
+│       ├── vault-client.ts ← V2: public API — depositToVault / withdrawFromVault /
+│       │                   transferShares (signWith='operator' only; 'provider' is a
+│       │                   V4 stub, ADR 031 §D6) / readVaultState (share-price ppm) /
+│       │                   resolveOperatorPublicKey (V3 addition — the operator `from`
+│       │                   for a share transfer). Mock-tested against a faked Soroban
+│       │                   RPC, no real testnet vault call has validated the exact
+│       │                   on-chain return shapes (see ADR 049 §Negative)
+│       └── vault-emissions.ts ← V3 (ADR 031 §D5, migration 0061): the cashback-EMISSION
+│                           state machine — pending → deposited → transferred → mirrored
+│                           (+ failed). Claimed (durable, no network I/O) from
+│                           `orders/fulfillment.ts`'s gated fork inside the SAME txn as
+│                           the order's `fulfilled` transition; driven forward by the
+│                           interval-based `startVaultEmissionSweep` worker (gated on
+│                           LOOP_WORKERS_ENABLED + LOOP_VAULTS_ENABLED). Mirror step
+│                           writes credit_transactions + user_credits AND a
+│                           `pending_payouts kind='emission'` audit row already
+│                           `state='confirmed'` — routes the write through the SAME
+│                           `assert_emission_conservation` trigger (migration 0044,
+│                           widened by 0061) admin emissions use, never a bespoke
+│                           user_credits UPDATE. docs/invariants.md INV-V1/INV-V2.
 ├── fraud/              ← ADR 045 (B-3) Phase-1 fraud/abuse controls
 │   ├── velocity.ts     ← Per-user order-create velocity gate (bounded/indexed
 │   │                     query, fail-closed) — called from orders/loop-handler.ts

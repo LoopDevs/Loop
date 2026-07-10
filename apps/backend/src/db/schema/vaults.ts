@@ -23,6 +23,9 @@ import {
   check,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
+import { users } from './users.js';
+import { orders } from './orders.js';
+import { pendingPayouts } from './payments.js';
 
 /**
  * Known LOOP-prefix vault-share asset codes (ADR 031 §Decision). The
@@ -101,6 +104,123 @@ export const vaultSharePriceSnapshots = pgTable(
       t.assetCode,
       t.network,
       t.takenAt.desc().nullsFirst(),
+    ),
+  ],
+);
+
+/**
+ * Vault-share cashback emission state machine (ADR 031 §D5, V3 —
+ * migration 0061). One row per fulfilled order that is emitted
+ * through the vault path (`credits/vaults/vault-emissions.ts`)
+ * instead of the classic `pending_payouts kind='order_cashback'`
+ * path — the two are mutually exclusive per order (see
+ * `orders/fulfillment.ts`'s gated fork).
+ *
+ * `order_id` is the SAME idempotency key the classic path already
+ * uses (`pending_payouts_order_unique`, partial on
+ * `kind='order_cashback'`) — deliberately reused rather than a fresh
+ * generated id, per ADR 031 §D5 step 1's "reuse it, don't invent a
+ * parallel one". The UNIQUE constraint below is the durable CLAIM
+ * fence: `orders/fulfillment.ts` inserts this row (state='pending')
+ * in the SAME transaction as the order's `fulfilled` transition,
+ * BEFORE any on-chain action — a crash after that commit always has
+ * a resumable claim row; a replay of the same order (shouldn't
+ * happen — the order's own `state='procuring'` guard already makes
+ * `markOrderFulfilled` a no-op on re-entry — but is additionally
+ * fenced here) finds the existing row via `onConflictDoNothing`
+ * rather than claiming twice.
+ *
+ * State machine (§D5): `pending` (claimed, no on-chain action yet)
+ * → `deposited` (operator `vault.deposit` landed, shares minted to
+ * the operator) → `transferred` (operator → user share transfer
+ * landed) → `mirrored` (off-chain `user_credits` liability credited
+ * + the `pending_payouts kind='emission'` conservation-trigger audit
+ * row written, in one DB transaction). `failed` is a terminal,
+ * NON-auto-retried state a row moves to only after
+ * `VAULT_EMISSION_MAX_ATTEMPTS` consecutive step failures — it needs
+ * an operator look (a re-drive hook is a follow-up; see that
+ * module's header for the current gap). Every step advance is
+ * idempotent / resumable: `deposit_tx_hash` and `transfer_tx_hash`
+ * are persisted (CF-18 `onSigned`) BEFORE each network submit, so a
+ * crash mid-step resumes via `priorTxHash` rather than re-submitting.
+ */
+export const vaultEmissions = pgTable(
+  'vault_emissions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orderId: uuid('order_id')
+      .notNull()
+      .references(() => orders.id, { onDelete: 'restrict' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    assetCode: text('asset_code').notNull(),
+    network: text('network').notNull(),
+    // Cashback owed in the vault's fiat currency's minor units (pence
+    // / cents) — the SAME value written to `credit_transactions` /
+    // `user_credits` at the mirror step, and the value the deposit
+    // step converts to the vault's underlying-asset smallest unit
+    // (7-decimal stroops, `cashbackMinor * 100_000`) per the LOOP-asset
+    // convention `credits/payout-builder.ts` already documents.
+    cashbackMinor: bigint('cashback_minor', { mode: 'bigint' }).notNull(),
+    // Destination Stellar address — the user's ACTIVATED embedded
+    // wallet (only Soroban-token-capable custody today, ADR 031 §D1).
+    // Pinned at claim time like `pending_payouts.to_address`.
+    toAddress: text('to_address').notNull(),
+
+    state: text('state').notNull().default('pending'),
+
+    // Slippage floor actually used for the deposit call — audit only
+    // (recomputed fresh on every attempt from a live share-price
+    // read; not itself re-used across retries).
+    minSharesUsed: bigint('min_shares_used', { mode: 'bigint' }),
+    depositTxHash: text('deposit_tx_hash'),
+    sharesMinted: bigint('shares_minted', { mode: 'bigint' }),
+    transferTxHash: text('transfer_tx_hash'),
+    // The audit-trail `pending_payouts kind='emission'` row written at
+    // the mirror step (see the table doc comment) — lets an admin
+    // view join straight from a vault emission to its
+    // conservation-trigger-checked payouts-table row.
+    pendingPayoutId: uuid('pending_payout_id').references(() => pendingPayouts.id, {
+      onDelete: 'set null',
+    }),
+
+    attempts: integer('attempts').notNull().default(0),
+    lastError: text('last_error'),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    depositedAt: timestamp('deposited_at', { withTimezone: true }),
+    transferredAt: timestamp('transferred_at', { withTimezone: true }),
+    mirroredAt: timestamp('mirrored_at', { withTimezone: true }),
+    failedAt: timestamp('failed_at', { withTimezone: true }),
+  },
+  (t) => [
+    // The durable claim fence (table doc comment) — one vault
+    // emission per order, ever.
+    uniqueIndex('vault_emissions_order_unique').on(t.orderId),
+    // Sweep query shape: `WHERE state IN (...) ORDER BY created_at`.
+    index('vault_emissions_state_created').on(t.state, t.createdAt),
+    check('vault_emissions_asset_code_known', sql`${t.assetCode} IN ('LOOPUSD', 'LOOPEUR')`),
+    check('vault_emissions_network_known', sql`${t.network} IN ('testnet', 'mainnet')`),
+    check(
+      'vault_emissions_state_known',
+      sql`${t.state} IN ('pending', 'deposited', 'transferred', 'mirrored', 'failed')`,
+    ),
+    check('vault_emissions_cashback_positive', sql`${t.cashbackMinor} > 0`),
+    check('vault_emissions_attempts_non_negative', sql`${t.attempts} >= 0`),
+    check('vault_emissions_to_address_format', sql`${t.toAddress} ~ '^G[A-Z2-7]{55}$'`),
+    // Shape-per-state: a row cannot claim to be further along the
+    // pipeline than the fields it actually populated. Mirrors
+    // `pending_payouts_kind_shape`'s per-discriminator pattern.
+    check(
+      'vault_emissions_state_shape',
+      sql`
+        (${t.state} = 'pending')
+        OR (${t.state} = 'deposited' AND ${t.depositTxHash} IS NOT NULL AND ${t.sharesMinted} IS NOT NULL)
+        OR (${t.state} = 'transferred' AND ${t.depositTxHash} IS NOT NULL AND ${t.sharesMinted} IS NOT NULL AND ${t.transferTxHash} IS NOT NULL)
+        OR (${t.state} = 'mirrored' AND ${t.depositTxHash} IS NOT NULL AND ${t.sharesMinted} IS NOT NULL AND ${t.transferTxHash} IS NOT NULL AND ${t.mirroredAt} IS NOT NULL)
+        OR (${t.state} = 'failed')
+      `,
     ),
   ],
 );

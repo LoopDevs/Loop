@@ -270,6 +270,10 @@ const REQUIRED_INDEXES = [
     name: 'credit_transactions_interest_period_unique',
     inv: 'INV-9 sibling (legacy off-chain interest-accrual period idempotency)',
   },
+  {
+    name: 'vault_emissions_order_unique',
+    inv: 'INV-V2 (vault-emission idempotency claim precedes any on-chain action, ADR 031 V3)',
+  },
 ];
 
 const REQUIRED_CHECKS = [

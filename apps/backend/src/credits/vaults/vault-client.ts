@@ -147,6 +147,22 @@ function resolveOperatorSecret(): string {
 }
 
 /**
+ * The operator's Stellar public key — the `from` of an
+ * operator-signed share transfer (ADR 031 §D5 step 3, V3) and the
+ * implicit signer/source of `depositToVault`/`withdrawFromVault`
+ * above. Exported (unlike `resolveOperatorSecret`) because
+ * `credits/vaults/vault-emissions.ts` needs the PUBLIC key to build
+ * `transferShares({ from: ..., to: userWallet })` without duplicating
+ * the env read + `Keypair.fromSecret` derivation this module already
+ * does internally. Does NOT gate on `vaultsEnabled()` — it's a pure
+ * derivation from config, not a network call; callers already sit
+ * behind their own `vaultsEnabled()` check.
+ */
+export function resolveOperatorPublicKey(): string {
+  return Keypair.fromSecret(resolveOperatorSecret()).publicKey();
+}
+
+/**
  * Threads the CF-18 fields into a `submitSorobanInvocation` call.
  * `onSigned` is REQUIRED on the money-submit path (see
  * `SubmitSorobanInvocationArgs`), so it's always passed. `priorTxHash`

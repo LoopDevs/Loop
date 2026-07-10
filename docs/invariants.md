@@ -248,6 +248,79 @@ Only GBPLOOP is minted on-chain nightly; USDLOOP/EURLOOP are vault shares
 
 ---
 
+## Vault emissions (ADR 031 §D4/D5, V3)
+
+LOOPUSD/LOOPEUR cashback emitted via the vault path
+(`credits/vaults/vault-emissions.ts`, gated on `LOOP_VAULTS_ENABLED` —
+default off, byte-identical to the classic path when unset). Only
+reachable through `orders/fulfillment.ts`'s gated fork; the classic
+USDLOOP/GBPLOOP/EURLOOP path is untouched by everything below.
+
+### INV-V1 — No unbacked shares: shares transferred == shares minted from the same deposit
+
+The operator never transfers more vault shares to a user than that
+SAME emission's own `vault.deposit` call actually minted.
+
+- **runtime**: `transferStep` (`vault-emissions.ts`) always passes
+  `amount: row.sharesMinted` — the exact value `depositStep` persisted
+  from THIS row's own deposit result — never a caller-supplied or
+  cross-row value. Holds by construction, not by a runtime check.
+- **DB (conservation, dollar-value dimension)**: the mirror step
+  writes a `pending_payouts kind='emission'` AUDIT row (already
+  `state='confirmed'`, real transfer `txHash` — never picked up by
+  the classic submit worker) through the SAME
+  `assert_emission_conservation` trigger (migration 0044) that guards
+  admin emissions — migration 0061 widens `pending_payouts
+.asset_code`/`.asset_issuer` CHECKs to admit LOOPUSD/LOOPEUR and
+  the trigger's `mirror_currency` mapping to know both codes.
+  **Load-bearing fix in the same migration**: the minted/burned
+  aggregation used to scope `WHERE asset_code = NEW.asset_code`,
+  correct only while exactly one asset code mapped to each mirror
+  currency. Now that USDLOOP _and_ LOOPUSD both mirror into USD
+  (EURLOOP/LOOPEUR into EUR), the aggregation sums over every asset
+  code sharing NEW's mirror currency — otherwise a user could
+  accumulate a classic USDLOOP emission AND a LOOPUSD emission that
+  EACH individually pass the check against the SAME shared USD
+  balance, jointly minting up to 2x the mirror liability. Regression-
+  tested in `__tests__/integration/vault-emissions.test.ts` (real
+  postgres).
+- **test**: `credits/vaults/__tests__/vault-emissions.test.ts` (mocked
+  — the transfer-amount-equals-sharesMinted assertion) +
+  `__tests__/integration/vault-emissions.test.ts` (real postgres — the
+  trigger genuinely rejects an over-limit insert, and the cross-asset
+  regression above).
+
+### INV-V2 — Idempotency claim precedes any on-chain action
+
+A `vault_emissions` row is claimed (durable, local, no network I/O)
+BEFORE any Soroban call, keyed on the SAME `order_id` the classic
+path's own `pending_payouts_order_unique` uses.
+
+- **DB**: `vault_emissions_order_unique` — one emission row per order,
+  ever.
+- **runtime**: `orders/fulfillment.ts` calls `claimVaultEmission`
+  inside the SAME transaction as the order's `fulfilled` transition —
+  a crash after that commit always has a resumable claim row.
+  Each on-chain step (`deposit`/`transfer`) persists its tx hash via
+  CF-18 `onSigned` BEFORE submit, so a resumed row passes
+  `priorTxHash` rather than re-submitting.
+- **test**: both suites above cover claim-replay (no second row) and
+  resume-from-`deposited`/`transferred` (no re-deposit / re-transfer).
+
+### Known residual (accepted, V3)
+
+`depositToVault`/`transferShares` sign with the same
+`LOOP_STELLAR_OPERATOR_SECRET` the classic payout-submit worker uses.
+The vault sweep and the classic payout worker are NOT coordinated
+against each other's operator-account sequence number (only the vault
+sweep's OWN rows are serialised, via its own fleet-wide advisory
+lock). A concurrent-tick sequence collision surfaces as a retryable
+Soroban/Horizon submit error on one side, not a fund-loss event — but
+this is a real gap, not yet closed. See `credits/vaults/
+vault-emissions.ts`'s module header.
+
+---
+
 ## Auth & access (the money-adjacent invariants)
 
 ### INV-11 — Every destructive admin write requires fresh step-up
