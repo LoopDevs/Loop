@@ -279,12 +279,59 @@ async function runPayoutTickLocked(args: RunPayoutTickArgs): Promise<PayoutTickR
       // Safe under JS's single-threaded cooperative concurrency: this
       // increment never interleaves with another shard's increment
       // mid-operation, even though multiple `runShard` calls are
-      // in-flight together via the `Promise.all` below.
+      // in-flight together via the `Promise.allSettled` below.
       result[outcome]++;
     }
   };
 
-  await Promise.all(shards.map((shardRows, i) => runShard(shardRows, channels[i]?.secret)));
+  // `allSettled`, not `all` (S4-1 follow-up). `payOne` fences almost
+  // everything it does in try/catch (idempotency pre-check, submit,
+  // classify-and-fail), but the row-claim call (markPayoutSubmitted /
+  // reclaimSubmittedPayout) and a couple of handleSubmitError's own DB
+  // writes are NOT — an unexpected throw there (DB blip, programmer
+  // error) can still reject `payOne`, and with it this shard's
+  // `runShard` loop.
+  //
+  // With `Promise.all`, one rejecting shard rejects the WHOLE tick
+  // immediately. That's worse than just losing a row: sibling shards'
+  // `runShard` calls are NOT cancelled by the rejection (JS doesn't
+  // cancel in-flight promises), so they keep submitting Stellar
+  // transactions in the background — but `withAdvisoryLock` releases the
+  // fleet-wide A8 leader lock as soon as THIS function's returned
+  // promise settles, i.e. immediately on the first shard rejection,
+  // while those sibling shards are still mid-submit. A second machine
+  // could then acquire the lock and submit through the SAME configured
+  // channel accounts concurrently with the still-in-flight orphaned
+  // shard — exactly the sequence-number collision (`tx_bad_seq` churn)
+  // A8 exists to prevent. So a shard rejection wasn't just a reporting
+  // nit; it could reopen the cross-machine race A8 closed.
+  //
+  // `allSettled` waits for every shard to finish (success or failure)
+  // before this function returns, so the lock is held for the shards'
+  // full duration regardless of any one shard's outcome — isolating a
+  // shard failure's blast radius to its own shard (its unprocessed rows
+  // simply stay in their prior DB state and get picked up next tick)
+  // without weakening A8 or losing the sibling shards' completed work
+  // from this tick's reported counts.
+  const settled = await Promise.allSettled(
+    shards.map((shardRows, i) => runShard(shardRows, channels[i]?.secret)),
+  );
+  for (const [shardIndex, outcome] of settled.entries()) {
+    if (outcome.status !== 'rejected') continue;
+    const shardRows = shards[shardIndex] ?? [];
+    log.error(
+      {
+        err: outcome.reason,
+        shardIndex,
+        shardCount,
+        shardRowCount: shardRows.length,
+        shardRowIds: shardRows.map((row) => row.id),
+        // Public key only — never the channel secret.
+        shardChannelAccount: channels[shardIndex]?.account,
+      },
+      'Payout channel shard threw and stopped mid-tick — isolated from sibling shards, which still ran to completion and are reflected in this tick’s counts. Rows in shardRowIds already processed before the throw are also reflected; the rest are untouched and will be re-picked on a later tick',
+    );
+  }
 
   if (emissionsKilled && result.skippedKilled > 0) {
     log.warn(
