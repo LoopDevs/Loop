@@ -81,7 +81,11 @@ email is replaced with `deleted-{uuid}@deleted.loopfinance.io`,
 `stellar_address` + `ctx_user_id` are nulled, OAuth identities are
 deleted, all refresh tokens are revoked, and terminal payout
 `to_address` rows are scrubbed. Ledger rows are retained (tax/regulatory)
-but no longer link to a real person.
+but no longer link to a real person. `fraud_signals` rows (ADR 045, B-3)
+are **also retained** and NOT scrubbed — under the fraud-prevention
+legitimate-interest basis (GDPR Art 17(3)); the funding address they hold
+is a denormalised copy of one already retained in `orders`. See the
+accepted-risk register in `docs/threat-model.md`.
 
 ### The endpoint refuses with a typed 409 when
 

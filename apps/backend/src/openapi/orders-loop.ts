@@ -162,7 +162,8 @@ export function registerOrdersLoopOpenApi(
         content: { 'application/json': { schema: errorResponse } },
       },
       429: {
-        description: 'Rate limit exceeded (10/min per IP)',
+        description:
+          'Rate limit exceeded (10/min per IP), or ORDER_VELOCITY_EXCEEDED (ADR 045 / B-3) — the caller already has LOOP_ORDER_VELOCITY_MAX_PER_WINDOW orders, or LOOP_ORDER_VELOCITY_MAX_VALUE_MINOR of charge value in one currency, within the rolling LOOP_ORDER_VELOCITY_WINDOW_HOURS window. Per-USER, distinct from the per-IP rate limit.',
         content: { 'application/json': { schema: errorResponse } },
       },
       500: {
@@ -178,10 +179,13 @@ export function registerOrdersLoopOpenApi(
       // rather than a wrong charge, distinct from a SERVICE_UNAVAILABLE
       // feed outage for a supported currency. AUDIT-2 P2 follow-up 'b'
       // (2026-07-09) adds the usdc-issuer-unconfigured case, same shape
-      // as the pre-existing LOOP-asset-issuer guard.
+      // as the pre-existing LOOP-asset-issuer guard. ADR 045 (B-3) adds
+      // ORDER_VELOCITY_CHECK_UNAVAILABLE — the velocity check's own
+      // bounded query failed; fails closed (no order created), same
+      // posture as the FX/deposit-config cases above.
       503: {
         description:
-          'SERVICE_UNAVAILABLE (FX feed outage, deposit address unconfigured, LOOP-asset issuer not configured for the requested currency, or LOOP_STELLAR_USDC_ISSUER not configured for paymentMethod=usdc) or CURRENCY_NOT_AVAILABLE (ADR-035 extended-market currency not yet served by the rates feed — ordering coming soon)',
+          'SERVICE_UNAVAILABLE (FX feed outage, deposit address unconfigured, LOOP-asset issuer not configured for the requested currency, or LOOP_STELLAR_USDC_ISSUER not configured for paymentMethod=usdc), CURRENCY_NOT_AVAILABLE (ADR-035 extended-market currency not yet served by the rates feed — ordering coming soon), or ORDER_VELOCITY_CHECK_UNAVAILABLE (ADR 045 / B-3 — the velocity check itself failed; fails closed, no order created)',
         content: { 'application/json': { schema: errorResponse } },
       },
     },

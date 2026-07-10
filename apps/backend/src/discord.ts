@@ -45,6 +45,7 @@ export {
   notifyOperatorPoolExhausted,
   notifyOperatorCredentialExpired,
   notifyCircuitBreaker,
+  notifyDuplicateAccountSignal,
   __resetCircuitNotifyDedupForTests,
   __resetCtxSchemaDriftDedupForTests,
   __resetOperatorCredentialDedupForTests,

@@ -73,6 +73,15 @@ src/
 │                         (watcher_cursors name='interest_mint'), Horizon balance snapshots
 │                         → interest_mint_snapshots (migration 0041, sub-minor carry),
 │                         mirror credit + kind='interest_mint' payout in one txn per user
+├── fraud/              ← ADR 045 (B-3) Phase-1 fraud/abuse controls
+│   ├── velocity.ts     ← Per-user order-create velocity gate (bounded/indexed
+│   │                     query, fail-closed) — called from orders/loop-handler.ts
+│   │                     BEFORE order creation
+│   └── duplicate-account-signals.ts ← Shared-funding-source dup-account
+│                         detector — flag-only, writes to `fraud_signals`
+│                         (migration 0059), Discord page on first occurrence;
+│                         called from payments/watcher.ts AFTER a paid
+│                         transition commits, never inside it
 ├── orders/
 │   ├── handler.ts      ← Legacy CTX-proxy order creation
 │   ├── loop-handler.ts ← Loop-native order creation with FX-pin (ADR 010 + 015)
@@ -128,8 +137,8 @@ src/
 ├── db/                 ← Drizzle schema + migrations + pool client (ADR 012);
 │   │                     schema.ts is a barrel over schema/*.ts per-domain
 │   │                     modules (users/credits/merchants/auth/orders/payments/
-│   │                     admin/reconciliation — D2 split); add tables to the
-│   │                     domain module, not one giant file.
+│   │                     admin/reconciliation/fraud — D2 split); add tables to
+│   │                     the domain module, not one giant file.
 │   │                     staff-roles.ts — ADR 037 role repo (resolution, list,
 │   │                     grant/revoke under a fixed advisory lock with
 │   │                     last-admin protection + is_admin mirror)

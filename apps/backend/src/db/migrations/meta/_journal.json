@@ -414,6 +414,13 @@
       "when": 1780188900000,
       "tag": "0058_credit_transactions_created_at_index",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1780189000000,
+      "tag": "0059_fraud_signals",
+      "breakpoints": true
     }
   ]
 }

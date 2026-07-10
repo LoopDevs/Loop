@@ -303,6 +303,16 @@ export const orders = pgTable(
     uniqueIndex('orders_user_idempotency_unique')
       .on(t.userId, t.idempotencyKey)
       .where(sql`${t.idempotencyKey} IS NOT NULL`),
+    // ADR 045 (B-3): expression index on the JSONB payment snapshot's
+    // `from` field — the paying Horizon operation's source Stellar
+    // account. Backs the duplicate-account funding-source-reuse check
+    // (`fraud/duplicate-account-signals.ts`), which would otherwise
+    // sequential-scan this table on every paid transition (S4-6/
+    // PERF-005 shape). Partial: only on-chain-funded orders
+    // (xlm/usdc/loop_asset) ever populate this column.
+    index('orders_payment_source_account')
+      .on(sql`(${t.paymentReceivedPayment}->>'from')`)
+      .where(sql`${t.paymentReceivedPayment} IS NOT NULL`),
   ],
 );
 

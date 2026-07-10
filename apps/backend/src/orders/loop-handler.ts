@@ -38,6 +38,7 @@ import {
 import { isFirstLoopAssetOrder } from './loop-create-checks.js';
 import { getWalletProvider } from '../wallet/provider.js';
 import { buildLoopCreateResponse } from './loop-create-response.js';
+import { checkOrderVelocity, VelocityCheckUnavailableError } from '../fraud/velocity.js';
 
 const log = logger.child({ handler: 'loop-orders' });
 
@@ -265,6 +266,47 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
         return await replayOrderResponse(c, prior);
       }
     }
+  }
+
+  // ADR 045 (B-3): per-user order-create velocity gate. Runs before
+  // any merchant/FX/balance work — it only needs auth.userId — so a
+  // user already over budget doesn't pay for work we'd throw away.
+  // Only a NEW order attempt reaches here (the idempotency-replay
+  // short-circuit above already returned for a repeat request), so
+  // this correctly only gates genuinely new orders. See ADR 045 for
+  // why this is per-user (not per-IP) and why it fails closed.
+  try {
+    const velocity = await checkOrderVelocity(auth.userId);
+    if (!velocity.allowed) {
+      log.warn(
+        { userId: auth.userId, reason: velocity.reason, currency: velocity.currency },
+        'Order rejected — velocity limit exceeded (ADR 045 / B-3)',
+      );
+      return c.json(
+        {
+          code: 'ORDER_VELOCITY_EXCEEDED',
+          message:
+            velocity.reason === 'value'
+              ? `You've reached the maximum order value for a ${env.LOOP_ORDER_VELOCITY_WINDOW_HOURS}-hour period. Please try again later or contact support.`
+              : `You've reached the maximum number of orders for a ${env.LOOP_ORDER_VELOCITY_WINDOW_HOURS}-hour period. Please try again later or contact support.`,
+        },
+        429,
+      );
+    }
+  } catch (err) {
+    if (err instanceof VelocityCheckUnavailableError) {
+      // Fail CLOSED (ADR 045): a transient DB error must never become
+      // a free pass past the fraud gate. No order is created here.
+      log.error({ err, userId: auth.userId }, 'Order velocity check unavailable — failing closed');
+      return c.json(
+        {
+          code: 'ORDER_VELOCITY_CHECK_UNAVAILABLE',
+          message: 'Unable to verify order velocity right now — please try again shortly',
+        },
+        503,
+      );
+    }
+    throw err;
   }
 
   // A4-017: global face-value ceiling. Caught here before we do any

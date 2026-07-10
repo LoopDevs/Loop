@@ -140,6 +140,18 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # `DAILY_LIMIT_EXCEEDED` response shape.
 # ADMIN_DAILY_WITHDRAWAL_CAP_MINOR=100000000
 
+# ADR 045 (B-3): Phase-1 fraud/abuse velocity limits — bounds how many
+# orders (and how much value) ONE USER can create per rolling window,
+# checked in POST /api/orders/loop before the order is created. Per-
+# user, distinct from the per-IP rate limiter above (an attacker can
+# rotate IPs; they can't rotate their own account). `0` disables a
+# dimension. Over-limit → 429 `ORDER_VELOCITY_EXCEEDED`; a failed
+# check (DB error) fails CLOSED → 503 `ORDER_VELOCITY_CHECK_UNAVAILABLE`
+# rather than silently allowing the order.
+# LOOP_ORDER_VELOCITY_MAX_PER_WINDOW=20
+# LOOP_ORDER_VELOCITY_WINDOW_HOURS=24
+# LOOP_ORDER_VELOCITY_MAX_VALUE_MINOR=500000
+
 # ── Default cashback split (ADR 010 / 011) ───────────────────────────
 # Fallbacks used when a merchant has no row in merchant_cashback_configs.
 # Keep at 0 in dev / staging — a non-zero default will silently credit

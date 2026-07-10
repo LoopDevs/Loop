@@ -150,6 +150,40 @@ vi.mock('../../wallet/provider.js', () => ({
   getWalletProvider: () => (walletProviderState.on ? ({} as never) : null),
 }));
 
+// ADR 045 (B-3) velocity gate — fully mocked here; its own bounded-
+// query/fail-closed behaviour is covered by fraud/__tests__/velocity.test.ts.
+// Default: always allowed, so every pre-existing test in this file is
+// unaffected. `velocityState.calls` records every invocation so the
+// per-user (not per-IP) wiring can be asserted.
+const { velocityState, VelocityCheckUnavailableError } = vi.hoisted(() => {
+  class VelocityCheckUnavailableError extends Error {
+    constructor() {
+      super('velocity check unavailable');
+      this.name = 'VelocityCheckUnavailableError';
+    }
+  }
+  return {
+    velocityState: {
+      decision: { allowed: true } as {
+        allowed: boolean;
+        reason?: 'count' | 'value';
+        currency?: string;
+      },
+      throwUnavailable: false,
+      calls: [] as string[],
+    },
+    VelocityCheckUnavailableError,
+  };
+});
+vi.mock('../../fraud/velocity.js', () => ({
+  checkOrderVelocity: async (userId: string) => {
+    velocityState.calls.push(userId);
+    if (velocityState.throwUnavailable) throw new VelocityCheckUnavailableError();
+    return velocityState.decision;
+  },
+  VelocityCheckUnavailableError,
+}));
+
 import { loopCreateOrderHandler, validateMerchantDenomination } from '../loop-handler.js';
 
 interface FakeCtx {
@@ -208,6 +242,9 @@ beforeEach(() => {
   payoutAssetState.issuer = null;
   fxState.impl = async (amount: bigint) => amount;
   walletProviderState.on = false;
+  velocityState.decision = { allowed: true };
+  velocityState.throwUnavailable = false;
+  velocityState.calls = [];
   userState.user = {
     id: 'user-uuid',
     email: 'a@b.com',
@@ -1019,6 +1056,93 @@ describe('loopCreateOrderHandler', () => {
         nowSpy.mockRestore();
       }
     });
+  });
+});
+
+describe('loopCreateOrderHandler — ADR 045 (B-3) order velocity gate', () => {
+  it('429 ORDER_VELOCITY_EXCEEDED (count) — no order created', async () => {
+    velocityState.decision = { allowed: false, reason: 'count' };
+    const { ctx } = makeCtx({
+      auth: LOOP_AUTH,
+      body: { merchantId: 'm1', amountMinor: 10_000, currency: 'GBP', paymentMethod: 'xlm' },
+    });
+    const res = await loopCreateOrderHandler(ctx);
+    expect(res.status).toBe(429);
+    const body = (await res.json()) as { code: string; message: string };
+    expect(body.code).toBe('ORDER_VELOCITY_EXCEEDED');
+    expect(body.message).toMatch(/maximum number of orders/i);
+    expect(createOrderMock).not.toHaveBeenCalled();
+  });
+
+  it('429 ORDER_VELOCITY_EXCEEDED (value) — distinct message, no order created', async () => {
+    velocityState.decision = { allowed: false, reason: 'value', currency: 'GBP' };
+    const { ctx } = makeCtx({
+      auth: LOOP_AUTH,
+      body: { merchantId: 'm1', amountMinor: 10_000, currency: 'GBP', paymentMethod: 'xlm' },
+    });
+    const res = await loopCreateOrderHandler(ctx);
+    expect(res.status).toBe(429);
+    const body = (await res.json()) as { code: string; message: string };
+    expect(body.code).toBe('ORDER_VELOCITY_EXCEEDED');
+    expect(body.message).toMatch(/maximum order value/i);
+    expect(createOrderMock).not.toHaveBeenCalled();
+  });
+
+  it('503 ORDER_VELOCITY_CHECK_UNAVAILABLE when the check itself fails — fails closed, no order created', async () => {
+    velocityState.throwUnavailable = true;
+    const { ctx } = makeCtx({
+      auth: LOOP_AUTH,
+      body: { merchantId: 'm1', amountMinor: 10_000, currency: 'GBP', paymentMethod: 'xlm' },
+    });
+    const res = await loopCreateOrderHandler(ctx);
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('ORDER_VELOCITY_CHECK_UNAVAILABLE');
+    expect(createOrderMock).not.toHaveBeenCalled();
+  });
+
+  it('allows order creation when under the velocity budget', async () => {
+    velocityState.decision = { allowed: true };
+    const { ctx } = makeCtx({
+      auth: LOOP_AUTH,
+      body: { merchantId: 'm1', amountMinor: 10_000, currency: 'GBP', paymentMethod: 'xlm' },
+    });
+    const res = await loopCreateOrderHandler(ctx);
+    expect(res.status).toBe(200);
+    expect(createOrderMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('checks velocity keyed on the authenticated userId — per-USER, not per-IP', async () => {
+    const { ctx } = makeCtx({
+      auth: LOOP_AUTH,
+      body: { merchantId: 'm1', amountMinor: 10_000, currency: 'GBP', paymentMethod: 'xlm' },
+    });
+    await loopCreateOrderHandler(ctx);
+    expect(velocityState.calls).toEqual(['user-uuid']); // LOOP_AUTH.userId
+  });
+
+  it('an Idempotency-Key replay does NOT re-check velocity — a repeat request creates nothing new', async () => {
+    const prior = {
+      id: 'prior-order-id',
+      userId: 'user-uuid',
+      merchantId: 'm1',
+      faceValueMinor: 7_500n,
+      currency: 'GBP',
+      chargeMinor: 7_500n,
+      chargeCurrency: 'GBP',
+      paymentMethod: 'xlm',
+      paymentMemo: 'PRIORMEMO',
+    };
+    findOrderByIdempotencyKeyMock.mockResolvedValueOnce(prior);
+    const { ctx } = makeCtx({
+      auth: LOOP_AUTH,
+      headers: { 'Idempotency-Key': '0123456789abcdef-loop-order-idempotency-key' },
+      body: { merchantId: 'm1', amountMinor: 10_000, currency: 'GBP', paymentMethod: 'xlm' },
+    });
+    const res = await loopCreateOrderHandler(ctx);
+    expect(res.status).toBe(200);
+    expect(velocityState.calls).toEqual([]);
+    expect(createOrderMock).not.toHaveBeenCalled();
   });
 });
 
