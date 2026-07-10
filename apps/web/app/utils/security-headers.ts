@@ -21,12 +21,17 @@
  *     style-src is unavoidable.
  *   - fonts.googleapis.com + fonts.gstatic.com — Google Fonts (accepted
  *     third-party dep, see audit A-032).
- *   - *.basemaps.cartocdn.com + *.tile.openstreetmap.org — Leaflet raster
- *     tiles. Wildcard on cartocdn is required because Leaflet substitutes
- *     `{s}` with `a`/`b`/`c`/`d` for load-spreading.
+ *   - *.basemaps.cartocdn.com + *.tile.openstreetmap.org — MapLibre GL's
+ *     raster basemap tiles (ADR 046 — the Leaflet → MapLibre swap kept
+ *     this same CARTO/OSM tile source). Wildcard on cartocdn is required
+ *     because the map client expands `{s}` into `a`/`b`/`c`/`d` subdomain
+ *     URLs itself for load-spreading (the style-spec `tiles` array has no
+ *     built-in placeholder substitution the way Leaflet's tileLayer did).
  *   - *.ingest.sentry.io / *.ingest.de.sentry.io — error telemetry.
- *   - `blob:` + `data:` on img-src — Leaflet internal markers and
- *     inline SVG data URIs.
+ *   - `blob:` + `data:` on img-src — inline SVG/PNG data URIs used by the
+ *     share-image + purchase-complete flows. Not needed for map markers
+ *     — those are plain DOM elements with `background-image` URLs
+ *     already covered by the origins above, not data-URI-based icons.
  */
 export interface SecurityHeadersOptions {
   /** API origin the web app talks to. Used in CSP connect-src + img-src. */
@@ -63,9 +68,10 @@ export function buildSecurityHeaders(options: SecurityHeadersOptions = {}): Reco
     `style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com`,
     `font-src 'self' https://fonts.gstatic.com`,
     // `https://basemaps.cartocdn.com` only matches that exact hostname;
-    // Leaflet's tile URLs substitute `{s}` with `a`/`b`/`c`/`d` and fetch
-    // from `a.basemaps.cartocdn.com` etc., so the bare-domain entry would
-    // block every tile load. Use the wildcard form for both CARTO and OSM.
+    // the map client's tile URLs are built as `a.basemaps.cartocdn.com`,
+    // `b.basemaps.cartocdn.com`, etc. (subdomain load-spreading), so the
+    // bare-domain entry would block every tile load. Use the wildcard
+    // form for both CARTO and OSM.
     `img-src 'self' data: blob: ${apiOrigin} https://*.basemaps.cartocdn.com https://*.tile.openstreetmap.org https://*.googleusercontent.com`,
     `connect-src 'self' ${apiOrigin} https://*.ingest.sentry.io https://*.ingest.de.sentry.io https://accounts.google.com https://appleid.apple.com`,
     // Google renders its sign-in button inside an iframe it owns; Apple's

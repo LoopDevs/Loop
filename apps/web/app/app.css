@@ -191,39 +191,62 @@ input[type='number'] {
 
 /* JavaScript to handle wheel events will be added via script */
 
-/* Dark mode styling for Leaflet map tiles */
-.dark .leaflet-pane.leaflet-tile-pane {
-  filter: sepia(50%) hue-rotate(180deg) saturate(300%) contrast(1.1) brightness(2);
-}
-
-.dark .leaflet-container {
+/* Dark mode background for the MapLibre map container (ADR 046) — shows
+   briefly at the container edges while dark_all tiles load / beyond tile
+   coverage, matching the app's dark surface color instead of flashing
+   white. (Prior Leaflet styling here also applied a sepia/hue-rotate/
+   saturate/brightness CSS filter on top of the tile layer — added in the
+   very first commit as a hack to fake a dark basemap by filtering *light*
+   tiles, before Loop had a real dark tile source. A later commit added
+   the real CARTO `dark_all` tile swap but never removed the filter, so
+   the two had been stacking for months: a proper dark basemap tile, then
+   an extra color-transform pass on top of it. Dropped as part of the
+   MapLibre migration — see `docs/adr/046-maplibre-map.md` — rather than
+   carried forward, since MapLibre's raster tiles paint onto a shared
+   WebGL canvas with no per-tile DOM node a scoped filter could target
+   anyway.) */
+.dark .maplibregl-map {
   background: rgb(25 34 51);
 }
 
-/* Leaflet merchant popup styling */
-.merchant-popup .leaflet-popup-content-wrapper {
+/* MapLibre merchant popup styling (ADR 046 — ports the prior Leaflet
+   `.merchant-popup` rules to MapLibre's popup DOM structure). The
+   `className` passed to `new maplibregl.Popup({ className: 'merchant-popup' })`
+   lands on the outer `.maplibregl-popup` container itself, not a wrapper
+   ancestor. */
+.merchant-popup .maplibregl-popup-content {
+  margin: 0;
   border-radius: 12px;
   padding: 0;
   overflow: hidden;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
 }
 
-.merchant-popup .leaflet-popup-content {
-  margin: 0;
-  width: auto !important;
-}
-
-.merchant-popup .leaflet-popup-tip {
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-}
-
-html.dark .merchant-popup .leaflet-popup-content-wrapper {
+html.dark .merchant-popup .maplibregl-popup-content {
   background: #1f2937;
   color: #f3f4f6;
 }
 
-html.dark .merchant-popup .leaflet-popup-tip {
-  background: #1f2937;
+/* MapLibre's popup "tip" (the triangle pointer) is a CSS border-triangle
+   whose visible edge depends on which side of the marker the popup was
+   anchored — recolor whichever border-* the active anchor uses. */
+html.dark .merchant-popup.maplibregl-popup-anchor-top .maplibregl-popup-tip {
+  border-bottom-color: #1f2937;
+}
+html.dark .merchant-popup.maplibregl-popup-anchor-bottom .maplibregl-popup-tip {
+  border-top-color: #1f2937;
+}
+html.dark .merchant-popup.maplibregl-popup-anchor-left .maplibregl-popup-tip {
+  border-right-color: #1f2937;
+}
+html.dark .merchant-popup.maplibregl-popup-anchor-right .maplibregl-popup-tip {
+  border-left-color: #1f2937;
+}
+
+/* Default close-button glyph is dark grey/black — invisible against the
+   dark popup background above without an explicit light color. */
+html.dark .merchant-popup .maplibregl-popup-close-button {
+  color: #f3f4f6;
 }
 
 @keyframes loading {
@@ -495,9 +518,9 @@ html.native .route-enter {
 
 /* "You are here" marker — a solid blue disc with a white ring and a
    pulsing halo, styled to match the convention iOS Maps / Google
-   Maps use so users recognise it instantly. Rendered by Leaflet
-   via a `divIcon` so we don't have to ship an image asset for the
-   animated halo. */
+   Maps use so users recognise it instantly. Rendered inside a MapLibre
+   `Marker`'s custom element (ADR 046) so we don't have to ship an
+   image asset for the animated halo. */
 .loop-user-location {
   position: relative;
   pointer-events: none;

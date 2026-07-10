@@ -49,12 +49,37 @@ BUILD_DIR="${ROOT}/apps/web/build/client"
 # code regression — raised with headroom for the remaining un-extracted
 # surfaces (MobileHome, brand.$slug, remaining onboarding screens) still
 # tracked as follow-up B-6 tranches.
-MAX_SSR_KB="${MAX_SSR_KB:-3400}"
+#
+# 2026-07-10 MapLibre swap (ADR 046, §P3): this metric is a raw `du -sk`
+# over the whole `build/client/` directory, so it counts async/lazy
+# chunks too, not just the initial-load path — swapping Leaflet
+# (~148 KB JS + ~15 KB CSS, always lazy-loaded behind the same dynamic
+# import) for maplibre-gl (~1004 KB JS + ~72 KB CSS, same lazy-load
+# pattern — see MAX_CHUNK_KB below) pushed the directory total to
+# ~4240 KB even though the initial-load-critical chunks (entry.client
+# ~183 KB, main vendor ~549 KB) are unchanged from before this PR —
+# verified by diffing `du -sk` on those specific files pre/post swap.
+# Raised with a small buffer over the measured 4240 KB; the map is
+# still lazy-loaded (`lazy(() => import('~/components/features/ClusterMap'))`
+# in `routes/map.tsx`, which itself dynamically imports `maplibre-gl`),
+# so only users who open `/map` ever fetch this chunk.
+MAX_SSR_KB="${MAX_SSR_KB:-4300}"
 
 # Per-chunk ceiling — no single vendor chunk should exceed this.
 # Catches the "accidentally shipped moment + date-fns + leaflet in
-# one chunk" class of regression. Current largest chunk is ~420 KB.
-MAX_CHUNK_KB="${MAX_CHUNK_KB:-800}"
+# one chunk" class of regression. Current largest non-map chunk is
+# ~550 KB.
+#
+# 2026-07-10 MapLibre swap (ADR 046, §P3): maplibre-gl's own minified
+# bundle is ~1004 KB — roughly 6.7x Leaflet's ~150 KB — because it's a
+# WebGL rendering engine with its own style/spec/worker code, not a
+# thin DOM wrapper. It lands in its own async chunk via the dynamic
+# `import('maplibre-gl')` in `ClusterMap.tsx`'s map-init effect (never
+# in the main bundle), so this ceiling only needs to fit that one
+# expected large lazy chunk — anything else unexpectedly crossing it
+# is still a real regression this gate catches, since no other chunk
+# in the app is anywhere close to this size.
+MAX_CHUNK_KB="${MAX_CHUNK_KB:-1100}"
 
 if [ ! -d "${BUILD_DIR}" ]; then
   echo "FAIL: build output not found at ${BUILD_DIR}"
