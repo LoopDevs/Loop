@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { assertNever } from '@loop/shared';
 import { listLoopOrders, loopOrderStateLabel, type LoopOrderView } from '~/services/orders-loop';
 import { useAllMerchants } from '~/hooks/use-merchants';
@@ -18,6 +19,7 @@ import { formatMinorCurrency, useLocaleTag } from '~/i18n/format';
  * once the order is fulfilled.
  */
 export function LoopOrdersList({ enabled }: { enabled: boolean }): React.JSX.Element | null {
+  const { t } = useTranslation('orders');
   const query = useQuery({
     queryKey: ['loop-orders'],
     queryFn: () => listLoopOrders(),
@@ -46,7 +48,7 @@ export function LoopOrdersList({ enabled }: { enabled: boolean }): React.JSX.Ele
   return (
     <section className="mb-6" aria-label="Loop orders">
       <h2 className="px-1 mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-        Your orders
+        {t('loopList.heading')}
       </h2>
       <ul className="divide-y divide-gray-100 dark:divide-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-hidden">
         {orders.map((order) => (
@@ -58,6 +60,7 @@ export function LoopOrdersList({ enabled }: { enabled: boolean }): React.JSX.Ele
 }
 
 function LoopOrderRow({ order }: { order: LoopOrderView }): React.JSX.Element {
+  const { t } = useTranslation('orders');
   // A4-026: pending_payment rows must surface the deposit address +
   // memo + amount on every render of the orders list, even after a
   // page refresh / app restart that wipes the in-memory create
@@ -114,7 +117,9 @@ function LoopOrderRow({ order }: { order: LoopOrderView }): React.JSX.Element {
               <div className="mt-0.5 text-[11px] font-medium text-green-700 dark:text-green-400 tabular-nums">
                 {/* WEB-M2: render the currency symbol/code so £1.25 isn't
                     ambiguous with $1.25 on the always-visible row. */}
-                +{formatMinorCurrency(order.userCashbackMinor, order.currency, locale)} cashback
+                {t('loopList.earnedCashback', {
+                  amount: formatMinorCurrency(order.userCashbackMinor, order.currency, locale),
+                })}
               </div>
             ) : null}
           </div>
@@ -128,10 +133,10 @@ function LoopOrderRow({ order }: { order: LoopOrderView }): React.JSX.Element {
           {isFulfilled && hasRedemption ? (
             <div className="rounded-lg bg-gray-50 dark:bg-gray-950/50 p-3 space-y-2">
               {order.redeemCode !== null && order.redeemCode.length > 0 ? (
-                <RedemptionField label="Code" value={order.redeemCode} />
+                <RedemptionField label={t('loopList.fields.code')} value={order.redeemCode} />
               ) : null}
               {order.redeemPin !== null && order.redeemPin.length > 0 ? (
-                <RedemptionField label="PIN" value={order.redeemPin} />
+                <RedemptionField label={t('loopList.fields.pin')} value={order.redeemPin} />
               ) : null}
               {order.redeemUrl !== null && order.redeemUrl.length > 0 ? (
                 <a
@@ -140,15 +145,16 @@ function LoopOrderRow({ order }: { order: LoopOrderView }): React.JSX.Element {
                   rel="noopener noreferrer"
                   className="inline-flex items-center justify-center w-full rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium px-3 py-1.5"
                 >
-                  Open redemption link
+                  {t('loopList.openRedemptionLink')}
                 </a>
               ) : null}
             </div>
           ) : null}
           {order.userCashbackMinor !== '0' && isFulfilled ? (
             <div className="text-xs text-green-700 dark:text-green-300">
-              {formatMinorCurrency(order.userCashbackMinor, order.currency, locale)} cashback
-              credited.
+              {t('loopList.cashbackCredited', {
+                amount: formatMinorCurrency(order.userCashbackMinor, order.currency, locale),
+              })}
             </div>
           ) : null}
         </div>
@@ -174,30 +180,32 @@ function StatePill({ state }: { state: LoopOrderView['state'] }): React.JSX.Elem
  * outcome-based.
  */
 function RecycledPill(): React.JSX.Element {
+  const { t } = useTranslation('orders');
   return (
     <span
       className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900/30 dark:text-green-300"
-      aria-label="Paid with recycled cashback"
-      title="You paid for this order with LOOP-asset cashback you earned on earlier orders."
+      aria-label={t('loopList.recycledPill.ariaLabel')}
+      title={t('loopList.recycledPill.title')}
     >
       <span aria-hidden="true">♻️</span>
-      Recycled
+      {t('loopList.recycledPill.label')}
     </span>
   );
 }
 
 function StateBanner({ order }: { order: LoopOrderView }): React.JSX.Element | null {
+  const { t } = useTranslation('orders');
   if (order.state === 'failed') {
     return (
       <div className="rounded-lg border border-red-200 dark:border-red-900/40 bg-red-50 dark:bg-red-900/20 p-2 text-xs text-red-700 dark:text-red-300">
-        {order.failureReason ?? 'Order failed.'}
+        {order.failureReason ?? t('loopList.failedFallback')}
       </div>
     );
   }
   if (order.state === 'expired') {
     return (
       <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 p-2 text-xs text-gray-600 dark:text-gray-400">
-        Order expired before payment arrived.
+        {t('loopList.expired')}
       </div>
     );
   }
@@ -217,6 +225,7 @@ function PendingPaymentRecoveryPanel({
 }: {
   order: LoopOrderView;
 }): React.JSX.Element | null {
+  const { t } = useTranslation('orders');
   const locale = useLocaleTag();
   if (order.stellarAddress === null || order.paymentMemo === null) return null;
   const assetLabel =
@@ -230,17 +239,19 @@ function PendingPaymentRecoveryPanel({
   return (
     <div className="rounded-lg border border-yellow-200 dark:border-yellow-900/40 bg-yellow-50 dark:bg-yellow-900/20 p-3 text-xs text-yellow-900 dark:text-yellow-100 space-y-2">
       <p className="font-medium">
-        Awaiting payment. Send{' '}
-        {formatMinorCurrency(order.chargeMinor, order.chargeCurrency, locale)} of {assetLabel} to
-        the address below with the memo, then this row will move to Paid.
+        {t('loopList.pendingPayment', {
+          amount: formatMinorCurrency(order.chargeMinor, order.chargeCurrency, locale),
+          asset: assetLabel,
+        })}
       </p>
-      <RedemptionField label="Address" value={order.stellarAddress} />
-      <RedemptionField label="Memo" value={order.paymentMemo} />
+      <RedemptionField label={t('loopList.fields.address')} value={order.stellarAddress} />
+      <RedemptionField label={t('loopList.fields.memo')} value={order.paymentMemo} />
     </div>
   );
 }
 
 function RedemptionField({ label, value }: { label: string; value: string }): React.JSX.Element {
+  const { t } = useTranslation('orders');
   const [copied, setCopied] = useState(false);
   const onCopy = (): void => {
     void navigator.clipboard.writeText(value);
@@ -260,9 +271,9 @@ function RedemptionField({ label, value }: { label: string; value: string }): Re
           type="button"
           onClick={onCopy}
           className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline shrink-0"
-          aria-label={`Copy ${label.toLowerCase()}`}
+          aria-label={t('loopList.copyAriaLabel', { label: label.toLowerCase() })}
         >
-          {copied ? 'Copied' : 'Copy'}
+          {copied ? t('loopList.copied') : t('loopList.copy')}
         </button>
       </div>
       {/* WUM-10 (2026-06-30 cold audit) / CF-35 rollout: confirm copy to
@@ -270,7 +281,7 @@ function RedemptionField({ label, value }: { label: string; value: string }): Re
           function is that component's structural sibling for the orders
           list (address/memo recovery panel + redeem code/PIN). */}
       <span aria-live="polite" className="sr-only">
-        {copied ? `${label} copied to clipboard.` : ''}
+        {copied ? t('loopList.copiedAnnouncement', { label }) : ''}
       </span>
     </div>
   );

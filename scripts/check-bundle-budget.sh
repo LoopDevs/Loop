@@ -38,7 +38,18 @@ BUILD_DIR="${ROOT}/apps/web/build/client"
 # headroom so the gate prevents NEW regressions; slimming back toward
 # 2500 is tracked as audit follow-up work. Tighten this number whenever
 # the bundle shrinks — never loosen it without a PR-body justification.
-MAX_SSR_KB="${MAX_SSR_KB:-3300}"
+#
+# 2026-07-10 i18n-extraction bump (B-6 tranche 2, ADR 043): ADR 043 flagged
+# that the first extraction tranche used 56 of the prior 60 KB headroom
+# (3296/3300) and that "the next tranche that adds meaningful catalog JSON
+# ... is likely to need MAX_SSR_KB raised" — this is that tranche. Adding
+# settings/orders/giftCard namespace catalogs pushed the SSR client to
+# 3320 KB. This is expected, documented i18n-catalog growth (per-namespace
+# JSON bundled at build time, ADR 043's synchronous-init design), not a
+# code regression — raised with headroom for the remaining un-extracted
+# surfaces (MobileHome, brand.$slug, remaining onboarding screens) still
+# tracked as follow-up B-6 tranches.
+MAX_SSR_KB="${MAX_SSR_KB:-3400}"
 
 # Per-chunk ceiling — no single vendor chunk should exceed this.
 # Catches the "accidentally shipped moment + date-fns + leaflet in
