@@ -43,31 +43,41 @@ prebuilt shared object — a valid way to preserve LGPL section 4's
 "runtime relinking" clause. We do not statically link libvips, so no
 object-file distribution is required.
 
-### Leaflet default marker images — BSD-2-Clause
+### MapLibre GL JS — BSD-3-Clause
 
-**Files:** `apps/web/public/leaflet/marker-icon.png`,
-`marker-icon-2x.png`, `marker-shadow.png`.
+**Package:** `maplibre-gl` (top-level `apps/web/package.json`
+dependency, ADR 046).
 
-**Origin:** copied verbatim from the `leaflet` npm package's
-`dist/images/` directory.
+**Used for:** the `/map` store-locator's rendering engine
+(`apps/web/app/components/features/ClusterMap.tsx`), replacing Leaflet
+as of ADR 046 (2026-07-10). All markers/popups/pins are custom DOM
+elements we build ourselves (no library-provided marker images), so
+unlike the Leaflet entry it replaces, there are no bundled image assets
+to list here — just the library itself.
 
-**Upstream:** `https://github.com/Leaflet/Leaflet`. BSD-2-Clause
-licence; copyright belongs to the Leaflet contributors.
+**Upstream:** `https://github.com/maplibre/maplibre-gl-js`.
+BSD-3-Clause licence — the community-maintained, license-unencumbered
+fork of Mapbox GL JS v1.x. No attribution beyond the standard
+`npm install`-preserved `LICENSE` file is required (BSD-3 has no
+"advertising clause"), but listed here per this doc's practice of
+naming every shipped runtime dependency, not just the ones with an
+explicit attribution obligation.
 
-**Why we ship copies instead of importing from `node_modules`:** the
-Capacitor static-export build strips `node_modules` assets at bundle
-time, and Leaflet expects its defaults at a path it controls on the
-page root (`L.Icon.Default.imagePath`). Copying into `public/leaflet/`
-gives the mobile bundle a stable URL.
+**Note on map-tile attribution (unchanged by this swap):** MapLibre
+renders the same third-party CARTO/OpenStreetMap raster tiles Leaflet
+did (ADR 005 §10) — the runtime tile-fetch dependency and its required
+OpenStreetMap + CARTO copyright credit (surfaced via the map's "ⓘ" info
+button, not this document) are unrelated to which JS rendering library
+draws them and haven't changed.
 
-**Attribution** (required by BSD-2 §2 "advertising clause" modern
-equivalent): the Leaflet copyright notice is preserved in this
-document and on the public licences page. The original
-`LICENSE` text from the Leaflet repository reads:
-
-> Copyright (c) 2010-2024, Volodymyr Agafonkin
-> Copyright (c) 2010-2011, CloudMade
-> All rights reserved.
+**Retired by this swap:** Leaflet's default marker images
+(`apps/web/public/leaflet/marker-icon.png`, `marker-icon-2x.png`,
+`marker-shadow.png`, BSD-2-Clause, copied from the `leaflet` npm
+package's `dist/images/` directory) are deleted — every marker in
+`ClusterMap.tsx` already used a custom icon, so these were unused dead
+weight even before the swap. No successor asset needed; MapLibre's
+custom-element `Marker` API takes a DOM element per marker directly,
+with no "default icon" concept to work around.
 
 ### flag-icons country flags — MIT (flags are public domain)
 

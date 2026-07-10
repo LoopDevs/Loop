@@ -232,12 +232,19 @@ and where the fix work would happen.
   the fetches are cookie-less cross-origin GETs. Users in EU jurisdictions
   should still be informed; that copy lands with the privacy policy work
   under "Mobile app submission" in `docs/roadmap.md`.
-- **Revisit**: If we ship a self-hosted assets bundle (likely alongside
-  MapLibre GL JS in Phase 3), retire both third-party origins in the
-  same pass and drop them from `buildSecurityHeaders`.
+- **Revisit**: If we ship a self-hosted assets bundle, retire both
+  third-party origins in the same pass and drop them from
+  `buildSecurityHeaders`. **Update (ADR 046, 2026-07-10):** the map's
+  _rendering library_ moved from Leaflet to MapLibre GL JS, but as a
+  deliberate raster-source-first migration — it still fetches the same
+  CARTO/OSM raster tiles this section describes, so the runtime
+  third-party dependency is unchanged. Retiring it needs a follow-on
+  operator decision between self-hosted vector tiles (Protomaps
+  PMTiles) and a paid vector-tile provider (MapTiler/Stadia); see
+  ADR 046 for the tradeoffs. This item stays open until that lands.
 - **Where**: `apps/web/app/root.tsx` (font `<link>` tags),
-  `apps/web/app/components/features/ClusterMap.tsx` (tile layer),
-  `apps/web/app/utils/security-headers.ts` (CSP allowlist).
+  `apps/web/app/components/features/ClusterMap.tsx` (MapLibre raster
+  source), `apps/web/app/utils/security-headers.ts` (CSP allowlist).
 
 ### 11. Secret token transport on login is via upstream
 

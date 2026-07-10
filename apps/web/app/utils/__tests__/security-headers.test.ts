@@ -42,11 +42,32 @@ describe('buildSecurityHeaders', () => {
     const csp = h['Content-Security-Policy'] ?? '';
     expect(csp).toContain('fonts.googleapis.com');
     expect(csp).toContain('fonts.gstatic.com');
-    // Leaflet substitutes `{s}` with `a`/`b`/`c`/`d` on CARTO tile URLs,
-    // so the CSP must whitelist the wildcard — the bare hostname does not
-    // match subdomains under CSP host-source semantics.
+    // The map client (MapLibre GL JS, ADR 046) builds CARTO tile URLs
+    // across `a`/`b`/`c`/`d` subdomains for load-spreading, so the CSP
+    // must whitelist the wildcard — the bare hostname does not match
+    // subdomains under CSP host-source semantics.
     expect(csp).toContain('*.basemaps.cartocdn.com');
     expect(csp).toContain('ingest.sentry.io');
+  });
+
+  it('ADR 046: CSP permits the maplibre-gl blob: worker + XHR tile loads', () => {
+    const csp = h['Content-Security-Policy'] ?? '';
+    const directive = (name: string): string =>
+      csp
+        .split(';')
+        .map((d) => d.trim())
+        .find((d) => d.startsWith(`${name} `)) ?? '';
+    // maplibre-gl spawns its tile-processing Web Worker from a blob: URL.
+    // Without worker-src blob: the worker load falls through to
+    // default-src 'self' and `new Map()` throws — the map never inits.
+    expect(directive('worker-src')).toContain('blob:');
+    // child-src is the CSP2 fallback older browsers use for workers.
+    expect(directive('child-src')).toContain('blob:');
+    // MapLibre fetches raster tiles via XHR (arraybuffer), which is
+    // governed by connect-src — NOT img-src the way Leaflet's <img> tiles
+    // were. Both CARTO + OSM tile hosts must be reachable via connect-src.
+    expect(directive('connect-src')).toContain('*.basemaps.cartocdn.com');
+    expect(directive('connect-src')).toContain('*.tile.openstreetmap.org');
   });
 
   it('CF-27: allows the Sign in with Apple JS SDK + popup origins', () => {

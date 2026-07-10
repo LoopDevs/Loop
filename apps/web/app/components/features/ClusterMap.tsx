@@ -1,7 +1,16 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router';
-import type { Map as LeafletMap, Layer } from 'leaflet';
-import type * as LeafletNamespace from 'leaflet';
+import type {
+  Map as MapLibreMap,
+  MapOptions,
+  Marker,
+  MarkerOptions,
+  Popup,
+  PopupOptions,
+  NavigationControl,
+  NavigationControlOptions,
+  RasterTileSource,
+} from 'maplibre-gl';
 import type { ClusterParams, ClusterResponse } from '@loop/shared';
 import { ApiException, merchantSlug } from '@loop/shared';
 import * as Sentry from '@sentry/react';
@@ -12,12 +21,65 @@ import { useAllMerchants } from '~/hooks/use-merchants';
 const DEBOUNCE_MS = 300;
 
 /**
- * Escapes a string for safe interpolation into HTML text content. Leaflet's
- * popup.setContent and divIcon.html both set innerHTML, so any upstream value
- * we interpolate into a popup template (merchant name, anything from the
- * cluster response) has to be escaped. The backend validates these fields
- * as non-empty strings but does not HTML-escape them — if CTX ever returns
- * a merchant with `<script>…</script>` in the name we'd XSS ourselves.
+ * The shape of the dynamically-imported `maplibre-gl` module we actually
+ * use (its 4 constructors). maplibre-gl's generated `.d.ts` re-exports
+ * `@maplibre/maplibre-gl-style-spec`'s types via `export type * from ...`,
+ * which makes `typeof import('maplibre-gl')` (equivalently, `import type *
+ * as X from 'maplibre-gl'`) structurally include those type-only members
+ * as pseudo-properties — a shape no real runtime value can satisfy, so a
+ * dynamically-`import()`ed module's `.default` never type-checks against
+ * it (even though it's the runtime-correct value — Vite's CJS/UMD interop
+ * handles this fine, this is purely a `tsc` type-level mismatch). Naming
+ * just the constructors we call sidesteps that entirely.
+ */
+interface MapLibreGl {
+  Map: new (options: MapOptions) => MapLibreMap;
+  Marker: new (options?: MarkerOptions) => Marker;
+  Popup: new (options?: PopupOptions) => Popup;
+  NavigationControl: new (options?: NavigationControlOptions) => NavigationControl;
+}
+
+// CARTO basemap tiles are a documented and accepted third-party runtime
+// dependency — see `docs/adr/005-known-limitations.md` §10 and
+// `docs/adr/046-maplibre-map.md` (the Leaflet → MapLibre GL JS swap, which
+// deliberately kept this same raster tile source — see the ADR for why).
+// CSP allowlists `*.basemaps.cartocdn.com` in `buildSecurityHeaders`.
+// Audit A-032. MapLibre's style-spec `tiles` source option doesn't support
+// Leaflet's `{s}` subdomain placeholder — we expand the four CARTO
+// subdomains into explicit URLs ourselves; MapLibre round-robins across
+// them the same way Leaflet did for load-spreading. CARTO's URL scheme
+// also supports a `{r}` retina-tile placeholder — Leaflet only resolved it
+// to `@2x` when `detectRetina` was set, which this map never did, so (to
+// keep this a like-for-like rendering-library swap rather than also
+// opting into retina tiles) we resolve `{r}` to the same empty string
+// Leaflet always used here.
+const CARTO_SUBDOMAINS = ['a', 'b', 'c', 'd'];
+const CARTO_SOURCE_ID = 'carto-basemap';
+const CARTO_LAYER_ID = 'carto-basemap-layer';
+
+function cartoTileUrls(dark: boolean): string[] {
+  const style = dark ? 'dark_all' : 'rastertiles/voyager';
+  return CARTO_SUBDOMAINS.map(
+    (sub) => `https://${sub}.basemaps.cartocdn.com/${style}/{z}/{x}/{y}.png`,
+  );
+}
+
+function prefersDark(): boolean {
+  return (
+    document.documentElement.classList.contains('dark') ||
+    (!document.documentElement.classList.contains('light') &&
+      window.matchMedia('(prefers-color-scheme: dark)').matches)
+  );
+}
+
+/**
+ * Escapes a string for safe interpolation into HTML text content. MapLibre's
+ * Popup#setHTML and our custom marker elements' innerHTML both set raw
+ * HTML, so any upstream value we interpolate into a popup template
+ * (merchant name, anything from the cluster response) has to be escaped.
+ * The backend validates these fields as non-empty strings but does not
+ * HTML-escape them — if CTX ever returns a merchant with `<script>…</script>`
+ * in the name we'd XSS ourselves.
  */
 function escapeHtml(value: string): string {
   return value
@@ -26,6 +88,27 @@ function escapeHtml(value: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+/**
+ * A11Y-006: Leaflet's marker `keyboard: true` option made a marker
+ * tab-focusable and fired its click handler on Enter/Space, automatically.
+ * MapLibre's `Marker` has no equivalent option — markers are plain DOM
+ * elements — so this wires the same behavior by hand on the element we
+ * pass to `new maplibregl.Marker({ element })`.
+ */
+function makeKeyboardActivatable(el: HTMLElement, label: string, activate: () => void): void {
+  el.setAttribute('role', 'button');
+  el.setAttribute('tabindex', '0');
+  el.setAttribute('aria-label', label);
+  el.title = label;
+  el.style.cursor = 'pointer';
+  el.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      activate();
+    }
+  });
 }
 
 interface ClusterMapProps {
@@ -40,8 +123,10 @@ interface ClusterMapProps {
 }
 
 /**
- * Full-screen Leaflet map with protobuf cluster data from the Loop backend.
- * This component is lazy-loaded — Leaflet requires browser APIs.
+ * Full-screen MapLibre GL map with protobuf cluster data from the Loop
+ * backend. This component is lazy-loaded — MapLibre requires browser APIs
+ * (WebGL canvas). See `docs/adr/046-maplibre-map.md` for the Leaflet →
+ * MapLibre migration this component is the result of.
  */
 export default function ClusterMap({
   onMerchantSelect,
@@ -53,8 +138,8 @@ export default function ClusterMap({
   // *initial* viewport, not a live re-center (a bigger behavior change
   // than "open looking at roughly the right part of the world").
   const initialViewRef = useRef(initialView ?? { lat: 40, lng: -98, zoom: 4 });
-  const mapRef = useRef<LeafletMap | null>(null);
-  const markersRef = useRef<Layer[]>([]);
+  const mapRef = useRef<MapLibreMap | null>(null);
+  const markersRef = useRef<Marker[]>([]);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Cancels the previous in-flight cluster fetch when a new move/zoom fires
   // after the 300ms debounce. Without this, two fast pans could have two
@@ -65,15 +150,15 @@ export default function ClusterMap({
   const [status, setStatus] = useState<string>('');
   const [creditsOpen, setCreditsOpen] = useState(false);
   // Geolocation — one-shot "find me" that drops a marker + pans.
-  // Kept as refs (not state) because the marker and Leaflet module
+  // Kept as refs (not state) because the marker and MapLibre module
   // are imperative APIs; no render-side consumers care.
-  const leafletRef = useRef<typeof LeafletNamespace | null>(null);
-  const userMarkerRef = useRef<Layer | null>(null);
+  const maplibreRef = useRef<MapLibreGl | null>(null);
+  const userMarkerRef = useRef<Marker | null>(null);
   const [locating, setLocating] = useState(false);
   const [locateError, setLocateError] = useState<string | null>(null);
-  // Track viewport width once, kept in a ref so the Leaflet marker
-  // click closures (which are attached once per marker) pick up the
-  // latest value. md: breakpoint in Tailwind = 768px.
+  // Track viewport width once, kept in a ref so the marker click closures
+  // (which are attached once per marker) pick up the latest value. md:
+  // breakpoint in Tailwind = 768px.
   const isMobileRef = useRef<boolean>(
     typeof window !== 'undefined' && window.matchMedia('(max-width: 767.98px)').matches,
   );
@@ -96,13 +181,16 @@ export default function ClusterMap({
   // name-only slug that would drop the country.
   const merchantsById = useRef(new Map<string, { name: string; slug: string }>());
   const onMerchantSelectRef = useRef(onMerchantSelect);
-  // Leaflet popup click handlers run outside React — capture navigate in a
-  // ref so the 'popupopen' listener can invoke client-side nav without
+  // Popup "open" click handlers run outside React — capture navigate in a
+  // ref so the anchor click listener can invoke client-side nav without
   // forcing a full page reload on every "Buy Gift Card" tap.
   const navigate = useNavigate();
   const navigateRef = useRef(navigate);
-  // Track open popup so we can re-open it after zoom/pan marker refresh
+  // Track open popup so we can re-open it after zoom/pan marker refresh, and
+  // so a new popup open closes whichever one is currently showing (MapLibre
+  // popups, unlike Leaflet's, aren't map-singleton by default).
   const openPopupRef = useRef<{ merchantId: string; lat: number; lng: number } | null>(null);
+  const activePopupRef = useRef<Popup | null>(null);
 
   useEffect(() => {
     onMerchantSelectRef.current = onMerchantSelect;
@@ -119,15 +207,15 @@ export default function ClusterMap({
   }, [merchants]);
 
   const updateMarkers = useCallback(
-    async (map: LeafletMap, L: typeof LeafletNamespace): Promise<void> => {
+    async (map: MapLibreMap, maplibregl: MapLibreGl): Promise<void> => {
       const bounds = map.getBounds();
       const zoom = Math.round(map.getZoom());
 
-      // Clamp to valid lon/lat ranges. Leaflet's getBounds() can return
-      // values past the date line (e.g. west=-190) when the viewport is
-      // wider than the world at low zooms — the backend Zod schema
-      // rejects anything outside [-180,180] / [-85,85] with a 400, so
-      // no pins on first load. Clamp here before dispatching.
+      // Clamp to valid lon/lat ranges. getBounds() can return values past
+      // the date line (e.g. west=-190) when the viewport is wider than the
+      // world at low zooms — the backend Zod schema rejects anything
+      // outside [-180,180] / [-85,85] with a 400, so no pins on first
+      // load. Clamp here before dispatching.
       const params: ClusterParams = {
         west: Math.max(-180, bounds.getWest()),
         south: Math.max(-85, bounds.getSouth()),
@@ -173,8 +261,8 @@ export default function ClusterMap({
       if (fetchAbortRef.current !== controller) return;
 
       // Remove existing markers
-      for (const layer of markersRef.current) {
-        map.removeLayer(layer);
+      for (const marker of markersRef.current) {
+        marker.remove();
       }
       markersRef.current = [];
 
@@ -188,30 +276,25 @@ export default function ClusterMap({
         const { longitude: lng, latitude: lat } = cluster.geometry.coordinates;
         const count = cluster.properties.pointCount;
 
-        const icon = L.divIcon({
-          className: '',
-          html: `<div style="width:40px;height:40px;border-radius:50%;background:rgba(37,99,235,0.85);border:2px solid white;display:flex;align-items:center;justify-content:center;color:white;font-weight:bold;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,0.3)">${count}</div>`,
-          iconSize: [40, 40],
-          iconAnchor: [20, 20],
-        });
+        const el = document.createElement('div');
+        el.innerHTML = `<div style="width:40px;height:40px;border-radius:50%;background:rgba(37,99,235,0.85);border:2px solid white;display:flex;align-items:center;justify-content:center;color:white;font-weight:bold;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,0.3)">${count}</div>`;
 
-        // A11Y-006: `keyboard: true` makes the marker focusable and lets
-        // Enter/Space fire its click handler; `alt`/`title` give it an
-        // accessible name so SR users hear "cluster of N" instead of an
-        // unlabeled graphic.
+        // A11Y-006: focusable + named so keyboard/SR users can reach and
+        // activate the cluster the same as a tap.
         const clusterLabel = `Cluster of ${count} ${count === 1 ? 'location' : 'locations'}. Activate to zoom in.`;
-        const marker = L.marker([lat, lng], {
-          icon,
-          keyboard: true,
-          title: clusterLabel,
-          alt: clusterLabel,
-        });
-        // `setZoom` keeps the current centre, so clicking a cluster just
-        // zoomed in on wherever the user was looking. Pan to the cluster
-        // AND zoom via `setView` so the interaction feels like drilling
-        // into the cluster the user tapped.
-        marker.on('click', () => map.setView([lat, lng], zoom + 2));
-        marker.addTo(map);
+        // easeTo (not panTo) keeps the current centre while also zooming in
+        // — clicking a cluster both pans to it AND zooms, so the
+        // interaction feels like drilling into the cluster the user tapped
+        // (same intent as the original `map.setView([lat,lng], zoom+2)`).
+        const activate = (): void => {
+          map.easeTo({ center: [lng, lat], zoom: zoom + 2 });
+        };
+        makeKeyboardActivatable(el, clusterLabel, activate);
+
+        const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
+          .setLngLat([lng, lat])
+          .addTo(map);
+        marker.on('click', activate);
         markersRef.current.push(marker);
       }
 
@@ -224,26 +307,17 @@ export default function ClusterMap({
           ? `<div style="width:32px;height:32px;border-radius:6px;border:2px solid #fff;box-shadow:0 2px 5px rgba(0,0,0,0.3);background-image:url('${escapeHtml(getImageProxyUrl(mapPinUrl, 64))}');background-size:cover;background-position:center;background-repeat:no-repeat;"></div>`
           : `<div style="width:32px;height:32px;border-radius:6px;background:#2563eb;border:2px solid white;box-shadow:0 2px 5px rgba(0,0,0,0.3)"></div>`;
 
-        const icon = L.divIcon({
-          className: '',
-          html: iconHtml,
-          iconSize: [32, 32],
-          iconAnchor: [16, 16],
-        });
+        const el = document.createElement('div');
+        el.innerHTML = iconHtml;
 
         const resolved = merchantsById.current.get(merchantId);
         const merchantName = resolved?.name ?? merchantId;
         const slug = resolved?.slug ?? merchantSlug(merchantId);
         // A11Y-006: focusable + named pin so keyboard/SR users can reach
-        // each merchant. Enter/Space fires the same click handler as a tap.
+        // each merchant. Enter/Space fires the same handler as a tap.
         const pinLabel = `${merchantName}. Activate to view and buy a gift card.`;
-        const marker = L.marker([lat, lng], {
-          icon,
-          keyboard: true,
-          title: pinLabel,
-          alt: pinLabel,
-        });
-        // Escape before interpolation: Leaflet sets innerHTML on popup content.
+
+        // Escape before interpolation: Popup#setHTML sets innerHTML.
         const safeName = escapeHtml(merchantName);
         const safePinLargeUrl = mapPinUrl ? escapeHtml(getImageProxyUrl(mapPinUrl, 400)) : '';
         const safePinSmallUrl = mapPinUrl ? escapeHtml(getImageProxyUrl(mapPinUrl, 80)) : '';
@@ -270,42 +344,46 @@ export default function ClusterMap({
           </div>
         `;
 
-        const popup = L.popup({
-          minWidth: 260,
-          maxWidth: 300,
+        const popup = new maplibregl.Popup({
+          maxWidth: '300px',
           className: 'merchant-popup',
           closeButton: true,
         });
-        // Only bind on desktop — on mobile the drawer is the single
-        // affordance, so we never want Leaflet's popup to open.
-        if (!isMobileRef.current) {
-          marker.bindPopup(popup);
-        }
 
-        marker.on('click', () => {
-          onMerchantSelectRef.current?.(merchantId);
-
-          if (isMobileRef.current) {
-            // Pan the map so the tapped pin lands in the top third of
-            // the visible viewport, leaving the bottom two thirds free
-            // for the sheet that's about to slide up. Shift the pin
-            // point downward by 1/6 of the map height so the map
-            // centre moves below the pin and the pin renders higher.
-            const size = map.getSize();
-            const zoom = map.getZoom();
-            const pinPoint = map.project([lat, lng], zoom);
-            pinPoint.y += size.y / 6;
-            map.panTo(map.unproject(pinPoint, zoom), { animate: true });
-            return;
-          }
-
-          // Desktop: set popup content before Leaflet opens it via the
-          // bindPopup binding above.
-          popup.setContent(popupContent);
-          openPopupRef.current = { merchantId, lat, lng };
+        // Intercept "Buy Gift Card" link clicks so they stay within the
+        // SPA. Popup#setHTML injects raw HTML, so the <a href> would
+        // otherwise trigger a full page reload — losing the map viewport,
+        // re-downloading the JS bundle, and re-fetching clusters on
+        // return. Attached once per popup at construction; fires every
+        // time this popup transitions to open.
+        popup.on('open', () => {
+          const container = popup.getElement();
+          if (container === undefined) return;
+          const anchor = container.querySelector<HTMLAnchorElement>('a[href^="/gift-card/"]');
+          if (anchor === null) return;
+          anchor.addEventListener(
+            'click',
+            (clickEvent) => {
+              // Preserve the user's ability to open in a new tab via modifier
+              // keys / middle-click; only intercept the plain-click case.
+              if (
+                clickEvent.defaultPrevented ||
+                clickEvent.button !== 0 ||
+                clickEvent.metaKey ||
+                clickEvent.ctrlKey ||
+                clickEvent.shiftKey ||
+                clickEvent.altKey
+              ) {
+                return;
+              }
+              clickEvent.preventDefault();
+              void navigateRef.current(anchor.getAttribute('href') ?? '/');
+            },
+            { once: true },
+          );
         });
 
-        popup.on('remove', () => {
+        popup.on('close', () => {
           // Only clear if this popup is still the tracked one
           if (
             openPopupRef.current?.merchantId === merchantId &&
@@ -313,10 +391,42 @@ export default function ClusterMap({
           ) {
             openPopupRef.current = null;
           }
+          if (activePopupRef.current === popup) {
+            activePopupRef.current = null;
+          }
         });
 
+        const activate = (): void => {
+          onMerchantSelectRef.current?.(merchantId);
+
+          if (isMobileRef.current) {
+            // Pan the map so the tapped pin lands in the top third of the
+            // visible viewport, leaving the bottom two thirds free for the
+            // sheet that's about to slide up. Shift the pin's projected
+            // screen point downward by 1/6 of the map height so the map
+            // centre moves below the pin and the pin renders higher.
+            const containerHeight = map.getContainer().clientHeight;
+            const pinPoint = map.project([lng, lat]);
+            pinPoint.y += containerHeight / 6;
+            map.panTo(map.unproject(pinPoint), { animate: true });
+            return;
+          }
+
+          // Desktop only — mobile never opens a popup (the drawer is the
+          // single affordance there). Only one popup open at a time,
+          // matching Leaflet's map-singleton popup behavior.
+          if (activePopupRef.current !== null && activePopupRef.current !== popup) {
+            activePopupRef.current.remove();
+          }
+          popup.setLngLat([lng, lat]).setHTML(popupContent);
+          popup.addTo(map);
+          activePopupRef.current = popup;
+          openPopupRef.current = { merchantId, lat, lng };
+        };
+        makeKeyboardActivatable(el, pinLabel, activate);
+
         // Re-open popup if this marker matches the previously open one
-        // (desktop only — mobile never opens a Leaflet popup).
+        // (desktop only — mobile never opens a popup).
         if (
           !isMobileRef.current &&
           openPopupRef.current !== null &&
@@ -324,11 +434,19 @@ export default function ClusterMap({
           Math.abs(openPopupRef.current.lat - lat) < 0.0001 &&
           Math.abs(openPopupRef.current.lng - lng) < 0.0001
         ) {
-          popup.setContent(popupContent);
-          marker.openPopup();
+          popup.setLngLat([lng, lat]).setHTML(popupContent);
+          popup.addTo(map);
+          activePopupRef.current = popup;
         }
 
-        marker.addTo(map);
+        const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
+          .setLngLat([lng, lat])
+          .addTo(map);
+        // `activate` itself branches on `isMobileRef.current` (pan vs.
+        // popup), so this listener is unconditional — same shape as the
+        // original Leaflet `marker.on('click', ...)` handler, which also
+        // always ran regardless of platform.
+        marker.on('click', activate);
         markersRef.current.push(marker);
       }
     },
@@ -337,8 +455,8 @@ export default function ClusterMap({
 
   const handleLocate = useCallback(() => {
     const map = mapRef.current;
-    const leaflet = leafletRef.current;
-    if (map === null || leaflet === null) return;
+    const maplibregl = maplibreRef.current;
+    if (map === null || maplibregl === null) return;
     if (typeof navigator === 'undefined' || navigator.geolocation === undefined) {
       setLocateError('Geolocation is not available on this device.');
       return;
@@ -348,7 +466,6 @@ export default function ClusterMap({
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         const { latitude, longitude } = pos.coords;
-        const L = leaflet;
         // Remove the previous marker before creating a new one —
         // otherwise repeat-locate drops a pile of blue dots on the
         // same spot as accuracy drifts slightly.
@@ -356,34 +473,32 @@ export default function ClusterMap({
           userMarkerRef.current.remove();
           userMarkerRef.current = null;
         }
-        // Custom blue-dot icon — matches the iOS/Google "you are
+        // Custom blue-dot element — matches the iOS/Google "you are
         // here" style (solid blue disc with white ring + soft halo).
-        // Rendered as a `divIcon` so the pulsing halo is pure CSS
-        // and we don't need to ship a second image asset.
-        const icon = L.divIcon({
-          className: 'loop-user-location',
-          html: `
-            <div class="loop-user-location__halo"></div>
-            <div class="loop-user-location__dot"></div>
-          `,
-          iconSize: [24, 24],
-          iconAnchor: [12, 12],
-        });
-        const marker = L.marker([latitude, longitude], {
-          icon,
-          // Sit the user marker under any merchant popups — the
-          // blue dot is orientation, not the content the user is
-          // trying to click through to.
-          zIndexOffset: -500,
-          keyboard: false,
-          interactive: false,
-        }).addTo(map);
+        // Pure CSS (`.loop-user-location*` in app.css) so we don't need
+        // to ship a second image asset.
+        const el = document.createElement('div');
+        el.className = 'loop-user-location';
+        el.innerHTML = `
+          <div class="loop-user-location__halo"></div>
+          <div class="loop-user-location__dot"></div>
+        `;
+        const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
+          .setLngLat([longitude, latitude])
+          .addTo(map);
+        // Sit the user marker under any merchant popups/pins — the blue
+        // dot is orientation, not content the user is trying to click
+        // through to. `.loop-user-location` already carries
+        // `pointer-events: none` (app.css), matching Leaflet's
+        // `interactive: false`.
+        marker.getElement().style.zIndex = '0';
         userMarkerRef.current = marker;
         // Keep their existing zoom if they've already zoomed in;
         // otherwise jump to a city-level zoom so the dot and any
-        // nearby merchant clusters both read on screen.
+        // nearby merchant clusters both read on screen. MapLibre's
+        // flyTo duration is milliseconds (Leaflet's was seconds).
         const targetZoom = Math.max(map.getZoom(), 13);
-        map.flyTo([latitude, longitude], targetZoom, { duration: 0.7 });
+        map.flyTo({ center: [longitude, latitude], zoom: targetZoom, duration: 700 });
         setLocating(false);
       },
       (err) => {
@@ -392,7 +507,7 @@ export default function ClusterMap({
           err.code === err.PERMISSION_DENIED
             ? 'Location permission denied.'
             : err.code === err.POSITION_UNAVAILABLE
-              ? 'Couldn\u2019t determine your location.'
+              ? 'Couldn’t determine your location.'
               : 'Timed out finding your location.',
         );
       },
@@ -407,71 +522,75 @@ export default function ClusterMap({
     let themeObserver: MutationObserver | null = null;
 
     void (async () => {
-      const [leafletModule] = await Promise.all([
-        import('leaflet'),
-        import('leaflet/dist/leaflet.css'),
+      const [maplibreModule] = await Promise.all([
+        import('maplibre-gl'),
+        import('maplibre-gl/dist/maplibre-gl.css'),
       ]);
-      const L = leafletModule.default;
-      // Stash the Leaflet module for the locate button's callback —
-      // it runs outside the init effect and needs `L.divIcon` /
-      // `L.marker` to plot the user's position.
-      leafletRef.current = L;
+      // Cast needed: `maplibreModule.default`'s inferred type doesn't
+      // structurally match `MapLibreGl` (see that interface's doc comment)
+      // even though it's the runtime-correct value — Vite's build already
+      // confirms this resolves correctly (`new maplibreModule.default.Map(...)`
+      // works in the built bundle); this narrows the type `tsc` sees to
+      // just the 4 constructors we call.
+      const maplibregl = maplibreModule.default as unknown as MapLibreGl;
+      // Stash the MapLibre module for the locate button's callback —
+      // it runs outside the init effect and needs `maplibregl.Marker`
+      // to plot the user's position.
+      maplibreRef.current = maplibregl;
 
       if (!mounted || mapContainerRef.current === null) return;
 
-      // Fix Leaflet default icon path issue in bundlers
-      delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)['_getIconUrl'];
-      L.Icon.Default.mergeOptions({
-        iconRetinaUrl: '/leaflet/marker-icon-2x.png',
-        iconUrl: '/leaflet/marker-icon.png',
-        shadowUrl: '/leaflet/marker-shadow.png',
-      });
+      const isDark = prefersDark();
 
-      const map = L.map(mapContainerRef.current, {
-        center: [initialViewRef.current.lat, initialViewRef.current.lng],
+      const map = new maplibregl.Map({
+        container: mapContainerRef.current,
+        style: {
+          version: 8,
+          sources: {
+            [CARTO_SOURCE_ID]: {
+              type: 'raster',
+              tiles: cartoTileUrls(isDark),
+              tileSize: 256,
+              maxzoom: 20,
+            },
+          },
+          layers: [
+            {
+              id: CARTO_LAYER_ID,
+              type: 'raster',
+              source: CARTO_SOURCE_ID,
+            },
+          ],
+        },
+        center: [initialViewRef.current.lng, initialViewRef.current.lat],
         zoom: initialViewRef.current.zoom,
-        // A11Y-006: restore the +/- zoom control. Gestures (pinch /
-        // double-tap) are the primary affordance on mobile, but the
-        // buttons are the only keyboard-operable zoom for users who can't
-        // pinch — removing them left keyboard users with no zoom at all.
-        // (Leaflet's `keyboard: true` also enables +/- arrow-key zoom when
-        // the map has focus; the visible control is the discoverable path.)
-        zoomControl: true,
-        // Default Leaflet attribution bar takes a visible strip along
-        // the bottom. Suppress it here; the license-required credits
-        // are still surfaced via the "ⓘ" button rendered below the map
-        // container, which opens a popover with the same links.
+        // Match Leaflet's effective max zoom (the tile layer's maxZoom of
+        // 20, which Leaflet also used as the map's own zoom ceiling since
+        // no separate map-level maxZoom was set).
+        maxZoom: 20,
+        // Default MapLibre attribution control takes a visible strip
+        // along the bottom. Suppress it here; the license-required
+        // credits are still surfaced via the "ⓘ" button rendered below
+        // the map container, which opens a popover with the same links.
         attributionControl: false,
       });
 
-      const isDark =
-        document.documentElement.classList.contains('dark') ||
-        (!document.documentElement.classList.contains('light') &&
-          window.matchMedia('(prefers-color-scheme: dark)').matches);
+      // A11Y-006: restore the +/- zoom control. Gestures (pinch /
+      // double-tap) are the primary affordance on mobile, but the buttons
+      // are the only keyboard-operable zoom for users who can't pinch —
+      // without them keyboard users have no zoom at all. (Native <button>
+      // elements, so they're focusable and Enter/Space-activatable for
+      // free.) Compass/rotate hidden — this map never rotates or tilts.
+      map.addControl(
+        new maplibregl.NavigationControl({ showCompass: false, showZoom: true }),
+        'top-left',
+      );
 
-      // CARTO basemap tiles are a documented and accepted third-party
-      // runtime dependency — see `docs/adr/005-known-limitations.md` §10.
-      // CSP allowlists `basemaps.cartocdn.com` in `buildSecurityHeaders`.
-      // Audit A-032.
-      const tileUrl = isDark
-        ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-        : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
-
-      const tileLayer = L.tileLayer(tileUrl, {
-        maxZoom: 20,
-        subdomains: 'abcd',
-      }).addTo(map);
-
-      // Watch for theme changes and swap tile layer
+      // Watch for theme changes and swap tile source URLs in place.
       themeObserver = new MutationObserver(() => {
-        const nowDark =
-          document.documentElement.classList.contains('dark') ||
-          (!document.documentElement.classList.contains('light') &&
-            window.matchMedia('(prefers-color-scheme: dark)').matches);
-        const newUrl = nowDark
-          ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-          : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
-        tileLayer.setUrl(newUrl);
+        const source = map.getSource<RasterTileSource>(CARTO_SOURCE_ID);
+        if (source === undefined) return;
+        source.setTiles(cartoTileUrls(prefersDark()));
       });
       themeObserver.observe(document.documentElement, {
         attributes: true,
@@ -483,48 +602,15 @@ export default function ClusterMap({
       const refresh = (): void => {
         if (debounceRef.current !== null) clearTimeout(debounceRef.current);
         debounceRef.current = setTimeout(() => {
-          void updateMarkers(map, L);
+          void updateMarkers(map, maplibregl);
         }, DEBOUNCE_MS);
       };
 
       map.on('moveend', refresh);
       map.on('zoomend', refresh);
 
-      // Intercept "Buy Gift Card" link clicks so they stay within the SPA.
-      // Leaflet injects popup HTML via innerHTML, so the <a href> would
-      // otherwise trigger a full page reload — losing the map viewport,
-      // re-downloading the JS bundle, and re-fetching clusters on return.
-      map.on('popupopen', (e) => {
-        const container = (
-          e as { popup: { getElement: () => HTMLElement | undefined } }
-        ).popup.getElement();
-        if (container === undefined) return;
-        const anchor = container.querySelector<HTMLAnchorElement>('a[href^="/gift-card/"]');
-        if (anchor === null) return;
-        anchor.addEventListener(
-          'click',
-          (clickEvent) => {
-            // Preserve the user's ability to open in a new tab via modifier
-            // keys / middle-click; only intercept the plain-click case.
-            if (
-              clickEvent.defaultPrevented ||
-              clickEvent.button !== 0 ||
-              clickEvent.metaKey ||
-              clickEvent.ctrlKey ||
-              clickEvent.shiftKey ||
-              clickEvent.altKey
-            ) {
-              return;
-            }
-            clickEvent.preventDefault();
-            void navigateRef.current(anchor.getAttribute('href') ?? '/');
-          },
-          { once: true },
-        );
-      });
-
       // Initial load
-      void updateMarkers(map, L);
+      void updateMarkers(map, maplibregl);
     })();
 
     return () => {
