@@ -27,6 +27,7 @@ export * from './public-cashback-stats.js';
 export * from './public-flywheel-stats.js';
 export * from './public-loop-assets.js';
 export * from './public-merchant.js';
+export * from './public-rum.js';
 export * from './public-top-cashback-merchants.js';
 export * from './regions.js';
 export * from './search.js';

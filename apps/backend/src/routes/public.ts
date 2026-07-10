@@ -28,6 +28,7 @@ import { publicFlywheelStatsHandler } from '../public/flywheel-stats.js';
 import { publicGeoHandler } from '../public/geo.js';
 import { publicLoopAssetsHandler } from '../public/loop-assets.js';
 import { publicMerchantHandler } from '../public/merchant.js';
+import { publicRumHandler } from '../public/rum.js';
 import { publicTopCashbackMerchantsHandler } from '../public/top-cashback-merchants.js';
 
 /**
@@ -102,4 +103,12 @@ export function mountPublicRoutes(app: Hono): void {
     rateLimit('GET /api/public/flywheel-stats', 60, 60_000),
     publicFlywheelStatsHandler,
   );
+
+  // First-party, cookieless RUM intake (ADR 048). Folds Core Web
+  // Vitals + a page-view marker into /metrics; no DB, no PII, no
+  // persistent id. 60/min per IP matches every other public endpoint
+  // — the client (apps/web app/utils/analytics-lazy.ts) fires at most
+  // ~6 events per page load (5 vitals + 1 page-view), well under
+  // budget for real traffic.
+  app.post('/api/public/rum', rateLimit('POST /api/public/rum', 60, 60_000), publicRumHandler);
 }

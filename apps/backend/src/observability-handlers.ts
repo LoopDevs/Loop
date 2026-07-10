@@ -11,7 +11,13 @@
  */
 import type { Context } from 'hono';
 import { env } from './env.js';
-import { METRIC_KEY_SEPARATOR, REQUEST_DURATION_BUCKETS_SECONDS, metrics } from './metrics.js';
+import {
+  METRIC_KEY_SEPARATOR,
+  REQUEST_DURATION_BUCKETS_SECONDS,
+  WEB_VITAL_BUCKETS,
+  WEB_VITAL_NAMES,
+  metrics,
+} from './metrics.js';
 import { getAllCircuitStates } from './circuit-breaker.js';
 import { generateOpenApiSpec } from './openapi.js';
 import { probeGateAllows } from './middleware/probe-gate.js';
@@ -237,6 +243,33 @@ export async function metricsHandler(c: Context): Promise<Response> {
   lines.push(
     `loop_rate_limit_fleet_estimate_source ${currentFleetSizeSource() === 'dynamic' ? 1 : 0}`,
   );
+  lines.push('');
+
+  // ADR 048: Core Web Vitals captured via POST /api/public/rum. Unit
+  // varies by vital — ms for LCP/INP/FCP/TTFB, an unitless layout-
+  // shift score for CLS — called out in the HELP line since
+  // Prometheus has no native per-label-value unit concept.
+  lines.push(
+    '# HELP loop_web_vital Core Web Vital observations from real users (ms for LCP/INP/FCP/TTFB, unitless score for CLS).',
+  );
+  lines.push('# TYPE loop_web_vital histogram');
+  for (const name of WEB_VITAL_NAMES) {
+    const hist = metrics.webVitals[name];
+    const bounds = WEB_VITAL_BUCKETS[name];
+    for (let i = 0; i < bounds.length; i++) {
+      lines.push(`loop_web_vital_bucket{vital="${name}",le="${bounds[i]}"} ${hist.buckets[i]}`);
+    }
+    lines.push(`loop_web_vital_bucket{vital="${name}",le="+Inf"} ${hist.count}`);
+    lines.push(`loop_web_vital_sum{vital="${name}"} ${hist.sum}`);
+    lines.push(`loop_web_vital_count{vital="${name}"} ${hist.count}`);
+  }
+  lines.push('');
+
+  lines.push(
+    '# HELP loop_page_views_total Total page-view events recorded via POST /api/public/rum (ADR 048).',
+  );
+  lines.push('# TYPE loop_page_views_total counter');
+  lines.push(`loop_page_views_total ${metrics.pageViewsTotal}`);
 
   return c.text(lines.join('\n') + '\n', 200, {
     'Content-Type': 'text/plain; version=0.0.4',

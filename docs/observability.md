@@ -41,6 +41,8 @@ handler itself.
 | `loop_catalog_stale`                               | gauge     | `catalog=merchants\|locations` | Freshness SLO breach flag (same 2x-refresh-interval formula as `/health`, single source of truth in `health.ts`'s `merchantCatalogStaleAfterMs()`/`locationCatalogStaleAfterMs()`) — added B-5 |
 | `loop_geo_db_stale`                                | gauge     | —                              | GeoLite2 `.mmdb` staleness (go-live-plan §T1-F); false both when fresh AND when unconfigured — added B-5                                                                                       |
 | `loop_geo_db_build_age_days`                       | gauge     | —                              | Age of the loaded `.mmdb` build; omitted entirely when no DB is configured — added B-5                                                                                                         |
+| `loop_web_vital_{bucket,sum,count}`                | histogram | `vital[,le]`                   | Core Web Vitals (LCP/INP/CLS/FCP/TTFB) from `POST /api/public/rum`, ms for four vitals + unitless score for CLS — ADR 048                                                                      |
+| `loop_page_views_total`                            | counter   | —                              | Page-view events from `POST /api/public/rum` — ADR 048                                                                                                                                         |
 
 **Not emitted as metrics** (deliberately, so nothing in the dashboard
 below panels a metric the code doesn't actually produce):

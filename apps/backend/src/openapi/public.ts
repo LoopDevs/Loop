@@ -231,4 +231,55 @@ export function registerPublicOpenApi(
   // `./public-merchants.ts`. Same path-registration position as
   // the original block.
   registerPublicMerchantsOpenApi(registry, errorResponse);
+
+  // ─── Public — RUM intake (ADR 048 / 020) ───────────────────────────────────
+
+  const RumVitalEvent = registry.register(
+    'RumVitalEvent',
+    z.object({
+      type: z.literal('vital'),
+      name: z
+        .enum(['LCP', 'INP', 'CLS', 'FCP', 'TTFB'])
+        .openapi({ description: 'Core Web Vital name.' }),
+      value: z.number().min(0).max(600_000).openapi({
+        description:
+          "Raw value in the vital's native unit — ms for LCP/INP/FCP/TTFB, an unitless layout-shift score for CLS.",
+      }),
+    }),
+  );
+
+  const RumPageViewEvent = registry.register(
+    'RumPageViewEvent',
+    z.object({ type: z.literal('pageview') }),
+  );
+
+  registry.registerPath({
+    method: 'post',
+    path: '/api/public/rum',
+    summary: 'First-party, cookieless RUM intake (ADR 048).',
+    description:
+      'Records one Core Web Vital observation or a bare page-view marker into /metrics (`loop_web_vital_*` histograms, `loop_page_views_total` counter). No DB table, no PII, no persistent user/session id — see ADR 048. Never 500: a malformed body is 400, everything else 200. Unauthenticated, `Cache-Control: no-store`.',
+    tags: ['Public'],
+    request: {
+      body: {
+        content: {
+          'application/json': { schema: z.union([RumVitalEvent, RumPageViewEvent]) },
+        },
+      },
+    },
+    responses: {
+      200: {
+        description: 'Event recorded (or silently dropped on an unexpected internal error).',
+        content: { 'application/json': { schema: z.object({ ok: z.boolean() }) } },
+      },
+      400: {
+        description: 'Invalid RUM event body',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      429: {
+        description: 'Rate limit exceeded (60/min per IP)',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+    },
+  });
 }
