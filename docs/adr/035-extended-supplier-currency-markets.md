@@ -89,6 +89,8 @@ as **display-only** countries in the ADR 034 model:
   precedent).
 - The catalogue still holds ~20 thinner foreign currencies that remain API-orderable but
   unrouted. No data is lost; they're one threshold-crossing away from being surfaced.
+  `docs/thin-currency-promotion.md` is the review cadence + measurement + promotion
+  checklist for deciding when one of them crosses.
 - ~~**No backend change** — CTX already creates and prices these merchants.~~ Superseded
   by the CF-19 order-path update above: the legacy CTX-proxy path needed none, but the
   loop-native path (handler currency gate, FX feed, and the `orders_currency_known` DB
