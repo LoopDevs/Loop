@@ -233,6 +233,25 @@ export interface AdminAuditTimelineEvent {
 }
 
 /**
+ * One source's compound keyset cursor. A single-column `at`-only
+ * cursor is NOT sufficient: a source can write many rows sharing the
+ * exact same timestamp (e.g. `revokeAllRefreshTokensForUser` stamps
+ * one `revokedAt` on every live session in one UPDATE; interest-mint
+ * inserts a transaction-stable `now()` per credit row), and a naive
+ * `WHERE ts < cursor` at a page boundary would silently DROP the tied
+ * rows that didn't fit on the page. So the cursor is `(at, id)` and
+ * the query pages with `ts < at OR (ts = at AND id < id)` ordered by
+ * `(ts DESC, id DESC)`. `id` is that source's stable unique row key
+ * (uuid / jti / idempotency key).
+ */
+export interface AdminAuditTimelineCursor {
+  /** ISO-8601 timestamp of the oldest row this source returned. */
+  at: string;
+  /** That row's stable unique id — the keyset tiebreaker. */
+  id: string;
+}
+
+/**
  * Per-source keyset cursors for `GET /api/admin/users/:userId/audit`.
  *
  * The timeline merges five INDEPENDENTLY paginated sources, so it
@@ -241,29 +260,47 @@ export interface AdminAuditTimelineEvent {
  * = the oldest `at` across the merged page would permanently DROP the
  * denser source's un-returned rows on the next page (they're newer
  * than the global floor, so they never satisfy `< floor`). Instead
- * each source carries its OWN cursor.
+ * each source carries its OWN compound `(at, id)` cursor.
  *
- * On a response, each field is the `at` (timestamp) of the OLDEST row
- * that source returned this page, or `null` when that source is
- * exhausted (returned fewer than `limit` rows, or wasn't queried this
- * page). On the next request the client echoes this object back: each
- * non-null cursor pages ITS source older; a null cursor means "don't
- * re-query that source". When every field is null the walk is done.
+ * On a response, each field is the `(at, id)` of the OLDEST row that
+ * source returned this page, or `null` when that source is exhausted
+ * (returned fewer than `limit` rows, or wasn't queried this page). On
+ * the next request the client echoes this object back: each non-null
+ * cursor pages ITS source older; a null cursor means "don't re-query
+ * that source". When every field is null the walk is done.
  *
  * The single-row OTP-lock snapshot is NOT a paged source — it appears
  * once (page 1 only) and has no cursor here.
  */
 export interface AdminAuditTimelineCursors {
-  /** admin_idempotency_keys rows targeting this user (createdAt). */
-  adminActions: string | null;
-  /** credit_transactions (createdAt). */
-  ledger: string | null;
-  /** orders (createdAt). */
-  orders: string | null;
-  /** pending_payouts (createdAt). */
-  payouts: string | null;
-  /** refresh_tokens revocations (revokedAt). */
-  sessions: string | null;
+  /** admin_idempotency_keys rows targeting this user (createdAt, key). */
+  adminActions: AdminAuditTimelineCursor | null;
+  /** credit_transactions (createdAt, id). */
+  ledger: AdminAuditTimelineCursor | null;
+  /** orders (createdAt, id). */
+  orders: AdminAuditTimelineCursor | null;
+  /** pending_payouts (createdAt, id). */
+  payouts: AdminAuditTimelineCursor | null;
+  /** refresh_tokens revocations (revokedAt, jti). */
+  sessions: AdminAuditTimelineCursor | null;
+}
+
+/**
+ * Wire codec for a compound audit cursor in a `before<Source>` query
+ * param: `<isoTs>|<id>`. An ISO-8601 timestamp never contains `|`, so
+ * splitting on the FIRST `|` reconstructs `id` losslessly even if the
+ * id itself contains `|` (an opaque idempotency key can). Backend
+ * decodes; web encodes — kept together so they can't drift.
+ */
+export function encodeAuditCursor(cursor: AdminAuditTimelineCursor): string {
+  return `${cursor.at}|${cursor.id}`;
+}
+
+/** Returns null on a malformed token (no separator, or an empty half). */
+export function decodeAuditCursor(raw: string): AdminAuditTimelineCursor | null {
+  const i = raw.indexOf('|');
+  if (i <= 0 || i === raw.length - 1) return null;
+  return { at: raw.slice(0, i), id: raw.slice(i + 1) };
 }
 
 /**

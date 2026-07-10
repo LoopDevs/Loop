@@ -14,7 +14,7 @@
  * importing from the historical `'../credits/pending-payouts.js'`
  * path without a re-target.
  */
-import { and, desc, eq, lt } from 'drizzle-orm';
+import { and, desc, eq, lt, or } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { pendingPayouts } from '../db/schema.js';
 import type { PendingPayout } from './pending-payouts.js';
@@ -26,6 +26,16 @@ import type { PendingPayout } from './pending-payouts.js';
  * first when you open the page). `before` is the ISO `created_at` of
  * the last row the client has rendered; next page fetches rows older
  * than that. Limit clamps 1..100.
+ *
+ * `tiebreakById` (A5-7) opts into a COMPOUND `(createdAt, id)` keyset:
+ * the ORDER BY gains `id DESC` and, when `beforeId` accompanies
+ * `before`, the cursor predicate becomes
+ * `createdAt < before OR (createdAt = before AND id < beforeId)`. This
+ * is required by the per-subject audit timeline so a batch of
+ * same-`createdAt` payouts (e.g. an interest-mint run) can't drop rows
+ * straddling a page boundary. The existing admin payouts-list caller
+ * leaves it off and keeps its legacy createdAt-only ordering (no
+ * behavioral change).
  */
 export async function listPayoutsForAdmin(opts: {
   state?: string;
@@ -34,6 +44,10 @@ export async function listPayoutsForAdmin(opts: {
   /** ADR-024 §2 + ADR 036: filter by payout discriminator. Lets treasury split order-cashback / emission / burn flows visually. */
   kind?: 'order_cashback' | 'emission' | 'burn' | 'interest_mint';
   before?: Date;
+  /** A5-7 compound-cursor tiebreaker; only honoured with `tiebreakById`. */
+  beforeId?: string;
+  /** A5-7: order by (createdAt DESC, id DESC) + use the compound cursor. */
+  tiebreakById?: boolean;
   limit?: number;
 }): Promise<PendingPayout[]> {
   const limit = Math.min(Math.max(opts.limit ?? 20, 1), 100);
@@ -44,11 +58,25 @@ export async function listPayoutsForAdmin(opts: {
   if (opts.kind !== undefined) conditions.push(eq(pendingPayouts.kind, opts.kind));
   // A2-1610: typed `lt()` + `desc()` — postgres-js can't bind a Date
   // through the raw sql interpolator. See `audit-tail-csv.ts`.
-  if (opts.before !== undefined) conditions.push(lt(pendingPayouts.createdAt, opts.before));
+  if (opts.before !== undefined) {
+    if (opts.tiebreakById && opts.beforeId !== undefined) {
+      conditions.push(
+        or(
+          lt(pendingPayouts.createdAt, opts.before),
+          and(eq(pendingPayouts.createdAt, opts.before), lt(pendingPayouts.id, opts.beforeId)),
+        ),
+      );
+    } else {
+      conditions.push(lt(pendingPayouts.createdAt, opts.before));
+    }
+  }
   const where = conditions.length === 0 ? undefined : and(...conditions);
   const q = db.select().from(pendingPayouts);
   const filtered = where === undefined ? q : q.where(where);
-  return filtered.orderBy(desc(pendingPayouts.createdAt)).limit(limit);
+  const ordered = opts.tiebreakById
+    ? filtered.orderBy(desc(pendingPayouts.createdAt), desc(pendingPayouts.id))
+    : filtered.orderBy(desc(pendingPayouts.createdAt));
+  return ordered.limit(limit);
 }
 
 /**

@@ -163,7 +163,7 @@ describe('<UserAuditTimeline />', () => {
   it('pages older with the prior page’s per-source cursors and accumulates rows', async () => {
     const page1Cursors: AdminAuditTimelineCursors = {
       ...NULL_CURSORS,
-      ledger: '2026-07-05T00:00:00.000Z',
+      ledger: { at: '2026-07-05T00:00:00.000Z', id: 'tx-boundary' },
     };
     // Keyed on the cursors arg (robust to react-query refetching page 1):
     // page 1 (cursors null) returns the order + a live ledger cursor;

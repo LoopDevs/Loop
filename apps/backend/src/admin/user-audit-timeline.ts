@@ -66,20 +66,35 @@
  *      a stream. It is NOT a paged source: it appears once, on page 1
  *      only (no `before*` cursors present), and carries no cursor.
  *
- * **Per-source keyset pagination (not one shared cursor).** Each of
- * the five list sources is independently `.limit()`-bounded AND
- * independently cursored: the response's `nextCursors` carries one
- * `<iso|null>` per source (the oldest `at` that source returned this
- * page, or null when it returned fewer than `limit` rows / wasn't
- * queried). The client echoes those back as `?before<Source>=<iso>`
- * query params; each source pages on ITS OWN cursor. This is the fix
- * for the cross-source row-loss bug a single shared `before` would
- * cause: with uneven per-source density (many ledger rows per order),
- * a global cursor = the oldest `at` across the merged page would
- * permanently drop the denser source's un-returned rows (newer than
- * the global floor, so they never satisfy `< floor` on the next
- * page). A support/compliance "what happened to this user" tool must
- * be complete, so completeness is enforced, not documented away.
+ * **Per-source COMPOUND keyset pagination.** Each of the five list
+ * sources is independently `.limit()`-bounded AND independently
+ * cursored on `(timestamp, id)` — NOT a bare `ts < cursor`. A single
+ * source can write many rows sharing the exact same timestamp:
+ * `revokeAllRefreshTokensForUser` stamps ONE `revokedAt` on every live
+ * session in one UPDATE (so a mass "sign out everywhere" / admin
+ * incident revoke of > `limit` sessions ties), and interest-mint
+ * inserts a transaction-stable `now()` per credit row. A naive
+ * `ts < cursor` at a page boundary would silently DROP the tied rows
+ * that didn't fit the page (they're neither on this page nor `< ts` on
+ * the next). So every source orders by `(tsCol DESC, idCol DESC)` and
+ * pages with `ts < cursor.at OR (ts = cursor.at AND id < cursor.id)`,
+ * where `id` is that source's stable unique row key: `credit_transactions.id`
+ * / `orders.id` / `pending_payouts.id` (uuid), `refresh_tokens.jti`
+ * (PK), `admin_idempotency_keys.key` (the second half of its
+ * composite PK — unique per acting admin; a tie would additionally
+ * require the same createdAt AND same client idempotency key across
+ * two different admins, which is not producible in practice). The
+ * `nextCursors` field carries `{ at, id }` per source (the oldest row
+ * it returned, or null when exhausted / not queried); the client
+ * echoes each non-null one back as `?before<Source>=<isoAt>|<id>`.
+ *
+ * This ALSO fixes the cross-source density loss a single shared `at`
+ * cursor would cause: with uneven per-source density (many ledger rows
+ * per order) a global cursor = the oldest `at` across the merged page
+ * would drop the denser source's un-returned rows (newer than the
+ * global floor). A support/compliance "what happened to this user"
+ * tool must be complete, so completeness is enforced, not documented
+ * away.
  *
  * **Page mode.** A request with NO `before*` params is page 1: every
  * source is queried and the OTP-lock snapshot is computed. A request
@@ -103,10 +118,12 @@
  */
 import type { Context } from 'hono';
 import { and, desc, eq, isNotNull, isNull, like, lt, or } from 'drizzle-orm';
-import type {
-  AdminAuditTimelineCursors,
-  AdminAuditTimelineEvent,
-  AdminUserAuditTimelineResponse,
+import {
+  decodeAuditCursor,
+  type AdminAuditTimelineCursor,
+  type AdminAuditTimelineCursors,
+  type AdminAuditTimelineEvent,
+  type AdminUserAuditTimelineResponse,
 } from '@loop/shared';
 import { UUID_RE } from '../uuid.js';
 import { db } from '../db/client.js';
@@ -137,23 +154,47 @@ const SOURCE_CURSOR_PARAM = {
 type SourceKey = keyof typeof SOURCE_CURSOR_PARAM;
 const SOURCE_KEYS = Object.keys(SOURCE_CURSOR_PARAM) as SourceKey[];
 
+/** A validated compound cursor: the parsed `at` Date plus its raw id. */
+interface ParsedCursor {
+  atDate: Date;
+  id: string;
+}
+
 function iso(d: Date): string {
   return d.toISOString();
 }
 
 /**
- * Next-cursor for one source: null when it wasn't queried, or returned
- * fewer than `limit` rows (exhausted). Otherwise the `at` of the
- * oldest event it returned this page (events are newest-first, so the
- * last one is the oldest).
+ * Compound keyset predicate for one source's timestamp + id columns:
+ * `ts < at OR (ts = at AND id < id)`. Returns undefined when there's
+ * no cursor (page 1 / unqueried), so the source just orders + limits.
  */
-function nextCursorFor(
+function keysetBefore(
+  tsCol: Parameters<typeof lt>[0],
+  idCol: Parameters<typeof lt>[0],
+  cursor: ParsedCursor | undefined,
+): ReturnType<typeof or> | undefined {
+  if (cursor === undefined) return undefined;
+  return or(lt(tsCol, cursor.atDate), and(eq(tsCol, cursor.atDate), lt(idCol, cursor.id)));
+}
+
+/**
+ * Next-cursor for one source: null when it wasn't queried, or returned
+ * fewer than `limit` rows (exhausted). Otherwise `{ at, id }` of the
+ * OLDEST row it returned (rows are newest-first, so the last one),
+ * built directly from the DB row via the source's timestamp/id
+ * accessors (so no per-event cursor bookkeeping leaks to the wire).
+ */
+function nextCursorFor<T>(
   queried: boolean,
-  events: AdminAuditTimelineEvent[],
+  rows: ReadonlyArray<T>,
   limit: number,
-): string | null {
-  if (!queried || events.length < limit) return null;
-  return events[events.length - 1]?.at ?? null;
+  atOf: (row: T) => string,
+  idOf: (row: T) => string,
+): AdminAuditTimelineCursor | null {
+  if (!queried || rows.length < limit) return null;
+  const oldest = rows[rows.length - 1];
+  return oldest === undefined ? null : { at: atOf(oldest), id: idOf(oldest) };
 }
 
 export async function adminUserAuditTimelineHandler(c: Context): Promise<Response> {
@@ -169,8 +210,8 @@ export async function adminUserAuditTimelineHandler(c: Context): Promise<Respons
     MAX_PER_SOURCE_LIMIT,
   );
 
-  // Parse + validate each source's `before` cursor independently.
-  const before: Partial<Record<SourceKey, Date>> = {};
+  // Parse + validate each source's compound `(at, id)` cursor.
+  const before: Partial<Record<SourceKey, ParsedCursor>> = {};
   const present: Record<SourceKey, boolean> = {
     adminActions: false,
     ledger: false,
@@ -181,17 +222,27 @@ export async function adminUserAuditTimelineHandler(c: Context): Promise<Respons
   for (const key of SOURCE_KEYS) {
     const raw = c.req.query(SOURCE_CURSOR_PARAM[key]);
     if (raw === undefined || raw.length === 0) continue;
-    const d = new Date(raw);
-    if (Number.isNaN(d.getTime())) {
+    const decoded = decodeAuditCursor(raw);
+    if (decoded === null) {
       return c.json(
         {
           code: 'VALIDATION_ERROR',
-          message: `${SOURCE_CURSOR_PARAM[key]} must be an ISO-8601 timestamp`,
+          message: `${SOURCE_CURSOR_PARAM[key]} must be a "<iso-8601>|<id>" cursor`,
         },
         400,
       );
     }
-    before[key] = d;
+    const atDate = new Date(decoded.at);
+    if (Number.isNaN(atDate.getTime())) {
+      return c.json(
+        {
+          code: 'VALIDATION_ERROR',
+          message: `${SOURCE_CURSOR_PARAM[key]} timestamp must be ISO-8601`,
+        },
+        400,
+      );
+    }
+    before[key] = { atDate, id: decoded.id };
     present[key] = true;
   }
 
@@ -222,10 +273,17 @@ export async function adminUserAuditTimelineHandler(c: Context): Promise<Respons
               eq(adminIdempotencyKeys.path, staffRolePath),
             ),
           ];
-          const cursor = before.adminActions;
-          if (cursor !== undefined) conds.push(lt(adminIdempotencyKeys.createdAt, cursor));
+          const keyset = keysetBefore(
+            adminIdempotencyKeys.createdAt,
+            adminIdempotencyKeys.key,
+            before.adminActions,
+          );
+          if (keyset !== undefined) conds.push(keyset);
           return db
             .select({
+              // `key` is the compound-cursor tiebreaker (the second
+              // column of admin_idempotency_keys' PK).
+              cursorId: adminIdempotencyKeys.key,
               actorEmail: users.email,
               method: adminIdempotencyKeys.method,
               path: adminIdempotencyKeys.path,
@@ -235,7 +293,7 @@ export async function adminUserAuditTimelineHandler(c: Context): Promise<Respons
             .from(adminIdempotencyKeys)
             .innerJoin(users, eq(adminIdempotencyKeys.adminUserId, users.id))
             .where(and(...conds))
-            .orderBy(desc(adminIdempotencyKeys.createdAt))
+            .orderBy(desc(adminIdempotencyKeys.createdAt), desc(adminIdempotencyKeys.key))
             .limit(limit);
         })()
       : Promise.resolve([] as never[]);
@@ -244,13 +302,17 @@ export async function adminUserAuditTimelineHandler(c: Context): Promise<Respons
     const ledgerPromise = shouldQuery('ledger')
       ? (async () => {
           const conds = [eq(creditTransactions.userId, userId)];
-          const cursor = before.ledger;
-          if (cursor !== undefined) conds.push(lt(creditTransactions.createdAt, cursor));
+          const keyset = keysetBefore(
+            creditTransactions.createdAt,
+            creditTransactions.id,
+            before.ledger,
+          );
+          if (keyset !== undefined) conds.push(keyset);
           return db
             .select()
             .from(creditTransactions)
             .where(and(...conds))
-            .orderBy(desc(creditTransactions.createdAt))
+            .orderBy(desc(creditTransactions.createdAt), desc(creditTransactions.id))
             .limit(limit);
         })()
       : Promise.resolve([] as never[]);
@@ -259,8 +321,8 @@ export async function adminUserAuditTimelineHandler(c: Context): Promise<Respons
     const ordersPromise = shouldQuery('orders')
       ? (async () => {
           const conds = [eq(orders.userId, userId)];
-          const cursor = before.orders;
-          if (cursor !== undefined) conds.push(lt(orders.createdAt, cursor));
+          const keyset = keysetBefore(orders.createdAt, orders.id, before.orders);
+          if (keyset !== undefined) conds.push(keyset);
           return db
             .select({
               id: orders.id,
@@ -278,17 +340,25 @@ export async function adminUserAuditTimelineHandler(c: Context): Promise<Respons
             })
             .from(orders)
             .where(and(...conds))
-            .orderBy(desc(orders.createdAt))
+            .orderBy(desc(orders.createdAt), desc(orders.id))
             .limit(limit);
         })()
       : Promise.resolve([] as never[]);
 
     // ─── 4. Payouts ───────────────────────────────────────────────────────
+    // `listPayoutsForAdmin` gets the compound-cursor path (createdAt +
+    // id tiebreaker) via `tiebreakById`, so a batch of same-createdAt
+    // payouts (e.g. interest-mint) can't lose rows at a page boundary
+    // either. The other caller (admin payouts list) leaves it off and
+    // keeps its legacy createdAt-only ordering.
     const payoutsPromise = shouldQuery('payouts')
       ? listPayoutsForAdmin({
           userId,
           limit,
-          ...(before.payouts !== undefined ? { before: before.payouts } : {}),
+          tiebreakById: true,
+          ...(before.payouts !== undefined
+            ? { before: before.payouts.atDate, beforeId: before.payouts.id }
+            : {}),
         })
       : Promise.resolve([] as never[]);
 
@@ -300,8 +370,8 @@ export async function adminUserAuditTimelineHandler(c: Context): Promise<Respons
             isNotNull(refreshTokens.revokedAt),
             isNull(refreshTokens.replacedByJti),
           ];
-          const cursor = before.sessions;
-          if (cursor !== undefined) conds.push(lt(refreshTokens.revokedAt, cursor));
+          const keyset = keysetBefore(refreshTokens.revokedAt, refreshTokens.jti, before.sessions);
+          if (keyset !== undefined) conds.push(keyset);
           return db
             .select({
               jti: refreshTokens.jti,
@@ -310,7 +380,7 @@ export async function adminUserAuditTimelineHandler(c: Context): Promise<Respons
             })
             .from(refreshTokens)
             .where(and(...conds))
-            .orderBy(desc(refreshTokens.revokedAt))
+            .orderBy(desc(refreshTokens.revokedAt), desc(refreshTokens.jti))
             .limit(limit);
         })()
       : Promise.resolve([] as never[]);
@@ -338,8 +408,9 @@ export async function adminUserAuditTimelineHandler(c: Context): Promise<Respons
         lockPromise,
       ]);
 
-    // Build per-source event lists so each source's next-cursor is the
-    // oldest `at` IT returned (never a cross-source min).
+    // Build per-source event lists. The compound-cursor tiebreaker id
+    // is NOT put on the event (it must not leak to the wire) — it's
+    // read straight off the DB row when computing `nextCursors` below.
     const adminEvents: AdminAuditTimelineEvent[] = adminActionRows.map((r) => ({
       kind: 'admin_action',
       at: iso(r.createdAt),
@@ -376,8 +447,8 @@ export async function adminUserAuditTimelineHandler(c: Context): Promise<Respons
 
     const orderEvents: AdminAuditTimelineEvent[] = orderRows.map((r) => ({
       kind: 'order',
-      // `at` is `createdAt` — the SAME column the cursor pages on (see
-      // the handler doc). The full milestone history rides in `detail`.
+      // `at` is `createdAt` — the SAME column the cursor pages on. The
+      // full milestone history rides in `detail`.
       at: iso(r.createdAt),
       summary: `Order ${r.id.slice(0, 8)}… — ${r.state}`,
       refType: 'order',
@@ -400,7 +471,7 @@ export async function adminUserAuditTimelineHandler(c: Context): Promise<Respons
     const payoutEvents: AdminAuditTimelineEvent[] = payoutRows.map((r) => ({
       kind: 'payout',
       // Same reasoning as orders: `at` = `createdAt`, matching
-      // `listPayoutsForAdmin`'s own `before` cursor column.
+      // `listPayoutsForAdmin`'s compound cursor column.
       at: iso(r.createdAt),
       summary: `Payout ${r.id.slice(0, 8)}… — ${r.state} (${r.kind})`,
       refType: 'payout',
@@ -466,12 +537,45 @@ export async function adminUserAuditTimelineHandler(c: Context): Promise<Respons
 
     events.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
 
+    // Cursors are built from the raw DB rows (createdAt/revokedAt + the
+    // stable tiebreaker id/jti/key), not the events — so the tiebreaker
+    // never touches the response body.
     const nextCursors: AdminAuditTimelineCursors = {
-      adminActions: nextCursorFor(shouldQuery('adminActions'), adminEvents, limit),
-      ledger: nextCursorFor(shouldQuery('ledger'), ledgerEvents, limit),
-      orders: nextCursorFor(shouldQuery('orders'), orderEvents, limit),
-      payouts: nextCursorFor(shouldQuery('payouts'), payoutEvents, limit),
-      sessions: nextCursorFor(shouldQuery('sessions'), sessionEvents, limit),
+      adminActions: nextCursorFor(
+        shouldQuery('adminActions'),
+        adminActionRows,
+        limit,
+        (r) => iso(r.createdAt),
+        (r) => r.cursorId,
+      ),
+      ledger: nextCursorFor(
+        shouldQuery('ledger'),
+        ledgerRows,
+        limit,
+        (r) => iso(r.createdAt),
+        (r) => r.id,
+      ),
+      orders: nextCursorFor(
+        shouldQuery('orders'),
+        orderRows,
+        limit,
+        (r) => iso(r.createdAt),
+        (r) => r.id,
+      ),
+      payouts: nextCursorFor(
+        shouldQuery('payouts'),
+        payoutRows,
+        limit,
+        (r) => iso(r.createdAt),
+        (r) => r.id,
+      ),
+      sessions: nextCursorFor(
+        shouldQuery('sessions'),
+        sessionRows,
+        limit,
+        (r) => iso(r.revokedAt as Date),
+        (r) => r.jti,
+      ),
     };
 
     return c.json<AdminUserAuditTimelineResponse>({ userId, events, nextCursors });

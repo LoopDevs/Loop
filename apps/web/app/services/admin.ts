@@ -537,6 +537,7 @@ export { type AdminRevokeSessionsResult, revokeUserSessions } from './admin-user
 // browser above; the service lives in its own slice (per-user axis,
 // not fleet-wide) matching `./admin-ledger.ts`'s split.
 export {
+  type AdminAuditTimelineCursor,
   type AdminAuditTimelineCursors,
   type AdminAuditTimelineEvent,
   type AdminUserAuditTimelineResponse,

@@ -6,22 +6,26 @@
  * + `drizzle-orm` are mocked so the handler's own query-building logic
  * runs for real against canned per-table row fixtures.
  *
- * Unlike the sibling mocks, this one is PAGINATION-AWARE: the chain's
- * `.limit()` honours the captured `lt(<cursorCol>, before)` condition
- * (filters + sorts desc + slices), so a real multi-page keyset walk
- * can be driven end-to-end. That's what lets the cross-source
- * completeness test below actually exercise (and prove) the
- * per-source-cursor fix.
+ * Unlike the sibling mocks, this one is COMPOUND-KEYSET-AWARE: the
+ * chain's `.limit()` honours the captured
+ * `ts < at OR (ts = at AND id < id)` predicate (filters + sorts by
+ * `(tsCol DESC, idCol DESC)` + slices), so a real multi-page keyset
+ * walk — including one across a TIE boundary where many rows share a
+ * timestamp — can be driven end-to-end. That's what lets the
+ * completeness + tie tests below actually exercise (and prove) the
+ * per-source compound-cursor fix.
  *
  * Covers: the merge + newest-first sort across five sources; that
  * EVERY source query reaches an explicit `.limit()` (never unbounded —
  * S4-6); the merged `at` == the cursor column (within-source
  * consistency); the CROSS-source completeness walk (no row lost under
- * uneven density — the P1 fix); 400s / 404 / never-500; and the CF-10
- * default-response-size bound.
+ * uneven density); the TIE-boundary walk (no row lost when > limit
+ * rows share one timestamp — the residual P1); 400s / 404 / never-500;
+ * and the CF-10 default-response-size bound.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Context } from 'hono';
+import { encodeAuditCursor, type AdminAuditTimelineCursors } from '@loop/shared';
 import { BULK_LIST_ROW_THRESHOLD, countAdminListRows } from '../read-audit.js';
 
 // Single canonical set of table markers, shared by reference between
@@ -33,12 +37,14 @@ import { BULK_LIST_ROW_THRESHOLD, countAdminListRows } from '../read-audit.js';
 const TABLES = vi.hoisted(() => ({
   adminIdempotencyKeys: {
     adminUserId: 'admin_idempotency_keys.admin_user_id',
-    path: 'admin_idempotency_keys.path',
+    key: 'admin_idempotency_keys.key',
     method: 'admin_idempotency_keys.method',
     status: 'admin_idempotency_keys.status',
+    path: 'admin_idempotency_keys.path',
     createdAt: 'admin_idempotency_keys.created_at',
   },
   creditTransactions: {
+    id: 'credit_transactions.id',
     userId: 'credit_transactions.user_id',
     createdAt: 'credit_transactions.created_at',
   },
@@ -52,6 +58,7 @@ const TABLES = vi.hoisted(() => ({
     lockedUntil: 'otp_attempt_counters.locked_until',
   },
   refreshTokens: {
+    jti: 'refresh_tokens.jti',
     userId: 'refresh_tokens.user_id',
     revokedAt: 'refresh_tokens.revoked_at',
     replacedByJti: 'refresh_tokens.replaced_by_jti',
@@ -75,24 +82,31 @@ const state = vi.hoisted(() => ({
   whereCalls: [] as Array<{ table: string; cond: unknown }>,
 }));
 
-// Faithfully paginate the payouts source (the one that goes through
-// `listPayoutsForAdmin`, not the drizzle chain) the same way the real
-// repo does: filter by `before` on createdAt, sort desc, slice `limit`.
+// Faithfully compound-paginate the payouts source (the one that goes
+// through `listPayoutsForAdmin`, not the drizzle chain): filter by the
+// compound `(createdAt, id)` cursor, sort by (createdAt DESC, id DESC),
+// slice `limit`.
 vi.mock('../../credits/pending-payouts.js', () => ({
-  listPayoutsForAdmin: vi.fn(async (opts: { limit?: number; before?: Date }) => {
-    state.limitCalls.push({ table: 'pending_payouts', n: opts.limit ?? -1 });
-    let rows = state.payoutRows;
-    if (opts.before !== undefined) {
-      const cutoff = opts.before.getTime();
-      rows = rows.filter((r) => new Date(r.createdAt as string | Date).getTime() < cutoff);
-    }
-    rows = [...rows].sort(
-      (a, b) =>
-        new Date(b.createdAt as string | Date).getTime() -
-        new Date(a.createdAt as string | Date).getTime(),
-    );
-    return rows.slice(0, opts.limit ?? rows.length);
-  }),
+  listPayoutsForAdmin: vi.fn(
+    async (opts: { limit?: number; before?: Date; beforeId?: string; tiebreakById?: boolean }) => {
+      state.limitCalls.push({ table: 'pending_payouts', n: opts.limit ?? -1 });
+      let rows = state.payoutRows;
+      if (opts.before !== undefined) {
+        const curTs = opts.before.getTime();
+        const curId = opts.beforeId;
+        rows = rows.filter((r) => {
+          const ts = new Date(r.createdAt as string | Date).getTime();
+          if (ts < curTs) return true;
+          if (opts.tiebreakById && curId !== undefined && ts === curTs) {
+            return String(r.id) < curId;
+          }
+          return false;
+        });
+      }
+      rows = [...rows].sort((a, b) => cmpDesc(a, b, 'createdAt', 'id'));
+      return rows.slice(0, opts.limit ?? rows.length);
+    },
+  ),
 }));
 
 vi.mock('../../db/schema.js', () => ({
@@ -123,29 +137,59 @@ vi.mock('../../logger.js', () => ({
   logger: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }) },
 }));
 
-/** Pull the `before` Date out of a captured `and(...)` / bare where cond. */
-function capturedBefore(where: unknown): Date | undefined {
+/** newest-first compare: tsField DESC, then idField DESC (string). */
+function cmpDesc(
+  a: Record<string, unknown>,
+  b: Record<string, unknown>,
+  tsField: string,
+  idField: string,
+): number {
+  const d =
+    new Date(b[tsField] as string | Date).getTime() -
+    new Date(a[tsField] as string | Date).getTime();
+  if (d !== 0) return d;
+  const ai = String(a[idField]);
+  const bi = String(b[idField]);
+  return ai < bi ? 1 : ai > bi ? -1 : 0;
+}
+
+/** Pull the compound `{ ts, id }` cursor out of a captured where cond. */
+function extractCompoundCursor(where: unknown): { ts: Date; id: string } | undefined {
   if (where === null || typeof where !== 'object') return undefined;
   const w = where as { __and?: boolean; conds?: unknown[] };
   const conds = w.__and ? (w.conds ?? []) : [where];
-  const lt = conds.find(
+  const orNode = conds.find(
+    (c): c is { __or: true; conds: unknown[] } =>
+      typeof c === 'object' && c !== null && '__or' in c,
+  );
+  if (orNode === undefined) return undefined;
+  const ltTs = orNode.conds.find(
     (c): c is { __lt: true; value: unknown } => typeof c === 'object' && c !== null && '__lt' in c,
   );
-  if (lt === undefined) return undefined;
-  return new Date(lt.value as string | number | Date);
+  const andNode = orNode.conds.find(
+    (c): c is { __and: true; conds: unknown[] } =>
+      typeof c === 'object' && c !== null && '__and' in c,
+  );
+  const ltId = andNode?.conds.find(
+    (c): c is { __lt: true; value: unknown } => typeof c === 'object' && c !== null && '__lt' in c,
+  );
+  if (ltTs === undefined || ltId === undefined) return undefined;
+  return { ts: new Date(ltTs.value as string | number | Date), id: String(ltId.value) };
 }
 
 /**
- * Pagination-aware chain. When `cursorField` is set, `.limit(n)`
- * filters rows by the captured `lt(cursorField, before)`, sorts them
- * desc by that field, then slices — i.e. it behaves like a real
- * keyset-paginated table. When it's undefined (single-row lookups:
- * users / otp), it just slices.
+ * Compound-keyset-aware chain. When `tsField`/`idField` are set,
+ * `.limit(n)` filters rows by the captured compound cursor
+ * (`ts < at OR (ts = at AND id < id)`), sorts them by
+ * `(tsField DESC, idField DESC)`, then slices — a real compound keyset
+ * table. When undefined (single-row lookups: users / otp) it just
+ * slices.
  */
 function makeChainFor(
   tableName: string,
   rows: Array<Record<string, unknown>>,
-  cursorField?: string,
+  tsField?: string,
+  idField?: string,
 ): unknown {
   const chain: Record<string, unknown> = {};
   let where: unknown;
@@ -160,18 +204,19 @@ function makeChainFor(
   chain.limit = async (n: number) => {
     if (state.throwErr !== null) throw state.throwErr;
     state.limitCalls.push({ table: tableName, n });
-    if (cursorField === undefined) return rows.slice(0, n);
+    if (tsField === undefined || idField === undefined) return rows.slice(0, n);
     let out = rows;
-    const before = capturedBefore(where);
-    if (before !== undefined) {
-      const cutoff = before.getTime();
-      out = out.filter((r) => new Date(r[cursorField] as string | Date).getTime() < cutoff);
+    const cur = extractCompoundCursor(where);
+    if (cur !== undefined) {
+      const curTs = cur.ts.getTime();
+      out = out.filter((r) => {
+        const ts = new Date(r[tsField] as string | Date).getTime();
+        if (ts < curTs) return true;
+        if (ts === curTs) return String(r[idField]) < cur.id;
+        return false;
+      });
     }
-    out = [...out].sort(
-      (a, b) =>
-        new Date(b[cursorField] as string | Date).getTime() -
-        new Date(a[cursorField] as string | Date).getTime(),
-    );
+    out = [...out].sort((a, b) => cmpDesc(a, b, tsField, idField));
     return out.slice(0, n);
   };
   return chain;
@@ -180,13 +225,14 @@ function makeChainFor(
 function fromMock(table: unknown): unknown {
   switch (table) {
     case TABLES.adminIdempotencyKeys:
-      return makeChainFor('admin_idempotency_keys', state.adminActionRows, 'createdAt');
+      // tiebreaker column is `key`, surfaced on fixture rows as `cursorId`.
+      return makeChainFor('admin_idempotency_keys', state.adminActionRows, 'createdAt', 'cursorId');
     case TABLES.creditTransactions:
-      return makeChainFor('credit_transactions', state.ledgerRows, 'createdAt');
+      return makeChainFor('credit_transactions', state.ledgerRows, 'createdAt', 'id');
     case TABLES.orders:
-      return makeChainFor('orders', state.orderRows, 'createdAt');
+      return makeChainFor('orders', state.orderRows, 'createdAt', 'id');
     case TABLES.refreshTokens:
-      return makeChainFor('refresh_tokens', state.sessionRows, 'revokedAt');
+      return makeChainFor('refresh_tokens', state.sessionRows, 'revokedAt', 'jti');
     case TABLES.otpAttemptCounters:
       return makeChainFor('otp_attempt_counters', state.lockRows);
     case TABLES.users:
@@ -226,22 +272,14 @@ const NULL_CURSORS = {
   sessions: null,
 };
 
-interface Cursors {
-  adminActions: string | null;
-  ledger: string | null;
-  orders: string | null;
-  payouts: string | null;
-  sessions: string | null;
-}
-
-/** Turn a `nextCursors` object into the request's `before*` params. */
-function cursorsToQuery(c: Cursors): Record<string, string> {
+/** Turn a `nextCursors` object into the request's compact `before*` params. */
+function cursorsToQuery(c: AdminAuditTimelineCursors): Record<string, string> {
   const q: Record<string, string> = {};
-  if (c.adminActions !== null) q.beforeAdminActions = c.adminActions;
-  if (c.ledger !== null) q.beforeLedger = c.ledger;
-  if (c.orders !== null) q.beforeOrders = c.orders;
-  if (c.payouts !== null) q.beforePayouts = c.payouts;
-  if (c.sessions !== null) q.beforeSessions = c.sessions;
+  if (c.adminActions !== null) q.beforeAdminActions = encodeAuditCursor(c.adminActions);
+  if (c.ledger !== null) q.beforeLedger = encodeAuditCursor(c.ledger);
+  if (c.orders !== null) q.beforeOrders = encodeAuditCursor(c.orders);
+  if (c.payouts !== null) q.beforePayouts = encodeAuditCursor(c.payouts);
+  if (c.sessions !== null) q.beforeSessions = encodeAuditCursor(c.sessions);
   return q;
 }
 
@@ -270,9 +308,16 @@ describe('adminUserAuditTimelineHandler', () => {
     expect(res.status).toBe(404);
   });
 
-  it('400 on a malformed per-source before cursor', async () => {
+  it('400 on a malformed per-source cursor (no "|id" half)', async () => {
     const res = await adminUserAuditTimelineHandler(
       makeCtx({ userId: USER_ID }, { beforeLedger: 'not-a-date' }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('400 on a cursor with a non-ISO timestamp half', async () => {
+    const res = await adminUserAuditTimelineHandler(
+      makeCtx({ userId: USER_ID }, { beforeLedger: 'not-a-date|tx-1' }),
     );
     expect(res.status).toBe(400);
   });
@@ -292,9 +337,10 @@ describe('adminUserAuditTimelineHandler', () => {
     expect(body.code).toBe('INTERNAL_ERROR');
   });
 
-  it('merges every source and sorts newest-first', async () => {
+  it('merges every source and sorts newest-first (no cursorId leaks to the wire)', async () => {
     state.adminActionRows = [
       {
+        cursorId: 'idem-1',
         actorEmail: 'admin@loop.test',
         method: 'POST',
         path: `/api/admin/users/${USER_ID}/credit-adjustments`,
@@ -328,8 +374,7 @@ describe('adminUserAuditTimelineHandler', () => {
         procuredAt: new Date('2026-07-03T12:02:00Z'),
         // Deliberately AFTER the admin action's createdAt (07-05) — if
         // the merged `at` used this instead of `createdAt`, the order
-        // would incorrectly sort first. See the cursor-consistency
-        // test below.
+        // would incorrectly sort first (see the cursor-consistency test).
         fulfilledAt: new Date('2026-07-06T00:00:00Z'),
         failedAt: null,
       },
@@ -367,15 +412,11 @@ describe('adminUserAuditTimelineHandler', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       userId: string;
-      events: Array<{ kind: string; at: string; refType: string | null; refId: string | null }>;
-      nextCursors: Cursors;
+      events: Array<Record<string, unknown>>;
+      nextCursors: AdminAuditTimelineCursors;
     };
     expect(body.userId).toBe(USER_ID);
     expect(body.events).toHaveLength(5);
-    // Newest first, by createdAt (admin_action 07-05 > ledger 07-04 >
-    // order 07-03 > payout 07-02 > session 07-01). The order event's
-    // `at` is its `createdAt` (07-03), NOT its later `fulfilledAt`
-    // (07-06).
     expect(body.events.map((e) => e.kind)).toEqual([
       'admin_action',
       'ledger',
@@ -383,27 +424,22 @@ describe('adminUserAuditTimelineHandler', () => {
       'payout',
       'session_revoked',
     ]);
+    // The internal cursorId tiebreaker must never leave the process.
+    for (const e of body.events) expect(e).not.toHaveProperty('cursorId');
     const orderEvent = body.events.find((e) => e.kind === 'order');
     expect(orderEvent).toMatchObject({
       at: '2026-07-03T12:00:00.000Z',
       refType: 'order',
       refId: 'order-1',
     });
-    const ledgerEvent = body.events.find((e) => e.kind === 'ledger');
-    expect(ledgerEvent).toMatchObject({ refType: 'order', refId: 'order-1' });
-    // One row per source (< limit 8) → every source is exhausted, so
-    // every next-cursor is null.
+    // One row per source (< limit 8) → every source exhausted → all null.
     expect(body.nextCursors).toEqual(NULL_CURSORS);
   });
 
   // Money-review finding (within-source): the merged `at` for
-  // orders/payouts must be the SAME column the cursor pages on
-  // (`createdAt`), not a later milestone — otherwise a milestone-heavy
-  // row (created long ago, fulfilled recently) could pass the
-  // cursor's `createdAt < before` check yet still recompute to the
-  // same `at` on the next page, reappearing forever and stalling
-  // paging just below it.
-  it('cursor consistency: the orders `before` filter pages on the same column as `at` (createdAt)', async () => {
+  // orders/payouts must be `createdAt` (the cursor column), not a later
+  // milestone.
+  it('cursor consistency: orders page on (createdAt, id), and `at` is createdAt', async () => {
     state.orderRows = [
       {
         id: 'order-old-milestone',
@@ -421,40 +457,41 @@ describe('adminUserAuditTimelineHandler', () => {
       },
     ];
 
-    const beforeCursor = new Date('2026-07-06T00:00:00Z');
     const res = await adminUserAuditTimelineHandler(
-      makeCtx({ userId: USER_ID }, { beforeOrders: beforeCursor.toISOString() }),
+      makeCtx(
+        { userId: USER_ID },
+        { beforeOrders: encodeAuditCursor({ at: '2026-07-06T00:00:00.000Z', id: 'zzzz' }) },
+      ),
     );
-    const body = (await res.json()) as { events: Array<{ at: string; kind: string }> };
-    // createdAt (01-01) < cursor (07-06) → row passes the filter.
+    const body = (await res.json()) as { events: Array<{ at: string }> };
+    // createdAt (01-01) < cursor.at (07-06) → row passes the filter.
     expect(body.events).toHaveLength(1);
-    // `at` is createdAt, not the later fulfilledAt.
     expect(body.events[0]?.at).toBe('2026-01-01T00:00:00.000Z');
 
-    const orderWhere = state.whereCalls.find((c) => c.table === 'orders')?.cond as
-      | { conds: unknown[] }
-      | undefined;
-    expect(orderWhere).toBeDefined();
-    const ltCond = orderWhere?.conds.find(
-      (c): c is { __lt: true; col: unknown; value: Date } =>
-        typeof c === 'object' && c !== null && '__lt' in c,
+    // Structural: the captured orders predicate is the compound keyset
+    // `ts < at OR (ts = at AND id < id)` on (orders.createdAt, orders.id).
+    const orderWhere = state.whereCalls.find((c) => c.table === 'orders')?.cond;
+    expect(extractCompoundCursor(orderWhere)).toBeDefined();
+    const orderOr = (orderWhere as { conds: unknown[] }).conds.find(
+      (c): c is { __or: true; conds: unknown[] } =>
+        typeof c === 'object' && c !== null && '__or' in c,
     );
-    expect(ltCond?.col).toBe(TABLES.orders.createdAt); // orders.created_at, not fulfilledAt
-    expect(ltCond?.value).toEqual(beforeCursor);
+    const ltTs = orderOr?.conds.find(
+      (c): c is { __lt: true; col: unknown } => typeof c === 'object' && c !== null && '__lt' in c,
+    );
+    expect(ltTs?.col).toBe(TABLES.orders.createdAt);
+    const andNode = orderOr?.conds.find(
+      (c): c is { __and: true; conds: unknown[] } =>
+        typeof c === 'object' && c !== null && '__and' in c,
+    );
+    const ltId = andNode?.conds.find(
+      (c): c is { __lt: true; col: unknown } => typeof c === 'object' && c !== null && '__lt' in c,
+    );
+    expect(ltId?.col).toBe(TABLES.orders.id); // tiebreaker is orders.id
   });
 
-  // ── The P1 fix: CROSS-source completeness under uneven density ──
-  //
-  // A single shared `before` cursor (= the oldest `at` across the
-  // whole merged page) applied uniformly to every source silently
-  // DROPS rows when per-source density is uneven. Seed a user with 2
-  // orders spanning a wide date range AND 12 ledger rows clustered in
-  // a narrow recent window, so the ledger's page-1 floor (07-05) is
-  // far NEWER than the orders' oldest (01-01). Under a global cursor
-  // page-2 would query ledger `< 01-01` → nothing → ledger rows
-  // 07-01..07-04 vanish forever. Under per-source cursors the ledger
-  // pages on ITS OWN floor (07-05) and every row is recovered.
-  it('cross-source completeness: no row is lost paging uneven-density sources to exhaustion', async () => {
+  // ── Cross-source completeness under uneven density (distinct ts) ──
+  it('cross-source completeness: no row lost paging uneven-density sources to exhaustion', async () => {
     state.orderRows = [
       makeOrder('order-a', '2026-01-01T00:00:00Z'),
       makeOrder('order-b', '2026-02-01T00:00:00Z'),
@@ -463,7 +500,7 @@ describe('adminUserAuditTimelineHandler', () => {
     state.ledgerRows = Array.from({ length: 12 }, (_, i) => {
       const day = i + 1;
       return {
-        id: `tx-${day}`,
+        id: `tx-${String(day).padStart(2, '0')}`,
         userId: USER_ID,
         type: 'cashback',
         amountMinor: 100n,
@@ -474,47 +511,73 @@ describe('adminUserAuditTimelineHandler', () => {
       };
     });
 
-    // Drive the client's per-source paging loop: page 1 has no
-    // cursors; each subsequent page echoes the prior `nextCursors`.
-    const seenKeys: string[] = [];
-    let cursors: Cursors | null = null;
-    let pages = 0;
-    let firstPageCursors: Cursors | null = null;
-    for (;;) {
-      pages += 1;
-      expect(pages).toBeLessThanOrEqual(10); // guard against a runaway loop
-      const query = cursors === null ? {} : cursorsToQuery(cursors);
-      const res = await adminUserAuditTimelineHandler(makeCtx({ userId: USER_ID }, query));
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        events: Array<{ kind: string; refId: string | null; detail: Record<string, unknown> }>;
-        nextCursors: Cursors;
-      };
-      for (const e of body.events) {
-        seenKeys.push(e.kind === 'ledger' ? String(e.detail.transactionId) : String(e.refId));
-      }
-      if (firstPageCursors === null) firstPageCursors = body.nextCursors;
-      const more = Object.values(body.nextCursors).some((v) => v !== null);
-      if (!more) break;
-      cursors = body.nextCursors;
-    }
+    const { seenKeys, pages, firstPageCursors } = await walkToExhaustion();
 
     // Per-source cursors: after page 1 the ledger cursor is ITS OWN
-    // floor (07-05), NOT the cross-source min (the 01-01 order). The
-    // orders source is already exhausted (2 < limit) so its cursor is
-    // null. This is exactly the distinction a single global cursor
-    // erases — and why it would have lost the 07-01..07-04 rows.
-    expect(firstPageCursors?.ledger).toBe('2026-07-05T00:00:00.000Z');
+    // floor (07-05), not the cross-source min (the 01-01 order). Orders
+    // is already exhausted (2 < limit) so its cursor is null.
+    expect(firstPageCursors?.ledger?.at).toBe('2026-07-05T00:00:00.000Z');
     expect(firstPageCursors?.orders).toBeNull();
 
-    // Completeness: every seeded row appears exactly once.
     const expected = [
       'order-a',
       'order-b',
-      ...Array.from({ length: 12 }, (_, i) => `tx-${i + 1}`),
+      ...Array.from({ length: 12 }, (_, i) => `tx-${String(i + 1).padStart(2, '0')}`),
     ].sort();
     expect([...seenKeys].sort()).toEqual(expected);
     expect(seenKeys.length).toBe(new Set(seenKeys).size); // no duplicates
+    expect(pages).toBe(2);
+  });
+
+  // ── The residual P1: TIE-boundary loss (many rows share one ts) ──
+  //
+  // `revokeAllRefreshTokensForUser` stamps ONE `revokedAt` on every
+  // live session in a single UPDATE, so a mass "sign out everywhere" /
+  // admin incident revoke of > limit sessions produces > 8 rows with
+  // IDENTICAL revokedAt. A naive `revokedAt < cursor` would return 8,
+  // set the cursor to that shared timestamp, then `< cursor` on page 2
+  // returns 0 — the overflow revocations vanish. The compound
+  // `(revokedAt, jti)` cursor recovers them.
+  it('tie boundary (sessions): >limit revocations sharing one revokedAt are all returned', async () => {
+    const sharedRevokedAt = new Date('2026-07-05T00:00:00Z');
+    state.sessionRows = Array.from({ length: 10 }, (_, i) => ({
+      jti: `jti-${String(i).padStart(2, '0')}`,
+      createdAt: new Date('2026-06-01T00:00:00Z'),
+      revokedAt: sharedRevokedAt, // one UPDATE stamped them all
+    }));
+
+    const { seenKeys, pages } = await walkToExhaustion();
+
+    const expected = Array.from(
+      { length: 10 },
+      (_, i) => `jti-${String(i).padStart(2, '0')}`,
+    ).sort();
+    expect([...seenKeys].sort()).toEqual(expected);
+    expect(seenKeys.length).toBe(new Set(seenKeys).size); // no duplicates
+    expect(pages).toBe(2); // 8 then 2, across the tie boundary
+  });
+
+  it('tie boundary (ledger): >limit credits sharing one createdAt are all returned', async () => {
+    const sharedCreatedAt = new Date('2026-07-05T00:00:00Z');
+    state.ledgerRows = Array.from({ length: 10 }, (_, i) => ({
+      id: `tx-${String(i).padStart(2, '0')}`,
+      userId: USER_ID,
+      type: 'interest',
+      amountMinor: 3n,
+      currency: 'GBP',
+      referenceType: null,
+      referenceId: null,
+      createdAt: sharedCreatedAt, // an interest-mint-style transaction-stable now()
+    }));
+
+    const { seenKeys, pages } = await walkToExhaustion();
+
+    const expected = Array.from(
+      { length: 10 },
+      (_, i) => `tx-${String(i).padStart(2, '0')}`,
+    ).sort();
+    expect([...seenKeys].sort()).toEqual(expected);
+    expect(seenKeys.length).toBe(new Set(seenKeys).size);
     expect(pages).toBe(2);
   });
 
@@ -543,7 +606,10 @@ describe('adminUserAuditTimelineHandler', () => {
 
   it('a later page (a before* cursor present) re-queries ONLY cursored sources + omits the OTP snapshot', async () => {
     await adminUserAuditTimelineHandler(
-      makeCtx({ userId: USER_ID }, { beforeLedger: '2026-07-01T00:00:00.000Z' }),
+      makeCtx(
+        { userId: USER_ID },
+        { beforeLedger: encodeAuditCursor({ at: '2026-07-01T00:00:00.000Z', id: 'tx-1' }) },
+      ),
     );
     const tables = state.limitCalls.map((c) => c.table).sort();
     // users (subject lookup) + credit_transactions (the cursored
@@ -567,11 +633,11 @@ describe('adminUserAuditTimelineHandler', () => {
 
   // CF-10: a maximally-populated DEFAULT response (every list source
   // returns exactly DEFAULT_PER_SOURCE_LIMIT rows, plus the OTP-lock
-  // snapshot) must stay under the global bulk-read threshold so a
-  // routine support-triage page load doesn't trip the tripwire.
+  // snapshot) must stay under the global bulk-read threshold.
   it('a maximally-populated default response stays under the CF-10 bulk-read threshold', async () => {
     const DEFAULT = 8;
     state.adminActionRows = Array.from({ length: DEFAULT }, (_, i) => ({
+      cursorId: `idem-${i}`,
       actorEmail: 'admin@loop.test',
       method: 'POST',
       path: `/api/admin/users/${USER_ID}/credit-adjustments`,
@@ -616,11 +682,7 @@ describe('adminUserAuditTimelineHandler', () => {
       revokedAt: new Date(Date.now() - i * 1000),
     }));
     state.lockRows = [
-      {
-        lockedUntil: new Date(Date.now() + 60_000),
-        failedAttempts: 5,
-        updatedAt: new Date(),
-      },
+      { lockedUntil: new Date(Date.now() + 60_000), failedAttempts: 5, updatedAt: new Date() },
     ];
 
     const res = await adminUserAuditTimelineHandler(makeCtx({ userId: USER_ID }));
@@ -633,6 +695,45 @@ describe('adminUserAuditTimelineHandler', () => {
     expect(rowCount).toBeLessThan(BULK_LIST_ROW_THRESHOLD);
   });
 });
+
+/**
+ * Drives the client's per-source paging loop to exhaustion: page 1 has
+ * no cursors; each subsequent page echoes the prior `nextCursors`.
+ * Returns the accumulated per-row keys (ledger→transactionId,
+ * session→jti, order/payout→refId), the page count, and page 1's
+ * cursors.
+ */
+async function walkToExhaustion(): Promise<{
+  seenKeys: string[];
+  pages: number;
+  firstPageCursors: AdminAuditTimelineCursors | null;
+}> {
+  const seenKeys: string[] = [];
+  let cursors: AdminAuditTimelineCursors | null = null;
+  let pages = 0;
+  let firstPageCursors: AdminAuditTimelineCursors | null = null;
+  for (;;) {
+    pages += 1;
+    expect(pages).toBeLessThanOrEqual(10); // guard against a runaway loop
+    const query = cursors === null ? {} : cursorsToQuery(cursors);
+    const res = await adminUserAuditTimelineHandler(makeCtx({ userId: USER_ID }, query));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      events: Array<{ kind: string; refId: string | null; detail: Record<string, unknown> }>;
+      nextCursors: AdminAuditTimelineCursors;
+    };
+    for (const e of body.events) {
+      if (e.kind === 'ledger') seenKeys.push(String(e.detail.transactionId));
+      else if (e.kind === 'session_revoked') seenKeys.push(String(e.detail.jti));
+      else seenKeys.push(String(e.refId));
+    }
+    if (firstPageCursors === null) firstPageCursors = body.nextCursors;
+    const more = Object.values(body.nextCursors).some((v) => v !== null);
+    if (!more) break;
+    cursors = body.nextCursors;
+  }
+  return { seenKeys, pages, firstPageCursors };
+}
 
 function makeOrder(id: string, createdAtIso: string): Record<string, unknown> {
   return {

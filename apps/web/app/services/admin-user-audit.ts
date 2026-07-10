@@ -14,14 +14,21 @@
  *
  * Wire shape lives in `@loop/shared/admin-support-ops.ts`.
  */
-import type {
-  AdminAuditTimelineCursors,
-  AdminAuditTimelineEvent,
-  AdminUserAuditTimelineResponse,
+import {
+  encodeAuditCursor,
+  type AdminAuditTimelineCursor,
+  type AdminAuditTimelineCursors,
+  type AdminAuditTimelineEvent,
+  type AdminUserAuditTimelineResponse,
 } from '@loop/shared';
 import { authenticatedRequest } from './api-client';
 
-export type { AdminAuditTimelineCursors, AdminAuditTimelineEvent, AdminUserAuditTimelineResponse };
+export type {
+  AdminAuditTimelineCursor,
+  AdminAuditTimelineCursors,
+  AdminAuditTimelineEvent,
+  AdminUserAuditTimelineResponse,
+};
 
 /** Maps each per-source cursor to its `before*` query param name. */
 const CURSOR_PARAM: Record<keyof AdminAuditTimelineCursors, string> = {
@@ -35,9 +42,10 @@ const CURSOR_PARAM: Record<keyof AdminAuditTimelineCursors, string> = {
 /**
  * `GET /api/admin/users/:userId/audit` — newest-first, per-source
  * bounded. Pass `cursors` (the previous page's `nextCursors`) to page
- * older: each NON-null cursor pages ITS source; null/omitted cursors
- * are not re-queried (that source is exhausted). Omit `cursors`
- * entirely for page 1.
+ * older: each NON-null compound `{at, id}` cursor pages ITS source
+ * (encoded as the compact `<iso>|<id>` param the backend decodes);
+ * null/omitted cursors are not re-queried (that source is exhausted).
+ * Omit `cursors` entirely for page 1.
  */
 export async function getAdminUserAuditTimeline(
   userId: string,
@@ -48,7 +56,7 @@ export async function getAdminUserAuditTimeline(
   if (opts.cursors !== null && opts.cursors !== undefined) {
     for (const key of Object.keys(CURSOR_PARAM) as Array<keyof AdminAuditTimelineCursors>) {
       const value = opts.cursors[key];
-      if (value !== null) params.set(CURSOR_PARAM[key], value);
+      if (value !== null) params.set(CURSOR_PARAM[key], encodeAuditCursor(value));
     }
   }
   const qs = params.toString();
