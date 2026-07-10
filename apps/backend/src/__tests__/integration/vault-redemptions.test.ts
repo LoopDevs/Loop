@@ -142,6 +142,11 @@ async function seedOrder(args: { userId: string; chargeMinor: bigint }): Promise
       chargeMinor: args.chargeMinor,
       chargeCurrency: 'USD',
       paymentMethod: 'loop_asset',
+      // orders_payment_memo_coherence (migration 0025): every
+      // non-'credit'-method order must carry a non-null payment memo;
+      // orders_payment_memo_unique also requires it be unique among
+      // non-null memos, so a fresh id per seeded order is required.
+      paymentMemo: `test-memo-${crypto.randomUUID()}`,
       wholesalePct: '70.00',
       userCashbackPct: '5.00',
       loopMarginPct: '25.00',
