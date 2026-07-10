@@ -23,6 +23,7 @@
     "test:e2e:mocked": "playwright test --config=playwright.mocked.config.ts",
     "test:e2e:flywheel": "playwright test --config=playwright.flywheel.config.ts",
     "test:e2e:loop-purchase": "playwright test --config=playwright.loop-purchase.config.ts",
+    "test:e2e:admin": "playwright test --config=playwright.admin.config.ts",
     "test:e2e:real": "playwright test",
     "verify": "./scripts/verify.sh",
     "lint:docs": "./scripts/lint-docs.sh",

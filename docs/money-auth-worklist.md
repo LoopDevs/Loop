@@ -839,7 +839,50 @@ payment_method='loop_asset' AND state='pending_payment'` — plus a
       pending on-chain, loop_asset code/issuer, null for terminal/credit/derivation-
       failure). Full web suite green, full `npm run verify` green. Two
       `money-reviewer`/lead passes completed pre-merge (see PR).
-- [ ] **Q6-5 · Admin / support UI E2E smoke.** _M._
+- [x] **Q6-5 · Admin / support UI E2E smoke.** _M._
+      **Done 2026-07-10 (test-only PR, no data-testid needed — every
+      selector resolves against existing roles/text/`title` attributes
+      — self-merged once CI was green):** new
+      `tests/e2e-admin-support/admin-dashboard.test.ts` +
+      `global-setup.ts` + `playwright.admin.config.ts` (own port
+      range, own `staff_roles` seed — an admin-tier user, a
+      support-tier user, and a "customer" user with a stuck `paid`
+      order, a `fulfilled` order + cashback ledger row, an
+      OTP-lockout row, and a live refresh-token row, all fixed ids).
+      Authenticates via the same test-only `/__test__/mint-loop-token`
+      endpoint the flywheel suite uses (grants a session, not a role —
+      the ADR 037 role grants are a direct SQL seed). Two tests:
+      **admin** — `/admin` dashboard + admin-only nav tab, stuck-orders
+      (A5-6), the fleet ledger browser with a filter + pagination
+      affordance (A5-8), the orders list, and a user-360 page (A5-7
+      audit timeline + A5-3 auth-state) all render real seeded data;
+      the order re-drive (A5-1) and refund (A5-4) write affordances
+      render and trip the ADR 028 step-up gate on submit (asserted via
+      `waitForResponse` on the real 401 `STEP_UP_REQUIRED`, then
+      cancelled — neither write completes, since both are real
+      money-moving primitives and completing them is the money-review-
+      gated backend integration tests' job); revoke-sessions (A5-2,
+      which has no step-up by design) is completed end-to-end as the
+      one safe write, with a post-reload check that the audit timeline
+      picked up the resulting `session_revoked` row. **support** — the
+      same read surfaces render, but every admin-only write affordance
+      and nav/page (e.g. `/admin/staff`) is absent or denied. Runs as
+      a third step in the CI `test-e2e-flywheel` job
+      (`npm run test:e2e:admin`), confirmed green across 3 consecutive
+      fresh-server local runs. Non-vacuousness proven directly:
+      temporarily broke `AdminNav.tsx`'s `visibleTabs` to always
+      return every tab regardless of role — the support test failed
+      red (deterministically, `Received: 1` for the "Staff" nav link
+      it expects absent) across 3 retries; reverted, suite green again
+      (byte-identical diff). That exercise also caught a real bug in
+      the test itself (not the product): the first version of the
+      support-tier nav-tab assertion checked `toHaveCount(0)` before
+      the nav had settled from its role-still-resolving `[]` state, so
+      it was trivially true regardless of the underlying gate — fixed
+      by waiting for a known support-visible tab first. No backend or
+      product route/logic touched; the one non-test file changed is
+      `apps/web/app/components/features/admin/AdminNav.tsx`, which
+      ends the diff unchanged (temporary local break, reverted).
 - [x] **Q6-6 · Wallet-spend + on-chain interest-mint coverage** (mint has no real-Postgres test). _M._
       **Done 2026-07-10 (test-only PR — coverage cannot demote an
       invariant, self-merged once CI was green):** added
