@@ -37,6 +37,12 @@ const TABLES_TO_TRUNCATE = [
   'watchdog_alert_state',
   'otp_attempt_counters',
   'ctx_settlements',
+  // Q6-6: the interest-mint integration suite writes here directly.
+  // Not previously listed — CASCADE from `users` below already swept
+  // it transitively (interest_mint_snapshots.user_id references
+  // users.id), but listing it explicitly keeps the truncation order
+  // self-documenting per this file's own stated intent.
+  'interest_mint_snapshots',
   'pending_payouts',
   'payment_watcher_skips',
   'credit_transactions',

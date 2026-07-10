@@ -578,7 +578,74 @@ payment_method='loop_asset' AND state='pending_payment'` — plus a
 - [ ] **Q6-3 · Web money-write client tests** (`admin-write-envelope` step-up + Idempotency-Key). _S–M._
 - [ ] **Q6-4 · Gating loop-native purchase-through-the-UI E2E** (the real production path). _M._
 - [ ] **Q6-5 · Admin / support UI E2E smoke.** _M._
-- [ ] **Q6-6 · Wallet-spend + on-chain interest-mint coverage** (mint has no real-Postgres test). _M._
+- [x] **Q6-6 · Wallet-spend + on-chain interest-mint coverage** (mint has no real-Postgres test). _M._
+      **Done 2026-07-10 (test-only PR — coverage cannot demote an
+      invariant, self-merged once CI was green):** added
+      `apps/backend/src/__tests__/integration/interest-mint.test.ts`,
+      the real-Postgres integration test this item said was missing —
+      drives `runInterestMintTick` against a real DB (Horizon mocked)
+      and covers: a full mint (snapshot + `credit_transactions` +
+      `user_credits` + `pending_payouts` rows, cursor advance);
+      sub-minor accrual carried forward across two real nights until
+      it crosses a whole minor unit and mints (a genuine DB round-trip
+      of the carry-forward read, not a mocked one); a zero-balance
+      holder writing no rows; the cursor fast-path making a same-
+      period re-run a cheap no-op; a crash-recovery re-run (cursor
+      unadvanced, one user already committed) skipping without a
+      double mint while a fresh user in the same tick still mints; a
+      genuine duplicate-INSERT unique-violation (real
+      `interest_mint_snapshots_user_asset_period_unique` 23505,
+      Drizzle-wrapped) correctly classified by `isUniqueViolation`
+      (`db/errors.ts`) — the AUDIT-2-D fix exercised against a REAL
+      wrapped error, which the mocked unit test structurally could
+      not produce; and the S4-3 fleet-wide advisory lock excluding a
+      concurrent tick via a second real `pg_try_advisory_lock` session
+      (a test-only mirror of the private `interestMintLockKey()` hash,
+      since the function isn't exported). Every new interest-mint
+      assertion was confirmed to fail against a deliberately-broken
+      production code path, then reverted (5 independent breaks: the
+      mirror-bump write, both idempotency layers together — breaking
+      only the SELECT fast-path alone is saved by the catch-based
+      classifier, confirmed empirically and now documented in the
+      test's own comment — the cursor-advance gate, the
+      `isUniqueViolation` cause-chain walk, and the lock-key
+      derivation).
+      Also added `apps/backend/src/__tests__/integration/redeem.test.ts`
+      for wallet-spend (`orders/redeem.ts`, R3-9's advisory lock):
+      the unit suite mocks `withAdvisoryLock` entirely, so it can pin
+      the call shape but not that a REAL Postgres session-scoped
+      advisory lock excludes a second, genuinely concurrent HTTP
+      redemption. Because the handler's in-process `Set` fence always
+      wins a same-process race first (deterministic, no `await`
+      between its check and add), the test clears that fence via the
+      exported `__resetRedeemFenceForTests()` seam mid-flight —
+      simulating "a second machine whose in-process Set doesn't know
+      about this order" — to isolate and prove the fleet-wide lock
+      alone. Confirmed to fail (times out — the un-excluded second
+      call also blocks on the paused Horizon mock) against a
+      deliberately non-deterministic lock-key derivation, then
+      reverted.
+      Test-helper-only changes (no production source touched):
+      `vitest-integration-setup.ts` gained a real (never-funded, freshly
+      generated per process — never a hardcoded secret literal,
+      `scripts/lint-docs.sh` §5b) GBPLOOP issuer/secret pair (needed so
+      `resolveIssuerSigners()` actually resolves a signer — a
+      placeholder-only address left GBPLOOP filtered out of the mint
+      path entirely), a real operator fee-bump secret (redeem's
+      `NOT_CONFIGURED` guard), and swapped the repeated-character
+      `LOOP_STELLAR_DEPOSIT_ADDRESS` placeholder for a real keypair's
+      public key (the redeem test is the first in the suite to build
+      an actual Stellar `Operation.payment`, which does full StrKey
+      checksum validation the old placeholder failed). `db-test-setup.ts`
+      now explicitly truncates `interest_mint_snapshots` (previously
+      swept only implicitly via `users` CASCADE). Verified none of
+      these changes altered any other integration test's behavior —
+      full local suite (`LOOP_E2E_DB=1`, throwaway docker postgres)
+      stayed 100% green before/after (170/170), and CI's
+      `flywheel-integration` job (real postgres) is the authoritative
+      gate. Wallet-provisioning single-flight (S4-2) was assessed as
+      already adequately unit-covered (`wallet/__tests__/provisioning.test.ts`)
+      and left alone — out of scope for this pass.
 - [ ] **Q6-7 · Promote the real-chain run off manual-only** (schedule `e2e-real.mjs`). _S._
 - [ ] **Q6-8 · Ratchet web coverage floors** as Q6-3/4/5 land. _S._
 
