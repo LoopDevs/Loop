@@ -27,10 +27,19 @@
  *     because the map client expands `{s}` into `a`/`b`/`c`/`d` subdomain
  *     URLs itself for load-spreading (the style-spec `tiles` array has no
  *     built-in placeholder substitution the way Leaflet's tileLayer did).
+ *     These hosts live in BOTH `connect-src` (load-bearing — MapLibre
+ *     XHRs tiles as arraybuffers) and `img-src` (decode fallback); see
+ *     the inline notes on those directives.
+ *   - `worker-src`/`child-src` allow `blob:` — maplibre-gl runs its
+ *     tile-processing Web Worker from a blob: URL (ADR 046). Without
+ *     this the worker load falls through worker-src → child-src →
+ *     default-src ('self'), none of which permit blob:, so `new Map()`
+ *     throws and the map never initializes.
  *   - *.ingest.sentry.io / *.ingest.de.sentry.io — error telemetry.
  *   - `blob:` + `data:` on img-src — inline SVG/PNG data URIs used by the
- *     share-image + purchase-complete flows. Not needed for map markers
- *     — those are plain DOM elements with `background-image` URLs
+ *     share-image + purchase-complete flows, plus MapLibre's blob:-backed
+ *     tile-image decode fallback (see connect-src note). Map markers
+ *     themselves are plain DOM elements with `background-image` URLs
  *     already covered by the origins above, not data-URI-based icons.
  */
 export interface SecurityHeadersOptions {
@@ -71,9 +80,23 @@ export function buildSecurityHeaders(options: SecurityHeadersOptions = {}): Reco
     // the map client's tile URLs are built as `a.basemaps.cartocdn.com`,
     // `b.basemaps.cartocdn.com`, etc. (subdomain load-spreading), so the
     // bare-domain entry would block every tile load. Use the wildcard
-    // form for both CARTO and OSM.
+    // form for both CARTO and OSM. NOTE (ADR 046): MapLibre fetches raster
+    // tiles via XMLHttpRequest (responseType=arraybuffer) → decodes the
+    // bytes to a blob:-backed ImageBitmap, NOT via a direct `<img src=…>`
+    // like Leaflet did — so the load-bearing directive for tiles is now
+    // `connect-src` below. These hosts are kept in img-src too for the
+    // no-createImageBitmap decode fallback (blob:/data: image), which is
+    // already covered by the blob:/data: sources here.
     `img-src 'self' data: blob: ${apiOrigin} https://*.basemaps.cartocdn.com https://*.tile.openstreetmap.org https://*.googleusercontent.com`,
-    `connect-src 'self' ${apiOrigin} https://*.ingest.sentry.io https://*.ingest.de.sentry.io https://accounts.google.com https://appleid.apple.com`,
+    // maplibre-gl spawns its tile-processing Web Worker from a blob: URL — ADR 046
+    `worker-src 'self' blob:`,
+    // child-src is the CSP2 fallback older browsers use for workers when
+    // they don't understand worker-src — keep blob: allowed there too (ADR 046).
+    `child-src 'self' blob:`,
+    // cartocdn + OSM added here (ADR 046): MapLibre XHRs raster tiles, and
+    // XHR/fetch is governed by connect-src (Leaflet loaded tiles as <img>,
+    // governed by img-src — hence this was img-src-only before the swap).
+    `connect-src 'self' ${apiOrigin} https://*.basemaps.cartocdn.com https://*.tile.openstreetmap.org https://*.ingest.sentry.io https://*.ingest.de.sentry.io https://accounts.google.com https://appleid.apple.com`,
     // Google renders its sign-in button inside an iframe it owns; Apple's
     // JS SDK opens appleid.apple.com (popup, and an iframe for state).
     `frame-src https://accounts.google.com https://appleid.apple.com`,
