@@ -337,6 +337,18 @@ interleave mid-operation).
   Tracked as a follow-up once N-channel throughput within one leader is
   proven and becomes the binding constraint (see "Why keep the
   fleet-wide leader lock" above).
+- **Cancelling in-flight shards on an A8 lease timeout.** The A8 lease
+  race (`runPayoutTick`) releases the leader lock if the tick body hangs
+  > 90s, but the raced-away `runPayoutTickLocked` promise is not
+  > cancelled — it runs to completion in the background. Pre-ADR-044 that
+  > orphaned at most one in-flight submit; with N channels it can orphan
+  > up to N (one per shard). This does NOT break INV-9 (CAS + CF-18 are
+  > per-row and channel-agnostic), but it N-scales the already-accepted
+  > A8 hung-leader `tx_bad_seq`/retry-churn residual — recorded in
+  > `docs/threat-model.md`'s accepted-risk register. An `AbortController`
+  > threaded into the shard loops (stop starting new rows once the lease
+  > trips) is the durable fix, naturally paired with the per-channel
+  > fleet-wide-locking follow-up above.
 - **Raising `PAYOUT_TICK_LEASE_MS` / the tick `limit` in tandem with N.**
   The existing 90s lease and default `limit=5` are untouched; an
   operator who raises `LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS` to N channels

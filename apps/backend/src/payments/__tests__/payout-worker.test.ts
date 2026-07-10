@@ -1433,4 +1433,30 @@ describe('ADR 031 — interest_mint rows sign with the issuer keypair', () => {
     expect(sdkMock.submitPayout).not.toHaveBeenCalled();
     expect(discordMock.notifyPayoutAwaitingTrustline).toHaveBeenCalledOnce();
   });
+
+  it('ADR 044 × ADR 031: an interest_mint routed through a channel signs with the ISSUER secret AND the channelSecret (orthogonal — the channel is the tx source, the issuer is the payment funder/minter)', async () => {
+    trustDestination();
+    repoMocks.listClaimablePayouts.mockResolvedValue([makeMintRow()]);
+    const r = await runPayoutTick({
+      ...ISSUER_ARGS,
+      channels: [{ secret: 'SCHAN1', account: 'GCHAN1' }],
+    });
+    expect(r.confirmed).toBe(1);
+    const submitArg = sdkMock.submitPayout.mock.calls[0]?.[0] as {
+      secret: string;
+      channelSecret?: string;
+    };
+    // `secret` (the payment funder = mint source) is still the ISSUER,
+    // untouched by channel plumbing — signer resolution is independent
+    // of channel assignment.
+    expect(Keypair.fromSecret(submitArg.secret).publicKey()).toBe(issuerKp.publicKey());
+    // The channel is the tx source that owns the sequence number + pays
+    // the fee — threaded through orthogonally.
+    expect(submitArg.channelSecret).toBe('SCHAN1');
+    // Idempotency pre-check still scans the ISSUER account (the funder),
+    // not the channel.
+    expect(horizonMock.findOutboundPaymentByMemo).toHaveBeenCalledWith(
+      expect.objectContaining({ account: issuerKp.publicKey() }),
+    );
+  });
 });
