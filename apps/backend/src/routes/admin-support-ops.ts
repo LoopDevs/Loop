@@ -1,13 +1,14 @@
 /**
  * Support-dashboard route mounts (ADR 037 §4) — the watcher-skip
  * browser, the per-user wallet card, the redemption re-fetch, the
- * reverse lookup, and the fleet-wide ledger browser (A5-8). All
- * SUPPORT-tier: these are exactly the "find the customer, explain
- * the state, unstick the delivery" (plus, for the ledger browser,
- * "see where the money moved") surfaces the support role exists
- * for. The explicit `requireStaff('support')` markers are
- * functionally redundant with the namespace blanket but make each
- * mount's tier reviewable in-place (and visible to
+ * reverse lookup, the fleet-wide ledger browser (A5-8), and the
+ * per-subject audit timeline (A5-7). All SUPPORT-tier: these are
+ * exactly the "find the customer, explain the state, unstick the
+ * delivery" (plus, for the ledger browser and audit timeline, "see
+ * where the money moved / what happened to this account") surfaces
+ * the support role exists for. The explicit `requireStaff('support')`
+ * markers are functionally redundant with the namespace blanket but
+ * make each mount's tier reviewable in-place (and visible to
  * staff-route-gating.test.ts).
  *
  * The three POST actions are idempotent re-drives of work the
@@ -38,6 +39,7 @@ import { adminGetUserWalletHandler, adminWalletReprovisionHandler } from '../adm
 import { adminRefetchRedemptionHandler } from '../admin/order-refetch-redemption.js';
 import { adminLookupHandler } from '../admin/lookup.js';
 import { adminLedgerHandler } from '../admin/ledger.js';
+import { adminUserAuditTimelineHandler } from '../admin/user-audit-timeline.js';
 
 /**
  * Mounts the ADR 037 support-ops routes on the supplied Hono app.
@@ -112,5 +114,18 @@ export function mountAdminSupportOpsRoutes(app: Hono): void {
     rateLimit('GET /api/admin/ledger', 60, 60_000),
     requireStaff('support'),
     adminLedgerHandler,
+  );
+  // A5-7: per-subject audit timeline — merges admin actions targeting
+  // this user + their credit-transactions/orders/payouts/session-
+  // revocation history into one newest-first, time-ordered view (see
+  // admin/user-audit-timeline.ts for the full per-source bounding
+  // doc + the 24h admin-action-window / OTP-lock-snapshot
+  // limitations). Read-only. 120/min matches the other per-user JSON
+  // drills (ADR 022).
+  app.get(
+    '/api/admin/users/:userId/audit',
+    rateLimit('GET /api/admin/users/:userId/audit', 120, 60_000),
+    requireStaff('support'),
+    adminUserAuditTimelineHandler,
   );
 }

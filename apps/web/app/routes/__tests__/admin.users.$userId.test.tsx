@@ -107,6 +107,17 @@ vi.mock('~/services/admin', async (importActual) => {
       rows: [],
     }),
     listAdminUserCreditTransactions: empty({ transactions: [] }),
+    getAdminUserAuditTimeline: empty({
+      userId: 'u-360',
+      events: [],
+      nextCursors: {
+        adminActions: null,
+        ledger: null,
+        orders: null,
+        payouts: null,
+        sessions: null,
+      },
+    }),
   };
 });
 
@@ -202,6 +213,8 @@ describe('<AdminUserDetailRoute /> — ADR 037 role gating', () => {
     expect(screen.getByRole('button', { name: /Download CSV/i })).toBeDefined();
     // Global lookup search renders for staff.
     expect(screen.getByRole('search', { name: /Global admin lookup/i })).toBeDefined();
+    // A5-7: audit timeline (read) renders for both roles.
+    expect(screen.getByRole('heading', { name: /Audit timeline/i })).toBeDefined();
   });
 
   it('support sees the reads + wallet card but NOT the money forms or CSV', async () => {
@@ -223,6 +236,8 @@ describe('<AdminUserDetailRoute /> — ADR 037 role gating', () => {
     expect(screen.queryByRole('button', { name: /Download CSV/i })).toBeNull();
     // Ledger browser (read) still renders.
     expect(screen.getByRole('heading', { name: /Credit transactions/i })).toBeDefined();
+    // A5-7: audit timeline (read) renders for support too.
+    expect(screen.getByRole('heading', { name: /Audit timeline/i })).toBeDefined();
   });
 
   it('denies non-staff users at the shell gate', async () => {

@@ -37,9 +37,26 @@ export const BULK_LIST_ROW_THRESHOLD = 50;
  * endpoint's page size — this map is a targeted patch for the one
  * endpoint that's currently invisible by construction, not a general
  * solution to sub-threshold pagination walks on other list endpoints.
+ *
+ * A5-8 P2 follow-up: the opposite collision. `GET /api/admin/ledger`
+ * (`admin/ledger.ts`) has `DEFAULT_LIMIT = 50` — the SAME value as the
+ * global `BULK_LIST_ROW_THRESHOLD` — so EVERY default-size page load
+ * (not just a broad/paginated one) trips the tripwire, diluting the
+ * CF-10 signal with routine support-triage opens of the page. This
+ * override raises the effective threshold for that one path above its
+ * own default page size (51 > 50) while leaving it well below the
+ * endpoint's real max (`MAX_LIMIT = 200`), so an explicit wide
+ * `?limit=` pull still trips it — only the routine default no longer
+ * does. Chosen over bumping `admin/ledger.ts`'s `DEFAULT_LIMIT` to 49:
+ * that constant is documented as "50" in three other places (the
+ * handler doc, the `@loop/shared` response-type doc, and the openapi
+ * registration) that a magic-number-49 change would need to ripple
+ * through for no behavioural benefit; this map exists for exactly this
+ * shape of fix.
  */
 export const PER_PATH_BULK_ROW_THRESHOLD: Readonly<Record<string, number>> = {
   '/api/admin/users/search': 15,
+  '/api/admin/ledger': 51,
 };
 
 /**

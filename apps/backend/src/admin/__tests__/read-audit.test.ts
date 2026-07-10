@@ -106,3 +106,46 @@ describe('bulkRowThresholdFor (ADMIN-02)', () => {
     expect(rowCount).toBeLessThan(BULK_LIST_ROW_THRESHOLD);
   });
 });
+
+// A5-8 P2 follow-up: the opposite collision from ADMIN-02 above.
+// `admin/ledger.ts`'s DEFAULT_LIMIT (50) equals the global
+// BULK_LIST_ROW_THRESHOLD (50), so every default-size page trips the
+// tripwire — not just a broad/paginated pull. The override raises the
+// effective threshold above the endpoint's own default so routine
+// support-triage opens stay log-only, while an explicit wide
+// `?limit=` request (up to the endpoint's real MAX_LIMIT of 200)
+// still trips it.
+describe('bulkRowThresholdFor (A5-8 P2 — ledger default-page collision)', () => {
+  const LEDGER_DEFAULT_LIMIT = 50;
+
+  it("uses a per-path override for /api/admin/ledger, set ABOVE the endpoint's own default page size", () => {
+    const override = bulkRowThresholdFor('/api/admin/ledger');
+    expect(override).toBe(PER_PATH_BULK_ROW_THRESHOLD['/api/admin/ledger']);
+    expect(override).toBeGreaterThan(LEDGER_DEFAULT_LIMIT);
+    // Still well below the endpoint's real ceiling — a wide explicit
+    // pull remains visible to the tripwire.
+    expect(override).toBeLessThan(200);
+  });
+
+  it('a default-size ledger page (50 rows) no longer counts as bulk', () => {
+    const rows = Array.from({ length: LEDGER_DEFAULT_LIMIT }, (_, i) => ({ id: String(i) }));
+    const rowCount = countAdminListRows(
+      JSON.stringify({ transactions: rows }),
+      'application/json; charset=utf-8',
+    );
+    expect(rowCount).toBe(LEDGER_DEFAULT_LIMIT);
+    // Before the fix this exact page (rowCount === global threshold)
+    // WOULD have tripped the tripwire (isBulkList = rowCount >=
+    // threshold). The override closes that.
+    expect(rowCount).toBeLessThan(bulkRowThresholdFor('/api/admin/ledger'));
+  });
+
+  it('an explicit wide ledger pull (near MAX_LIMIT) still counts as bulk', () => {
+    const rows = Array.from({ length: 200 }, (_, i) => ({ id: String(i) }));
+    const rowCount = countAdminListRows(
+      JSON.stringify({ transactions: rows }),
+      'application/json; charset=utf-8',
+    );
+    expect(rowCount).toBeGreaterThanOrEqual(bulkRowThresholdFor('/api/admin/ledger'));
+  });
+});

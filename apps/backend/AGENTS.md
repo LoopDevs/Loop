@@ -40,7 +40,10 @@ src/
 │   │                     user-wallet.ts (wallet card + reprovision),
 │   │                     order-refetch-redemption.ts, lookup.ts (reverse
 │   │                     lookup), ledger.ts (fleet-wide credit_transactions
-│   │                     browser, A5-8); routes in routes/admin-staff.ts +
+│   │                     browser, A5-8), user-audit-timeline.ts (per-subject
+│   │                     audit timeline merging admin actions + ledger +
+│   │                     orders + payouts + session revocations, A5-7);
+│   │                     routes in routes/admin-staff.ts +
 │   │                     routes/admin-support-ops.ts.
 ├── config/handler.ts   ← GET /api/config (feature-flag snapshot — ADR 010)
 ├── public/             ← ADR 020 Tier-1 unauthenticated never-500 surface:

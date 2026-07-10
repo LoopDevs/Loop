@@ -1,15 +1,15 @@
 /**
  * Support-ops OpenAPI registrations (ADR 037 §4) — the
  * watcher-skip browser (+ reopen), the per-user wallet card
- * (+ reprovision), the redemption re-fetch, the reverse lookup, and
- * the fleet-wide ledger browser (A5-8). Wire shapes live in
- * `@loop/shared/admin-support-ops`.
+ * (+ reprovision), the redemption re-fetch, the reverse lookup, the
+ * fleet-wide ledger browser (A5-8), and the per-subject audit
+ * timeline (A5-7). Wire shapes live in `@loop/shared/admin-support-ops`.
  *
- * All eight paths are SUPPORT-tier (admin ⊇ support); the three
+ * All nine paths are SUPPORT-tier (admin ⊇ support); the three
  * POST actions carry the ADR 017 envelope (Idempotency-Key +
  * reason) without the step-up header — they unstick deliveries,
- * they don't move money (ADR 037 matrix). The ledger browser is a
- * plain read — no envelope, no mutation.
+ * they don't move money (ADR 037 matrix). The ledger browser and the
+ * audit timeline are plain reads — no envelope, no mutation.
  */
 import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
@@ -562,6 +562,110 @@ export function registerAdminSupportOpsOpenApi(
       },
       500: {
         description: 'Internal error reading the ledger',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+    },
+  });
+
+  // ─── Per-subject audit timeline (ADR 037 §4 / A5-7) ─────────────────────────
+
+  const AdminAuditTimelineEvent = registry.register(
+    'AdminAuditTimelineEvent',
+    z.object({
+      kind: z.enum(['admin_action', 'ledger', 'order', 'payout', 'session_revoked', 'auth_lock']),
+      at: z.string().datetime().openapi({ description: 'Merge/sort key — newest first.' }),
+      summary: z.string(),
+      refType: z.enum(['order', 'payout']).nullable(),
+      refId: z.string().nullable(),
+      detail: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])),
+    }),
+  );
+
+  const AdminAuditTimelineCursor = registry.register(
+    'AdminAuditTimelineCursor',
+    z.object({
+      at: z.string().datetime().openapi({ description: "Oldest returned row's timestamp." }),
+      id: z
+        .string()
+        .openapi({ description: "That row's stable unique id (the keyset tiebreaker)." }),
+    }),
+  );
+
+  const AdminAuditTimelineCursors = registry.register(
+    'AdminAuditTimelineCursors',
+    z.object({
+      adminActions: AdminAuditTimelineCursor.nullable(),
+      ledger: AdminAuditTimelineCursor.nullable(),
+      orders: AdminAuditTimelineCursor.nullable(),
+      payouts: AdminAuditTimelineCursor.nullable(),
+      sessions: AdminAuditTimelineCursor.nullable(),
+    }),
+  );
+
+  // `before<Source>` cursors are the compact `<iso-8601>|<id>` encoding
+  // of an `AdminAuditTimelineCursor` (see @loop/shared encodeAuditCursor).
+  const compoundCursorParam = (source: string): z.ZodType =>
+    z
+      .string()
+      .optional()
+      .openapi({
+        description: `Compound keyset cursor for the ${source} source: "<iso-8601>|<id>".`,
+      });
+
+  const AdminUserAuditTimelineResponse = registry.register(
+    'AdminUserAuditTimelineResponse',
+    z.object({
+      userId: z.string().uuid(),
+      events: z.array(AdminAuditTimelineEvent),
+      nextCursors: AdminAuditTimelineCursors,
+    }),
+  );
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/admin/users/{userId}/audit',
+    summary:
+      'Per-subject audit timeline — admin actions + ledger + orders + payouts + sessions (ADR 037 §4 / A5-7).',
+    description:
+      "Merges five bounded, already-indexed per-user reads (admin_idempotency_keys rows naming this userId, credit_transactions, orders, pending_payouts, refresh_tokens revocations) plus a current-state OTP-lock snapshot into one newest-first timeline PAGE. `?limit=` bounds EACH source independently (default 8, clamped [1, 20]). Pagination is PER-SOURCE with a COMPOUND `(timestamp, id)` keyset cursor — not a single shared cursor and not a bare timestamp: the response's `nextCursors` carries one `{at, id}` per source (the oldest row that source returned, or null when exhausted); the client echoes each non-null one back as `beforeAdminActions`/`beforeLedger`/`beforeOrders`/`beforePayouts`/`beforeSessions` (each the compact `<iso>|<id>` encoding) to page THAT source older. The `id` tiebreaker prevents silent row-loss when many rows share one timestamp (e.g. a mass session-revocation stamps one revokedAt on every session), and per-source cursors prevent cross-source loss under uneven density. A request with NO before* param is page 1 (all sources + the OTP-lock snapshot); ANY before* param makes it a later page (only cursored sources re-queried, snapshot omitted). The admin-actions source only covers a trailing 24h window (admin_idempotency_keys is a 24h-TTL idempotency cache, hourly-swept — same limitation as the existing GET /api/admin/audit-tail); the OTP-lock entry is a snapshot of current state, not a history. Read-only — no mutation, no idempotency envelope. See admin/user-audit-timeline.ts for the full per-source doc.",
+    tags: ['Admin'],
+    security: [{ bearerAuth: [] }],
+    request: {
+      params: z.object({ userId: z.string().uuid() }),
+      query: z.object({
+        limit: z.coerce.number().int().min(1).max(20).optional().openapi({
+          description: 'Per-source row cap. Default 8, clamped [1, 20].',
+        }),
+        beforeAdminActions: compoundCursorParam('admin-actions'),
+        beforeLedger: compoundCursorParam('ledger (credit_transactions)'),
+        beforeOrders: compoundCursorParam('orders'),
+        beforePayouts: compoundCursorParam('payouts (pending_payouts)'),
+        beforeSessions: compoundCursorParam('sessions (refresh_tokens)'),
+      }),
+    },
+    responses: {
+      200: {
+        description: 'Merged timeline page (newest first) + per-source next cursors',
+        content: { 'application/json': { schema: AdminUserAuditTimelineResponse } },
+      },
+      400: {
+        description: 'userId is not a uuid, or limit/before* is malformed',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      401: {
+        description: 'Missing or invalid bearer',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      404: {
+        description: 'Caller is not staff (concealment), or no such user',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      429: {
+        description: 'Rate limit exceeded (120/min per IP)',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      500: {
+        description: 'Internal error',
         content: { 'application/json': { schema: errorResponse } },
       },
     },
