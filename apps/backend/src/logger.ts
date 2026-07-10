@@ -90,6 +90,14 @@ export const REDACT_PATHS: readonly string[] = [
   '*.LOOP_STELLAR_EURLOOP_ISSUER_SECRET',
   'issuerSecret',
   '*.issuerSecret',
+  // ADR 044 / S4-1 — payout channel-account secrets. Same treatment as
+  // the operator secret above: cover the env-key shape (the comma-list
+  // itself) and the typed field name `submitPayout`/the worker thread
+  // through.
+  'channelSecret',
+  '*.channelSecret',
+  'LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS',
+  '*.LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS',
   // A2-655 + A2-1601 — env-var names for every secret-bearing
   // field loaded into process.env / env.ts. A boot-time
   // `log.debug({ env })` would otherwise leak these verbatim. The

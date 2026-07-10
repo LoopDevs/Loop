@@ -219,6 +219,21 @@ A `pending_payouts` row is submitted to Stellar at most once.
   lock if the leader hangs on Stellar I/O, degrading to the pre-A8
   per-machine race (accepted) rather than stalling the fleet. Not a full
   heartbeat leader-election; the residual is a >90s hung tick.
+- **runtime (ADR 044 / S4-1 — payout channel accounts)**: within one
+  leader's tick, a claimed batch may be sharded across N configured
+  channel accounts and the shards submitted concurrently for
+  throughput. This does NOT weaken the invariant: shards are a pure
+  in-memory partition of rows this process already claimed (no second
+  DB claim, so no row can land in two shards), each shard is still a
+  strictly serial queue against its OWN channel's sequence number (so
+  "no two in-flight submits share a sequence number" holds per-shard
+  exactly as it held fleet-wide before), and the CAS claim + CF-18
+  hash-before-submit + authoritative re-check are per-row and
+  channel-agnostic — unaffected by which account paid the fee. The A8
+  fleet-wide leader lock is unchanged, so cross-machine safety still
+  reduces to the single-process argument above. Zero channels
+  configured (the default) is the exact pre-ADR-044 code path. Full
+  argument: `docs/adr/044-payout-throughput.md`.
 
 ### INV-10 — Interest mints only for backed assets
 

@@ -149,6 +149,24 @@ describe('logger redaction', () => {
     expect(wallet.mnemonic).toBe('[REDACTED]');
   });
 
+  it('ADR 044 / S4-1: redacts payout channel-account secrets (typed field + env-key shape)', () => {
+    const { logger, records } = makeLogger();
+    logger.info(
+      {
+        channelSecret: 'SCHANNELXXX',
+        args: { channelSecret: 'SCHANNELYYY' },
+        env: { LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS: 'SXXX,SYYY' },
+      },
+      'test',
+    );
+    const r = records[0] as Record<string, unknown>;
+    expect(r.channelSecret).toBe('[REDACTED]');
+    expect((r.args as Record<string, string>).channelSecret).toBe('[REDACTED]');
+    expect((r.env as Record<string, string>).LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS).toBe(
+      '[REDACTED]',
+    );
+  });
+
   it('redacts cookie headers at common nesting depths', () => {
     const { logger, records } = makeLogger();
     logger.info(

@@ -25,8 +25,25 @@ import {
 } from '@stellar/stellar-sdk';
 
 export interface PayoutSubmitArgs {
-  /** Operator Stellar secret key (`S...`). Never logged. */
+  /**
+   * Funding/authorizing Stellar secret key (`S...`) — the operator, or
+   * (for `kind='interest_mint'` rows) an ADR 031 issuer. This is the
+   * account the payment actually debits. Never logged.
+   */
   secret: string;
+  /**
+   * ADR 044 / S4-1: optional channel-account secret. When set, THIS
+   * account becomes the transaction source — its sequence number is
+   * consumed and it pays the fee — while the Payment operation gets an
+   * explicit `source: <funding pubkey>` override so the payment still
+   * debits `secret`'s account. The transaction is signed by both
+   * keypairs (Stellar requires every distinct `source` referenced —
+   * tx-level and any op-level override — to sign). Unset (the default):
+   * byte-identical to pre-ADR-044 behaviour — `secret` is both the tx
+   * source and the payment's implicit `from`, one signature. Never
+   * logged.
+   */
+  channelSecret?: string;
   /** Horizon base URL. Pinned per-deployment via env. */
   horizonUrl: string;
   /** Network passphrase — PUBLIC or TESTNET constant from the SDK. */
@@ -249,14 +266,30 @@ export async function submitPayout(args: PayoutSubmitArgs): Promise<PayoutSubmit
   const timeout = args.timeoutSeconds ?? 60;
   const fee = args.feeStroops ?? BASE_FEE;
 
-  let keypair: Keypair;
+  let fundingKeypair: Keypair;
   try {
-    keypair = Keypair.fromSecret(args.secret);
+    fundingKeypair = Keypair.fromSecret(args.secret);
   } catch (err) {
     throw new PayoutSubmitError(
       'terminal_bad_auth',
       err instanceof Error ? err.message : 'Invalid operator secret',
     );
+  }
+
+  // ADR 044 / S4-1: optional channel account. See `PayoutSubmitArgs`
+  // for the full contract; when unset every line below behaves exactly
+  // as before this ADR (sequenceKeypair === fundingKeypair, no op-level
+  // source override, one signature).
+  let channelKeypair: Keypair | null = null;
+  if (args.channelSecret !== undefined) {
+    try {
+      channelKeypair = Keypair.fromSecret(args.channelSecret);
+    } catch (err) {
+      throw new PayoutSubmitError(
+        'terminal_bad_auth',
+        err instanceof Error ? err.message : 'Invalid channel secret',
+      );
+    }
   }
 
   let asset: Asset;
@@ -271,11 +304,17 @@ export async function submitPayout(args: PayoutSubmitArgs): Promise<PayoutSubmit
 
   const server = new Horizon.Server(args.horizonUrl);
 
+  // The channel (when configured) owns the sequence number this
+  // submit consumes; otherwise the funding account is its own
+  // sequence source, exactly as pre-ADR-044.
+  const sequenceKeypair = channelKeypair ?? fundingKeypair;
+
   let account: Awaited<ReturnType<Horizon.Server['loadAccount']>>;
   try {
     // Fresh seq on every submit — ADR 016 design, prevents
-    // stale-seq from a prior timeout poisoning the retry.
-    account = await server.loadAccount(keypair.publicKey());
+    // stale-seq from a prior timeout poisoning the retry. Now reads
+    // whichever account owns the sequence for this submit.
+    account = await server.loadAccount(sequenceKeypair.publicKey());
   } catch (err) {
     throw new PayoutSubmitError(
       'transient_horizon',
@@ -291,6 +330,12 @@ export async function submitPayout(args: PayoutSubmitArgs): Promise<PayoutSubmit
     })
       .addOperation(
         Operation.payment({
+          // ADR 044: when a channel is submitting, the payment must
+          // still debit the FUNDING account, not the channel — the
+          // op-level `source` override does that. Omitted entirely
+          // (not even undefined) when there's no channel, so the
+          // built operation is byte-identical to pre-ADR-044.
+          ...(channelKeypair !== null ? { source: fundingKeypair.publicKey() } : {}),
           destination: args.intent.to,
           asset,
           amount: stroopsToAmount(args.intent.amountStroops),
@@ -299,7 +344,16 @@ export async function submitPayout(args: PayoutSubmitArgs): Promise<PayoutSubmit
       .addMemo(Memo.text(args.intent.memoText))
       .setTimeout(timeout)
       .build();
-    tx.sign(keypair);
+    // Stellar requires a signature from every distinct `source`
+    // referenced in the transaction — the tx-level source (always) and
+    // any op-level source override (here, the funding account, only
+    // when a channel is in play). Signing twice with the SAME keypair
+    // when there's no channel would be harmless but pointless, so this
+    // stays a single `sign` call on that path.
+    tx.sign(sequenceKeypair);
+    if (channelKeypair !== null) {
+      tx.sign(fundingKeypair);
+    }
   } catch (err) {
     throw new PayoutSubmitError(
       'terminal_other',

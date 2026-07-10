@@ -70,6 +70,7 @@
 | `docs/adr/041-media-pipeline-tooling-deps.md`               | Why the media pipeline stronger QC/sourcing (`tools/ctx-catalog/`) adds `tesseract.js` (text-in-cover OCR) + `tldts` (Public Suffix List domain resolution) as **root `devDependencies`** — operator-tooling only, never in a shipped web/backend/mobile bundle, so `container-cve-scan` + bundle budgets are unaffected.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `docs/adr/042-a11y-tooling.md`                              | Accessibility regression tooling (B-2) — `eslint-plugin-jsx-a11y` as a lint gate on `apps/web/app/**/*.tsx` + `jest-axe` runtime DOM smoke scans on key routes; both `apps/web`-only devDependencies, never shipped. CF-35/WUM-10 are the evidence manual-only a11y regresses.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `docs/adr/043-i18n-framework.md`                            | i18n framework (B-6) — i18next + react-i18next chosen over FormatJS/react-intl; route-driven locale (no browser detection), synchronous bundled-resources init (SSR + static-export safe), first customer-facing extraction tranche (home/auth/onboarding/footer/404). Supersedes the CF-22 "don't extract yet" scaffold (`i18n/t.ts`/`messages.ts`, deleted). Actual translations deferred to the 🧭 language-set decision — see `docs/i18n.md`.                                                                                                                                                                                                                                                                                                                                                                           |
+| `docs/adr/044-payout-throughput.md`                         | Stellar payout throughput (S4-1) — channel accounts (the standard Stellar scale pattern) lift the one-operator-account sequence-number ceiling; N pre-funded channels own the tx source (sequence + fee), the Payment op's `source` override keeps the operator/issuer as the actual funder, so N sequence streams submit concurrently with the fleet-wide leader lock (A8) unchanged. Phase 1 (code) shipped; N=0 (unset) is byte-identical to pre-ADR-044. Operator channel provisioning is a follow-up.                                                                                                                                                                                                                                                                                                                  |
 
 ---
 
@@ -466,6 +467,16 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # so a dev-mode backend doesn't submit Stellar transactions; set true in
 # production + Fly staging after LOOP_STELLAR_OPERATOR_SECRET is wired.
 # LOOP_WORKERS_ENABLED=true
+
+# ADR 044 / S4-1: payout channel accounts (Stellar payout throughput).
+# Comma-separated pre-funded Stellar secret keys the payout worker uses
+# as its transaction SOURCE (sequence + fee) so N channels give N
+# independent sequence streams to submit through concurrently —
+# payments still debit the operator/issuer; channels never hold the
+# LOOP asset. List length is the channel count; empty/unset (default)
+# → the original fully-serial single-account path, byte-identical to
+# pre-ADR-044. Never logged. See docs/adr/044-payout-throughput.md.
+# LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS=<S...>,<S...>
 
 # R3-5 CTX settlement sanity band. Before paying CTX, procurement
 # refuses a SEP-7 payment amount above this many basis points of the

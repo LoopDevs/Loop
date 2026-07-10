@@ -76,6 +76,15 @@ export interface PayOneArgs {
   horizonUrl: string;
   networkPassphrase: string;
   maxAttempts: number;
+  /**
+   * ADR 044 / S4-1: the channel account (if any) this call's shard is
+   * bound to. Threaded straight through to `submitPayout` — `payOne`
+   * itself doesn't branch on it anywhere else (the idempotency
+   * pre-check and CAS claim are unaffected by which account paid the
+   * fee). Unset on the legacy no-channel path, so every existing
+   * caller is unaffected.
+   */
+  channelSecret?: string | undefined;
 }
 
 /**
@@ -284,6 +293,7 @@ export async function payOne(row: PendingPayout, args: PayOneArgs): Promise<PayO
     });
     const { txHash } = await submitPayout({
       secret: signer.secret,
+      ...(args.channelSecret !== undefined ? { channelSecret: args.channelSecret } : {}),
       horizonUrl: args.horizonUrl,
       networkPassphrase: args.networkPassphrase,
       feeStroops,

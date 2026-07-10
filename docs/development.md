@@ -389,6 +389,16 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # LOOP_STELLAR_OPERATOR_SECRET=S...(55 chars)
 # LOOP_STELLAR_OPERATOR_SECRET_PREVIOUS=S...
 
+# Payout channel accounts (ADR 044 / S4-1 — payout throughput). Comma-
+# separated pre-funded Stellar secret keys used as the payout worker's
+# transaction SOURCE (sequence number + fee payer) so N channels give N
+# independent sequence streams the worker can submit through
+# concurrently — payments still debit the operator (or, for
+# interest_mint rows, the issuer); channels never hold the LOOP asset.
+# List length IS the channel count; empty/unset (default) → the
+# original fully-serial single-account path, unchanged. Never logged.
+# LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS=S...,S...
+
 # Stellar network passphrase (ADR 016). Public mainnet is the default;
 # override with the Testnet string for staging.
 # LOOP_STELLAR_NETWORK_PASSPHRASE=Public Global Stellar Network ; September 2015

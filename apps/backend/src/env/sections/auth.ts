@@ -233,6 +233,28 @@ export const authEnvFields = {
     .regex(/^S[A-Z2-7]{55}$/, { message: 'must be a valid Stellar secret key (S...)' })
     .optional(),
 
+  // Payout channel accounts (ADR 044 / S4-1). Comma-separated list of
+  // pre-funded Stellar secret keys used as the payout worker's
+  // transaction SOURCE (sequence number + fee payer) — the standard
+  // Stellar "channel account" scale pattern. The Payment operation
+  // itself still moves funds FROM the operator (or, for
+  // `kind='interest_mint'` rows, the asset issuer — ADR 031); channels
+  // never hold or move the LOOP asset. List length IS the channel
+  // count N — there is no separate count var to drift out of sync.
+  // Empty/unset (default) → N=0 → the worker's original single-
+  // sequence, fully-serial path, byte-identical to pre-ADR-044
+  // behaviour. Never logged (pino redaction). `parseEnv` below
+  // boot-fails on a malformed entry, a duplicated channel account, or
+  // a channel that collides with the operator or any issuer account.
+  // Operator-provisioned: each account needs a minimal XLM reserve to
+  // exist + a fee float (docs/adr/044-payout-throughput.md §Configuration).
+  LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS: z
+    .string()
+    .regex(/^S[A-Z2-7]{55}(\s*,\s*S[A-Z2-7]{55})*$/, {
+      message: 'must be a comma-separated list of valid Stellar secret keys (S...)',
+    })
+    .optional(),
+
   // Interest forward-mint pool account (ADR 009 / 015).
   //
   // Per the on-chain-is-source-of-truth model: paying users daily
