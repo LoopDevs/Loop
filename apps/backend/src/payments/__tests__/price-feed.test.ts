@@ -502,5 +502,43 @@ describe('convertMinorUnits', () => {
       expect(err).not.toBeInstanceOf(CurrencyRateUnavailableError);
       expect((err as Error).message).toMatch(/no rate for USD→GBP/);
     });
+
+    // §P3 (go-live-plan): each of the 5 ADR-035 extended currencies gets
+    // its own exact minor-unit conversion assertion — not just the AED
+    // example above. All five (AED/INR/SAR/AUD/MXN) are ISO-4217
+    // 2-decimal currencies like the three home currencies, so a plain
+    // USD-anchored rate divides evenly here; sub-cent ceiling rounding is
+    // already covered generically above ("rounds up so the charge covers
+    // the catalog price").
+    it.each([
+      { currency: 'AED', rate: 3.67, minor: 3670n, expectedUsd: 1000n },
+      { currency: 'INR', rate: 90, minor: 9000n, expectedUsd: 100n },
+      { currency: 'SAR', rate: 3.75, minor: 3750n, expectedUsd: 1000n },
+      { currency: 'AUD', rate: 1.5, minor: 1500n, expectedUsd: 1000n },
+      { currency: 'MXN', rate: 17.5, minor: 1750n, expectedUsd: 100n },
+    ] as const)(
+      'converts a $currency-priced card to USD exactly',
+      async ({ currency, rate, minor, expectedUsd }) => {
+        fetchSpy = stubFeed({ base: 'USD', rates: { [currency]: rate } });
+        expect(await convertMinorUnits(minor, currency, 'USD')).toBe(expectedUsd);
+      },
+    );
+
+    it('each extended currency fails gracefully (not a crash, not a wrong charge) when the feed omits it', async () => {
+      // Complements the single-currency (AED) case above — confirms the
+      // same typed-error path is generic across all five, not hardcoded
+      // to one. Mirrors the real Frankfurter feed today: AED/SAR are
+      // absent from the ECB reference-rate table Frankfurter republishes
+      // (they're USD-pegged Gulf currencies the ECB doesn't quote), while
+      // AUD/INR/MXN are present — so this feed shape ("home only") is a
+      // realistic stand-in for AED/SAR specifically, not a hypothetical.
+      fetchSpy = stubFeed({ base: 'USD', rates: { GBP: 0.78, EUR: 0.92 } });
+      for (const currency of ['AED', 'INR', 'SAR', 'AUD', 'MXN'] as const) {
+        await expect(convertMinorUnits(1000n, currency, 'USD')).rejects.toMatchObject({
+          name: 'CurrencyRateUnavailableError',
+          currency,
+        });
+      }
+    });
   });
 });
