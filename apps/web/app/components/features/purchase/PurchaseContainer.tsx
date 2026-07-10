@@ -12,6 +12,11 @@ import { useMerchantCashbackRate } from '~/hooks/use-merchants';
 import { useRadioGroupKeys } from '~/hooks/use-radio-group-keys';
 import { useWallet } from '~/hooks/use-wallet';
 import { shouldRetry } from '~/hooks/query-retry';
+import {
+  useLoopOrderRestore,
+  saveLoopPendingOrder,
+  clearLoopPendingOrder,
+} from '~/hooks/use-loop-order-restore';
 import { hasPositiveBalance } from '~/components/features/cashback/LinkWalletNudge';
 import { AmountSelection } from './AmountSelection';
 import { EarnedCashbackCard } from './EarnedCashbackCard';
@@ -132,6 +137,23 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
   // Navigating to a different merchant (or off the page entirely) cancels
   // any in-progress purchase rather than carrying it over — the user
   // explicitly left the flow, so the state shouldn't follow them.
+  //
+  // This cleanup ALSO fires on a spurious remount of the SAME merchant
+  // (a re-render that tears down and recreates this component without
+  // the user ever navigating away — e.g. a parent re-key, an error
+  // boundary reset, a slow-connection late fetch). `loopCreate` is
+  // local state so it's gone regardless once that happens; `store`
+  // (the legacy path's zustand store) gets reset too, which zeroes
+  // `store.merchantId` and so fails the `isCurrentMerchant` guard the
+  // loop-native render branch below depends on. This effect doesn't
+  // try to tell "genuine navigation away" apart from "spurious
+  // remount" — it can't, both look identical from here. Instead,
+  // `useLoopOrderRestore` below re-hydrates `loopCreate` (and re-arms
+  // `isCurrentMerchant` via `store.startPurchase`) on the very next
+  // mount for this merchant whenever a live, still-payable loop-native
+  // order was persisted — so a spurious remount recovers instead of
+  // stranding the user at the amount-selection form despite a real,
+  // payable order existing server-side.
   useEffect(() => {
     if (store.merchantId !== null && store.merchantId !== merchant.id) {
       store.reset();
@@ -144,6 +166,26 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [merchant.id]);
 
+  // Restore-on-remount for a loop-native order (see
+  // ~/hooks/use-loop-order-restore.ts for the full mechanism +
+  // money-safety reasoning). Read-only — this never creates a new
+  // order, so it can't double-order. Gated on auth + the loop-native
+  // path being live so it never fires a doomed fetch.
+  const { restored: restoredLoopOrder } = useLoopOrderRestore({
+    merchantId: merchant.id,
+    enabled: isAuthenticated && config.loopOrdersEnabled,
+  });
+  useEffect(() => {
+    if (restoredLoopOrder === null) return;
+    // Don't clobber a payment screen the user is already looking at, or
+    // an order create that's currently in flight (e.g. the restore GET
+    // resolved late, after the user had already tapped "Buy" again).
+    if (loopCreate !== null || isCreatingOrder) return;
+    store.startPurchase(merchant.id, merchant.name);
+    setLoopCreate(restoredLoopOrder.create);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [restoredLoopOrder]);
+
   // Loop-native payment screen (ADR 010). Takes precedence over the
   // CTX-proxy payment screen so a user mid-flow doesn't see two at
   // once. The loopCreate gets cleared on reset so a new merchant
@@ -153,6 +195,12 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
       <LoopPaymentStep
         create={loopCreate}
         onTerminal={(order) => {
+          // The persisted restore record (if any) is only useful while
+          // the order is still payable — clear it the moment we reach
+          // ANY terminal state (fulfilled/failed/expired), not just the
+          // error branches below, so a future remount never tries to
+          // resurrect a completed order onto the purchase form.
+          clearLoopPendingOrder();
           if (order.state === 'failed' || order.state === 'expired') {
             setLoopCreate(null);
             setOrderError(order.failureReason ?? `Order ${order.state}`);
@@ -160,6 +208,15 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
           // On fulfilled we leave the LoopPaymentStep visible showing
           // "Ready" — the user's redemption payload is served via the
           // existing orders API which is its own follow-up slice.
+        }}
+        onOrderNotFound={() => {
+          // A restored (or, more rarely, freshly-created) order id came
+          // back 404/403 — nothing left to show. Clear the persisted
+          // record and fall back to the normal amount-selection flow
+          // rather than leaving the screen stuck on "Creating order…".
+          clearLoopPendingOrder();
+          setLoopCreate(null);
+          setOrderError('This order could not be found. Please start again.');
         }}
       />
     );
@@ -419,6 +476,12 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
         // render path never reads.
         store.startPurchase(merchant.id, merchant.name);
         setLoopCreate(result);
+        // Persist so a remount (see the `[merchant.id]` effect above)
+        // or a tab refresh can restore this exact payment screen
+        // instead of stranding the user at the amount-selection form
+        // with a live, payable order sitting unnoticed server-side.
+        // See ~/hooks/use-loop-order-restore.ts.
+        saveLoopPendingOrder({ merchantId: merchant.id, orderId: result.orderId, create: result });
         // Successful create — reset the key so a follow-up "place
         // another order for this merchant" flow doesn't dedupe onto
         // the just-created row.
