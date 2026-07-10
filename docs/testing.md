@@ -281,7 +281,7 @@ in each workspace — the config files are the source of truth.
 | Surface                                               | Lines | Branches | Functions | Statements |
 | ----------------------------------------------------- | ----- | -------- | --------- | ---------- |
 | `apps/backend` (unit / default suite, no integration) | 80%   | 72%      | 75%       | 80%        |
-| `apps/web` (excl. routes + root)                      | 37%   | 32%      | 40%       | 35%        |
+| `apps/web` (whole-app, routes included — see below)   | 61%   | 56%      | 59%       | 60%        |
 
 A4-117: the backend coverage threshold reflects the default vitest
 config only. `apps/backend/vitest.integration.config.ts` sets
@@ -291,22 +291,37 @@ correctness but do NOT contribute to coverage numbers.
 
 ### Web coverage scope
 
-`apps/web/vitest.config.ts` excludes `app/routes/**` and `app/root.tsx`
-from unit-coverage on purpose — the metric is meant to track shared
+C3 (2026-07 hardening) re-baselined `apps/web/vitest.config.ts` to
+measure the **whole app, routes included** — `app/routes/**` and
+`app/root.tsx` used to be excluded so the metric tracked only shared
 modules (`services/`, `stores/`, `hooks/`, `utils/`, `native/`, leaf
-components), not route assemblies. Some route journeys are exercised by
-Playwright (`tests/e2e`, `tests/e2e-mocked`) and a handful of direct
-route tests exist under `app/routes/**/__tests__`, but that coverage is
-partial, not comprehensive. Excluding routes here is not evidence that
-all routes are otherwise covered.
+components), but that narrowed the denominator and let the coverage
+number overstate how much of the shipping app is actually tested. The
+only remaining exclusions are the genuinely un-unit-testable surface:
+test files themselves, `app/routes.ts` (the generated route table), and
+`app/entry.server.tsx` (the SSR bootstrap). Every route loader, meta,
+action, and component now counts toward the denominator.
 
-The 37–45% web unit figure reflects the fact that most user-facing UI
-is route-level; everything unit-tested today is `services/`, `stores/`,
-`hooks/`, `utils/`, `native/`, and leaf `components/`. When moving
-route-only logic out into a unit-testable module, add the unit test and
-ratchet the threshold up. When a route itself carries high-risk logic,
-add a direct route test or Playwright coverage instead of relying on the
-coverage exclusion as a proxy.
+Coverage is still uneven across the app — some routes (e.g.
+`admin.staff.tsx`, `calculator.tsx`) sit well above 80%, others
+(`home.tsx`, `orders.tsx`, `styleguide.tsx`) sit near 0% because their
+coverage comes from Playwright journeys (`tests/e2e`, `tests/e2e-mocked`,
+`tests/e2e-loop-purchase`) rather than unit tests. That's expected: the
+threshold is a whole-app regression floor, not a per-file requirement.
+When moving route-only logic out into a unit-testable module, add the
+unit test and ratchet the threshold up. When a route itself carries
+high-risk logic that isn't otherwise covered, add a direct route test
+or Playwright coverage.
+
+Q6-8 (2026-07-10, `docs/money-auth-worklist.md`) re-ratcheted the floor
+after Q6-3 (admin-write-envelope client tests), Q6-4/Q6-4b (loop-native
+purchase e2e's component tests), and the A5-2/A5-8 admin UI tests landed
+on main. Re-measured via `npm run test:coverage -w @loop/web`: statements
+63.4% / branches 59.44% / functions 62.09% / lines 64.87%. The floors in
+the table above sit ~3-4 points below those numbers — enough slack to
+tolerate minor fluctuation without blocking unrelated PRs, tight enough
+to fail CI on a real regression. Re-ratchet again once Q6-5 (admin/
+support UI E2E) lands.
 
 ### Backend coverage scope
 

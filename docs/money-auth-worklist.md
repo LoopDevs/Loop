@@ -916,7 +916,7 @@ payment_method='loop_asset' AND state='pending_payment'` — plus a
       alert) as repo secrets — see `docs/deployment.md` "CI secrets (GitHub Actions)".
       Until then the weekly run skips cleanly (by design) rather than actually
       exercising the real chain.
-- [ ] **Q6-8 · Ratchet web coverage floors** as Q6-3/4/5 land. _S._
+- [x] **Q6-8 · Ratchet web coverage floors** as Q6-3/4/5 land. _S._
 
 ---
 
