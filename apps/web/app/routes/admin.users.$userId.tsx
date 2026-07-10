@@ -7,6 +7,7 @@ import { getAdminUser, getAdminUserCredits, type AdminUserCreditRow } from '~/se
 import { AdminNav } from '~/components/features/admin/AdminNav';
 import { AdminLookupSearch } from '~/components/features/admin/AdminLookupSearch';
 import { RequireStaff } from '~/components/features/admin/RequireAdmin';
+import { RevokeSessionsPanel } from '~/components/features/admin/RevokeSessionsPanel';
 import { AdminUserFlywheelChip } from '~/components/features/admin/AdminUserFlywheelChip';
 import { CashbackSummaryChip } from '~/components/features/admin/CashbackSummaryChip';
 import { CopyButton } from '~/components/features/admin/CopyButton';
@@ -179,6 +180,16 @@ function AdminUserDetailRouteInner(): React.JSX.Element {
           </dl>
         </section>
       )}
+
+      {/* A5-2: incident-response session revocation. Admin-tier
+          (unlike the wallet re-trigger above, this isn't a
+          support-allowed delivery-unsticking action), so it renders
+          right after the identity card alongside the other
+          admin-only writes below — self-hides via RevokeSessionsPanel's
+          own isAdminRole check. */}
+      {isAdminRole && userQuery.data !== undefined && !userNotFound && userId !== undefined ? (
+        <RevokeSessionsPanel userId={userId} userEmail={userQuery.data.email} />
+      ) : null}
 
       <section className="rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
         <header className="border-b border-gray-200 px-6 py-4 dark:border-gray-800">

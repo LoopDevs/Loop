@@ -515,3 +515,8 @@ export { listWatcherSkips, getWatcherSkip, reopenWatcherSkip } from './admin-wat
 export { getAdminUserWallet, reprovisionAdminUserWallet } from './admin-user-wallet';
 export { refetchOrderRedemption } from './admin-order-redemption';
 export { adminLookup } from './admin-lookup';
+
+// A5-2: session-revocation UI. Not part of the ADR 037 slice above —
+// the endpoint predates it (hardening B4) — but lives in its own
+// slice for the same reason: no other consumer needs the type.
+export { type AdminRevokeSessionsResult, revokeUserSessions } from './admin-user-sessions';

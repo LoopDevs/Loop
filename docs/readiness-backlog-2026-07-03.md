@@ -613,10 +613,11 @@ max_connections`, including the release-command migration machine
 
 ### A5-2 · Admin session-revocation UI `[code]`
 
-- [ ] **Status:** ☐ Not started
+- [x] **Status:** ✅ Shipped 2026-07-10 (review-first PR, not yet merged).
       **Why:** `POST /api/admin/users/:userId/revoke-sessions` exists + is in OpenAPI but has **zero UI** (orphaned). Incident response requires curl.
       **Do:** add a "Revoke sessions" button on the user-360 page (`admin.users.$userId.tsx`) calling the existing endpoint.
       **Done when:** an operator can revoke a user's refresh tokens from the UI.
+      **Shipped:** `RevokeSessionsPanel` on `/admin/users/:userId`, gated `isAdminRole` (client UX gate — `requireStaff('admin')` server-side is the real boundary). Web service `revokeUserSessions()` (`services/admin-user-sessions.ts`) calls the endpoint as-is. Deliberately **does not** impose the ADR 017 admin-write envelope the sibling panels use (`OrderRedrivePanel`, `CreditAdjustmentForm`, `HomeCurrencyForm`): the backend handler (`auth/revoke-sessions-handler.ts`) predates/opts out of it — no `Idempotency-Key`, no `reason` body field, no `{ result, audit }` wrapper, and (per its own doc comment) deliberately not step-up gated, since revoking sessions moves no value and is fully reversible. UI matches that real contract: a plain `ConfirmDialog` (no reason capture the backend would silently discard), no step-up dance. Test: `RevokeSessionsPanel.test.tsx` (gating, confirm/cancel, success/error toasts).
 
 ### A5-3 · Login/OTP support tooling `[code]`
 
