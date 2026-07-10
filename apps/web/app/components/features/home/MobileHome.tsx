@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import type { Merchant, MerchantGroup } from '@loop/shared';
 import {
@@ -62,6 +64,7 @@ const MOBILE_SEARCH_RESULT_LIMIT = 50;
  * system), "streak" stat (no backend metric).
  */
 export function MobileHome(): React.JSX.Element {
+  const { t } = useTranslation('mobileHome');
   const [hydrated, setHydrated] = useState(false);
   const { merchants, isLoading: merchantsLoading } = useAllMerchants();
   // Bulk cashback-rate map (ADR 011 / 015). One fetch covers every
@@ -248,15 +251,15 @@ export function MobileHome(): React.JSX.Element {
       <div className="flex items-center justify-between px-5 pt-3 pb-2">
         <div className="flex flex-col">
           <span className="text-xs font-semibold uppercase tracking-[0.06em] text-gray-500 dark:text-gray-400">
-            {greetingName !== null ? 'Welcome back' : 'Welcome'}
+            {greetingName !== null ? t('greeting.welcomeBack') : t('greeting.welcome')}
           </span>
           <h1 className="mt-0.5 text-[24px] font-bold tracking-tight text-gray-950 dark:text-white">
-            {greetingName ?? 'to Loop'}
+            {greetingName ?? t('greeting.toLoop')}
           </h1>
         </div>
         <Link
           to="/auth"
-          aria-label="Account"
+          aria-label={t('greeting.accountAriaLabel')}
           className="w-9 h-9 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 flex items-center justify-center text-sm font-bold"
         >
           {avatarInitial !== null ? (
@@ -303,7 +306,11 @@ export function MobileHome(): React.JSX.Element {
       </div>
 
       {/* Quick buy ---------------------------------------------- */}
-      <SectionHeader title="Quick buy" actionLabel="Browse all" actionHref="#mobile-home-grid" />
+      <SectionHeader
+        title={t('section.quickBuy')}
+        actionLabel={t('section.browseAll')}
+        actionHref="#mobile-home-grid"
+      />
       {visibleMerchantsLoading && quickBuy.length === 0 ? (
         <div className="flex gap-2.5 px-5 pb-1 overflow-x-auto">
           {Array.from({ length: 6 }).map((_, i) => (
@@ -334,8 +341,8 @@ export function MobileHome(): React.JSX.Element {
       {recent.length > 0 && (
         <>
           <SectionHeader
-            title="Recent activity"
-            actionLabel="All orders"
+            title={t('section.recentActivity')}
+            actionLabel={t('section.allOrders')}
             actionOnClick={() => void navigate('/orders')}
           />
           <div className="px-5">
@@ -422,8 +429,8 @@ export function MobileHome(): React.JSX.Element {
 
       {/* Directory grid ----------------------------------------- */}
       <SectionHeader
-        title={query.length > 0 ? 'Results' : 'Browse'}
-        meta={`${groupedGrid.length} brand${groupedGrid.length === 1 ? '' : 's'}`}
+        title={query.length > 0 ? t('section.results') : t('section.browse')}
+        meta={t('section.resultsMeta', { count: groupedGrid.length })}
       />
       {/* `min-h-[70vh]` keeps the page tall enough that the search
           input's scroll position doesn't jump when the grid shrinks
@@ -439,7 +446,7 @@ export function MobileHome(): React.JSX.Element {
           // Distinct from "no results" — a failed search request
           // shouldn't read as "we searched and there's nothing".
           <div className="col-span-2 text-center py-10 text-sm text-gray-500 dark:text-gray-400">
-            Search is unavailable right now. Try again in a moment.
+            {t('directory.searchUnavailable')}
           </div>
         ) : groupedGrid.length > 0 ? (
           groupedGrid.map((g) =>
@@ -455,7 +462,7 @@ export function MobileHome(): React.JSX.Element {
           )
         ) : (
           <div className="col-span-2 text-center py-10 text-sm text-gray-500 dark:text-gray-400">
-            No brands match &ldquo;{query}&rdquo;
+            {t('directory.noMatch', { query })}
           </div>
         )}
       </div>
@@ -534,6 +541,7 @@ export function SavingsHero({
    */
   locale?: string;
 }): React.JSX.Element {
+  const { t } = useTranslation('mobileHome');
   // Unauth or no-orders state — show a teaser instead of "$0.00"
   // which reads as a bug. Matches the design's ink face but with a
   // friendlier copy instead of the stat strip.
@@ -542,11 +550,9 @@ export function SavingsHero({
   // "You've saved" / "Buy a gift card to start saving."
   // Phase 2 = cashback paid to user's Loop wallet, withdraw-able →
   // "Cashback earned" / "Buy a gift card to start earning cashback."
-  const heroLabel = phase1Only ? 'You’ve saved' : 'Cashback earned';
-  const emptySubtitle = phase1Only
-    ? 'Buy a gift card to start saving.'
-    : 'Buy a gift card to start earning cashback.';
-  const avgLabel = phase1Only ? 'Avg saving' : 'Avg back';
+  const heroLabel = phase1Only ? t('hero.savedLabel') : t('hero.cashbackLabel');
+  const emptySubtitle = phase1Only ? t('hero.savedEmptySub') : t('hero.cashbackEmptySub');
+  const avgLabel = phase1Only ? t('hero.avgSavingLabel') : t('hero.avgBackLabel');
   return (
     <div
       className="relative overflow-hidden rounded-[18px] px-6 py-5 text-white shadow-[0_8px_24px_rgba(3,7,18,0.25),0_2px_6px_rgba(3,7,18,0.15)]"
@@ -577,16 +583,14 @@ export function SavingsHero({
           : formatCashback(cashbackCents, currency, locale)}
       </div>
       <div className="text-[13px] text-white/65 mb-4">
-        {empty
-          ? emptySubtitle
-          : `Across ${ordersCount} order${ordersCount === 1 ? '' : 's'} — keep going.`}
+        {empty ? emptySubtitle : t('hero.activitySub', { count: ordersCount })}
       </div>
       <div className="grid grid-cols-2 gap-0 border-t border-white/10 pt-3.5">
         <div className="text-left">
           <div className="text-[16px] font-bold" style={{ fontVariantNumeric: 'tabular-nums' }}>
             {ordersCount}
           </div>
-          <div className="text-[11px] opacity-55 mt-0.5">Orders</div>
+          <div className="text-[11px] opacity-55 mt-0.5">{t('hero.ordersLabel')}</div>
         </div>
         <div className="text-right">
           <div className="text-[16px] font-bold" style={{ fontVariantNumeric: 'tabular-nums' }}>
@@ -687,6 +691,7 @@ function DirectoryCell({
   /** Numeric(5,2) wire shape (e.g. `"2.50"`). Null → no pill. */
   userCashbackPct?: string | null;
 }): React.JSX.Element {
+  const { t } = useTranslation('mobileHome');
   const cashbackLabel = formatCashbackPct(userCashbackPct);
   const hasSavings =
     typeof merchant.savingsPercentage === 'number' && merchant.savingsPercentage > 0;
@@ -716,7 +721,7 @@ function DirectoryCell({
         {merchant.name}
       </div>
       <div className="text-[11px] font-medium text-gray-400 dark:text-gray-500 -mt-1">
-        Gift cards
+        {t('directory.giftCards')}
       </div>
     </Link>
   );
@@ -728,6 +733,7 @@ function DirectoryCell({
  * DirectoryCell, with an option count instead of a single savings %.
  */
 function DirectoryGroupCell({ group }: { group: MerchantGroup }): React.JSX.Element {
+  const { t } = useTranslation('mobileHome');
   const rep = group.members.find((m) => m.logoUrl !== undefined) ?? group.members[0]!;
   const maxSavings = group.members.reduce((acc, m) => Math.max(acc, m.savingsPercentage ?? 0), 0);
   return (
@@ -748,7 +754,7 @@ function DirectoryGroupCell({ group }: { group: MerchantGroup }): React.JSX.Elem
         {group.name}
       </div>
       <div className="text-[11px] font-medium text-gray-400 dark:text-gray-500 -mt-1">
-        {group.members.length} options
+        {t('directory.options', { count: group.members.length })}
       </div>
     </Link>
   );
@@ -775,8 +781,9 @@ function ActivityRow({
   onClick: () => void;
   isLast: boolean;
 }): React.JSX.Element {
+  const { t } = useTranslation('mobileHome');
   const back = savingsPercentage !== undefined ? amount * (savingsPercentage / 100) : 0;
-  const when = formatWhen(createdAt);
+  const when = formatWhen(createdAt, t);
   return (
     <button
       type="button"
@@ -820,7 +827,7 @@ function ActivityRow({
   );
 }
 
-function formatWhen(iso: string): string {
+function formatWhen(iso: string, t: TFunction<'mobileHome'>): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   const now = new Date();
@@ -829,13 +836,13 @@ function formatWhen(iso: string): string {
     d.getMonth() === now.getMonth() &&
     d.getDate() === now.getDate();
   const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-  if (sameDay) return `Today · ${time}`;
+  if (sameDay) return t('activity.today', { time });
   const yesterday = new Date(now);
   yesterday.setDate(now.getDate() - 1);
   const isYesterday =
     d.getFullYear() === yesterday.getFullYear() &&
     d.getMonth() === yesterday.getMonth() &&
     d.getDate() === yesterday.getDate();
-  if (isYesterday) return `Yesterday · ${time}`;
+  if (isYesterday) return t('activity.yesterday', { time });
   return d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
 }

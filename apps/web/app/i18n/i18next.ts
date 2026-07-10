@@ -44,6 +44,10 @@ import onboarding from './locales/en/onboarding.json';
 import settings from './locales/en/settings.json';
 import orders from './locales/en/orders.json';
 import giftCard from './locales/en/giftCard.json';
+import mobileHome from './locales/en/mobileHome.json';
+import brand from './locales/en/brand.json';
+import map from './locales/en/map.json';
+import cashback from './locales/en/cashback.json';
 
 // Only `en` ships (`SUPPORTED_LANGS` in `@loop/shared`) — this resources map
 // is intentionally single-language. Adding a locale is a resources-map + JSON
@@ -64,10 +68,28 @@ void i18next.use(initReactI18next).init({
     'settings',
     'orders',
     'giftCard',
+    'mobileHome',
+    'brand',
+    'map',
+    'cashback',
   ],
   defaultNS,
   resources: {
-    en: { common, footer, notFound, home, auth, onboarding, settings, orders, giftCard },
+    en: {
+      common,
+      footer,
+      notFound,
+      home,
+      auth,
+      onboarding,
+      settings,
+      orders,
+      giftCard,
+      mobileHome,
+      brand,
+      map,
+      cashback,
+    },
   },
   // React already escapes interpolated values (JSX text nodes are never
   // raw-inserted as HTML), so i18next's own HTML-escaping pass is redundant

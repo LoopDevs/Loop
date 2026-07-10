@@ -80,6 +80,72 @@
     "step2": "Buy a gift card at the store",
     "step3Phase1": "Your discount applies instantly",
     "step3Phase2": "Cashback lands in your bank",
-    "moreBrands": "+ 500 more brands"
+    "moreBrands": "+ 500 more brands",
+    "emailPrivacy": "Your email stays yours. We never sell contacts."
+  },
+  "emailPlaceholder": "you@example.com",
+  "error": {
+    "sendOtpFallback": "Failed to send verification code.",
+    "verifyFallback": "Invalid code. Please try again."
+  },
+  "resend": {
+    "code": "Resend code",
+    "in": "Resend code in {{seconds}}s"
+  },
+  "otp": {
+    "pastePrefix": "Paste "
+  },
+  "desktop": {
+    "slideshow": {
+      "previous": "Previous",
+      "next": "Next"
+    },
+    "emailStep": {
+      "heading": "Welcome to the club.",
+      "sub": "Drop your email below and we’ll send you a 6-digit code to verify.",
+      "emailLabel": "Email address",
+      "sendButton": "Send verification code",
+      "alreadyHaveAccountPrefix": "Already have an account? ",
+      "logIn": "Log in"
+    },
+    "otpStep": {
+      "heading": "Check your email",
+      "subPrefix": "We sent a 6-digit code to ",
+      "subSuffix": ".",
+      "otpLabel": "Verification code",
+      "verifyButton": "Verify & continue",
+      "useDifferentEmail": "Use a different email"
+    }
+  },
+  "currency": {
+    "ariaLabel": "Home currency",
+    "options": {
+      "usd": { "label": "US Dollar", "hint": "United States" },
+      "gbp": { "label": "British Pound", "hint": "United Kingdom" },
+      "eur": { "label": "Euro", "hint": "Eurozone" }
+    }
+  },
+  "biometric": {
+    "status": {
+      "enabled": "{{type}} enabled",
+      "scanning": "Scanning…",
+      "unavailable": "Not available",
+      "use": "Use {{type}}"
+    },
+    "sub": {
+      "enabled": "You’ll use {{type}} or your device passcode to unlock Loop on app launch.",
+      "unavailable": "We’ll skip this — you can turn it on later from your account.",
+      "default": "Lock Loop on app launch and fall back to your device passcode if biometrics are unavailable."
+    },
+    "privacyNote": "Face data stays on your device. Loop never sees it.",
+    "enableReason": "Enable app lock"
+  },
+  "wallet": {
+    "instantTitle": "Cashback lands instantly",
+    "instantBody": "Every order credits your in-app balance right away — no wallet needed.",
+    "withdrawTitle": "Withdraw to your own wallet",
+    "withdrawBodyPrefix": "Link a Stellar address any time to pull your balance out as ",
+    "withdrawBodySuffix": " — Loop's branded stablecoin.",
+    "linkCta": "Link a wallet now →"
   }
 }

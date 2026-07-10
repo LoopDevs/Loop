@@ -1,0 +1,61 @@
+{
+  "calculator": {
+    "meta": {
+      "title": "Cashback calculator — Loop",
+      "description": "See how much cashback you would earn on any merchant. Pick a store, enter an amount — Loop pays cashback in LOOP-asset stablecoin pinned 1:1 to your home currency."
+    },
+    "heading": "Cashback calculator",
+    "sub": "Pick a merchant and see what you’d earn on Loop — paid in LOOP-asset stablecoin you can spend on your next order.",
+    "noMerchants": "No merchants available right now. Check back shortly.",
+    "cta": "Start earning cashback →",
+    "merchantPicker": {
+      "label": "Merchant",
+      "ariaLabel": "Select merchant",
+      "option": "{{name}} · {{pct}}% cashback"
+    }
+  },
+  "index": {
+    "heading": "Best cashback rates on Loop",
+    "sub": "Earn cashback every time you buy a gift card. Paid in LOOP-asset stablecoin that compounds when you spend it on your next order.",
+    "loadError": "Couldn’t load the cashback list. Please refresh.",
+    "empty": "No merchants with cashback configured yet — check back soon.",
+    "howItWorks": {
+      "heading": "How Loop cashback works",
+      "step1": "Pick a merchant and buy a gift card — pay in XLM, USDC, or your LOOP balance.",
+      "step2": "Cashback lands in LOOP-asset stablecoin (USDLOOP / GBPLOOP / EURLOOP), pinned 1:1 to your home currency.",
+      "step3": "Spend LOOP on your next order. Cashback from order #1 pays for order #2 — the flywheel."
+    },
+    "rowAriaLabel": "{{name}}: {{pct}}% cashback",
+    "rowBack": "back"
+  },
+  "merchant": {
+    "meta": {
+      "title": "Cashback at {{name}} — Loop",
+      "description": "Earn cashback on {{name}} gift cards with Loop. Paid in LOOP-asset stablecoin — recycle it into more orders for compounding rewards."
+    },
+    "errorBoundary": {
+      "body": "We couldn't load this merchant. Try again in a minute.",
+      "link": "Back to home"
+    },
+    "notFound": {
+      "heading": "{{name}} isn’t on Loop",
+      "bodyPrefix": "We couldn’t find a merchant with slug ",
+      "bodySuffix": ". Browse the full catalog to see what’s available.",
+      "browse": "Browse merchants"
+    },
+    "hero": {
+      "heading": "Cashback at {{name}}",
+      "earnPrefix": "Earn ",
+      "earnSuffix": " back on every {{name}} gift card",
+      "comingSoon": "{{name}} is coming soon — sign up to be notified when cashback goes live.",
+      "shopCta": "Shop {{name}} gift cards"
+    },
+    "howItWorks": {
+      "heading": "How cashback compounds on Loop",
+      "step1": "Buy a gift card and pay with XLM, USDC, or your existing LOOP-asset balance.",
+      "step2": "Earn cashback in LOOP-asset stablecoin (USDLOOP / GBPLOOP / EURLOOP), pinned 1:1 to your home currency.",
+      "step3": "Spend that LOOP-asset balance on your next order. The cashback you earned on this purchase pays for the next one — flywheel."
+    },
+    "browseAll": "Browse all merchants →"
+  }
+}

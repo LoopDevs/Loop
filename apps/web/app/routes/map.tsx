@@ -1,4 +1,5 @@
 import { lazy, Suspense, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { mapViewOf } from '@loop/shared';
 import type { Route } from './+types/map';
 import { useNativePlatform } from '~/hooks/use-native-platform';
@@ -7,22 +8,26 @@ import { useLocale } from '~/i18n/locale';
 import { Navbar } from '~/components/features/Navbar';
 import { MapBottomSheet } from '~/components/features/MapBottomSheet';
 import { Spinner } from '~/components/ui/Spinner';
+import i18n from '~/i18n/i18next';
 
 export function meta(): Route.MetaDescriptors {
-  return [{ title: 'Map — Loop' }];
+  return [{ title: i18n.t('map:meta.title') }];
 }
 
 // Dynamically import the map component — Leaflet requires browser APIs
 const ClusterMap = lazy(() => import('~/components/features/ClusterMap'));
 
 export function ErrorBoundary(): React.JSX.Element {
+  const { t } = useTranslation('map');
   return (
     <div className="flex items-center justify-center h-screen">
       <div className="text-center">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">Map unavailable</h1>
-        <p className="text-gray-600 dark:text-gray-300 mb-6">We couldn&apos;t load the map.</p>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
+          {t('error.heading')}
+        </h1>
+        <p className="text-gray-600 dark:text-gray-300 mb-6">{t('error.body')}</p>
         <a href="/map" className="text-blue-600 underline">
-          Try again
+          {t('error.retry')}
         </a>
       </div>
     </div>
