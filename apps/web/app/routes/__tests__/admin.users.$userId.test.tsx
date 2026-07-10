@@ -107,7 +107,17 @@ vi.mock('~/services/admin', async (importActual) => {
       rows: [],
     }),
     listAdminUserCreditTransactions: empty({ transactions: [] }),
-    getAdminUserAuditTimeline: empty({ userId: 'u-360', events: [] }),
+    getAdminUserAuditTimeline: empty({
+      userId: 'u-360',
+      events: [],
+      nextCursors: {
+        adminActions: null,
+        ledger: null,
+        orders: null,
+        payouts: null,
+        sessions: null,
+      },
+    }),
   };
 });
 

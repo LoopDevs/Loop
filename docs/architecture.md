@@ -474,7 +474,7 @@ POST /api/admin/users/:userId/wallet/reprovision        [staff — support actio
 POST /api/admin/orders/:orderId/refetch-redemption      [staff — support action: one-shot redemption re-fetch via the backfill machinery; ADR-017 envelope, ADR 037]
 POST /api/admin/orders/:orderId/redrive                 [admin — A5-1 order re-drive lever: re-runs the procurement worker's own path for a stuck PAID order the worker never drained (procuring refused — the recovery sweep owns those); step-up gated, ADR-017 envelope]
 GET  /api/admin/ledger                                  [staff — fleet-wide credit_transactions browser: ?userId/?type/?referenceType+?referenceId/?since/?before filters, keyset-paginated (?before cursor, limit [1,200] default 50), read-only, ADR 037 §4.2 / A5-8]
-GET  /api/admin/users/:userId/audit                     [staff — per-subject audit timeline: merges admin actions targeting this user + credit_transactions + orders + payouts + refresh_tokens revocations + an OTP-lock snapshot into one newest-first view; ?limit (per-source, default 8/[1,20]) + ?before (approximate cursor), read-only, ADR 037 §4 / A5-7]
+GET  /api/admin/users/:userId/audit                     [staff — per-subject audit timeline: merges admin actions targeting this user + credit_transactions + orders + payouts + refresh_tokens revocations + an OTP-lock snapshot into one newest-first page; ?limit (per-source, default 8/[1,20]); PER-SOURCE keyset cursors (response.nextCursors → request beforeAdminActions/beforeLedger/beforeOrders/beforePayouts/beforeSessions) so uneven-density sources page independently without dropping rows; read-only, ADR 037 §4 / A5-7]
 ```
 
 Since ADR 037 the `/api/admin/*` namespace is staff-gated, not

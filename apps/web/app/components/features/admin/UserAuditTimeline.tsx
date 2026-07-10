@@ -1,7 +1,10 @@
-import { useState } from 'react';
 import { Link } from 'react-router';
-import { useQuery } from '@tanstack/react-query';
-import { getAdminUserAuditTimeline, type AdminAuditTimelineEvent } from '~/services/admin';
+import { useInfiniteQuery } from '@tanstack/react-query';
+import {
+  getAdminUserAuditTimeline,
+  type AdminAuditTimelineCursors,
+  type AdminAuditTimelineEvent,
+} from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
 import { ADMIN_LOCALE } from '~/utils/locale';
@@ -41,6 +44,12 @@ function drillHref(event: AdminAuditTimelineEvent): string | null {
   return null;
 }
 
+/** Any source still has a non-null cursor → there is an older page. */
+function hasMore(cursors: AdminAuditTimelineCursors | undefined): boolean {
+  if (cursors === undefined) return false;
+  return Object.values(cursors).some((v) => v !== null);
+}
+
 interface Props {
   userId: string;
 }
@@ -52,36 +61,34 @@ interface Props {
  * movements, orders, payouts, and session revocations, each drill-
  * linking to its own detail page.
  *
- * `?limit=` bounds EACH backend source independently (not the total
- * row count returned) — see `admin/user-audit-timeline.ts` for why.
- * "Older" re-queries with `?before=` set to the oldest event
- * currently shown; because up to five independently-cursored sources
- * are merged, this is an approximate walk (good enough for support
- * triage), not a gapless paginator — documented on the backend.
+ * Pagination is PER-SOURCE, accumulating (not page-replacing): each of
+ * the five sources is independently `?limit=`-bounded and carries its
+ * OWN keyset cursor (`nextCursors`). "Load older" echoes the previous
+ * page's cursors back — each non-null cursor pages ITS source older;
+ * an exhausted (null) source is not re-queried. This is the fix for
+ * the cross-source row-loss a single shared cursor would cause with
+ * uneven per-source density (many ledger rows per order). We flatten
+ * every fetched page and re-sort newest-first because the per-source
+ * pages interleave in time.
  */
 export function UserAuditTimeline({ userId }: Props): React.JSX.Element {
-  const [beforeCursor, setBeforeCursor] = useState<string | null>(null);
-
-  const query = useQuery({
-    queryKey: ['admin-user-audit-timeline', userId, beforeCursor],
-    queryFn: () =>
-      getAdminUserAuditTimeline(userId, {
-        limit: PER_SOURCE_LIMIT,
-        ...(beforeCursor !== null ? { before: beforeCursor } : {}),
-      }),
+  const query = useInfiniteQuery({
+    queryKey: ['admin-user-audit-timeline', userId],
+    initialPageParam: null as AdminAuditTimelineCursors | null,
+    queryFn: ({ pageParam }) =>
+      getAdminUserAuditTimeline(userId, { limit: PER_SOURCE_LIMIT, cursors: pageParam }),
+    getNextPageParam: (lastPage) =>
+      hasMore(lastPage.nextCursors) ? lastPage.nextCursors : undefined,
     retry: shouldRetry,
     staleTime: 10_000,
   });
 
-  const events = query.data?.events ?? [];
-
-  const pageOlder = (): void => {
-    const last = events[events.length - 1];
-    if (last === undefined) return;
-    setBeforeCursor(last.at);
-  };
-
-  const pageToTop = (): void => setBeforeCursor(null);
+  // The per-source pages interleave in time, so flatten + re-sort
+  // newest-first. Sources don't overlap and each pages strictly older,
+  // so there are no duplicates to dedupe.
+  const events = (query.data?.pages.flatMap((p) => p.events) ?? []).sort(
+    (a, b) => Date.parse(b.at) - Date.parse(a.at),
+  );
 
   return (
     <div className="space-y-4">
@@ -95,9 +102,7 @@ export function UserAuditTimeline({ userId }: Props): React.JSX.Element {
         </p>
       ) : events.length === 0 ? (
         <p className="py-6 text-sm text-gray-500 dark:text-gray-400">
-          {beforeCursor === null
-            ? 'No admin actions, money movements, or session events for this user yet.'
-            : 'No older activity.'}
+          No admin actions, money movements, or session events for this user yet.
         </p>
       ) : (
         <ol className="space-y-2">
@@ -136,24 +141,18 @@ export function UserAuditTimeline({ userId }: Props): React.JSX.Element {
         </ol>
       )}
 
-      <nav className="flex justify-between" aria-label="Audit timeline pagination">
-        <button
-          type="button"
-          onClick={pageToTop}
-          disabled={beforeCursor === null}
-          className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
-        >
-          ← Newest
-        </button>
-        <button
-          type="button"
-          onClick={pageOlder}
-          disabled={events.length === 0}
-          className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
-        >
-          Older →
-        </button>
-      </nav>
+      {query.hasNextPage ? (
+        <div className="flex justify-center">
+          <button
+            type="button"
+            onClick={() => void query.fetchNextPage()}
+            disabled={query.isFetchingNextPage}
+            className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
+          >
+            {query.isFetchingNextPage ? 'Loading…' : 'Load older'}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

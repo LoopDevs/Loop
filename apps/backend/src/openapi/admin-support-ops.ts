@@ -581,11 +581,23 @@ export function registerAdminSupportOpsOpenApi(
     }),
   );
 
+  const AdminAuditTimelineCursors = registry.register(
+    'AdminAuditTimelineCursors',
+    z.object({
+      adminActions: z.string().datetime().nullable(),
+      ledger: z.string().datetime().nullable(),
+      orders: z.string().datetime().nullable(),
+      payouts: z.string().datetime().nullable(),
+      sessions: z.string().datetime().nullable(),
+    }),
+  );
+
   const AdminUserAuditTimelineResponse = registry.register(
     'AdminUserAuditTimelineResponse',
     z.object({
       userId: z.string().uuid(),
       events: z.array(AdminAuditTimelineEvent),
+      nextCursors: AdminAuditTimelineCursors,
     }),
   );
 
@@ -595,7 +607,7 @@ export function registerAdminSupportOpsOpenApi(
     summary:
       'Per-subject audit timeline — admin actions + ledger + orders + payouts + sessions (ADR 037 §4 / A5-7).',
     description:
-      "Merges five bounded, already-indexed per-user reads (admin_idempotency_keys rows naming this userId, credit_transactions, orders, pending_payouts, refresh_tokens revocations) plus a current-state OTP-lock snapshot into one newest-first timeline. `?limit=` bounds EACH source independently (default 8, clamped [1, 20]); `?before=` is an approximate keyset cursor applied to each source's own timestamp column. The admin-actions source only covers a trailing 24h window (admin_idempotency_keys is a 24h-TTL idempotency cache, hourly-swept — same limitation as the existing GET /api/admin/audit-tail); the OTP-lock entry is a snapshot of current state, not a history. Read-only — no mutation, no idempotency envelope. See admin/user-audit-timeline.ts for the full per-source doc.",
+      "Merges five bounded, already-indexed per-user reads (admin_idempotency_keys rows naming this userId, credit_transactions, orders, pending_payouts, refresh_tokens revocations) plus a current-state OTP-lock snapshot into one newest-first timeline PAGE. `?limit=` bounds EACH source independently (default 8, clamped [1, 20]). Pagination is PER-SOURCE, not a single shared cursor: the response's `nextCursors` carries one `<iso|null>` cursor per source (the oldest `at` that source returned, or null when exhausted); the client echoes each non-null one back as `beforeAdminActions`/`beforeLedger`/`beforeOrders`/`beforePayouts`/`beforeSessions` to page THAT source older (a shared cursor would silently drop rows from denser sources). A request with NO before* param is page 1 (all sources + the OTP-lock snapshot); ANY before* param makes it a later page (only cursored sources re-queried, snapshot omitted). The admin-actions source only covers a trailing 24h window (admin_idempotency_keys is a 24h-TTL idempotency cache, hourly-swept — same limitation as the existing GET /api/admin/audit-tail); the OTP-lock entry is a snapshot of current state, not a history. Read-only — no mutation, no idempotency envelope. See admin/user-audit-timeline.ts for the full per-source doc.",
     tags: ['Admin'],
     security: [{ bearerAuth: [] }],
     request: {
@@ -604,18 +616,30 @@ export function registerAdminSupportOpsOpenApi(
         limit: z.coerce.number().int().min(1).max(20).optional().openapi({
           description: 'Per-source row cap. Default 8, clamped [1, 20].',
         }),
-        before: z.string().datetime().optional().openapi({
-          description: "Approximate keyset cursor — applied to each source's own timestamp column.",
+        beforeAdminActions: z.string().datetime().optional().openapi({
+          description: 'Keyset cursor for the admin-actions source (its createdAt).',
+        }),
+        beforeLedger: z.string().datetime().optional().openapi({
+          description: 'Keyset cursor for the ledger source (credit_transactions.createdAt).',
+        }),
+        beforeOrders: z.string().datetime().optional().openapi({
+          description: 'Keyset cursor for the orders source (orders.createdAt).',
+        }),
+        beforePayouts: z.string().datetime().optional().openapi({
+          description: 'Keyset cursor for the payouts source (pending_payouts.createdAt).',
+        }),
+        beforeSessions: z.string().datetime().optional().openapi({
+          description: 'Keyset cursor for the sessions source (refresh_tokens.revokedAt).',
         }),
       }),
     },
     responses: {
       200: {
-        description: 'Merged timeline, newest first',
+        description: 'Merged timeline page (newest first) + per-source next cursors',
         content: { 'application/json': { schema: AdminUserAuditTimelineResponse } },
       },
       400: {
-        description: 'userId is not a uuid, or limit/before is malformed',
+        description: 'userId is not a uuid, or limit/before* is malformed',
         content: { 'application/json': { schema: errorResponse } },
       },
       401: {

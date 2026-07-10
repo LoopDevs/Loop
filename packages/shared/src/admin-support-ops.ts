@@ -233,12 +233,48 @@ export interface AdminAuditTimelineEvent {
 }
 
 /**
+ * Per-source keyset cursors for `GET /api/admin/users/:userId/audit`.
+ *
+ * The timeline merges five INDEPENDENTLY paginated sources, so it
+ * cannot use one shared `before` value — with uneven per-source
+ * density (e.g. many ledger rows per order) a single global cursor
+ * = the oldest `at` across the merged page would permanently DROP the
+ * denser source's un-returned rows on the next page (they're newer
+ * than the global floor, so they never satisfy `< floor`). Instead
+ * each source carries its OWN cursor.
+ *
+ * On a response, each field is the `at` (timestamp) of the OLDEST row
+ * that source returned this page, or `null` when that source is
+ * exhausted (returned fewer than `limit` rows, or wasn't queried this
+ * page). On the next request the client echoes this object back: each
+ * non-null cursor pages ITS source older; a null cursor means "don't
+ * re-query that source". When every field is null the walk is done.
+ *
+ * The single-row OTP-lock snapshot is NOT a paged source — it appears
+ * once (page 1 only) and has no cursor here.
+ */
+export interface AdminAuditTimelineCursors {
+  /** admin_idempotency_keys rows targeting this user (createdAt). */
+  adminActions: string | null;
+  /** credit_transactions (createdAt). */
+  ledger: string | null;
+  /** orders (createdAt). */
+  orders: string | null;
+  /** pending_payouts (createdAt). */
+  payouts: string | null;
+  /** refresh_tokens revocations (revokedAt). */
+  sessions: string | null;
+}
+
+/**
  * `GET /api/admin/users/:userId/audit` — merges five bounded,
  * already-indexed per-user reads (admin actions targeting this user,
  * credit_transactions, orders, pending_payouts, refresh_tokens
  * revocations) plus a current-state OTP-lock snapshot into one
- * newest-first timeline. `?limit=` bounds EACH source independently
- * (default 8, clamped [1, 20]) — see the handler doc
+ * newest-first timeline PAGE. `?limit=` bounds EACH source
+ * independently (default 8, clamped [1, 20]); `nextCursors` carries
+ * the per-source keyset cursors for the next page (see
+ * `AdminAuditTimelineCursors`). See the handler doc
  * (`admin/user-audit-timeline.ts`) for why the admin-actions source
  * only covers a trailing 24h window and why OTP lock is a snapshot,
  * not a history.
@@ -246,4 +282,6 @@ export interface AdminAuditTimelineEvent {
 export interface AdminUserAuditTimelineResponse {
   userId: string;
   events: AdminAuditTimelineEvent[];
+  /** Per-source cursors to fetch the next (older) page. */
+  nextCursors: AdminAuditTimelineCursors;
 }

@@ -306,13 +306,13 @@ describe('ADR 037 tier behaviour', () => {
   // 200-with-empty-events isn't reachable here without per-row
   // fixtures (see `admin/__tests__/user-audit-timeline.test.ts` for
   // that full-fixture coverage incl. the real 200 shape). 400 (not
-  // 404) on a malformed `before` still proves the support tier passed
-  // the gate and reached the handler's own validation — same
-  // convention as the lookup / reopen / refetch-redemption probes
-  // above.
+  // 404) on a malformed per-source `beforeLedger` cursor still proves
+  // the support tier passed the gate and reached the handler's own
+  // validation — same convention as the lookup / reopen /
+  // refetch-redemption probes above.
   it('support can reach the per-subject audit timeline (A5-7) past the gate, non-staff cannot', async () => {
     const ok = await app.request(
-      `/api/admin/users/${NOBODY_ID}/audit?before=not-a-date`,
+      `/api/admin/users/${NOBODY_ID}/audit?beforeLedger=not-a-date`,
       asUser(SUPPORT_ID),
     );
     expect(ok.status).toBe(400);
