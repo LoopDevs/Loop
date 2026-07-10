@@ -897,7 +897,27 @@ payment_method='loop_asset' AND state='pending_payment'` — plus a
       already adequately unit-covered (`wallet/__tests__/provisioning.test.ts`)
       and left alone — out of scope for this pass.
 - [ ] **Q6-7 · Promote the real-chain run off manual-only** (schedule `e2e-real.mjs`). _S._
-- [ ] **Q6-8 · Ratchet web coverage floors** as Q6-3/4/5 land. _S._
+- [x] **Q6-8 · Ratchet web coverage floors** as Q6-3/4/5 land. _S._
+      **Done 2026-07-10 (config + docs only, self-merged once CI was
+      green):** Q6-5 (admin/support UI E2E) hasn't landed yet, but Q6-3
+      (admin-write-envelope client tests) and Q6-4/Q6-4b (loop-native
+      purchase e2e's component tests) had, so re-measured
+      `apps/web` coverage via `npm run test:coverage -w @loop/web`
+      (203 files / 1572 tests, all green): statements 63.4% / branches
+      59.44% / functions 62.09% / lines 64.87% — up from the C3
+      baseline (58.2/53.6/56.2/59.6) the current thresholds
+      (55/50/53/56) were set against. Raised
+      `apps/web/vitest.config.ts`'s `coverage.thresholds` to
+      statements 60 / branches 56 / functions 59 / lines 61 — same
+      ~3-4pt-below-measured margin C3 established, enough slack that
+      an unrelated small PR doesn't trip the gate, tight enough that a
+      real regression still fails CI. Verified green against the new
+      floor before pushing. Also refreshed `docs/testing.md`'s
+      "Web coverage scope" section, which had gone stale after C3
+      switched the config to measure the whole app (routes included)
+      but never got its prose updated — it still described the old
+      excl.-routes / 37–45% posture. No product or test-logic source
+      touched; thresholds + docs only.
 
 ---
 

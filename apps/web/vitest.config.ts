@@ -48,11 +48,21 @@ export default defineConfig({
       // fluctuation but still fail CI if a change drags coverage down —
       // and they're now honest (whole-app), not a narrowed subset. Ratchet
       // up as new tests land; never widen the measured↔claimed gap again.
+      //
+      // Q6-8 (2026-07-10): re-ratcheted up now that Q6-3 (admin-write-
+      // envelope client tests), Q6-4/Q6-4b (loop-native purchase e2e's
+      // component tests), and the A5-2/A5-8 admin UI tests have landed on
+      // main. Re-measured via `npm run test:coverage -w @loop/web`: stmt
+      // 63.4 / branch 59.44 / func 62.09 / line 64.87. Floors below sit
+      // ~3-4pts under that (same margin convention as C3) — enough slack
+      // that an unrelated small PR doesn't trip the gate, tight enough
+      // that a real regression still fails CI. Re-ratchet up again after
+      // Q6-5 (admin/support UI E2E) lands.
       thresholds: {
-        lines: 56,
-        functions: 53,
-        branches: 50,
-        statements: 55,
+        lines: 61,
+        functions: 59,
+        branches: 56,
+        statements: 60,
       },
     },
   },
