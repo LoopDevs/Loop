@@ -694,7 +694,7 @@ max_connections`, including the release-command migration machine
 
 ### A5-8 · Fleet-wide ledger browser `[code]`
 
-- [ ] **Status:** ☐ Not started
+- [x] **Status:** ✅ Shipped 2026-07-10, review-first PR open (not yet merged): `GET /api/admin/ledger` — paginated (`?before=` keyset cursor, no OFFSET; `limit` clamped [1, 200], default 50), filterable by `userId` / `type` / `referenceType`+`referenceId` / `since`+`before`, newest first. Support-tier (rides `requireStaff('support')`, matching ADR 037 §3's explicit listing of "ledger" among the shared read views and the existing `/api/admin/reconciliation` / `/api/admin/orders` fleet-wide blanket riders — no precedent for a tighter admin-only gate on a fleet-wide _read_). Read-only: no write path added. Bounded + indexed on every filter combination — added a plain `credit_transactions_created_at` btree index (migration 0058) mirroring PERF-005's `orders_created_at` so the unfiltered/date-range-only case doesn't seq-scan; the `userId`/`type`/`referenceType`+`referenceId` filters ride the existing composite indexes. Web: new `/admin/ledger` page (filters, keyset "Newest/Older" pagination, drill-in links to `/admin/users/:userId` and `/admin/orders|payouts/:id`); a "View in fleet-wide ledger →" link was added to the per-user credit-transactions panel on `/admin/users/:userId` for the reverse drill-down (ADR 018).
       **Why:** `credit_transactions` is browsable per-user only; ADR-037 §4.2 listed a fleet-wide ledger browser, only the per-user slice shipped. Keyset-paginate (no OFFSET). `[code]`.
 
 ### A5-9 · Bulk actions + drift-correction action `[code]`

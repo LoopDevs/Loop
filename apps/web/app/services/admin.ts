@@ -516,6 +516,17 @@ export { getAdminUserWallet, reprovisionAdminUserWallet } from './admin-user-wal
 export { refetchOrderRedemption } from './admin-order-redemption';
 export { adminLookup } from './admin-lookup';
 
+// A5-8: fleet-wide ledger browser. Wire shape lives in
+// `@loop/shared/admin-support-ops.ts` alongside the other ADR 037
+// support-dashboard shapes above; the service lives in its own
+// slice (not `./admin-user-credits.ts`) because it's a fleet-wide
+// axis, not a per-user drill.
+export {
+  type AdminLedgerEntry,
+  type AdminLedgerListResponse,
+  listAdminLedger,
+} from './admin-ledger';
+
 // A5-2: session-revocation UI. Not part of the ADR 037 slice above —
 // the endpoint predates it (hardening B4) — but lives in its own
 // slice for the same reason: no other consumer needs the type.

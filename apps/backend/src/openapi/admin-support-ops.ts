@@ -1,13 +1,15 @@
 /**
  * Support-ops OpenAPI registrations (ADR 037 §4) — the
  * watcher-skip browser (+ reopen), the per-user wallet card
- * (+ reprovision), the redemption re-fetch, and the reverse
- * lookup. Wire shapes live in `@loop/shared/admin-support-ops`.
+ * (+ reprovision), the redemption re-fetch, the reverse lookup, and
+ * the fleet-wide ledger browser (A5-8). Wire shapes live in
+ * `@loop/shared/admin-support-ops`.
  *
- * All seven paths are SUPPORT-tier (admin ⊇ support); the three
+ * All eight paths are SUPPORT-tier (admin ⊇ support); the three
  * POST actions carry the ADR 017 envelope (Idempotency-Key +
  * reason) without the step-up header — they unstick deliveries,
- * they don't move money (ADR 037 matrix).
+ * they don't move money (ADR 037 matrix). The ledger browser is a
+ * plain read — no envelope, no mutation.
  */
 import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
@@ -473,6 +475,93 @@ export function registerAdminSupportOpsOpenApi(
       },
       503: {
         description: 'Operator pool unavailable (`SERVICE_UNAVAILABLE`) — retry once CTX recovers',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+    },
+  });
+
+  // ─── Fleet-wide ledger browser (ADR 037 §4.2 / A5-8) ────────────────────────
+
+  // Duplicated (not imported from `@loop/shared`) to match the
+  // `openapi/admin-user-cluster-drill.ts` convention — openapi/ stays
+  // independent of the runtime schema module graph. Mirrors the
+  // CHECK constraint on `credit_transactions.type`.
+  const LedgerCreditTransactionType = z
+    .enum(['cashback', 'interest', 'spend', 'withdrawal', 'refund', 'adjustment'])
+    .openapi({ description: 'Mirrors the CHECK constraint on credit_transactions.type.' });
+
+  const AdminLedgerEntry = registry.register(
+    'AdminLedgerEntry',
+    z.object({
+      id: z.string().uuid(),
+      userId: z.string().uuid(),
+      type: LedgerCreditTransactionType,
+      amountMinor: z.string().openapi({
+        description:
+          'bigint-as-string, signed. Positive for cashback/interest/refund, negative for spend/withdrawal; adjustment can be either.',
+      }),
+      currency: z.string().length(3),
+      referenceType: z.string().nullable(),
+      referenceId: z.string().nullable(),
+      createdAt: z.string().datetime(),
+    }),
+  );
+
+  const AdminLedgerListResponse = registry.register(
+    'AdminLedgerListResponse',
+    z.object({ transactions: z.array(AdminLedgerEntry) }),
+  );
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/admin/ledger',
+    summary: 'Fleet-wide ledger browser — every user’s credit_transactions (ADR 037 §4.2 / A5-8).',
+    description:
+      'Newest-first, keyset-paginated (`?before=<iso>`, same convention as `/api/admin/orders`) browse of `credit_transactions` across every user — for drift investigation, dispute triage, and reconciliation without SQL. Filterable by `userId`, `type`, `referenceType`+`referenceId` (e.g. `order`/`<uuid>`), and a `since`/`before` date range. `limit` clamps to [1, 200], default 50. Read-only: no mutation, no idempotency envelope. Every filter combination rides an index that already matches its predicate + the `created_at` ordering (composite `(user_id, created_at)` / `(type, created_at)` / `(reference_type, reference_id)`, or the plain `created_at` index for an unfiltered/date-range-only browse) so the query never degrades into an unbounded scan.',
+    tags: ['Admin'],
+    security: [{ bearerAuth: [] }],
+    request: {
+      query: z.object({
+        userId: z.string().uuid().optional(),
+        type: LedgerCreditTransactionType.optional(),
+        referenceType: z
+          .string()
+          .regex(/^[a-z_]{1,64}$/)
+          .optional(),
+        referenceId: z.string().min(1).max(128).optional(),
+        since: z.string().datetime().optional().openapi({ description: 'Inclusive lower bound.' }),
+        before: z.string().datetime().optional().openapi({
+          description:
+            'Exclusive upper bound / keyset cursor — pass the last row’s createdAt to page older.',
+        }),
+        limit: z.coerce.number().int().min(1).max(200).optional().openapi({
+          description: 'Default 50, clamped [1, 200].',
+        }),
+      }),
+    },
+    responses: {
+      200: {
+        description: 'Ledger rows (newest first)',
+        content: { 'application/json': { schema: AdminLedgerListResponse } },
+      },
+      400: {
+        description: 'Invalid userId / type / referenceType / referenceId / since / before / limit',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      401: {
+        description: 'Missing or invalid bearer',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      404: {
+        description: 'Caller is not staff (concealment)',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      429: {
+        description: 'Rate limit exceeded (60/min per IP)',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      500: {
+        description: 'Internal error reading the ledger',
         content: { 'application/json': { schema: errorResponse } },
       },
     },

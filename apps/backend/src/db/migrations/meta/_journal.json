@@ -407,6 +407,13 @@
       "when": 1780188800000,
       "tag": "0057_operator_wallet_baselines_cursor_not_null",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1780188900000,
+      "tag": "0058_credit_transactions_created_at_index",
+      "breakpoints": true
     }
   ]
 }

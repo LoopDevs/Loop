@@ -281,6 +281,22 @@ describe('ADR 037 tier behaviour', () => {
     expect(refetch.status).toBe(400); // missing Idempotency-Key — gate passed
   });
 
+  // A5-8: fleet-wide ledger browser is support-tier (ADR 037 §3 lists
+  // "ledger" among the shared read views; §4.2 names the ledger
+  // browser itself as a support MVP surface). Pinned explicitly here
+  // rather than left to the generic riders bucket because the mount
+  // carries its own `requireStaff('support')` (see
+  // routes/admin-support-ops.ts) and is counted in `supportExplicit`
+  // above.
+  it('support can read the fleet-wide ledger browser (A5-8), non-staff cannot', async () => {
+    const ok = await app.request('/api/admin/ledger', asUser(SUPPORT_ID));
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ transactions: [] });
+
+    const denied = await app.request('/api/admin/ledger', asUser(NOBODY_ID));
+    expect(denied.status).toBe(404);
+  });
+
   it.each(ADMIN_ONLY_PROBES)('support gets 404 on %s %s', async (method, path) => {
     const res = await app.request(path, asUser(SUPPORT_ID, { method }));
     expect(res.status).toBe(404);
@@ -363,8 +379,9 @@ describe('ADR 037 mount inventory (default-deny)', () => {
     //      membership is pinned by the matrix test above and the
     //      money-write list below.
     expect(adminTier).toHaveLength(38);
-    // 7 = lookup, watcher-skips ×3, wallet ×2, refetch-redemption.
-    expect(supportExplicit).toHaveLength(7);
+    // 8 = lookup, watcher-skips ×3, wallet ×2, refetch-redemption,
+    //     ledger (A5-8 fleet-wide ledger browser).
+    expect(supportExplicit).toHaveLength(8);
     expect(riders).toBeGreaterThanOrEqual(50);
   });
 
