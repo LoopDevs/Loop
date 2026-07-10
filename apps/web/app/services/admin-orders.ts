@@ -25,6 +25,12 @@
  *   filters (`state` / `userId` / `merchantId` / `chargeCurrency`
  *   / `paymentMethod` / `ctxOperatorId`). Cursor via
  *   `before=<iso>`.
+ * - `POST /api/admin/orders/:orderId/refund` — A5-4 order-bound
+ *   refund. `paid`/`procuring`/`failed` refund directly; `fulfilled`
+ *   requires a code-unused attestation. Admin-tier + step-up (ADR 028
+ *   `order-refund` scope) — reuses the existing refund primitives per
+ *   payment method (on-chain refund-to-sender for xlm/usdc, mirror
+ *   credit for `credit`, fails closed for `loop_asset`).
  *
  * `AdminOrderView` was inline in `services/admin.ts` and moves
  * with the functions. It's the single row shape behind every
@@ -37,7 +43,12 @@
  * `routes/admin.orders.tsx`, paired tests) don't have to
  * re-target imports.
  */
-import type { AdminOrderRedriveResult, OrderState } from '@loop/shared';
+import type {
+  AdminOrderRedriveResult,
+  AdminOrderRefundAttestation,
+  AdminOrderRefundResult,
+  OrderState,
+} from '@loop/shared';
 import type { AdminPaymentMethod } from './admin-payment-method-share';
 import { generateIdempotencyKey, type AdminWriteEnvelope } from './admin-write-envelope';
 import { authenticatedRequest } from './api-client';
@@ -129,6 +140,34 @@ export async function redriveOrder(args: {
       method: 'POST',
       headers: { 'Idempotency-Key': args.idempotencyKey ?? generateIdempotencyKey() },
       body: { reason: args.reason },
+      // ADR-028 / A4-063: gated by step-up auth.
+      withStepUp: true,
+    },
+  );
+}
+
+/**
+ * `POST /api/admin/orders/:orderId/refund` — A5-4 order-bound refund,
+ * ADR 017 admin write. `attestation` is required (and validated
+ * server-side) only when the order is `fulfilled` — a code-unused
+ * attestation, the accepted compensating control for the fulfilled-
+ * order double-spend risk.
+ */
+export async function refundOrder(args: {
+  orderId: string;
+  reason: string;
+  attestation?: AdminOrderRefundAttestation;
+  idempotencyKey?: string;
+}): Promise<AdminWriteEnvelope<AdminOrderRefundResult>> {
+  return authenticatedRequest<AdminWriteEnvelope<AdminOrderRefundResult>>(
+    `/api/admin/orders/${encodeURIComponent(args.orderId)}/refund`,
+    {
+      method: 'POST',
+      headers: { 'Idempotency-Key': args.idempotencyKey ?? generateIdempotencyKey() },
+      body: {
+        reason: args.reason,
+        ...(args.attestation !== undefined ? { attestation: args.attestation } : {}),
+      },
       // ADR-028 / A4-063: gated by step-up auth.
       withStepUp: true,
     },

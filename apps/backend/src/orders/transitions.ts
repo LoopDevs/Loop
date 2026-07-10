@@ -340,6 +340,39 @@ export async function markOrderFailed(orderId: string, reason: string): Promise<
 }
 
 /**
+ * Transition: `fromState` → `failed`, guarded on the EXACT expected
+ * source state (a single-state CAS, not the broad-predicate
+ * `markOrderFailed`). Returns `null` if the row is no longer in
+ * `fromState` — the caller treats that as "raced past me, re-validate".
+ *
+ * A5-4 (money review 2026-07-10): the admin order-refund handler must
+ * fence the order it VALIDATED, not whatever state it later happens to
+ * be in. `markOrderFailed`'s predicate matches `paid` OR `procuring`, so
+ * fencing a `paid`-read order with it could silently fail a row a worker
+ * just transitioned `paid → procuring` — and that worker pays CTX with
+ * no order-state re-check, so refunding it would double-lose (CTX paid
+ * AND customer refunded). Pinning the CAS to the read state means an
+ * intervening transition returns `null` → the handler 409s and refunds
+ * nothing.
+ */
+export async function markOrderFailedFromState(
+  orderId: string,
+  fromState: 'paid' | 'procuring',
+  reason: string,
+): Promise<Order | null> {
+  const rows = await db
+    .update(orders)
+    .set({
+      state: 'failed',
+      failureReason: reason,
+      failedAt: new Date(),
+    })
+    .where(and(eq(orders.id, orderId), eq(orders.state, fromState)))
+    .returning();
+  return rows[0] ?? null;
+}
+
+/**
  * Sweep: `pending_payment` orders older than `cutoff` → `expired`.
  * Called from a periodic job (not per-request). Returns the number
  * of rows swept so the caller can log the batch size.

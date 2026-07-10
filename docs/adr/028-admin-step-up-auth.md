@@ -63,6 +63,19 @@
   The step-up-gated set is now: credit-adjust, refund, withdrawal,
   payout-retry, payout-compensation, home-currency, cashback-config, staff
   role grant/revoke, deposit-refund, operator-float, order-redrive.
+- **2026-07-10** A5-4: the order-bound refund
+  (`POST /api/admin/orders/:orderId/refund`) joins the gated set with its
+  own scope, `order-refund` — it can submit a real outbound Stellar
+  refund-to-sender (the A6 `refundDeposit` machinery) for an xlm/usdc
+  order, the same stolen-bearer class as `deposit-refund`. It is ALSO the
+  operator surface for the fulfilled-order code-unused-attestation policy
+  (readiness-backlog A5-4; the accepted double-spend risk in
+  `docs/threat-model.md`), so step-up is doubly warranted: the attestation
+  - audit are the compensating control, and step-up ensures a captured
+    bearer alone cannot exercise it. The step-up-gated set is now:
+    credit-adjust, refund, withdrawal, payout-retry, payout-compensation,
+    home-currency, cashback-config, staff role grant/revoke, deposit-refund,
+    operator-float, order-redrive, order-refund.
 
 ### Activation gate / deploy ordering
 

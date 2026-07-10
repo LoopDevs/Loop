@@ -62,7 +62,12 @@ const log = logger.child({ area: 'stuck-procurement-sweep' });
  *   - ANY read failure (DB or Horizon) → treat as PAID and hold —
  *     uncertainty must never auto-refund (the double-spend direction).
  */
-async function loopPaidCtx(orderId: string): Promise<boolean> {
+// Exported (A5-4): the admin order-refund handler (admin/order-refund.ts)
+// reuses this same disambiguation before allowing a `procuring` order to
+// be refunded -- refunding a `procuring` order whose CTX payment already
+// landed would double-lose money (CTX paid AND the customer refunded),
+// exactly the case this function exists to rule out.
+export async function loopPaidCtx(orderId: string): Promise<boolean> {
   const settlement = await getCtxSettlementByOrderId(orderId);
   if (settlement === null || settlement.txHash === null) return false;
   if (settlement.confirmedAt !== null) return true;
