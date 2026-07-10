@@ -2,14 +2,19 @@
  * Support-ops OpenAPI registrations (ADR 037 §4) — the
  * watcher-skip browser (+ reopen), the per-user wallet card
  * (+ reprovision), the redemption re-fetch, the reverse lookup, the
- * fleet-wide ledger browser (A5-8), and the per-subject audit
- * timeline (A5-7). Wire shapes live in `@loop/shared/admin-support-ops`.
+ * fleet-wide ledger browser (A5-8), the per-subject audit
+ * timeline (A5-7), and the login/OTP support-state read (A5-3). Wire
+ * shapes live in `@loop/shared/admin-support-ops`.
  *
- * All nine paths are SUPPORT-tier (admin ⊇ support); the three
+ * All ten paths are SUPPORT-tier (admin ⊇ support); the three
  * POST actions carry the ADR 017 envelope (Idempotency-Key +
  * reason) without the step-up header — they unstick deliveries,
- * they don't move money (ADR 037 matrix). The ledger browser and the
- * audit timeline are plain reads — no envelope, no mutation.
+ * they don't move money (ADR 037 matrix). The ledger browser, the
+ * audit timeline, and the auth-state read are plain reads — no
+ * envelope, no mutation. The auth-state read's companion ACTION
+ * (clearing the B5 lockout) is admin-tier, not support — registered
+ * in `./admin-user-writes.ts` instead; see `admin/clear-otp-lockout.ts`
+ * for why.
  */
 import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
@@ -658,6 +663,60 @@ export function registerAdminSupportOpsOpenApi(
       },
       404: {
         description: 'Caller is not staff (concealment), or no such user',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      429: {
+        description: 'Rate limit exceeded (120/min per IP)',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      500: {
+        description: 'Internal error',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+    },
+  });
+
+  // ─── Login / OTP support state (ADR 037 / readiness-backlog A5-3) ──────
+
+  const AdminUserAuthStateResponse = registry.register(
+    'AdminUserAuthStateResponse',
+    z.object({
+      userId: z.string().uuid(),
+      otpLock: z.object({
+        locked: z.boolean(),
+        lockedUntil: z.string().datetime().nullable(),
+        failedAttempts: z.number().int(),
+      }),
+      lastOtpRequestedAt: z.string().datetime().nullable(),
+      lastOtpVerifiedAt: z.string().datetime().nullable(),
+      activeSessionCount: z.number().int(),
+    }),
+  );
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/admin/users/{userId}/auth-state',
+    summary: 'Login/OTP support state — B5 lockout + issuance history (ADR 037 / A5-3).',
+    description:
+      "Read-only snapshot of the account's B5 verify-otp lockout state (`otp_attempt_counters`), OTP request/verify history (aggregates over `otps` — never the codes or their hashes), and a live-session count (`refresh_tokens`). Support-tier. Never returns an OTP code, a code hash, or a refresh-token hash. Pairs with `POST /api/admin/users/{userId}/clear-otp-lockout` (admin-tier) for the corresponding unlock action.",
+    tags: ['Admin'],
+    security: [{ bearerAuth: [] }],
+    request: { params: z.object({ userId: z.string().uuid() }) },
+    responses: {
+      200: {
+        description: 'Auth state snapshot',
+        content: { 'application/json': { schema: AdminUserAuthStateResponse } },
+      },
+      400: {
+        description: 'userId is not a uuid',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      401: {
+        description: 'Missing or invalid bearer',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      404: {
+        description: 'Caller is not staff (concealment), or no such user (`USER_NOT_FOUND`)',
         content: { 'application/json': { schema: errorResponse } },
       },
       429: {

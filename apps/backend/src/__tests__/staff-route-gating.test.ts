@@ -203,6 +203,7 @@ const ADMIN_ONLY_PROBES: Array<[string, string]> = [
   ['POST', `/api/admin/users/${NOBODY_ID}/emissions`],
   ['POST', `/api/admin/users/${NOBODY_ID}/home-currency`],
   ['POST', `/api/admin/users/${NOBODY_ID}/revoke-sessions`],
+  ['POST', `/api/admin/users/${NOBODY_ID}/clear-otp-lockout`],
   ['POST', '/api/admin/deposits/op-123/refund'],
   ['POST', '/api/admin/payouts/00000000-0000-4000-8000-00000000aaaa/retry'],
   ['POST', '/api/admin/payouts/00000000-0000-4000-8000-00000000aaaa/compensate'],
@@ -321,6 +322,27 @@ describe('ADR 037 tier behaviour', () => {
     expect(denied.status).toBe(404);
   });
 
+  // A5-3: login/OTP support state is support-tier (ADR 037 §3 — read
+  // views are shared). `getUserById` resolves NOBODY_ID from the
+  // fixture map (it's a real, non-staff user id), so unlike the
+  // audit-timeline probe above this reaches a genuine 200 with the
+  // empty-state default shape — the generic db mock resolves every
+  // downstream OTP/session query to `[]`.
+  it('support can read the login/OTP auth-state (A5-3), non-staff cannot', async () => {
+    const ok = await app.request(`/api/admin/users/${NOBODY_ID}/auth-state`, asUser(SUPPORT_ID));
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({
+      userId: NOBODY_ID,
+      otpLock: { locked: false, lockedUntil: null, failedAttempts: 0 },
+      lastOtpRequestedAt: null,
+      lastOtpVerifiedAt: null,
+      activeSessionCount: 0,
+    });
+
+    const denied = await app.request(`/api/admin/users/${NOBODY_ID}/auth-state`, asUser(NOBODY_ID));
+    expect(denied.status).toBe(404);
+  });
+
   it.each(ADMIN_ONLY_PROBES)('support gets 404 on %s %s', async (method, path) => {
     const res = await app.request(path, asUser(SUPPORT_ID, { method }));
     expect(res.status).toBe(404);
@@ -394,19 +416,20 @@ describe('ADR 037 mount inventory (default-deny)', () => {
       (g) => !g.gates.includes('requireStaff(admin)') && g.gates.includes('requireStaff(support)'),
     );
     const riders = groups.length - adminTier.length - supportExplicit.length;
-    // 38 = 23 CSV exports + 10 non-CSV admin writes (3 credit writes,
+    // 39 = 23 CSV exports + 11 non-CSV admin writes (3 credit writes,
     //      home-currency, cashback-config PUT, merchants/resync,
-    //      B4 revoke-sessions, A6 deposit-refund, R3-1 operator-float
-    //      baseline/manual explanations) + payout retry/compensate
-    //      + A5-1 order redrive + 3 Discord surfaces + step-up
-    //      mint... see the mount-by-mount table in the PR; the exact
-    //      membership is pinned by the matrix test above and the
-    //      money-write list below.
-    expect(adminTier).toHaveLength(38);
-    // 9 = lookup, watcher-skips ×3, wallet ×2, refetch-redemption,
-    //     ledger (A5-8 fleet-wide ledger browser), audit timeline
-    //     (A5-7 per-subject audit timeline).
-    expect(supportExplicit).toHaveLength(9);
+    //      B4 revoke-sessions, A5-3 clear-otp-lockout, A6 deposit-refund,
+    //      R3-1 operator-float baseline/manual explanations) + payout
+    //      retry/compensate + A5-1 order redrive + 3 Discord surfaces
+    //      + step-up mint... see the mount-by-mount table in the PR;
+    //      the exact membership is pinned by the matrix test above
+    //      and the money-write list below.
+    expect(adminTier).toHaveLength(39);
+    // 10 = lookup, watcher-skips ×3, wallet ×2, refetch-redemption,
+    //      ledger (A5-8 fleet-wide ledger browser), audit timeline
+    //      (A5-7 per-subject audit timeline), auth-state (A5-3
+    //      login/OTP support state).
+    expect(supportExplicit).toHaveLength(10);
     expect(riders).toBeGreaterThanOrEqual(50);
   });
 
@@ -489,6 +512,16 @@ describe('ADR 037 mount inventory (default-deny)', () => {
       // step-up friction during a fast security response is
       // counterproductive.
       'POST /api/admin/users/:userId/revoke-sessions',
+      // A5-3: clear the B5 verify-otp lockout counter — same rationale
+      // as revoke-sessions above (moves no value; the counter alone
+      // doesn't grant access, it only re-opens the guess budget, and
+      // any further wrong guess re-arms the lockout from a clean
+      // window), so step-up friction during a support-incident unlock
+      // is counterproductive. Kept at admin-tier (not support) because,
+      // unlike the delivery-unsticking actions below, it weakens a
+      // brute-force defense rather than re-driving already-paid work —
+      // see admin/clear-otp-lockout.ts for the full reasoning.
+      'POST /api/admin/users/:userId/clear-otp-lockout',
       // ADR 037 support-tier delivery-unsticking actions: reversible
       // re-drives of existing intents (no new value creation), scoped
       // to the support remit on purpose — adding step-up would move

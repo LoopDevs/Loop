@@ -1,12 +1,11 @@
 /**
- * Admin user-property write OpenAPI registrations
- * (ADR 015 deferred § home-currency change).
+ * Admin user-property write OpenAPI registrations: home-currency
+ * change (ADR 015 deferred), session revocation (B4), the B5
+ * OTP-lockout clear (A5-3), and the sibling deposit-refund (A6).
  *
- * Sibling of `./admin-credit-writes.ts`. Currently just one
- * surface — `POST /api/admin/users/{userId}/home-currency` — but
- * its own factory keeps the credit-write file's docstring honest
- * (it really is "credits / refunds / withdrawals", not a catch-all
- * for every admin-mediated user write).
+ * Sibling of `./admin-credit-writes.ts` — that file's docstring
+ * stays honest as "credits / refunds / withdrawals", not a catch-all
+ * for every admin-mediated user write; this one holds the rest.
  *
  * Three locally-scoped schemas travel with the slice:
  *   - HomeCurrencySetBody / Result / Envelope
@@ -225,6 +224,84 @@ export function registerAdminUserWritesOpenApi(
       },
       500: {
         description: 'Internal error revoking sessions (`INTERNAL_ERROR`)',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+    },
+  });
+
+  // A5-3: clear the B5 verify-otp lockout counter for a user (incident
+  // response — "user is locked out and can't get in"). Admin-tier, NOT
+  // step-up-gated; DOES carry a required `reason` + Discord audit
+  // (ADR 017-lite), unlike the plainer revoke-sessions above. See
+  // `admin/clear-otp-lockout.ts` for the tier/step-up reasoning.
+  const ClearOtpLockoutBody = registry.register(
+    'ClearOtpLockoutBody',
+    z.object({
+      reason: z.string().min(2).max(500).openapi({
+        description: 'Why the lockout is being cleared — lands in the Discord audit trail.',
+      }),
+    }),
+  );
+  const ClearOtpLockoutResult = registry.register(
+    'AdminClearOtpLockoutResult',
+    z.object({
+      userId: z.string().uuid(),
+      wasLocked: z.boolean().openapi({
+        description: 'Whether the account was actually locked before this call.',
+      }),
+      cleared: z.literal(true),
+    }),
+  );
+  const ClearOtpLockoutEnvelope = registry.register(
+    'AdminClearOtpLockoutEnvelope',
+    z.object({ result: ClearOtpLockoutResult, audit: AdminWriteAudit }),
+  );
+
+  registry.registerPath({
+    method: 'post',
+    path: '/api/admin/users/{userId}/clear-otp-lockout',
+    summary: 'Clear a user’s B5 verify-otp lockout (readiness-backlog A5-3).',
+    description:
+      "Deletes the user's `otp_attempt_counters` row via the same `clearOtpAttempts` primitive a successful `verify-otp` uses — no bespoke unlock path. Idempotent: clearing an already-clear (or never-locked) counter is a no-op success (`wasLocked: false`). Admin-tier; NOT step-up-gated — like `revoke-sessions`, this moves no value and clearing the counter alone doesn't grant access, it only lets the user retry (any further wrong guess re-arms the same B5 lockout). Requires a `reason` (2..500 chars) and fires the Discord admin-audit fanout after commit, unlike `revoke-sessions` which predates that convention.",
+    tags: ['Admin'],
+    security: [{ bearerAuth: [] }],
+    request: {
+      params: z.object({ userId: z.string().uuid() }),
+      headers: z.object({
+        'idempotency-key': z.string().min(16).max(128).openapi({
+          description:
+            'Required. Scoped to (admin_user_id, key); repeats replay the stored snapshot.',
+        }),
+      }),
+      body: {
+        content: { 'application/json': { schema: ClearOtpLockoutBody } },
+      },
+    },
+    responses: {
+      200: {
+        description: 'Lockout cleared (or replayed from idempotency snapshot)',
+        content: { 'application/json': { schema: ClearOtpLockoutEnvelope } },
+      },
+      400: {
+        description: 'Missing idempotency key, invalid body, or non-uuid userId',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      401: {
+        description: 'Missing or invalid bearer',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      404: {
+        description:
+          'Target user not found (`USER_NOT_FOUND`). Also returned to non-admin callers: requireStaff masks the admin surface as 404.',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      429: {
+        description: 'Rate limit exceeded (20/min per IP)',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      500: {
+        description:
+          'Internal error (`INTERNAL_ERROR`), or unreadable replay snapshot (`IDEMPOTENCY_SNAPSHOT_CORRUPT`)',
         content: { 'application/json': { schema: errorResponse } },
       },
     },

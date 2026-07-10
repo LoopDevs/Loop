@@ -23,7 +23,9 @@ app/
 │   │   ├── admin/    ← ~45 components (treasury, cashback, operator, supplier,
 │   │   │               payout, mix-axis-matrix cards + csv export; ADR 037 adds
 │   │   │               RequireStaff role gate, role-aware AdminNav, UserWalletCard,
-│   │   │               OrderDeliveryPanel, AdminLookupSearch)
+│   │   │               OrderDeliveryPanel, AdminLookupSearch, AuthStatePanel — A5-3
+│   │   │               login/OTP support state: read for both staff roles, the
+│   │   │               "Clear OTP lockout" action admin-only)
 │   │   ├── auth/     ← social login button, email+OTP flow
 │   │   ├── cashback/ ← flywheel chip, balance, pending-payouts, rail-mix
 │   │   ├── home/     ← stats bands (cashback + flywheel)
@@ -45,7 +47,8 @@ app/
 ├── services/         ← Typed API client (api-client, auth, clusters, merchants,
 │                       orders, orders-loop, wallet, config, admin (+ per-surface admin-*
 │                       slices incl. ADR 037 admin-staff / admin-watcher-skips /
-│                       admin-user-wallet / admin-lookup / admin-order-redemption),
+│                       admin-user-wallet / admin-lookup / admin-order-redemption /
+│                       admin-user-auth-state — A5-3 login/OTP support state),
 │                       user, public-stats, parse-error-response)
 ├── stores/           ← Zustand (auth.store, purchase.store, ui.store)
 ├── native/           ← Capacitor plugin wrappers (platform, haptics, secure-storage,

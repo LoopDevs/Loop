@@ -118,6 +118,14 @@ vi.mock('~/services/admin', async (importActual) => {
         sessions: null,
       },
     }),
+    // A5-3: login/OTP support state — support-visible read.
+    getAdminUserAuthState: empty({
+      userId: 'u-360',
+      otpLock: { locked: false, lockedUntil: null, failedAttempts: 0 },
+      lastOtpRequestedAt: null,
+      lastOtpVerifiedAt: null,
+      activeSessionCount: 0,
+    }),
   };
 });
 
@@ -215,6 +223,12 @@ describe('<AdminUserDetailRoute /> — ADR 037 role gating', () => {
     expect(screen.getByRole('search', { name: /Global admin lookup/i })).toBeDefined();
     // A5-7: audit timeline (read) renders for both roles.
     expect(screen.getByRole('heading', { name: /Audit timeline/i })).toBeDefined();
+    // A5-3: auth-state panel renders, and the clear-lockout action is
+    // admin-visible.
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /Auth \/ login state/i })).toBeDefined();
+    });
+    expect(screen.getByRole('button', { name: /Clear OTP lockout/i })).toBeDefined();
   });
 
   it('support sees the reads + wallet card but NOT the money forms or CSV', async () => {
@@ -238,6 +252,12 @@ describe('<AdminUserDetailRoute /> — ADR 037 role gating', () => {
     expect(screen.getByRole('heading', { name: /Credit transactions/i })).toBeDefined();
     // A5-7: audit timeline (read) renders for support too.
     expect(screen.getByRole('heading', { name: /Audit timeline/i })).toBeDefined();
+    // A5-3: auth-state panel READ renders for support, but the
+    // admin-tier clear-lockout button is hidden (not disabled).
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /Auth \/ login state/i })).toBeDefined();
+    });
+    expect(screen.queryByRole('button', { name: /Clear OTP lockout/i })).toBeNull();
   });
 
   it('denies non-staff users at the shell gate', async () => {
