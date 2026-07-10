@@ -21,7 +21,8 @@
  * preserved in the comments next to each mount: 60/min for the
  * full-catalog `/all` (legitimate clients fetch once + cache),
  * 120/min for individual reads + cashback previews, 180/min for
- * paginated `/api/merchants` (filter/page-change burst).
+ * paginated `/api/merchants` (filter/page-change burst) and for
+ * `/search` (search-as-you-type — same burst profile).
  */
 import type { Hono } from 'hono';
 import { rateLimit } from '../middleware/rate-limit.js';
@@ -33,6 +34,7 @@ import {
   merchantDetailHandler,
   merchantsCashbackRatesHandler,
 } from '../merchants/handler.js';
+import { merchantSearchHandler } from '../merchants/search-handler.js';
 import { requireAuth } from '../auth/handler.js';
 
 /** Mounts all `/api/merchants/*` routes on the supplied Hono app. */
@@ -52,6 +54,19 @@ export function mountMerchantRoutes(app: Hono): void {
     '/api/merchants/all',
     rateLimit('GET /api/merchants/all', 60, 60_000),
     merchantAllHandler,
+  );
+
+  // GET /api/merchants/search — server-side name search (go-live-plan
+  // §P3 / S4-7 §3 tail). Static literal path — must come BEFORE /:id
+  // for the same routing-order reason as /all. 180/min matches
+  // /api/merchants' "filter burst" rationale above: this endpoint
+  // serves exactly that use case (search-as-you-type), just computed
+  // server-side over the cached catalog instead of client-side over
+  // the full fetched catalog.
+  app.get(
+    '/api/merchants/search',
+    rateLimit('GET /api/merchants/search', 180, 60_000),
+    merchantSearchHandler,
   );
   // /by-slug/:slug before /:id for the same reason.
   app.get(

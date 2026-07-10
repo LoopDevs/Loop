@@ -4,6 +4,8 @@ import type {
   MerchantListParams,
   MerchantListResponse,
   MerchantAllResponse,
+  MerchantSearchParams,
+  MerchantSearchResponse,
   MerchantsCashbackRatesResponse,
 } from '@loop/shared';
 import { apiRequest, authenticatedRequest } from './api-client';
@@ -32,6 +34,23 @@ export async function fetchAllMerchants(): Promise<MerchantAllResponse> {
   // pulls those from /by-slug + /:id), so request the lite projection to keep
   // this whole-catalog payload small as the catalog grows.
   return apiRequest<MerchantAllResponse>('/api/merchants/all?fields=lite');
+}
+
+/**
+ * Server-side merchant name search (go-live-plan §P3 / S4-7 §3 tail).
+ * Replaces the client-side full-catalog fetch + filter previously used
+ * by the Navbar dropdown and MobileHome search — same accent/case-
+ * insensitive substring match on name, bounded + ranked server-side.
+ * Public — no auth required.
+ */
+export async function fetchMerchantSearch(
+  params: MerchantSearchParams,
+): Promise<MerchantSearchResponse> {
+  const qs = new URLSearchParams();
+  qs.set('q', params.q);
+  if (params.country) qs.set('country', params.country);
+  if (params.limit !== undefined) qs.set('limit', String(params.limit));
+  return apiRequest<MerchantSearchResponse>(`/api/merchants/search?${qs.toString()}`);
 }
 
 /**

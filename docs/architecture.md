@@ -314,6 +314,7 @@ GET  /.well-known/apple-app-site-association — iOS Universal Links domain-veri
 GET  /.well-known/assetlinks.json            — Android App Links domain-verification (M-3); 404 WELL_KNOWN_NOT_CONFIGURED until ANDROID_CERT_SHA256 is set, `public, max-age=300`
 GET  /api/merchants              ?page=&limit=&q=      — paginated, max 100 per page
 GET  /api/merchants/all                                 — full catalog in one response (audit A-002); `?fields=lite` strips description/instructions/terms for browse (S4-7)
+GET  /api/merchants/search       ?q=&country=&limit=    — server-side name search, bounded (default 20/max 50), lite projection (S4-7 §3 tail)
 GET  /api/merchants/by-slug/:slug
 GET  /api/merchants/:id
 GET  /api/merchants/cashback-rates              — public bulk map of active cashback pcts (ADR 011/015)

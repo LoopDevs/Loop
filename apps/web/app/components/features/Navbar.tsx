@@ -2,14 +2,8 @@ import { useState, useEffect, useRef, forwardRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation } from 'react-router';
 import { LocaleLink as Link } from '~/components/ui/LocaleLink';
-import { useAllMerchants } from '~/hooks/use-merchants';
-import {
-  brandSlug,
-  foldForSearch,
-  groupMerchants,
-  merchantInCountry,
-  merchantSlug,
-} from '@loop/shared';
+import { useMerchantSearch } from '~/hooks/use-merchants';
+import { brandSlug, groupMerchants, merchantSlug } from '@loop/shared';
 import { useAuthStore } from '~/stores/auth.store';
 import { useLocale, useLocalizedNavigate } from '~/i18n/locale';
 import { useAuth } from '~/hooks/use-auth';
@@ -114,7 +108,6 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
   useEffect(() => {
     setMounted(true);
   }, []);
-  const { merchants } = useAllMerchants();
   const { country } = useLocale();
 
   useEffect(() => {
@@ -125,27 +118,28 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
   // UX-06: trimmed once so both the results filter and the "no results"
   // copy agree on what actually counts as a searched query.
   const trimmedQuery = debouncedQuery.trim();
+  // Matches the pre-existing "at least 2 chars" floor before firing a
+  // search — a single-char query is too noisy to be a useful dropdown.
+  const searchReady = debouncedQuery.length > 1;
 
-  // Shared foldForSearch keeps navbar filtering in step with the
-  // backend /api/merchants?q= behaviour (accent-insensitive).
-  const foldedQuery = foldForSearch(debouncedQuery);
+  // S4-7 §3 tail: server-side search (go-live-plan §P3) replaces the old
+  // client-side full-catalog fetch + filter. `useMerchantSearch` already
+  // matches the pre-existing semantics — accent/case-insensitive substring
+  // on name, in-country-first ranking (ADR 034) — computed server-side
+  // instead of over a client-held copy of the whole catalog.
+  const {
+    merchants: searchMerchants,
+    isLoading: searchLoading,
+    isError: searchErrored,
+  } = useMerchantSearch(debouncedQuery, { country, enabled: searchReady });
+
   // ADR 032: group "Brand - Variant" matches so a search for "dots" returns
-  // one "dots.eco" entry (→ the brand view) rather than 14 rows. Grouping the
-  // filtered set keeps a brand whose variant matches; slice(0,6) caps brands.
-  // Search spans every country; the active country ranks first (ADR 034) — a UK
-  // visitor searching "amazon" sees the UK entry before the US one. Stable sort
-  // preserves the existing order within each tier.
+  // one "dots.eco" entry (→ the brand view) rather than 14 rows. The server
+  // already ranks + bounds the raw matches; grouping + the top-6 slice stay
+  // client-side since they're a display concern, not a search concern.
   const results: SearchResult[] =
-    debouncedQuery.length > 1
-      ? groupMerchants(
-          merchants
-            .filter((m) => foldForSearch(m.name).includes(foldedQuery))
-            .sort((a, b) => {
-              const ra = merchantInCountry(a, country) ? 1 : 0;
-              const rb = merchantInCountry(b, country) ? 1 : 0;
-              return rb - ra;
-            }),
-        )
+    searchReady && !searchErrored
+      ? groupMerchants(searchMerchants)
           .slice(0, 6)
           .map((g): SearchResult => {
             if (g.isGroup) {
@@ -170,10 +164,18 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
 
   // UX-06: an explicit empty state once a real search has run and found
   // nothing — without this, a no-match query looks identical to "hasn't
-  // searched yet" (dropdown just doesn't render).
+  // searched yet" (dropdown just doesn't render). Gated on !searchLoading
+  // so an in-flight request (no cached data yet for this query) doesn't
+  // flash "no results" before the response arrives.
   const showNoResults =
-    open && debouncedQuery.length > 1 && trimmedQuery.length > 0 && results.length === 0;
-  const showPanel = open && (results.length > 0 || showNoResults);
+    open &&
+    searchReady &&
+    !searchLoading &&
+    !searchErrored &&
+    trimmedQuery.length > 0 &&
+    results.length === 0;
+  const showError = open && searchReady && !searchLoading && searchErrored;
+  const showPanel = open && (results.length > 0 || showNoResults || showError);
 
   return (
     <>
@@ -268,6 +270,16 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
             className="absolute top-full left-0 right-0 mt-2 rounded-lg shadow-lg z-[999999] bg-surface border border-line px-4 py-6 text-center text-sm text-ink-muted"
           >
             No brands match &ldquo;{trimmedQuery}&rdquo;
+          </div>
+        ) : showError ? (
+          // Distinct from "no results" — a search request failure
+          // shouldn't read as "we searched and there's nothing", it
+          // should read as "search is broken right now".
+          <div
+            role="status"
+            className="absolute top-full left-0 right-0 mt-2 rounded-lg shadow-lg z-[999999] bg-surface border border-line px-4 py-6 text-center text-sm text-ink-muted"
+          >
+            Search is unavailable right now. Try again in a moment.
           </div>
         ) : null}
       </div>

@@ -10,6 +10,7 @@ const { merchantsMock } = vi.hoisted(() => ({
     fetchAllMerchants: vi.fn(),
     fetchMerchant: vi.fn(),
     fetchMerchantBySlug: vi.fn(),
+    fetchMerchantSearch: vi.fn(),
     fetchMerchantCashbackRate: vi.fn(),
     fetchMerchantsCashbackRates: vi.fn(),
   },
@@ -20,6 +21,7 @@ vi.mock('~/services/merchants', () => ({
   fetchAllMerchants: () => merchantsMock.fetchAllMerchants(),
   fetchMerchant: (id: string) => merchantsMock.fetchMerchant(id),
   fetchMerchantBySlug: (slug: string) => merchantsMock.fetchMerchantBySlug(slug),
+  fetchMerchantSearch: (args: unknown) => merchantsMock.fetchMerchantSearch(args),
   fetchMerchantCashbackRate: (id: string) => merchantsMock.fetchMerchantCashbackRate(id),
   fetchMerchantsCashbackRates: () => merchantsMock.fetchMerchantsCashbackRates(),
 }));
@@ -31,6 +33,7 @@ import {
   useAllMerchants,
   useMerchantBySlug,
   useMerchant,
+  useMerchantSearch,
   useMerchantCashbackRate,
   useMerchantsCashbackRatesMap,
 } from '../use-merchants';
@@ -127,6 +130,74 @@ describe('useAllMerchants', () => {
       | undefined;
     expect(opts?.refetchOnWindowFocus).toBe(false);
     expect(opts?.staleTime).toBe(30 * 60 * 1000);
+  });
+});
+
+describe('useMerchantSearch', () => {
+  it('does not fire when the query is empty', () => {
+    function Probe(): React.ReactElement {
+      const r = useMerchantSearch('');
+      return <span data-testid="count">{r.merchants.length}</span>;
+    }
+    render(withProvider(<Probe />));
+    expect(merchantsMock.fetchMerchantSearch).not.toHaveBeenCalled();
+  });
+
+  it('does not fire when whitespace-only', () => {
+    function Probe(): React.ReactElement {
+      const r = useMerchantSearch('   ');
+      return <span data-testid="count">{r.merchants.length}</span>;
+    }
+    render(withProvider(<Probe />));
+    expect(merchantsMock.fetchMerchantSearch).not.toHaveBeenCalled();
+  });
+
+  it('honours the caller enabled gate (Navbar-style length>1 floor)', () => {
+    function Probe(): React.ReactElement {
+      const r = useMerchantSearch('a', { enabled: 'a'.length > 1 });
+      return <span data-testid="count">{r.merchants.length}</span>;
+    }
+    render(withProvider(<Probe />));
+    expect(merchantsMock.fetchMerchantSearch).not.toHaveBeenCalled();
+  });
+
+  it('fires with the trimmed query + country + limit and returns results', async () => {
+    merchantsMock.fetchMerchantSearch.mockResolvedValue({
+      merchants: [{ id: 'm-1', name: 'Amazon', enabled: true }],
+      total: 1,
+    });
+    function Probe(): React.ReactElement {
+      const r = useMerchantSearch('  ama  ', { country: 'gb', limit: 20 });
+      return <span data-testid="count">{r.merchants.length}</span>;
+    }
+    render(withProvider(<Probe />));
+    await waitFor(() => expect(screen.getByTestId('count').textContent).toBe('1'));
+    expect(merchantsMock.fetchMerchantSearch).toHaveBeenCalledWith({
+      q: 'ama',
+      country: 'gb',
+      limit: 20,
+    });
+  });
+
+  it('omits country/limit from the request when not supplied', async () => {
+    merchantsMock.fetchMerchantSearch.mockResolvedValue({ merchants: [], total: 0 });
+    function Probe(): React.ReactElement {
+      const r = useMerchantSearch('ama');
+      return <span data-testid="count">{r.merchants.length}</span>;
+    }
+    render(withProvider(<Probe />));
+    await waitFor(() => expect(merchantsMock.fetchMerchantSearch).toHaveBeenCalled());
+    expect(merchantsMock.fetchMerchantSearch).toHaveBeenCalledWith({ q: 'ama' });
+  });
+
+  it('surfaces isError when the request fails', async () => {
+    merchantsMock.fetchMerchantSearch.mockRejectedValue(new Error('network'));
+    function Probe(): React.ReactElement {
+      const r = useMerchantSearch('ama');
+      return <span data-testid="err">{String(r.isError)}</span>;
+    }
+    render(withProvider(<Probe />));
+    await waitFor(() => expect(screen.getByTestId('err').textContent).toBe('true'));
   });
 });
 

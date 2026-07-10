@@ -2,6 +2,7 @@ import type { Context } from 'hono';
 import { z } from 'zod';
 import { foldForSearch } from '@loop/shared';
 import { getMerchants } from './sync.js';
+import { toLiteMerchant } from './lite.js';
 import { getUpstreamCircuit } from '../circuit-breaker.js';
 import { upstreamUrl } from '../upstream.js';
 import { logger } from '../logger.js';
@@ -98,14 +99,7 @@ export function merchantAllHandler(c: Context): Response {
   // single biggest browse-payload win as the catalog scales (they're capped at
   // 50k chars each). Default (no param) is unchanged for any other consumer.
   if (c.req.query('fields') === 'lite') {
-    const lite = merchants.map((m) => {
-      const copy = { ...m };
-      delete copy.description;
-      delete copy.instructions;
-      delete copy.terms;
-      return copy;
-    });
-    return c.json({ merchants: lite, total: merchants.length });
+    return c.json({ merchants: merchants.map(toLiteMerchant), total: merchants.length });
   }
   return c.json({ merchants, total: merchants.length });
 }

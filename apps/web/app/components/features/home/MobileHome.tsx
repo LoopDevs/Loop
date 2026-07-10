@@ -11,7 +11,11 @@ import {
   merchantInCountry,
   merchantSlug,
 } from '@loop/shared';
-import { useAllMerchants, useMerchantsCashbackRatesMap } from '~/hooks/use-merchants';
+import {
+  useAllMerchants,
+  useMerchantSearch,
+  useMerchantsCashbackRatesMap,
+} from '~/hooks/use-merchants';
 import { useOrders } from '~/hooks/use-orders';
 import { useAuth } from '~/hooks/use-auth';
 import { useAppConfig } from '~/hooks/use-app-config';
@@ -25,6 +29,18 @@ import { MerchantCardSkeleton } from '~/components/ui/Skeleton';
 import { FavoritesStrip } from '~/components/features/FavoritesStrip';
 import { RecentlyPurchasedStrip } from '~/components/features/RecentlyPurchasedStrip';
 import { WalletCard } from '~/components/features/wallet/WalletCard';
+
+/**
+ * S4-7 §3 tail (go-live-plan §P3): the search-mode directory grid used
+ * to show every catalog match with no cap. `GET /api/merchants/search`
+ * bounds results server-side (default 20, max 50 — see
+ * `apps/backend/src/merchants/search-handler.ts`); this passes the max
+ * so the grid stays as full as it can within that documented cap. A
+ * deliberate, documented UX change from "unbounded" — a query matching
+ * more than 50 merchants now shows the top 50 (ranked in-country-first,
+ * then by savings) instead of every match.
+ */
+const MOBILE_SEARCH_RESULT_LIMIT = 50;
 
 /**
  * Mobile home — native and web narrow widths. Combines the dashboard
@@ -169,30 +185,52 @@ export function MobileHome(): React.JSX.Element {
     return () => clearTimeout(timer);
   }, [query]);
   const foldedQuery = foldForSearch(debouncedQuery.trim());
+  const isSearching = foldedQuery.length > 0;
+
+  // S4-7 §3 tail: server-side search (go-live-plan §P3). Only the SEARCH
+  // branch below switches to the endpoint — browsing (no query) still
+  // reads `countryMerchants`/`visibleMerchants` from the full catalog
+  // fetched above, unchanged. `useMerchantSearch` matches the exact
+  // ordering this branch used to compute client-side (in-country first,
+  // then savingsPercentage desc — ADR 034) via its `country` param, now
+  // computed server-side. `MOBILE_SEARCH_RESULT_LIMIT` bounds the grid —
+  // previously unbounded; see the comment on the constant below.
+  const {
+    merchants: searchResults,
+    isLoading: searchLoading,
+    isError: searchErrored,
+  } = useMerchantSearch(debouncedQuery, {
+    country,
+    limit: MOBILE_SEARCH_RESULT_LIMIT,
+    enabled: isSearching,
+  });
+
   const grid = useMemo(() => {
     const bySavings = (a: Merchant, b: Merchant): number =>
       (b.savingsPercentage ?? 0) - (a.savingsPercentage ?? 0);
     // Browsing the directory shows the active country. Searching spans every
-    // country but ranks the active country first (ADR 034).
-    if (foldedQuery.length === 0) {
+    // country but ranks the active country first (ADR 034) — the server
+    // already applies both filters + that ordering.
+    if (!isSearching) {
       return countryMerchants
         .filter((m) => m.enabled !== false)
         .slice()
         .sort(bySavings);
     }
-    const inCountry = (m: Merchant): boolean => merchantInCountry(m, country);
-    return visibleMerchants
-      .filter((m) => m.enabled !== false && foldForSearch(m.name).includes(foldedQuery))
-      .slice()
-      .sort((a, b) => {
-        const r = (inCountry(b) ? 1 : 0) - (inCountry(a) ? 1 : 0);
-        return r !== 0 ? r : bySavings(a, b);
-      });
-  }, [countryMerchants, visibleMerchants, country, foldedQuery]);
+    if (searchErrored) return [];
+    return searchResults;
+  }, [countryMerchants, isSearching, searchResults, searchErrored]);
   // ADR 032: collapse "Brand - Variant" SKUs into one brand cell. Grouping
   // the *filtered* list means a search for "tree" still surfaces the
   // dots.eco brand (a matching variant keeps its group).
   const groupedGrid = useMemo(() => groupMerchants(grid), [grid]);
+  // Loading skeleton: while searching, only the search request's own
+  // loading state matters (the catalog fetch that gates browse mode is
+  // irrelevant once a query is typed). `grid.length === 0` avoids
+  // re-showing skeletons under `placeholderData: keepPreviousData` once a
+  // prior result set is already on screen.
+  const directoryLoading =
+    (isSearching ? searchLoading : visibleMerchantsLoading) && grid.length === 0;
 
   useEffect(() => {
     setHydrated(true);
@@ -395,8 +433,14 @@ export function MobileHome(): React.JSX.Element {
           back under the hero. The tab bar clearance below sits
           inside NativeShell, so this min-h is clean content. */}
       <div id="mobile-home-grid" className="px-5 pb-6 grid grid-cols-2 gap-2.5 min-h-[70vh]">
-        {visibleMerchantsLoading && grid.length === 0 ? (
+        {directoryLoading ? (
           Array.from({ length: 6 }).map((_, i) => <MerchantCardSkeleton key={i} />)
+        ) : isSearching && searchErrored ? (
+          // Distinct from "no results" — a failed search request
+          // shouldn't read as "we searched and there's nothing".
+          <div className="col-span-2 text-center py-10 text-sm text-gray-500 dark:text-gray-400">
+            Search is unavailable right now. Try again in a moment.
+          </div>
         ) : groupedGrid.length > 0 ? (
           groupedGrid.map((g) =>
             g.isGroup ? (

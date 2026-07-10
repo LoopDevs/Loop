@@ -518,10 +518,49 @@ max_connections`, including the release-command migration machine
 
 ### S4-7 · Trim the client-side catalog fetch `[code]`
 
-- [x] **Status:** ✅ Done — both "done when" criteria met: **(1) `fields=lite` projection** (`/api/merchants/all?fields=lite` strips description/instructions/terms; browse hook opts in; verified no browse surface renders them — detail uses `/by-slug` + `/:id`) + **(2) mobile search debounced** (150ms in `MobileHome`, mirrors Navbar; input stays responsive, filtering keys off the debounced value). (3) directory virtualization + server-side search deferred (explicitly "later"; not in the acceptance criteria).
+- [x] **Status:** ✅ Done — all three "do" items now closed: **(1) `fields=lite` projection** (`/api/merchants/all?fields=lite` strips description/instructions/terms; browse hook opts in; verified no browse surface renders them — detail uses `/by-slug` + `/:id`) + **(2) mobile search debounced** (150ms in `MobileHome`, mirrors Navbar; input stays responsive, filtering keys off the debounced value) + **(3) server-side search, done 2026-07-10** — see the §3 tail entry immediately below. Directory virtualization is the one remaining deferred item (explicitly "later"; not in the original acceptance criteria).
       **Why:** `use-merchants.ts:65` → `/api/merchants/all` ships `description/instructions/terms` (each capped 50k chars) that no browse surface renders — ~0.5-1MB now, ~10-20MB at 34k merchants — JSON-parsed on the main thread + localStorage-seeded; the directory renders un-virtualized DOM cards; mobile search is undebounced. Scale-#6 (catalog size is operator-controlled).
       **Do (cheap→structural):** (1) a `fields=lite` server projection stripping the long text — biggest single win, few lines in `merchants/handler.ts`; (2) debounce mobile search; (3) virtualize the directory + add server-side search (later).
       **Done when:** the browse payload excludes unrendered long text; mobile search is debounced.
+
+      **§3 tail — server-side search, done 2026-07-10 (go-live-plan §P3):** the
+      Navbar dropdown and MobileHome search both used to fetch the *entire*
+      lite catalog (`/api/merchants/all?fields=lite`) and filter it in the
+      browser on every debounced keystroke — fine at ~1,134 merchants, not at
+      34k. Added `GET /api/merchants/search?q=&country=&limit=`
+      (`apps/backend/src/merchants/search-handler.ts`, mounted in
+      `routes/merchants.ts` before `/:id`, 180/min per IP, OpenAPI-registered,
+      lite projection via the extracted `merchants/lite.ts#toLiteMerchant`
+      helper shared with `/all?fields=lite`). **Catalog is memory-backed**
+      (synced from upstream CTX into an in-process array/Map — see
+      `merchants/sync.ts` — not Postgres), so this is a plain in-memory
+      `Array.filter`/`.sort`, no SQL, no migration, no injection surface.
+      Match semantics deliberately mirror the pre-existing filters exactly:
+      `foldForSearch(m.name).includes(q)` (same as `/api/merchants?q=` and
+      the old client filters) + `enabled !== false`; ranking is in-country
+      first (when `country` is supplied, ADR 034) then `savingsPercentage`
+      desc, matching what `MobileHome`'s search branch already computed
+      client-side. Bounded at 20 default / 50 max — a **documented,
+      deliberate UX change**: MobileHome's search grid was previously
+      unbounded (showed every match) and now caps at 50
+      (`MOBILE_SEARCH_RESULT_LIMIT` in `MobileHome.tsx`); Navbar's dropdown
+      was already capped to 6 after ADR-032 grouping, well inside the new
+      bound. Web: `useMerchantSearch()` hook
+      (`apps/web/app/hooks/use-merchants.ts`, `placeholderData:
+      keepPreviousData` so the dropdown/grid doesn't flash empty between
+      debounced requests) replaces `useAllMerchants()` in `Navbar.tsx`'s
+      `SearchBar` entirely and is used alongside (not instead of)
+      `useAllMerchants()` in `MobileHome.tsx` — browse mode (no query) is
+      untouched, only the search branch switched. Loading/no-results/error
+      states handled in both (error is a distinct message from the
+      pre-existing UX-06 "no results" state). **Follow-on win:** since
+      Navbar no longer needs the full catalog at all, pages where Navbar was
+      the only catalog consumer (gift-card detail, orders, settings, auth,
+      onboarding) no longer eagerly fetch `/api/merchants/all` just to power
+      the search box — the catalog fetch now only fires on surfaces that
+      actually browse it (home, map, brand pages, cashback-by-merchant,
+      order history). Directory virtualization stays the one open item from
+      the original §3 "later" list.
 
 ### S4-8 · Dedupe per-machine watchers/alerts `[code]`
 
@@ -985,7 +1024,7 @@ Each is documented + accepted in `docs/adr/005-known-limitations.md` with a revi
 `docs/roadmap.md` §Tranche 3.
 
 - [ ] Plaid open-banking rails (2–3 mo) · virtual cashback Visa/MC (BIN sponsor + KYC, 4–6 mo) · mainnet launch (audits + UK FCA EMI + per-jurisdiction posture) · four-country launch (US/UK/EU/CA).
-- [ ] MapLibre GL swap (from Leaflet) · server-side merchant search (ties to S4-7) · referral program · privacy-respecting analytics · Core Web Vitals monitoring · WCAG 2.1 AA audit (ties to B-2).
+- [ ] MapLibre GL swap (from Leaflet) · referral program · privacy-respecting analytics · Core Web Vitals monitoring · WCAG 2.1 AA audit (ties to B-2). (Server-side merchant search, formerly listed here, is done — see S4-7 §3 tail.)
 
 ---
 
