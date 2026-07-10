@@ -220,7 +220,7 @@ Note the **sweep** arm already maps a skip-row that goes `unmatched` → `order_
 
 ### R3-1 · Operator XLM/USDC float reconciliation `[code]`
 
-- [ ] **Status:** ◐ Partial 2026-07-07 — detection/indexing/read surface and audited baseline/manual write workflow landed; production baselines/cursors/thresholds and money review remain.
+- [ ] **Status:** ◐ Partial — detection/indexing/read surface, audited baseline/manual write workflow, cold-start cursor safety (DB-enforced), `needs_baseline` paging, threshold config + docs, and the operator runbook (`docs/runbooks/operator-float-drift.md`) all landed (2026-07-07 + 2026-07-10 review-first PR). **👤 Remains open:** the real production baseline (operator sets it via the audited admin write) and money-review sign-off.
       **Why:** The only automated reconciliations are mirror=ledger (INV-1) and on-chain-LOOP-vs-mirror (INV-4). **Neither covers the operator/deposit wallet** through which every real deposit dollar flows (deposits in, CTX settlements out, refunds out, fees). No aggregate "deposits-for-paid-orders ≈ CTX-paid + refunds + fees + float" check. Money-P2-1.
       **Do:** add a scheduled reconciliation (model on `asset-drift-watcher.ts` / `ledger-invariant-watcher.ts`, `withAdvisoryLock` single-flight, persist state, page on breach) that sums the operator wallet's inbound/outbound (Horizon) against the recorded deposits/settlements/refunds and alerts on drift beyond a threshold. Surface it on the Treasury admin page.
       **⚠️** Money-review; it's a _detection_ addition (no writes) but its threshold logic must not false-page on normal float.
@@ -290,6 +290,44 @@ Note the **sweep** arm already maps a skip-row that goes `unmatched` → `order_
       inflation policy. Remaining: production baselines/cursors/
       thresholds (operator) — the code side of the money review is
       addressed.
+      **Production-readiness fixes 2026-07-10** (review-first, not yet
+      merged at doc-write time): the `startingHorizonCursor` requirement
+      above was Zod-only (app-layer "convention" tier) — promoted to a
+      DB-enforced NOT NULL + non-empty CHECK on both
+      `starting_horizon_cursor` and `current_horizon_cursor` (migration
+      0057), closing the path where a future non-API writer (script,
+      raw-SQL backfill) could leave a baseline with a null cursor and
+      make the indexer fall back to an unbounded full-history Horizon
+      scan from genesis. Cold start with NO baseline at all was already
+      correctly fail-closed to `needs_baseline` with zero Horizon reads;
+      that state now also PAGES Discord (previously it persisted
+      silently, so a deployed watcher with no baseline configured could
+      sit inert forever with nothing prompting an operator to set one
+      up). Thresholds (`LOOP_OPERATOR_FLOAT_XLM_THRESHOLD_STROOPS` /
+      `_USDC_THRESHOLD_STROOPS` / `_RECONCILIATION_INTERVAL_HOURS`) were
+      already `parseEnv`-validated, non-negative, with safe production
+      defaults (1 XLM / 1 stroop / 24h) — this pass adds boot-fail
+      regression tests and closes a real doc gap: these three vars were
+      entirely undocumented in `AGENTS.md` / `docs/development.md` /
+      `docs/deployment.md` despite existing in `.env.example` and
+      `env.ts` since the 0052 migration. New operator runbook
+      `docs/runbooks/operator-float-drift.md` documents: the memo
+      policy (classification is keyed off Loop's own DB records —
+      order/settlement/skip linkage — never off memo text, since memo
+      is attacker-controllable; an operator-initiated movement, e.g. a
+      manual top-up or sweep, has no automatic classification path
+      regardless of its memo and always needs an explicit
+      `POST /api/admin/operator-float/manual-movements` explanation,
+      confirming the existing "unclassified → paged" design rather than
+      changing it); the exact steps to compute + set the real
+      production baseline (balance + cursor read from the same Horizon
+      moment); and `needs_baseline`/`unclassified`/`drift` triage.
+      **Confirmed: this module makes no balance-adjusting writes** —
+      classification/audit-trail/paging only (AUDIT-2 payments sweep
+      posture preserved). **Still open (👤 operator):** creating the
+      real production baseline for `LOOP_STELLAR_DEPOSIT_ADDRESS`
+      (`xlm` + `usdc`) via the audited admin write, and money-review
+      sign-off on this PR.
 
 ### R3-2 · Auto-refund delivers the wrong asset in Phase-1 `[code]`
 

@@ -52,6 +52,55 @@ describe('parseEnv', () => {
     expect(() => parseEnv({ ...base, PORT: '-1' })).toThrow(/PORT/);
   });
 
+  // R3-1 production readiness (2026-07-10): the operator-float
+  // reconciler's per-asset drift thresholds and reconciliation cadence
+  // are `parseEnv`-validated, not hardcoded — a malformed override
+  // fails boot instead of silently coercing to something unintended.
+  describe('R3-1: operator-float reconciliation config', () => {
+    it('defaults to a fee-tolerant XLM threshold and an exact USDC threshold', () => {
+      const env = parseEnv(base);
+      expect(env.LOOP_OPERATOR_FLOAT_XLM_THRESHOLD_STROOPS).toBe(10_000_000n);
+      expect(env.LOOP_OPERATOR_FLOAT_USDC_THRESHOLD_STROOPS).toBe(1n);
+      expect(env.LOOP_OPERATOR_FLOAT_RECONCILIATION_INTERVAL_HOURS).toBe(24);
+    });
+
+    it('coerces valid overrides from string', () => {
+      const env = parseEnv({
+        ...base,
+        LOOP_OPERATOR_FLOAT_XLM_THRESHOLD_STROOPS: '50000000',
+        LOOP_OPERATOR_FLOAT_USDC_THRESHOLD_STROOPS: '0',
+        LOOP_OPERATOR_FLOAT_RECONCILIATION_INTERVAL_HOURS: '6',
+      });
+      expect(env.LOOP_OPERATOR_FLOAT_XLM_THRESHOLD_STROOPS).toBe(50_000_000n);
+      expect(env.LOOP_OPERATOR_FLOAT_USDC_THRESHOLD_STROOPS).toBe(0n);
+      expect(env.LOOP_OPERATOR_FLOAT_RECONCILIATION_INTERVAL_HOURS).toBe(6);
+    });
+
+    it('fails boot on a non-numeric threshold instead of silently defaulting', () => {
+      expect(() =>
+        parseEnv({ ...base, LOOP_OPERATOR_FLOAT_XLM_THRESHOLD_STROOPS: 'a-lot' }),
+      ).toThrow(/LOOP_OPERATOR_FLOAT_XLM_THRESHOLD_STROOPS/);
+      expect(() =>
+        parseEnv({ ...base, LOOP_OPERATOR_FLOAT_USDC_THRESHOLD_STROOPS: 'not-a-number' }),
+      ).toThrow(/LOOP_OPERATOR_FLOAT_USDC_THRESHOLD_STROOPS/);
+    });
+
+    it('fails boot on a negative threshold', () => {
+      expect(() => parseEnv({ ...base, LOOP_OPERATOR_FLOAT_XLM_THRESHOLD_STROOPS: '-1' })).toThrow(
+        /LOOP_OPERATOR_FLOAT_XLM_THRESHOLD_STROOPS/,
+      );
+    });
+
+    it('fails boot on a zero or negative reconciliation interval', () => {
+      expect(() =>
+        parseEnv({ ...base, LOOP_OPERATOR_FLOAT_RECONCILIATION_INTERVAL_HOURS: '0' }),
+      ).toThrow(/LOOP_OPERATOR_FLOAT_RECONCILIATION_INTERVAL_HOURS/);
+      expect(() =>
+        parseEnv({ ...base, LOOP_OPERATOR_FLOAT_RECONCILIATION_INTERVAL_HOURS: '-1' }),
+      ).toThrow(/LOOP_OPERATOR_FLOAT_RECONCILIATION_INTERVAL_HOURS/);
+    });
+  });
+
   it('rejects non-http(s) URLs for GIFT_CARD_API_BASE_URL', () => {
     expect(() => parseEnv({ GIFT_CARD_API_BASE_URL: 'file:///etc/passwd' })).toThrow(
       /GIFT_CARD_API_BASE_URL/,

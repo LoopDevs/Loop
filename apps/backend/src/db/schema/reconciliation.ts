@@ -259,6 +259,21 @@ export type OperatorFloatRunState = (typeof OPERATOR_FLOAT_RUN_STATES)[number];
  * should equal the current Horizon balance within the configured
  * threshold. Absence of an active baseline is a fail-closed
  * `needs_baseline` state, not healthy.
+ *
+ * `starting_horizon_cursor` / `current_horizon_cursor` are NOT NULL
+ * (migration 0057, production-readiness pass): the reconciler's
+ * indexer omits Horizon's `cursor` query param entirely when a
+ * baseline resolves to a null cursor, which walks the account's
+ * ENTIRE payment history from genesis instead of starting at the
+ * baseline's anchor point — an unbounded cold-start re-scan, and a
+ * double-count of everything before the baseline's opening balance.
+ * The baseline-create handler (`admin/operator-float.ts`) has
+ * required a non-empty `startingHorizonCursor` since the 2026-07-08
+ * money review, but that was Zod-only — a "convention" tier check any
+ * future non-API writer (a script, a raw-SQL backfill) could bypass.
+ * This promotes it to the DB tier, matching the same
+ * convention→DB-constraint pattern used throughout the 2026-07
+ * hardening pass (see `docs/invariants.md`).
  */
 export const operatorWalletBaselines = pgTable(
   'operator_wallet_baselines',
@@ -267,8 +282,8 @@ export const operatorWalletBaselines = pgTable(
     asset: text('asset').notNull().$type<OperatorFloatAsset>(),
     account: text('account').notNull(),
     openingBalanceStroops: bigint('opening_balance_stroops', { mode: 'bigint' }).notNull(),
-    startingHorizonCursor: text('starting_horizon_cursor'),
-    currentHorizonCursor: text('current_horizon_cursor'),
+    startingHorizonCursor: text('starting_horizon_cursor').notNull(),
+    currentHorizonCursor: text('current_horizon_cursor').notNull(),
     active: integer('active').notNull().default(1),
     reason: text('reason').notNull(),
     createdBy: text('created_by').notNull(),
@@ -290,6 +305,15 @@ export const operatorWalletBaselines = pgTable(
     check(
       'operator_wallet_baselines_created_by_len',
       sql`length(${t.createdBy}) BETWEEN 1 AND 200`,
+    ),
+    // Migration 0057: cold-start cursor safety — see the table docstring.
+    check(
+      'operator_wallet_baselines_starting_cursor_len',
+      sql`length(${t.startingHorizonCursor}) >= 1`,
+    ),
+    check(
+      'operator_wallet_baselines_current_cursor_len',
+      sql`length(${t.currentHorizonCursor}) >= 1`,
     ),
   ],
 );

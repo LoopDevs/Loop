@@ -29,7 +29,31 @@
  * the at-least-once reminder, not an oversight. A drift result is
  * recomputed once (re-index + re-read) before it is persisted or
  * paged, so a deposit landing between the movement indexing and the
- * balance read does not produce a one-run false page.
+ * balance read does not produce a one-run false page. `needs_baseline`
+ * pages too (production readiness pass, 2026-07-10): a deployed watcher
+ * with no baseline configured yet is not a healthy "nothing to report"
+ * state — it is R3-1 silently doing nothing, and the operator must be
+ * prompted to run the baseline setup in `docs/runbooks/operator-float-drift.md`
+ * rather than mistaking silence for a passing check.
+ *
+ * COLD-START CURSOR SAFETY: with NO active baseline, no Horizon read
+ * happens at all (`needs_baseline`, below) — the watcher never scans
+ * history until an operator anchors it. Once a baseline exists, its
+ * `starting_horizon_cursor` / `current_horizon_cursor` are DB-enforced
+ * NOT NULL + non-empty (migration 0057) specifically so the indexer's
+ * Horizon `cursor` query param is never omitted — an omitted cursor
+ * walks the account's ENTIRE payment history from genesis instead of
+ * the baseline's chosen anchor, corrupting the very check this module
+ * exists to run. Baselines are created via the audited, step-up-gated
+ * `POST /api/admin/operator-float/baselines` (operator runbook:
+ * `docs/runbooks/operator-float-drift.md` §Setting the baseline).
+ *
+ * THRESHOLDS: `LOOP_OPERATOR_FLOAT_XLM_THRESHOLD_STROOPS` /
+ * `LOOP_OPERATOR_FLOAT_USDC_THRESHOLD_STROOPS` (env.ts) are the only
+ * per-asset knobs; both are `parseEnv`-validated non-negative bigints
+ * with production-safe defaults (see `thresholdForAsset` below and the
+ * KNOWN UNMODELED TERMS note for why XLM's default is wider). A
+ * non-numeric or negative override fails boot, not a silent fallback.
  */
 import { createHash } from 'node:crypto';
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
@@ -477,6 +501,14 @@ async function recordNeedsBaseline(args: {
     error: 'operator float baseline is not configured',
   };
   await persistRun(summary);
+  // Production readiness (2026-07-10): `needs_baseline` used to persist
+  // quietly — a deployed, LOOP_WORKERS_ENABLED watcher with no baseline
+  // configured yet ran forever without ever prompting an operator to
+  // set one up, so "no Discord page" could be misread as "R3-1 is
+  // healthy" when it was actually never checking anything. Page it
+  // the same at-least-once way as drift/unclassified (see the module
+  // docstring's ALERT SEMANTICS).
+  notifyOperatorFloatDrift(summary);
   return summary;
 }
 
@@ -646,6 +678,11 @@ export async function runOperatorFloatReconciliationForAsset(
       if (fresh === null || fresh.id !== baseline.id) {
         throw new BaselineChangedMidRunError();
       }
+      // Both columns are DB-enforced NOT NULL + non-empty (migration
+      // 0057) — this `??` is belt-and-suspenders, not load-bearing;
+      // `indexNewMovements` never receives a null/undefined cursor for
+      // an active baseline, so it can never omit Horizon's `cursor`
+      // param and fall back to a full-history genesis scan.
       const cursor = fresh.currentHorizonCursor ?? fresh.startingHorizonCursor;
       await indexNewMovements({
         account: args.account,

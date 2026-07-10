@@ -400,6 +400,13 @@
       "when": 1780188700000,
       "tag": "0056_watcher_skip_unrecognized_deposit",
       "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1780188800000,
+      "tag": "0057_operator_wallet_baselines_cursor_not_null",
+      "breakpoints": true
     }
   ]
 }

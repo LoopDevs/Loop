@@ -53,9 +53,24 @@ describe('operator float schema mirrors', () => {
     expect(idx?.config.where).toBeDefined();
   });
 
+  it('pins cold-start cursor safety at the schema layer: both cursor columns NOT NULL + non-empty (migration 0057)', () => {
+    expect(operatorWalletBaselines.startingHorizonCursor.notNull).toBe(true);
+    expect(operatorWalletBaselines.currentHorizonCursor.notNull).toBe(true);
+    const checkNames = getTableConfig(operatorWalletBaselines).checks.map((c) => c.name);
+    expect(checkNames).toContain('operator_wallet_baselines_starting_cursor_len');
+    expect(checkNames).toContain('operator_wallet_baselines_current_cursor_len');
+  });
+
   it('exposes bigint balances and nullable baseline/run fields with the expected row types', () => {
     expectTypeOf<BaselineRow['openingBalanceStroops']>().toEqualTypeOf<bigint>();
-    expectTypeOf<BaselineRow['currentHorizonCursor']>().toEqualTypeOf<string | null>();
+    // Migration 0057 (production-readiness pass): both cursor columns
+    // are DB-enforced NOT NULL — a nullable cursor let the reconciler
+    // silently fall back to an unbounded full-history Horizon scan on
+    // cold start (see the table docstring in `db/schema/reconciliation.ts`
+    // and the `operator_wallet_baselines_starting_cursor_len` /
+    // `_current_cursor_len` CHECK constraints).
+    expectTypeOf<BaselineRow['startingHorizonCursor']>().toEqualTypeOf<string>();
+    expectTypeOf<BaselineRow['currentHorizonCursor']>().toEqualTypeOf<string>();
     expectTypeOf<ManualMovementRow['movementPaymentId']>().toEqualTypeOf<string | null>();
     expectTypeOf<MovementRow['classification']>().toEqualTypeOf<OperatorFloatClassification>();
     expectTypeOf<MovementRow['amountStroops']>().toEqualTypeOf<bigint>();
