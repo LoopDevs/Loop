@@ -451,3 +451,74 @@ export const vaultHotFloat = pgTable(
     check('vault_hot_float_pending_shares_non_negative', sql`${t.pendingUnredeemedShares} >= 0`),
   ],
 );
+
+export const VAULT_FLOAT_RECONCILIATION_STATES = ['ok', 'drift', 'error'] as const;
+export type VaultFloatReconciliationState = (typeof VAULT_FLOAT_RECONCILIATION_STATES)[number];
+
+/**
+ * Audit trail for `treasury/hot-float-reconciliation.ts`'s float/pool
+ * desync check (ADR 031 §D4, V5) — one row per (asset, network) per
+ * tick. Compares the operator's ACTUAL on-chain vault-share balance
+ * against what the bookkeeping says it should be holding right now:
+ * shares in-flight from an emission deposit not yet transferred
+ * (`vault_emissions` state `'deposited'`) plus shares collected from a
+ * redemption but not yet withdrawn (`vault_hot_float
+ * .pending_unredeemed_shares`). A gap here is exactly the V4-accepted
+ * "Known residual (NOT self-correcting)" `docs/invariants.md`
+ * documents under Vault redemptions — two drivers both landing a real
+ * on-chain `vault.withdraw` for the same shares — which has no other
+ * reconciler.
+ */
+export const vaultFloatReconciliationRuns = pgTable(
+  'vault_float_reconciliation_runs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    assetCode: text('asset_code').notNull(),
+    network: text('network').notNull(),
+    operatorShareBalance: bigint('operator_share_balance', { mode: 'bigint' }),
+    expectedOperatorShares: bigint('expected_operator_shares', { mode: 'bigint' }),
+    shareDelta: bigint('share_delta', { mode: 'bigint' }),
+    thresholdShares: bigint('threshold_shares', { mode: 'bigint' }).notNull(),
+    state: text('state').notNull().$type<VaultFloatReconciliationState>(),
+    error: text('error'),
+    checkedAt: timestamp('checked_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('vault_float_reconciliation_runs_asset_network_checked').on(
+      t.assetCode,
+      t.network,
+      t.checkedAt,
+    ),
+    check(
+      'vault_float_reconciliation_runs_asset_code_known',
+      sql`${t.assetCode} IN ('LOOPUSD', 'LOOPEUR')`,
+    ),
+    check(
+      'vault_float_reconciliation_runs_network_known',
+      sql`${t.network} IN ('testnet', 'mainnet')`,
+    ),
+    check(
+      'vault_float_reconciliation_runs_state_known',
+      sql`${t.state} IN ('ok', 'drift', 'error')`,
+    ),
+    check('vault_float_reconciliation_runs_threshold_non_negative', sql`${t.thresholdShares} >= 0`),
+    // A computed run (`ok`/`drift`) MUST carry all three numeric
+    // columns; an `error` run leaves them NULL. This keeps an `error`
+    // row structurally distinguishable from an `ok`/`drift` row with
+    // legitimately-zero values (fail-open review P2-3) — a future
+    // second writer can't silently record a half-populated computed
+    // run.
+    check(
+      'vault_float_reconciliation_runs_shape',
+      sql`
+        (${t.state} = 'error')
+        OR (
+          ${t.state} IN ('ok', 'drift')
+          AND ${t.operatorShareBalance} IS NOT NULL
+          AND ${t.expectedOperatorShares} IS NOT NULL
+          AND ${t.shareDelta} IS NOT NULL
+        )
+      `,
+    ),
+  ],
+);

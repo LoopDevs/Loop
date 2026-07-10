@@ -337,6 +337,38 @@ A stranded vault emission must never be silent:
   re-arm state in `watchdog_alert_state`, confirmed-delivery
   (at-least-once), mirroring `stuck-payout-watchdog.ts`.
 - The admin re-drive ENDPOINT for a `failed` row is deferred (V5).
+- **watcher (standing invariant, V5)**: the per-row alerts above catch
+  a stuck/failed ROW; they say nothing about whether the vault's
+  overall on-chain state still satisfies INV-V1/INV-V2 as a STANDING
+  fact. `credits/vaults/vault-drift-watcher.ts` closes that gap —
+  every `LOOP_VAULT_DRIFT_WATCHER_INTERVAL_SECONDS` (default 300s) it
+  checks two dimensions, paging Discord (`notifyVaultShareDrift` /
+  `notifyVaultSolvencyBreach`) fire-once/re-arm via
+  `watchdog_alert_state` on breach:
+  - **INV-V1 (share-count)**: on-chain user-held shares (`totalSupply
+− operatorShareBalance`) vs the off-chain-tracked net (Σ
+    transferred − Σ collected, `vault-share-accounting.ts`).
+  - **INV-V2 (solvency)**: the vault path's OWN off-chain USD
+    liability (`sumVaultMirrorLiabilityMinor` — Σ mirrored-emission
+    `cashback_minor` − Σ settled-redemption `value_minor`) vs the
+    realizable backing (`totalManaged` + hot float). Deliberately NOT
+    `onChainUserShares × sharePrice` vs `totalManaged`, which is
+    TAUTOLOGICALLY DEAD (`sharePrice = totalManaged/totalSupply`, so
+    the breach term can never go positive — money-review V5 P0); the
+    mirror liability is a fixed USD figure INDEPENDENT of the vault's
+    self-reported state, so a genuine `totalManaged` impairment below
+    it actually fires.
+    Single-flighted fleet-wide (`withAdvisoryLock` + lease deadline),
+    gated on `LOOP_VAULTS_ENABLED`. This is the Soroban LOOPUSD/LOOPEUR
+    twin of `asset-drift-watcher.ts` — before V5 a vault desync (an
+    unbacked share, a strategy impairment) was completely silent since
+    the classic watcher only reads Horizon classic assets.
+    **Validate-before-flip caveat**: the INV-V1 closed-world premise
+    ("only operator + users hold shares") is UNVERIFIED against a real
+    vault — if DeFindex pays its performance fee as newly-minted shares
+    to the Fee Receiver (ADR 031 §D7 / OQ8), those inflate
+    `onChainUserShares` as false INV-V1 drift; confirm the fee-payout
+    mechanics during the vault config review (money-review V5 P2).
 
 ### Known residual (accepted, V3)
 
@@ -453,7 +485,7 @@ marks `markWorkerTickFailure('vault_redemption_sweep')` on any terminal
 failure. The admin re-drive endpoint for a `failed` row is deferred
 (V5).
 
-### Known residual (NOT self-correcting — needs drift reconcile, V5)
+### Known residual (reconciled by V5 — not yet prevented)
 
 The SLOW-path payout and the hot-float replenish (`treasury/hot-float.ts`)
 each have a documented residual: two drivers that both fail the
@@ -463,11 +495,52 @@ either commits. The loser's on-chain call typically fails (the vault
 can't burn shares the operator doesn't hold), but a rare interleaving
 where BOTH land is an OVER-withdraw that leaves UNTRACKED float/pool
 drift (it fails CLOSED to drift, never a double-credit of the float).
-This is NOT self-correcting: the **vault-aware R3-1 operator-float
-reconciliation must catch and reconcile it, and being vault-aware is a
-prerequisite before `LOOP_VAULTS_ENABLED` is flipped on** (a V5 item,
-alongside a per-row payout advisory lock and a durable
-`hot_float_replenish_attempts` CF-18 row). See the module headers.
+This was NOT self-correcting and had no reconciler before V5.
+`treasury/hot-float-reconciliation.ts`'s float/pool desync check now
+closes the DETECTION half: every `LOOP_VAULT_FLOAT_RECONCILIATION_INTERVAL_HOURS`
+(default 24h) it compares the operator's ACTUAL on-chain vault-share
+balance (`getShareBalance`) against the COMPLETE set of buckets the
+bookkeeping says the operator should hold — `sumOperatorHeldEmissionShares`
+(deposited OR failed-post-deposit) + `sumOperatorHeldCollectedRedemptionShares`
+(collected, `payout_path IS NULL`) + `vault_hot_float.pending_unredeemed_shares`
+(`vault-share-accounting.ts` enumerates all of them). **Completeness
+is load-bearing** (money-review V5 P1): omitting an operator-held
+bucket makes `expected` too low, `actual` looks too high, and that
+positive phantom can numerically OFFSET — and thus mask — a real
+negative double-withdraw shortfall. It persists the run to
+`vault_float_reconciliation_runs` (migration 0063) and pages
+(`notifyVaultFloatDesync`) on EVERY bad-state run (R3-1's own alert
+posture, not fire-once) while a gap persists — but **re-computes once
+before paging** (like R3-1's re-index-and-recompute) so a concurrent
+in-flight deposit/replenish caught mid-commit doesn't produce a
+one-run false page (money-review V5 P1-2). Single-flighted fleet-wide
+with a lease deadline (`withAdvisoryLock` + `Promise.race`, so a hung
+Soroban RPC can't pin the pooled connection + lock forever —
+money-review V5 P1-1), gated on `LOOP_VAULTS_ENABLED` — this was the
+prerequisite before `LOOP_VAULTS_ENABLED` is flipped on. What V5 does
+NOT do: PREVENT the race itself (a per-row payout advisory lock and a
+durable `hot_float_replenish_attempts` CF-18 row remain a follow-up) —
+a detected desync still needs an operator to reconcile the actual
+drift manually; this closes "silent," not "impossible."
+
+### V5 also makes R3-1 vault-aware (avoids false drift)
+
+`payments/operator-float-reconciliation.ts` (R3-1) indexes only
+classic Horizon `payment` operations — a Soroban vault `deposit`/
+`withdraw` is an `InvokeHostFunction` operation, structurally invisible
+to that indexer even though it moves the account's real USDC balance.
+Without V5 this would make every ordinary vault deposit/withdraw read
+as unexplained drift once `LOOP_VAULTS_ENABLED` goes live.
+`treasury/vault-operator-movement.ts`'s `recordVaultOperatorMovement`
+(called from `vault-emissions.ts`'s deposit step,
+`vault-redemptions.ts`'s slow-path payout, and `hot-float.ts`'s
+replenish tick) writes an unlinked `operator_manual_movements` row the
+moment a USDC-denominated vault call lands, which R3-1's EXISTING
+`computeUnlinkedManualDelta` already folds into its expected balance —
+no change to R3-1's core logic. Scoped to USDC (LOOPUSD's backing)
+only: R3-1's `OperatorFloatAsset` enum has no `'eurc'` member, so
+LOOPEUR gets no R3-1 coverage yet — widening those CHECK constraints
+is a separate, dedicated migration.
 
 ---
 

@@ -153,6 +153,7 @@ import {
   resolveOperatorPublicKey,
 } from './vault-client.js';
 import { generatePayoutMemo } from '../payout-builder.js';
+import { recordVaultOperatorMovement } from '../../treasury/vault-operator-movement.js';
 
 const log = logger.child({ area: 'vault-emissions' });
 
@@ -375,6 +376,20 @@ async function depositStep(row: VaultEmissionRow, vault: LoopVaultRow): Promise<
     if (updated === undefined) {
       throw new Error(`vault_emissions update returned no row (id=${row.id}, deposit step)`);
     }
+    // V5 (ADR 031 §D4): explain this USDC-denominated outflow to R3-1
+    // (`treasury/hot-float-reconciliation.ts`) — best-effort, and
+    // placed AFTER the state transition commits so a crash before this
+    // point means depositStep re-enters on retry (this call happens
+    // again, still safe — the row is only 'deposited' once this
+    // update has already landed) while a crash AFTER this point never
+    // re-enters depositStep for this row (it's no longer 'depositing'),
+    // so at worst this note is missed once rather than double-recorded.
+    await recordVaultOperatorMovement({
+      vault,
+      direction: 'out',
+      amountStroops: result.amountsUsed.reduce((sum, amount) => sum + amount, 0n),
+      reason: `Vault emission deposit for order ${row.orderId} (vault_emissions ${row.id})`,
+    });
     return updated;
   } catch (err) {
     return recordStepFailure(row, err);

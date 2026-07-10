@@ -633,6 +633,41 @@ export async function readVaultState(args: ReadVaultStateArgs): Promise<VaultSta
   return { totalSupply, totalManaged, sharePricePpm };
 }
 
+// ---------------------------------------------------------------------------
+// read a holder's share balance
+// ---------------------------------------------------------------------------
+
+export interface GetShareBalanceArgs {
+  vault: LoopVaultRow;
+  /** Stellar/Soroban address (G... account or a contract address) to read the SEP-41 `balance` for. */
+  address: string;
+}
+
+/**
+ * SEP-41 `balance(address)` on the vault's share-token contract (V5,
+ * ADR 031 §D4 observability). Used by `vault-drift-watcher.ts` /
+ * `treasury/hot-float-reconciliation.ts` to derive "shares held by
+ * users" as `totalSupply - operatorShareBalance` — cheaper and more
+ * robust than iterating every user's wallet (which would need one
+ * Soroban simulate call per activated user, per tick), and correct
+ * under this system's closed-world assumption that only the operator
+ * and user wallets ever hold vault shares (no third party is ever
+ * transferred shares).
+ */
+export async function getShareBalance(args: GetShareBalanceArgs): Promise<bigint> {
+  requireVaultsEnabled();
+  const operatorSecret = resolveOperatorSecret();
+  const retval = await simulateSorobanCall({
+    rpcUrl: resolveRpcUrl(),
+    networkPassphrase: networkPassphraseFor(args.vault.network),
+    sourceSecret: operatorSecret,
+    contractId: args.vault.shareAssetIssuer,
+    functionName: 'balance',
+    args: [encodeAddress(args.address)],
+  });
+  return decodeI128(retval);
+}
+
 /**
  * `fetch_total_managed_funds()` returns `Vec<AssetManagedFunds>` per
  * the DeFindex REST API's TS types (used here only as a proxy for the

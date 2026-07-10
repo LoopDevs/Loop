@@ -175,6 +175,7 @@ import {
 } from './vault-client.js';
 import { generatePayoutMemo } from '../payout-builder.js';
 import { markOrderPaidViaVaultRedemption } from '../../orders/transitions.js';
+import { recordVaultOperatorMovement } from '../../treasury/vault-operator-movement.js';
 import {
   drawHotFloatInTx,
   applyHotFloatDeltaInTx,
@@ -609,8 +610,10 @@ async function payoutStep(
     // Guaranteed >= 0 by the minAmountsOut floor above.
     const netFloatDelta = amountOutMinor - row.valueMinor;
 
+    let slowPathLanded = false;
+    let slowPathResult: VaultRedemptionRow;
     try {
-      return await db.transaction(async (tx) => {
+      slowPathResult = await db.transaction(async (tx) => {
         await applyHotFloatDeltaInTx(tx, assetCode, network, netFloatDelta, 0n);
         const [updated] = await tx
           .update(vaultRedemptions)
@@ -620,6 +623,7 @@ async function payoutStep(
         if (updated === undefined) throw new PayoutAlreadyLandedError();
         return updated;
       });
+      slowPathLanded = true;
     } catch (err) {
       if (!(err instanceof PayoutAlreadyLandedError)) throw err;
       // Another driver already landed the transition — the float
@@ -629,7 +633,10 @@ async function payoutStep(
       // landed regardless (its proceeds are safe — a future retry of
       // THIS row would dedupe via `redeemTxHash`'s CF-18 fence, but
       // this row won't be retried again since it's already past
-      // 'collecting'); re-read the current state and return it.
+      // 'collecting'); re-read the current state and return it. Do
+      // NOT record an R3-1 movement note here — the WINNING driver's
+      // own successful-transition branch already recorded it (or will
+      // never re-enter this function for this row again).
       const [fresh] = await db
         .select()
         .from(vaultRedemptions)
@@ -639,6 +646,20 @@ async function payoutStep(
       }
       return fresh;
     }
+    if (slowPathLanded) {
+      // V5 (ADR 031 §D4): explain this USDC-denominated inflow to
+      // R3-1 (`treasury/hot-float-reconciliation.ts`) — best-effort,
+      // placed after the state transition commits, same "record once,
+      // possibly miss rather than double-count" reasoning as
+      // `vault-emissions.ts`'s depositStep.
+      await recordVaultOperatorMovement({
+        vault,
+        direction: 'in',
+        amountStroops: amountOutStroops,
+        reason: `Vault redemption slow-path withdraw for ${row.sourceType} ${row.sourceId} (vault_redemptions ${row.id})`,
+      });
+    }
+    return slowPathResult;
   } catch (err) {
     return recordStepFailure(row, err);
   }

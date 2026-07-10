@@ -44,6 +44,14 @@ import {
   stopVaultRedemptionSweep,
 } from './credits/vaults/vault-redemptions.js';
 import { vaultsEnabled } from './credits/vaults/registry.js';
+import {
+  startVaultDriftWatcher,
+  stopVaultDriftWatcher,
+} from './credits/vaults/vault-drift-watcher.js';
+import {
+  startVaultFloatReconciliationWatcher,
+  stopVaultFloatReconciliationWatcher,
+} from './treasury/hot-float-reconciliation.js';
 import { markWorkerBlocked, markWorkerDisabled } from './runtime-health.js';
 import { getGeoDbStatus } from './public/geo.js';
 
@@ -306,9 +314,18 @@ if (env.LOOP_WORKERS_ENABLED) {
     // `orders/redeem.ts`'s gated fork never claims a `vault_redemptions`
     // row, so an unstarted sweep here is consistent, not merely inert.
     startVaultRedemptionSweep();
+    // ADR 031 §D4 (V5) — vault drift + solvency watcher and the
+    // vault-aware hot-float reconciliation. Same gating reasoning:
+    // with vaults off there is no vault state to observe (the
+    // registry is only ever read when `vaultsEnabled()`), so an
+    // unstarted watcher here is consistent, not merely inert.
+    startVaultDriftWatcher();
+    startVaultFloatReconciliationWatcher();
   } else {
     markWorkerDisabled('vault_emission_sweep', 'LOOP_VAULTS_ENABLED is false');
     markWorkerDisabled('vault_redemption_sweep', 'LOOP_VAULTS_ENABLED is false');
+    markWorkerDisabled('vault_drift_watcher', 'LOOP_VAULTS_ENABLED is false');
+    markWorkerDisabled('vault_float_reconciliation', 'LOOP_VAULTS_ENABLED is false');
   }
 } else {
   markWorkerDisabled('payment_watcher', 'LOOP_WORKERS_ENABLED is false');
@@ -323,6 +340,8 @@ if (env.LOOP_WORKERS_ENABLED) {
   markWorkerDisabled('wallet_provisioning', 'LOOP_WORKERS_ENABLED is false');
   markWorkerDisabled('vault_emission_sweep', 'LOOP_WORKERS_ENABLED is false');
   markWorkerDisabled('vault_redemption_sweep', 'LOOP_WORKERS_ENABLED is false');
+  markWorkerDisabled('vault_drift_watcher', 'LOOP_WORKERS_ENABLED is false');
+  markWorkerDisabled('vault_float_reconciliation', 'LOOP_WORKERS_ENABLED is false');
 }
 
 logger.info({ port: env.PORT }, 'Loop backend starting');
@@ -365,6 +384,8 @@ function shutdown(signal: string): void {
   stopWalletProvisioning();
   stopVaultEmissionSweep();
   stopVaultRedemptionSweep();
+  stopVaultDriftWatcher();
+  stopVaultFloatReconciliationWatcher();
 
   server.close(() => {
     void Promise.allSettled([sentryFlush(5000), closeDb()]).finally(() => {

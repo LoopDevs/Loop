@@ -256,7 +256,26 @@ against the ADR 030 wallet-provider abstraction, reusing the SAME
 `attachUserWalletSignature` raw-hash-signing mechanism
 `orders/redeem.ts`'s classic-asset flow already uses — this is an
 ASSUMPTION flagged for operator DD (§D1 open question 1), not yet
-validated against a real Privy dev account. Still open: the scheduled
+validated against a real Privy dev account.
+
+**V5 (§D4, observability — required before `LOOP_VAULTS_ENABLED` flips
+on) shipped**: `credits/vaults/vault-drift-watcher.ts` — the Soroban
+LOOPUSD/LOOPEUR twin of `payments/asset-drift-watcher.ts`, checking
+INV-V1 (on-chain user-held shares vs the off-chain-tracked net,
+`credits/vaults/vault-share-accounting.ts`) and INV-V2 (user-share
+value vs `totalManaged` + hot float) on a schedule, paging Discord
+fire-once/re-arm via `watchdog_alert_state`. `treasury/
+hot-float-reconciliation.ts` closes two V4-review gaps: (a) makes R3-1
+(`payments/operator-float-reconciliation.ts`) vault-aware by recording
+an explanatory `operator_manual_movements` row
+(`treasury/vault-operator-movement.ts`) whenever a vault call moves the
+operator's USDC balance — R3-1's indexer only sees classic Horizon
+`payment` ops, so a Soroban `InvokeHostFunction` vault deposit/withdraw
+was previously invisible and would have read as false drift; scoped to
+USDC (LOOPUSD) only, LOOPEUR/EURC still has no R3-1 coverage — and (b)
+detects (does not yet prevent) the V4-accepted slow-withdraw-race /
+phantom-share float desync via a new `vault_float_reconciliation_runs`
+audit table (migration 0063). Still open: the scheduled
 share-price snapshotter (§D8 — the `recordSharePriceSnapshot` helper
 exists and V3's mirror step calls it per-emission, but no periodic
 snapshotter runs independently of an emission), the APY endpoint +
