@@ -332,4 +332,16 @@ export const infraEnvFields = {
   // in normal operation (no in-flight emission/redemption window to
   // absorb) — see the module header for why a gap here is meaningful.
   LOOP_VAULT_FLOAT_SHARES_THRESHOLD_STROOPS: z.coerce.bigint().nonnegative().default(1_000_000n),
+
+  // ADR 031 §Detailed design D8, V5b: APY snapshot cron
+  // (`credits/vaults/vault-apy-snapshot.ts`) — periodically records
+  // each active vault's live share price into
+  // `vault_share_price_snapshots` so the read endpoint
+  // (`GET /api/me/vault-apy`) can compute a past-30-day APY + past-
+  // 90-day range from history instead of hitting Soroban per request.
+  // 24h default — a daily sample is enough resolution for a 30/90-day
+  // annualised figure; not latency-sensitive. Runs under
+  // LOOP_WORKERS_ENABLED AND LOOP_VAULTS_ENABLED, single-flighted
+  // fleet-wide like the drift watcher above.
+  LOOP_VAULT_APY_SNAPSHOT_INTERVAL_HOURS: z.coerce.number().int().positive().default(24),
 };

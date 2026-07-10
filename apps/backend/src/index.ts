@@ -52,6 +52,10 @@ import {
   startVaultFloatReconciliationWatcher,
   stopVaultFloatReconciliationWatcher,
 } from './treasury/hot-float-reconciliation.js';
+import {
+  startVaultApySnapshotWorker,
+  stopVaultApySnapshotWorker,
+} from './credits/vaults/vault-apy-snapshot.js';
 import { markWorkerBlocked, markWorkerDisabled } from './runtime-health.js';
 import { getGeoDbStatus } from './public/geo.js';
 
@@ -321,11 +325,17 @@ if (env.LOOP_WORKERS_ENABLED) {
     // unstarted watcher here is consistent, not merely inert.
     startVaultDriftWatcher();
     startVaultFloatReconciliationWatcher();
+    // ADR 031 §D8 (V5b) — APY snapshot cron. Same gating reasoning:
+    // with vaults off there's no live share price to snapshot (the
+    // registry is only ever read when `vaultsEnabled()`), so an
+    // unstarted cron here is consistent, not merely inert.
+    startVaultApySnapshotWorker();
   } else {
     markWorkerDisabled('vault_emission_sweep', 'LOOP_VAULTS_ENABLED is false');
     markWorkerDisabled('vault_redemption_sweep', 'LOOP_VAULTS_ENABLED is false');
     markWorkerDisabled('vault_drift_watcher', 'LOOP_VAULTS_ENABLED is false');
     markWorkerDisabled('vault_float_reconciliation', 'LOOP_VAULTS_ENABLED is false');
+    markWorkerDisabled('vault_apy_snapshot', 'LOOP_VAULTS_ENABLED is false');
   }
 } else {
   markWorkerDisabled('payment_watcher', 'LOOP_WORKERS_ENABLED is false');
@@ -342,6 +352,7 @@ if (env.LOOP_WORKERS_ENABLED) {
   markWorkerDisabled('vault_redemption_sweep', 'LOOP_WORKERS_ENABLED is false');
   markWorkerDisabled('vault_drift_watcher', 'LOOP_WORKERS_ENABLED is false');
   markWorkerDisabled('vault_float_reconciliation', 'LOOP_WORKERS_ENABLED is false');
+  markWorkerDisabled('vault_apy_snapshot', 'LOOP_WORKERS_ENABLED is false');
 }
 
 logger.info({ port: env.PORT }, 'Loop backend starting');
@@ -386,6 +397,7 @@ function shutdown(signal: string): void {
   stopVaultRedemptionSweep();
   stopVaultDriftWatcher();
   stopVaultFloatReconciliationWatcher();
+  stopVaultApySnapshotWorker();
 
   server.close(() => {
     void Promise.allSettled([sentryFlush(5000), closeDb()]).finally(() => {

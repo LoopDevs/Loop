@@ -16,7 +16,7 @@
  * `active = true` — an operator can insert a vault row ahead of
  * go-live (e.g. to stage config) without it being usable yet.
  */
-import { and, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, gte } from 'drizzle-orm';
 import { db } from '../../db/client.js';
 import {
   loopVaults,
@@ -124,4 +124,31 @@ export async function getLatestSharePrice(
     .orderBy(desc(vaultSharePriceSnapshots.takenAt))
     .limit(1);
   return rows[0] ?? null;
+}
+
+/**
+ * Every share-price sample for `(assetCode, network)` taken at or
+ * after `since`, oldest first — the raw series
+ * `credits/vaults/vault-apy.ts` (ADR 031 §D8, V5b) annualises into a
+ * past-30-day APY + past-90-day range. Empty when the subsystem is
+ * disabled, regardless of table contents (same belt-and-suspenders
+ * gate every other read in this module uses).
+ */
+export async function listSharePriceSnapshotsSince(
+  assetCode: LoopVaultAssetCode,
+  network: LoopVaultNetwork,
+  since: Date,
+): Promise<VaultSharePriceSnapshotRow[]> {
+  if (!vaultsEnabled()) return [];
+  return db
+    .select()
+    .from(vaultSharePriceSnapshots)
+    .where(
+      and(
+        eq(vaultSharePriceSnapshots.assetCode, assetCode),
+        eq(vaultSharePriceSnapshots.network, network),
+        gte(vaultSharePriceSnapshots.takenAt, since),
+      ),
+    )
+    .orderBy(asc(vaultSharePriceSnapshots.takenAt));
 }
