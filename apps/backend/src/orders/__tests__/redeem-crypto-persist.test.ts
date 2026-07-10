@@ -9,14 +9,30 @@ import { randomBytes } from 'node:crypto';
  * envelope key set.
  */
 
-// 32-byte key, set before the modules load.
-const KEY_B64 = randomBytes(32).toString('base64');
-const envState = { LOOP_REDEEM_ENCRYPTION_KEY: KEY_B64 as string | undefined };
+// `envState` MUST be built inside `vi.hoisted` (not a bare top-level
+// `const`): ES module imports link/evaluate their full transitive
+// graph BEFORE the importing file's own top-level statements run, so
+// `import { markOrderFulfilled } from '../fulfillment.js'` below
+// pulls in `credits/vaults/vault-emissions.js` -> `runtime-health.js`
+// (ADR 031 V3), which reads `env.LOOP_AUTH_NATIVE_ENABLED` at ITS OWN
+// module top level — that read would hit `envState` in its TDZ if
+// `envState` were still a plain `const` positioned "before" this
+// `vi.mock` call in source order. `vi.hoisted` runs before any import
+// is linked (even before regular `import` bindings resolve, so it
+// can't call `randomBytes` itself — the real key is generated below
+// as a normal top-level `const` and assigned into `envState` in
+// `beforeEach`, exactly as this file already did before this fix).
+const { envState } = vi.hoisted(() => ({
+  envState: { LOOP_REDEEM_ENCRYPTION_KEY: undefined as string | undefined },
+}));
 vi.mock('../../env.js', () => ({
   get env() {
     return envState;
   },
 }));
+
+// 32-byte key, assigned into `envState` in `beforeEach` below.
+const KEY_B64 = randomBytes(32).toString('base64');
 
 // Minimal chainable db mock that records the order-update `.set()`
 // payload. The fulfillment txn also inserts ledger rows + looks up the

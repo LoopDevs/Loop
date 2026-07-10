@@ -41,6 +41,8 @@ export {
   notifyStuckPayouts,
   notifyRedemptionBackfillExhausted,
   notifyWalletProvisioningStuck,
+  notifyVaultEmissionFailed,
+  notifyVaultEmissionsStuck,
   notifyCtxSchemaDrift,
   notifyOperatorPoolExhausted,
   notifyOperatorCredentialExpired,

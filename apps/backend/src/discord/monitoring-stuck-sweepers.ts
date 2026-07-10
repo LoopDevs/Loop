@@ -215,6 +215,113 @@ export function notifyStuckPayouts(args: {
 }
 
 /**
+ * ADR 031 V3 (money-review #1647 P1-2a): a vault cashback emission
+ * reached the terminal `failed` state (mirror step failed
+ * `VAULT_EMISSION_MAX_ATTEMPTS` times, or a step kept erroring). The
+ * user's cashback for this order is stuck — neither the on-chain
+ * share transfer NOR the off-chain mirror credit is guaranteed
+ * complete, and the row is NOT auto-retried. Ops must inspect the
+ * row's `last_error` + tx hashes and reconcile (the admin re-drive
+ * endpoint is a V5 follow-up).
+ *
+ * Per-row (not aggregated) like `notifyStuckProcurementSwept` — a
+ * terminal vault emission is rare and each needs individual
+ * investigation. Fire-and-forget void (not the pure-sender shape):
+ * this fires INLINE from `recordStepFailure` on the terminal
+ * transition, not from a fire-once watchdog, so there's no
+ * `watchdog_alert_state` delivery-confirmation contract to honour.
+ */
+export function notifyVaultEmissionFailed(args: {
+  vaultEmissionId: string;
+  orderId: string;
+  userId: string;
+  assetCode: string;
+  cashbackMinor: string;
+  attempts: number;
+  lastError: string | null;
+}): void {
+  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+    title: '🔴 Vault Emission Failed (terminal)',
+    description: truncate(
+      `A vault cashback emission reached \`failed\` after ${args.attempts} attempts and will NOT be auto-retried. The on-chain share transfer and/or the off-chain mirror credit for this order is incomplete — inspect the row and reconcile (see the vault-emission runbook; the admin re-drive endpoint is a follow-up).`,
+      DESCRIPTION_MAX,
+    ),
+    color: RED,
+    fields: [
+      {
+        name: 'Vault emission',
+        value: `\`${escapeMarkdown(args.vaultEmissionId)}\``,
+        inline: false,
+      },
+      { name: 'Order', value: `\`${args.orderId.slice(-8)}\``, inline: true },
+      { name: 'User', value: `\`${args.userId.slice(-8)}\``, inline: true },
+      { name: 'Asset', value: escapeMarkdown(args.assetCode), inline: true },
+      { name: 'Cashback (minor)', value: escapeMarkdown(args.cashbackMinor), inline: true },
+      { name: 'Attempts', value: String(args.attempts), inline: true },
+      {
+        name: 'Last error',
+        value:
+          args.lastError === null
+            ? '_none_'
+            : truncate(`\`${escapeMarkdown(args.lastError)}\``, FIELD_VALUE_MAX),
+        inline: false,
+      },
+    ],
+  });
+}
+
+/**
+ * ADR 031 V3 (money-review #1647 P1-2b): one or more vault emissions
+ * have sat in a non-terminal in-flight state
+ * (`depositing`/`deposited`/`transferred`) past the watchdog window —
+ * the sweep isn't making progress on them (worker down, Soroban RPC
+ * unreachable, operator-account sequence contention, …). Distinct
+ * from `notifyVaultEmissionFailed` (which fires on a row that reached
+ * terminal `failed`): this catches rows that are STUCK without having
+ * exhausted their attempts, which `failed`-paging alone would never
+ * surface.
+ *
+ * PURE SENDER (same contract as `notifyStuckPayouts` / `notifyPaymentWatcherStuck`):
+ * returns the `sendWebhook` promise so `vault-emission-stuck-watchdog`
+ * only persists `alert_active=true` after delivery confirms —
+ * at-least-once per incident, fleet-wide.
+ */
+export function notifyVaultEmissionsStuck(args: {
+  rowCount: number;
+  thresholdMinutes: number;
+  oldestAgeMinutes: number;
+  states: string;
+  vaultEmissionId: string | null;
+  assetCode: string | null;
+}): Promise<boolean> {
+  return sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+    title: '🔴 Stuck Vault Emissions Detected',
+    description: truncate(
+      `One or more vault cashback emissions have sat in an in-flight state (\`depositing\`/\`deposited\`/\`transferred\`) past the ${args.thresholdMinutes}-minute watchdog window. The sweep is not advancing them — check the vault-emission sweep worker, Soroban RPC reachability, and operator funding.`,
+      DESCRIPTION_MAX,
+    ),
+    color: RED,
+    fields: [
+      { name: 'Rows', value: String(args.rowCount), inline: true },
+      { name: 'States', value: escapeMarkdown(args.states), inline: true },
+      { name: 'Oldest age (min)', value: String(args.oldestAgeMinutes), inline: true },
+      { name: 'Threshold (min)', value: String(args.thresholdMinutes), inline: true },
+      {
+        name: 'Example emission',
+        value:
+          args.vaultEmissionId === null ? '_none_' : `\`${escapeMarkdown(args.vaultEmissionId)}\``,
+        inline: true,
+      },
+      {
+        name: 'Example asset',
+        value: args.assetCode === null ? '_unknown_' : escapeMarkdown(args.assetCode),
+        inline: true,
+      },
+    ],
+  });
+}
+
+/**
  * Wallet-provisioning exhaustion (ADR 030 Phase C1): a user's
  * embedded-wallet provisioning has failed `attempts` consecutive
  * drives (provider createWallet, sponsored activation submit, or

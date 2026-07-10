@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type * as EnvModule from '../../env.js';
 
 /**
  * Transitions exercise `UPDATE ... WHERE state = <expected> RETURNING`
@@ -254,6 +255,54 @@ vi.mock('../../credits/payout-asset.js', () => ({
   }),
 }));
 
+// ADR 031 V3 — gated fork. `vaultRegistryMock.enabled`/`.activeVault`
+// drive whether `orders/fulfillment.ts`'s fork condition can ever be
+// true; `vaultEmissionMock` records `claimVaultEmission` calls so a
+// test can assert the classic mirror-credit/payout writes above were
+// skipped in favour of a vault claim (and vice versa when the flag is
+// off, proving the classic path is byte-identical).
+const { vaultRegistryMock, vaultEmissionMock } = vi.hoisted(() => ({
+  vaultRegistryMock: {
+    enabled: false,
+    activeVault: null as null | { id: string },
+  },
+  vaultEmissionMock: {
+    claimCalls: [] as Array<Record<string, unknown>>,
+    claimResult: true,
+  },
+}));
+vi.mock('../../credits/vaults/registry.js', () => ({
+  vaultsEnabled: () => vaultRegistryMock.enabled,
+  getActiveVault: async () => vaultRegistryMock.activeVault,
+}));
+vi.mock('../../credits/vaults/vault-emissions.js', () => ({
+  claimVaultEmission: async (_tx: unknown, args: Record<string, unknown>) => {
+    vaultEmissionMock.claimCalls.push(args);
+    return vaultEmissionMock.claimResult;
+  },
+  vaultAssetForCurrency: (currency: string) => (currency === 'USD' ? 'LOOPUSD' : 'LOOPEUR'),
+  currentVaultNetwork: () => 'testnet',
+  isVaultEligibleCurrency: (currency: string) => currency === 'USD' || currency === 'EUR',
+}));
+
+// ADR 031 V3 P2-5 — `fulfillment.ts` reads `env.LOOP_PHASE_1_ONLY` to
+// structurally gate the vault fork. Mock env by SPREADING the real
+// parsed env (so every other field transitions.ts reads stays real)
+// and overriding only LOOP_PHASE_1_ONLY via a mutable hoisted ref.
+const { phaseOneOnlyRef } = vi.hoisted(() => ({ phaseOneOnlyRef: { value: false } }));
+vi.mock('../../env.js', async () => {
+  const actual = await vi.importActual<typeof EnvModule>('../../env.js');
+  return {
+    ...actual,
+    env: {
+      ...actual.env,
+      get LOOP_PHASE_1_ONLY() {
+        return phaseOneOnlyRef.value;
+      },
+    },
+  };
+});
+
 import {
   markOrderPaid,
   markOrderProcuring,
@@ -278,6 +327,11 @@ beforeEach(() => {
   payoutAssetMock.issuer = 'GBURNISSUER';
   payoutBuilderMock.decision = null;
   notifyPegBreakMock.mockClear();
+  vaultRegistryMock.enabled = false;
+  vaultRegistryMock.activeVault = null;
+  vaultEmissionMock.claimCalls = [];
+  vaultEmissionMock.claimResult = true;
+  phaseOneOnlyRef.value = false;
   for (const fn of Object.values(dbMock)) {
     if (typeof fn === 'function' && 'mockClear' in fn) {
       (fn as unknown as { mockClear: () => void }).mockClear();
@@ -467,6 +521,149 @@ describe('markOrderFulfilled', () => {
       balanceMinor: 500n,
     });
     expect(state.upsertSet).toBeDefined();
+  });
+
+  // ─── ADR 031 V3 — gated vault-emission fork ────────────────────────────
+  describe('vault-emission gated fork', () => {
+    const usdOrder = { ...baseOrder, currency: 'USD', chargeCurrency: 'USD' };
+    const activatedUsdUser = {
+      stellarAddress: null,
+      homeCurrency: 'USD',
+      walletAddress: 'GEMBEDDED',
+      walletProvisioning: 'activated',
+    };
+
+    it('LOOP_VAULTS_ENABLED=false (default): the classic path runs byte-identical, no vault claim attempted', async () => {
+      vaultRegistryMock.enabled = false;
+      vaultRegistryMock.activeVault = { id: 'vault-1' };
+      state.returningRows = [usdOrder];
+      state.userLookupRows = [activatedUsdUser];
+
+      await markOrderFulfilled('o-1', { ctxOrderId: 'ctx-abc' });
+
+      expect(vaultEmissionMock.claimCalls).toHaveLength(0);
+      expect(state.insertCreditCalls).toHaveLength(1);
+      expect(state.upsertUserCreditsCalls).toHaveLength(1);
+      expect(state.insertPendingPayoutCalls).toHaveLength(1);
+      expect(state.insertPendingPayoutCalls[0]).toMatchObject({ assetCode: 'USDLOOP' });
+    });
+
+    it('vault-eligible order (flag on, USD currency match, activated wallet, active vault): claims a vault emission and skips the classic mirror-credit + payout', async () => {
+      vaultRegistryMock.enabled = true;
+      vaultRegistryMock.activeVault = { id: 'vault-1' };
+      state.returningRows = [usdOrder];
+      state.userLookupRows = [activatedUsdUser];
+
+      const result = await markOrderFulfilled('o-1', { ctxOrderId: 'ctx-abc' });
+
+      expect(result?.id).toBe('o-1');
+      expect(vaultEmissionMock.claimCalls).toHaveLength(1);
+      expect(vaultEmissionMock.claimCalls[0]).toMatchObject({
+        orderId: 'o-1',
+        userId: 'u-1',
+        assetCode: 'LOOPUSD',
+        network: 'testnet',
+        cashbackMinor: 500n,
+        toAddress: 'GEMBEDDED',
+      });
+      // The classic mirror-credit + payout writes never fire for this
+      // order — the vault path owns them (deferred to the sweep).
+      expect(state.insertCreditCalls).toHaveLength(0);
+      expect(state.upsertUserCreditsCalls).toHaveLength(0);
+      expect(state.insertPendingPayoutCalls).toHaveLength(0);
+    });
+
+    it('flag on but currency is not vault-eligible (GBP): falls back to the classic path', async () => {
+      vaultRegistryMock.enabled = true;
+      vaultRegistryMock.activeVault = { id: 'vault-1' };
+      state.returningRows = [baseOrder]; // GBP
+      state.userLookupRows = [
+        {
+          stellarAddress: null,
+          homeCurrency: 'GBP',
+          walletAddress: 'GEMBEDDED',
+          walletProvisioning: 'activated',
+        },
+      ];
+
+      await markOrderFulfilled('o-1', { ctxOrderId: 'ctx-abc' });
+
+      expect(vaultEmissionMock.claimCalls).toHaveLength(0);
+      expect(state.insertCreditCalls).toHaveLength(1);
+      expect(state.insertPendingPayoutCalls).toHaveLength(1);
+    });
+
+    it('flag on + eligible currency but no active vault registered: falls back to the classic path', async () => {
+      vaultRegistryMock.enabled = true;
+      vaultRegistryMock.activeVault = null;
+      state.returningRows = [usdOrder];
+      state.userLookupRows = [activatedUsdUser];
+
+      await markOrderFulfilled('o-1', { ctxOrderId: 'ctx-abc' });
+
+      expect(vaultEmissionMock.claimCalls).toHaveLength(0);
+      expect(state.insertCreditCalls).toHaveLength(1);
+      expect(state.insertPendingPayoutCalls).toHaveLength(1);
+    });
+
+    it('flag on + eligible currency but wallet not activated: falls back to the classic path', async () => {
+      vaultRegistryMock.enabled = true;
+      vaultRegistryMock.activeVault = { id: 'vault-1' };
+      state.returningRows = [usdOrder];
+      state.userLookupRows = [
+        {
+          stellarAddress: null,
+          homeCurrency: 'USD',
+          walletAddress: 'GEMBEDDED',
+          walletProvisioning: 'wallet_created',
+        },
+      ];
+
+      await markOrderFulfilled('o-1', { ctxOrderId: 'ctx-abc' });
+
+      expect(vaultEmissionMock.claimCalls).toHaveLength(0);
+      // No embedded wallet AND no legacy stellarAddress -> classic
+      // path skips the payout (no_address) but still writes the mirror.
+      expect(state.insertCreditCalls).toHaveLength(1);
+      expect(state.insertPendingPayoutCalls).toHaveLength(0);
+    });
+
+    it('P2-5: LOOP_PHASE_1_ONLY=true structurally blocks the fork even with everything else eligible', async () => {
+      phaseOneOnlyRef.value = true;
+      vaultRegistryMock.enabled = true;
+      vaultRegistryMock.activeVault = { id: 'vault-1' };
+      state.returningRows = [usdOrder];
+      state.userLookupRows = [activatedUsdUser];
+
+      await markOrderFulfilled('o-1', { ctxOrderId: 'ctx-abc' });
+
+      // No vault claim; the classic path runs (defense-in-depth even
+      // though Phase-1 orders normally carry userCashbackMinor=0).
+      expect(vaultEmissionMock.claimCalls).toHaveLength(0);
+      expect(state.insertCreditCalls).toHaveLength(1);
+      expect(state.insertPendingPayoutCalls).toHaveLength(1);
+    });
+
+    it('flag on + peg-break (chargeCurrency != home currency): vault fork does not apply even if both are vault-eligible', async () => {
+      vaultRegistryMock.enabled = true;
+      vaultRegistryMock.activeVault = { id: 'vault-1' };
+      // Order pinned to USD, but the user's home currency is now EUR
+      // (support-mediated change after the order was placed).
+      state.returningRows = [usdOrder];
+      state.userLookupRows = [
+        {
+          stellarAddress: 'GLEGACY',
+          homeCurrency: 'EUR',
+          walletAddress: null,
+          walletProvisioning: null,
+        },
+      ];
+
+      await markOrderFulfilled('o-1', { ctxOrderId: 'ctx-abc' });
+
+      expect(vaultEmissionMock.claimCalls).toHaveLength(0);
+      expect(notifyPegBreakMock).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('skips ledger writes when userCashbackMinor is 0', async () => {

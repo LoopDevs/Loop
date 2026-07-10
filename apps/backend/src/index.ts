@@ -35,6 +35,11 @@ import {
 import { startInterestMintWorker, stopInterestMintWorker } from './credits/interest-mint.js';
 import { resolveIssuerSigners } from './payments/issuer-signers.js';
 import { startWalletProvisioning, stopWalletProvisioning } from './wallet/provisioning.js';
+import {
+  startVaultEmissionSweep,
+  stopVaultEmissionSweep,
+} from './credits/vaults/vault-emissions.js';
+import { vaultsEnabled } from './credits/vaults/registry.js';
 import { markWorkerBlocked, markWorkerDisabled } from './runtime-health.js';
 import { getGeoDbStatus } from './public/geo.js';
 
@@ -284,6 +289,17 @@ if (env.LOOP_WORKERS_ENABLED) {
   } else {
     markWorkerDisabled('wallet_provisioning', 'LOOP_WALLET_PROVIDER is unset');
   }
+
+  // ADR 031 §D5/D9 (V3) — vault cashback-emission sweep. Only
+  // meaningful once the vault subsystem itself is on; with
+  // `LOOP_VAULTS_ENABLED=false` (default) `orders/fulfillment.ts`'s
+  // gated fork never claims a `vault_emissions` row, so an unstarted
+  // sweep here is consistent, not merely inert.
+  if (vaultsEnabled()) {
+    startVaultEmissionSweep();
+  } else {
+    markWorkerDisabled('vault_emission_sweep', 'LOOP_VAULTS_ENABLED is false');
+  }
 } else {
   markWorkerDisabled('payment_watcher', 'LOOP_WORKERS_ENABLED is false');
   markWorkerDisabled('operator_float_reconciliation', 'LOOP_WORKERS_ENABLED is false');
@@ -295,6 +311,7 @@ if (env.LOOP_WORKERS_ENABLED) {
   markWorkerDisabled('auth_row_purge', 'LOOP_WORKERS_ENABLED is false');
   markWorkerDisabled('interest_mint', 'LOOP_WORKERS_ENABLED is false');
   markWorkerDisabled('wallet_provisioning', 'LOOP_WORKERS_ENABLED is false');
+  markWorkerDisabled('vault_emission_sweep', 'LOOP_WORKERS_ENABLED is false');
 }
 
 logger.info({ port: env.PORT }, 'Loop backend starting');
@@ -335,6 +352,7 @@ function shutdown(signal: string): void {
   stopAuthRowPurge();
   stopLedgerInvariantWatcher();
   stopWalletProvisioning();
+  stopVaultEmissionSweep();
 
   server.close(() => {
     void Promise.allSettled([sentryFlush(5000), closeDb()]).finally(() => {

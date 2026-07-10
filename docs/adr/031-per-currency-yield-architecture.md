@@ -241,6 +241,16 @@ The v6/v7 assumptions of a Loop-authored fee contract (5%/75% caps enforced in L
 5. Config review (roles, fee, upgradability, admin-key custody) + Blend/DeFindex protocol DD + counsel sign-off.
 6. Deploy mainnet vaults; provision the hot floats; flip `LOOP_PHASE_1_ONLY=false` once T1 + the discount demo are done.
 
+**Step 2 progress (2026-07-10):** V1 (registry read layer, migration
+0060), V2 (`credits/vaults/vault-client.ts` — the Soroban deposit/
+withdraw/transfer client), and V3 (`credits/vaults/vault-emissions.ts`
+— the cashback-EMISSION flow + conservation mirror, migration 0061)
+shipped. Still open within step 2: the withdraw/spend redemption path
+(§D6) and the scheduled share-price snapshotter (§D8 — the
+`recordSharePriceSnapshot` helper exists and V3's mirror step calls it
+per-emission, but no periodic snapshotter runs independently of an
+emission). Step 3 (wallet-side share-token custody) is unstarted.
+
 ### D10. Superseded by deploy-by-config
 
 For the record, these earlier-version assumptions are void: "Loop owns the vault contract code" (§Negative → a config-only deploy); "caps in vault contract 5%/75%, contract-enforced" and the on-chain "propose/apply_fee_change 7-day timelock" (§Fee adjustment → Loop-authored-contract logic; the stock DeFindex fee is Manager-adjustable with governance moved off-chain, D7); and the from-scratch contract audit (retired — see the 2026-07-10 finding under §LOOPUSD/LOOPEUR).

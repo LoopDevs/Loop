@@ -212,7 +212,7 @@ function resolve(name, creates, drops) {
 const REQUIRED_FUNCTIONS = [
   {
     name: 'assert_emission_conservation',
-    inv: 'INV-3 (no unbacked LOOP: on-chain emitted <= mirror liability)',
+    inv: 'INV-3 (no unbacked LOOP: on-chain emitted <= mirror liability) + INV-V1 (vault emissions share the mirror-currency conservation bound, ADR 031 V3)',
     mustInclude: [
       "'order_cashback'",
       "'emission'",
@@ -220,6 +220,30 @@ const REQUIRED_FUNCTIONS = [
       "kind = 'burn'",
       'FOR UPDATE',
       'check_violation',
+      // ADR 031 V3 (money-review #1647 P2-3): the minted/burned
+      // aggregation MUST scope by mirror CURRENCY, not bare
+      // asset_code — a revert to `WHERE pp.asset_code =
+      // NEW.asset_code` would reopen the cross-asset 2x-mint hole
+      // (USDLOOP + LOOPUSD share a USD mirror balance) and, being a
+      // logic-only change inside an existing function, would slip past
+      // every gate EXCEPT this one + the (non-required) flywheel test.
+      // Pin the exact currency-scoped predicate.
+      'loop_asset_mirror_currency(pp.asset_code) = mirror_currency',
+    ],
+  },
+  {
+    name: 'loop_asset_mirror_currency',
+    inv: 'INV-V1 (single source of truth for asset-code → mirror-currency; both trigger CASEs route through it, ADR 031 V3)',
+    // A future asset code added to the pending_payouts asset-code CHECK
+    // but NOT here would map to NULL and be excluded from the
+    // conservation aggregation (under-count → unbacked-mint window).
+    // Pin the full 5-code mapping so that omission fails CI.
+    mustInclude: [
+      "WHEN 'USDLOOP' THEN 'USD'",
+      "WHEN 'GBPLOOP' THEN 'GBP'",
+      "WHEN 'EURLOOP' THEN 'EUR'",
+      "WHEN 'LOOPUSD' THEN 'USD'",
+      "WHEN 'LOOPEUR' THEN 'EUR'",
     ],
   },
 ];
@@ -269,6 +293,10 @@ const REQUIRED_INDEXES = [
   {
     name: 'credit_transactions_interest_period_unique',
     inv: 'INV-9 sibling (legacy off-chain interest-accrual period idempotency)',
+  },
+  {
+    name: 'vault_emissions_order_unique',
+    inv: 'INV-V2 (vault-emission idempotency claim precedes any on-chain action, ADR 031 V3)',
   },
 ];
 

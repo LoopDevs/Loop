@@ -97,6 +97,19 @@ process.env['LOOP_STELLAR_OPERATOR_SECRET'] ??= Keypair.random().secret();
 // timing deterministic.
 process.env['LOOP_WORKERS_ENABLED'] = 'false';
 
+// ADR 031 §D5 (V3) — vault-subsystem master switch, needed by
+// `__tests__/integration/vault-emissions.test.ts` so
+// `credits/vaults/registry.ts`'s `vaultsEnabled()` (parsed once at
+// module load, not re-read live) returns true for the whole suite.
+// Harmless to every other integration test — nothing else in the
+// suite touches vault code, so this is a pure additive capability,
+// same posture as `LOOP_AUTH_NATIVE_ENABLED=true` above. Soroban RPC
+// is never actually dialed (that suite mocks `credits/vaults/
+// vault-client.js`'s functions) — the URL only needs to satisfy
+// env.ts's `LOOP_VAULTS_ENABLED=true` cross-field boot check.
+process.env['LOOP_VAULTS_ENABLED'] = 'true';
+process.env['LOOP_SOROBAN_RPC_URL'] ??= 'https://soroban-testnet.stellar.org';
+
 // Admin allowlist — mints a CTX-style bearer with `sub=test-admin-id`
 // and the admin-handler integration tests assert the full ADR-017
 // ladder (idempotency-guarded write + audit envelope + duplicate-
