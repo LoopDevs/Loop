@@ -12,6 +12,23 @@
  * on-chain share balance against what the emission/redemption
  * bookkeeping says it SHOULD be holding in-flight).
  *
+ * ── "Landed" means the CONFIRMED-landed timestamp, not the tx hash ──
+ * CF-18 persists a step's `*_tx_hash` in `onSigned` — BEFORE the
+ * network submit — so `transfer_tx_hash`/`collect_tx_hash IS NOT NULL`
+ * means "submitted, maybe not landed", NOT "landed" (INV-V3 spells
+ * this out: "a persisted `collect_tx_hash` is NOT proof of landing").
+ * Every predicate below therefore keys the user-holds / operator-holds
+ * split on the CONFIRMED-landed marker — the `transferred_at` /
+ * `collected_at` timestamp, set only AFTER the on-chain step confirms
+ * (`vault-emissions.ts:422` / `vault-redemptions.ts:478`), the same
+ * marker `vault-redemptions.ts` itself gates payout on — never the
+ * pre-submit hash (money-review V5, both reviewers). Using the hash
+ * would (a) count a submitted-but-unconfirmed transfer as user-held →
+ * transient false drift, and (b) — the dangerous one — EXCLUDE a
+ * terminal-`failed` emission whose transfer didn't land from the
+ * operator-held bucket, a standing positive phantom that could mask a
+ * real double-withdraw shortfall.
+ *
  * ── Where every operator-minted share sits ─────────────────────────
  * At any instant a vault share is in exactly one of these buckets.
  * Getting this enumeration COMPLETE is load-bearing: an omitted
@@ -21,24 +38,32 @@
  * fund-drift the reconciler exists to catch (money-review V5 P1).
  *
  *   (1) HELD BY USERS — {@link sumOffChainNetUserShares}: emissions
- *       whose operator→user transfer landed (`transfer_tx_hash IS NOT
- *       NULL`) MINUS redemptions whose user→operator collect landed
- *       (`collect_tx_hash IS NOT NULL`). This is INV-V1's off-chain
- *       side, compared against on-chain `totalSupply - operatorBalance`.
+ *       whose operator→user transfer CONFIRMED landed (`transferred_at
+ *       IS NOT NULL`) MINUS redemptions whose user→operator collect
+ *       CONFIRMED landed (`collected_at IS NOT NULL`). This is INV-V1's
+ *       off-chain side, compared against on-chain `totalSupply -
+ *       operatorBalance`.
  *
  *   Operator-held (the reconciliation's `expectedOperatorShares`):
- *   (2) EMISSION, deposited-not-transferred — {@link
- *       sumOperatorHeldEmissionShares}: `state='deposited'`
- *       (mid-emission) PLUS terminally-`failed` rows whose deposit
- *       landed but transfer never did (`deposit_tx_hash IS NOT NULL
- *       AND transfer_tx_hash IS NULL`) — the operator holds those
- *       minted shares indefinitely until an operator re-drives/refunds.
- *   (3) REDEMPTION, collected-not-yet-withdrawn — {@link
- *       sumOperatorHeldCollectedRedemptionShares}: `collect_tx_hash IS
- *       NOT NULL AND payout_path IS NULL AND state IN
- *       ('collecting','failed')` — the user's shares are with the
- *       operator but no payout path has run yet (so they are NOT in
- *       the hot-float pending count, and — slow path — NOT yet
+ *   (2) EMISSION, minted-but-not-transferred-to-user — {@link
+ *       sumOperatorHeldEmissionShares}: `shares_minted IS NOT NULL AND
+ *       transferred_at IS NULL AND state IN ('deposited','failed')`.
+ *       `state='deposited'` is the mid-emission case; a terminal
+ *       `failed` row with `shares_minted` set but `transferred_at`
+ *       NULL means the deposit landed (operator got the shares) but
+ *       the transfer never CONFIRMED — so the operator STILL HOLDS
+ *       them until an operator re-drives/refunds. **These `failed`
+ *       shares MUST be counted** (money-review V5): excluding them was
+ *       a standing positive phantom that could mask a real shortfall.
+ *       A `failed` row WITH `transferred_at` set (transfer landed,
+ *       then a later step failed) is correctly EXCLUDED — the user
+ *       holds those, and bucket (1) counts them.
+ *   (3) REDEMPTION, collected-not-yet-paid-out — {@link
+ *       sumOperatorHeldCollectedRedemptionShares}: `collected_at IS NOT
+ *       NULL AND payout_path IS NULL AND state IN
+ *       ('collecting','failed')` — the collect CONFIRMED landed (shares
+ *       with the operator) but no payout path has run yet (so they are
+ *       NOT in the hot-float pending count, and — slow path — NOT yet
  *       burned). `payout_path IS NULL` is the load-bearing
  *       discriminator that keeps this DISJOINT from bucket (4): once a
  *       fast-path draw sets `payout_path='fast'` the shares move into
@@ -99,11 +124,15 @@ async function sumBigint(
 
 /**
  * Σ `vault_emissions.shares_minted` for rows whose operator→user
- * transfer has landed (`transfer_tx_hash IS NOT NULL`) — every share
- * ever handed to a user via the emission path, regardless of whether
- * the row has since advanced to `mirrored` (the mirror step never
- * touches share custody, only the off-chain liability, so it's
- * irrelevant to a share-count sum).
+ * transfer has CONFIRMED landed (`transferred_at IS NOT NULL` — set
+ * only at the `transferred` transition, `vault-emissions.ts:422`) —
+ * every share actually handed to a user, regardless of whether the row
+ * has since advanced to `mirrored` OR later went `failed` at the mirror
+ * step (the mirror step moves off-chain liability, not share custody,
+ * so a failed-post-transfer row's shares are still with the user).
+ * Deliberately NOT `transfer_tx_hash IS NOT NULL`, which is set
+ * pre-submit (CF-18) and would count a submitted-but-unconfirmed
+ * transfer as user-held (money-review V5).
  */
 export async function sumEmittedTransferredShares(
   assetCode: LoopVaultAssetCode,
@@ -117,7 +146,7 @@ export async function sumEmittedTransferredShares(
         and(
           eq(vaultEmissions.assetCode, assetCode),
           eq(vaultEmissions.network, network),
-          isNotNull(vaultEmissions.transferTxHash),
+          isNotNull(vaultEmissions.transferredAt),
         ),
       ),
   );
@@ -125,10 +154,13 @@ export async function sumEmittedTransferredShares(
 
 /**
  * Σ `vault_redemptions.shares_to_redeem` for rows whose user→operator
- * collect has landed (`collect_tx_hash IS NOT NULL`) — every share a
- * user has ever sent back via the redemption path, regardless of
- * whether the row has since advanced past `collecting` (payout /
- * mirror steps move value, not share custody).
+ * collect has CONFIRMED landed (`collected_at IS NOT NULL` — set only
+ * after the collect transfer confirms, `vault-redemptions.ts:478`, the
+ * same marker the redemption code itself gates payout on) — every
+ * share a user has actually sent back, regardless of downstream state.
+ * Deliberately NOT `collect_tx_hash IS NOT NULL`, which is set
+ * pre-submit (CF-18) — INV-V3: "a persisted `collect_tx_hash` is NOT
+ * proof of landing" (money-review V5).
  */
 export async function sumRedeemedCollectedShares(
   assetCode: LoopVaultAssetCode,
@@ -142,7 +174,7 @@ export async function sumRedeemedCollectedShares(
         and(
           eq(vaultRedemptions.assetCode, assetCode),
           eq(vaultRedemptions.network, network),
-          isNotNull(vaultRedemptions.collectTxHash),
+          isNotNull(vaultRedemptions.collectedAt),
         ),
       ),
   );
@@ -167,23 +199,26 @@ export async function sumOffChainNetUserShares(
 
 /**
  * Bucket (2) — Σ `vault_emissions.shares_minted` for shares the
- * operator legitimately holds on the EMISSION side: rows in state
- * `'deposited'` (mid-emission, minted but not yet transferred) PLUS
- * terminally-`failed` rows whose deposit landed but transfer never did
- * (`deposit_tx_hash IS NOT NULL AND transfer_tx_hash IS NULL`) — the
- * operator holds those minted shares until an operator re-drives or
- * refunds the stranded emission. Used by
+ * operator legitimately holds on the EMISSION side: `shares_minted IS
+ * NOT NULL AND transferred_at IS NULL AND state IN ('deposited',
+ * 'failed')`. That is: the deposit landed (operator got `shares_minted`
+ * shares) but the transfer has NOT confirmed-landed (`transferred_at`
+ * NULL). Covers the mid-emission `deposited` case AND the terminal
+ * `failed`-with-unconfirmed-transfer case — the operator holds those
+ * minted shares until an operator re-drives/refunds. Used by
  * `treasury/hot-float-reconciliation.ts`'s desync check.
  *
- * A `failed` row WITH `transfer_tx_hash` set is deliberately EXCLUDED:
- * the transfer was attempted (CF-18 persists the hash before submit),
- * so whether the operator still holds those shares is genuinely
- * ambiguous from the DB alone — counting it risks a false "operator
- * should hold more" if the transfer actually landed. Such a row is
- * rare (a terminal failure after a transfer submit) and pages via the
- * emission failure notifier anyway; leaving it out biases the desync
- * check toward the safe direction (it won't manufacture a phantom
- * positive that could mask a real shortfall).
+ * **The `failed`-with-`transferred_at IS NULL` shares MUST be counted**
+ * (money-review V5): a terminal `failed` row whose transfer never
+ * confirmed most likely means the transfer did NOT land (had it landed,
+ * CF-18's `checkPriorSorobanTx` on retry would have advanced the row to
+ * `transferred`, not left it `failed`), so the operator STILL HOLDS
+ * them. Excluding them (the earlier `transfer_tx_hash IS NULL` version)
+ * was a standing positive phantom in `expectedOperatorShares` that
+ * could partially mask a real double-withdraw shortfall. A `failed` row
+ * WHERE the transfer DID confirm (`transferred_at IS NOT NULL`) is
+ * correctly excluded here (the user holds those — bucket 1 counts them
+ * via `sumEmittedTransferredShares`).
  */
 export async function sumOperatorHeldEmissionShares(
   assetCode: LoopVaultAssetCode,
@@ -197,14 +232,9 @@ export async function sumOperatorHeldEmissionShares(
         and(
           eq(vaultEmissions.assetCode, assetCode),
           eq(vaultEmissions.network, network),
-          sql`(
-            ${vaultEmissions.state} = 'deposited'
-            OR (
-              ${vaultEmissions.state} = 'failed'
-              AND ${vaultEmissions.depositTxHash} IS NOT NULL
-              AND ${vaultEmissions.transferTxHash} IS NULL
-            )
-          )`,
+          isNotNull(vaultEmissions.sharesMinted),
+          sql`${vaultEmissions.transferredAt} IS NULL`,
+          sql`${vaultEmissions.state} IN ('deposited', 'failed')`,
         ),
       ),
   );
@@ -212,9 +242,11 @@ export async function sumOperatorHeldEmissionShares(
 
 /**
  * Bucket (3) — Σ `vault_redemptions.shares_to_redeem` for shares the
- * operator holds from a REDEMPTION collect that has NOT yet run any
- * payout: `collect_tx_hash IS NOT NULL AND payout_path IS NULL AND
- * state IN ('collecting','failed')`. `payout_path IS NULL` is the
+ * operator holds from a REDEMPTION collect that CONFIRMED landed but
+ * has NOT yet run any payout: `collected_at IS NOT NULL AND payout_path
+ * IS NULL AND state IN ('collecting','failed')`. `collected_at IS NOT
+ * NULL` (not `collect_tx_hash`, per INV-V3) means the user's shares
+ * actually reached the operator; `payout_path IS NULL` is the
  * load-bearing discriminator that keeps this DISJOINT from the
  * hot-float pending count (bucket 4) and from burned slow-path shares:
  * a fast-path draw sets `payout_path='fast'` and moves the shares into
@@ -237,7 +269,7 @@ export async function sumOperatorHeldCollectedRedemptionShares(
         and(
           eq(vaultRedemptions.assetCode, assetCode),
           eq(vaultRedemptions.network, network),
-          isNotNull(vaultRedemptions.collectTxHash),
+          isNotNull(vaultRedemptions.collectedAt),
           sql`${vaultRedemptions.payoutPath} IS NULL`,
           sql`${vaultRedemptions.state} IN ('collecting', 'failed')`,
         ),

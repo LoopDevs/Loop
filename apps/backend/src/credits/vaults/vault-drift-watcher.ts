@@ -26,17 +26,38 @@
  * `balance(operator)` read (`getShareBalance`), independent of how
  * many users hold shares.
  *
- * ASSUMPTION flagged for operator DD (money-review V5 P2), UNVERIFIED
- * against a real deployed vault: the closed-world "only operator +
- * users hold shares" premise fails if DeFindex pays its performance
- * fee as newly-MINTED shares to the Fee Receiver address (ADR 031
- * §D7 / OQ8 — the fee-mint mechanics are an open question). If it
- * does, those Fee-Receiver shares inflate `onChainUserShares` here
- * and read as a growing INV-V1 false drift. Confirm the fee-payout
- * mechanics (managed-funds deduction vs. share mint) during the
- * vault config review before `LOOP_VAULTS_ENABLED` is flipped on; if
- * shares, subtract the Fee-Receiver `balance` too. Same
- * validate-before-flip caveat class as the Privy-Soroban signing DD.
+ * ── PRE-FLIP CONFIG VALIDATION (required before LOOP_VAULTS_ENABLED=true) ──
+ * These are config-correctness assumptions this watcher + the
+ * `treasury/hot-float-reconciliation.ts` reconciler rely on, UNVERIFIED
+ * against a real deployed vault. Confirm each during the vault config
+ * review (ADR 031 §D9 step 5) before flipping the flag — same
+ * validate-before-flip class as the Privy-Soroban signing DD:
+ *
+ *  1. **Fee-receiver share-mint (masking risk, not just a false page).**
+ *     If DeFindex pays the performance fee as newly-MINTED shares to a
+ *     distinct Fee-Receiver (ADR 031 §D7 / OQ8 — fee-mint mechanics are
+ *     an open question), those shares are in `totalSupply` but not in
+ *     `operatorShareBalance`, so they inflate `onChainUserShares`
+ *     (INV-V1); and if the Fee-Receiver IS the operator, they inflate
+ *     `operatorShareBalance` (the reconciler). EITHER way the inflation
+ *     is POSITIVE and can OFFSET — i.e. MASK — a coincident real
+ *     NEGATIVE drift/shortfall, not merely false-page. Resolution:
+ *     confirm the fee is taken from managed funds pre-share-price (ADR
+ *     031 §D7's stated model → no share mint, no adjustment), or if it
+ *     is share-minted, identify the Fee-Receiver address and subtract
+ *     its `balance` in the affected check.
+ *  2. **`DISCORD_WEBHOOK_MONITORING` must be set.** An unset webhook
+ *     makes `sendWebhook` return `true` (success) without sending, so a
+ *     real breach is swallowed: the fire-once alert flips `alertActive`
+ *     on a phantom "delivery" and never re-fires, and `/health` stays
+ *     green. (A health-degrade-on-standing-breach independent of
+ *     delivery is a deferred systemic follow-up shared by all watchers.)
+ *  3. **Registry/account config invariants.** The underlying is a
+ *     7-decimal at-par SAC (USDC/EURC); `share_asset_issuer ==
+ *     vault_contract_id` (a DeFindex vault IS its own SEP-41 share
+ *     token); and `LOOP_STELLAR_DEPOSIT_ADDRESS == the
+ *     operator-secret pubkey` (the reconciler attributes vault USDC
+ *     moves to the deposit address — `treasury/vault-operator-movement.ts`).
  *
  * ── INV-V1 — no unbacked shares ─────────────────────────────────────
  * Compares `onChainUserShares` against the off-chain-tracked net

@@ -87,7 +87,7 @@ describeIf('vault-share-accounting integration — real postgres (ADR 031 V5)', 
   it('sums only transferred emissions and only collected redemptions, per (asset, network)', async () => {
     const userId = await seedUser();
 
-    // A transferred LOOPUSD/testnet emission — counts.
+    // A transferred LOOPUSD/testnet emission (transfer CONFIRMED landed) — counts as user-held.
     const order1 = await seedOrder(userId);
     await db.insert(vaultEmissions).values({
       orderId: order1,
@@ -100,6 +100,7 @@ describeIf('vault-share-accounting integration — real postgres (ADR 031 V5)', 
       depositTxHash: 'deposit-tx-1',
       sharesMinted: 1_000_000n,
       transferTxHash: 'transfer-tx-1',
+      transferredAt: new Date(),
     });
 
     // A 'deposited' (not yet transferred) LOOPUSD/testnet emission — must NOT count toward transferred sum.
@@ -129,9 +130,10 @@ describeIf('vault-share-accounting integration — real postgres (ADR 031 V5)', 
       depositTxHash: 'deposit-tx-3',
       sharesMinted: 999_999n,
       transferTxHash: 'transfer-tx-3',
+      transferredAt: new Date(),
     });
 
-    // A collected LOOPUSD/testnet redemption — counts against the transferred total.
+    // A collected LOOPUSD/testnet redemption (collect CONFIRMED landed) — counts against the transferred total.
     await db.insert(vaultRedemptions).values({
       sourceType: 'order_redeem',
       sourceId: order1,
@@ -143,6 +145,7 @@ describeIf('vault-share-accounting integration — real postgres (ADR 031 V5)', 
       state: 'collecting',
       sharesToRedeem: 200_000n,
       collectTxHash: 'collect-tx-1',
+      collectedAt: new Date(),
     });
 
     // A 'pending' (not yet collected) LOOPUSD/testnet redemption — must NOT count.
@@ -161,9 +164,9 @@ describeIf('vault-share-accounting integration — real postgres (ADR 031 V5)', 
     await expect(sumRedeemedCollectedShares('LOOPUSD', 'testnet')).resolves.toBe(200_000n);
     await expect(sumOffChainNetUserShares('LOOPUSD', 'testnet')).resolves.toBe(800_000n);
     // Bucket (2): only the 'deposited' emission (300k) — the transferred
-    // one is with the user, not the operator.
+    // one (transferred_at set) is with the user, not the operator.
     await expect(sumOperatorHeldEmissionShares('LOOPUSD', 'testnet')).resolves.toBe(300_000n);
-    // Bucket (3): the 'collecting' redemption with collect_tx_hash set +
+    // Bucket (3): the 'collecting' redemption with collected_at set +
     // payout_path NULL (200k). The 'pending' one hasn't collected.
     await expect(sumOperatorHeldCollectedRedemptionShares('LOOPUSD', 'testnet')).resolves.toBe(
       200_000n,
@@ -177,42 +180,69 @@ describeIf('vault-share-accounting integration — real postgres (ADR 031 V5)', 
     await expect(sumEmittedTransferredShares('LOOPUSD', 'mainnet')).resolves.toBe(0n);
   });
 
-  it('sumOperatorHeldEmissionShares counts failed-post-deposit rows but not failed-with-transfer-attempted or transferred rows', async () => {
+  it('operator-held vs user-held emission split keys on transferred_at (landed), NOT transfer_tx_hash (submitted) — money-review V5', async () => {
     const userId = await seedUser();
 
-    // Failed AFTER deposit landed, transfer never attempted (transfer_tx_hash NULL) — operator holds these, COUNTS.
-    const o1 = await seedOrder(userId);
+    // (A) failed, transfer SUBMITTED (transfer_tx_hash set) but NOT
+    // confirmed-landed (transferred_at NULL) — the transfer most likely
+    // did NOT land (else CF-18 retry would have advanced it to
+    // 'transferred'). Operator STILL HOLDS these → operator-held COUNTS.
+    // This is the money-review masking-risk fix: the old
+    // transfer_tx_hash-based predicate WRONGLY excluded this row.
+    const oFailedSubmitted = await seedOrder(userId);
     await db.insert(vaultEmissions).values({
-      orderId: o1,
+      orderId: oFailedSubmitted,
       userId,
       assetCode: 'LOOPUSD',
       network: 'testnet',
       cashbackMinor: 400n,
       toAddress: WALLET_ADDRESS,
       state: 'failed',
-      depositTxHash: 'dep-fail-1',
+      depositTxHash: 'dep-A',
       sharesMinted: 700_000n,
+      transferTxHash: 'xfer-submitted-A', // submitted, but transferred_at is NULL
     });
 
-    // Failed WITH a transfer attempted (transfer_tx_hash set) — ambiguous, EXCLUDED.
-    const o2 = await seedOrder(userId);
+    // (B) 'deposited' mid-transfer: transfer_tx_hash persisted by
+    // onSigned but transferred_at still NULL — operator holds, and it
+    // must NOT be counted as user-held.
+    const oDepositedMidTransfer = await seedOrder(userId);
     await db.insert(vaultEmissions).values({
-      orderId: o2,
+      orderId: oDepositedMidTransfer,
+      userId,
+      assetCode: 'LOOPUSD',
+      network: 'testnet',
+      cashbackMinor: 400n,
+      toAddress: WALLET_ADDRESS,
+      state: 'deposited',
+      depositTxHash: 'dep-B',
+      sharesMinted: 300_000n,
+      transferTxHash: 'xfer-submitted-B',
+    });
+
+    // (C) failed AFTER the transfer CONFIRMED landed (transferred_at
+    // set — e.g. a later mirror-step failure): the USER holds these →
+    // operator-held EXCLUDES, user-held (sumEmittedTransferredShares)
+    // INCLUDES.
+    const oFailedPostTransfer = await seedOrder(userId);
+    await db.insert(vaultEmissions).values({
+      orderId: oFailedPostTransfer,
       userId,
       assetCode: 'LOOPUSD',
       network: 'testnet',
       cashbackMinor: 400n,
       toAddress: WALLET_ADDRESS,
       state: 'failed',
-      depositTxHash: 'dep-fail-2',
-      sharesMinted: 111_111n,
-      transferTxHash: 'xfer-attempted-2',
+      depositTxHash: 'dep-C',
+      sharesMinted: 222_000n,
+      transferTxHash: 'xfer-landed-C',
+      transferredAt: new Date(),
     });
 
-    // Failed BEFORE deposit (deposit_tx_hash NULL) — operator holds nothing, EXCLUDED.
-    const o3 = await seedOrder(userId);
+    // (D) failed BEFORE deposit landed (shares_minted NULL) — operator holds nothing, EXCLUDED.
+    const oFailedPreDeposit = await seedOrder(userId);
     await db.insert(vaultEmissions).values({
-      orderId: o3,
+      orderId: oFailedPreDeposit,
       userId,
       assetCode: 'LOOPUSD',
       network: 'testnet',
@@ -221,10 +251,14 @@ describeIf('vault-share-accounting integration — real postgres (ADR 031 V5)', 
       state: 'failed',
     });
 
-    await expect(sumOperatorHeldEmissionShares('LOOPUSD', 'testnet')).resolves.toBe(700_000n);
+    // Operator-held = (A) 700k + (B) 300k = 1_000_000. (C) is user-held; (D) minted nothing.
+    await expect(sumOperatorHeldEmissionShares('LOOPUSD', 'testnet')).resolves.toBe(1_000_000n);
+    // User-held = (C) 222k only — (A)/(B)'s submitted-but-unconfirmed
+    // transfers are NOT counted as user-held.
+    await expect(sumEmittedTransferredShares('LOOPUSD', 'testnet')).resolves.toBe(222_000n);
   });
 
-  it('sumOperatorHeldCollectedRedemptionShares counts only collected rows with no payout path (collecting or failed-pre-payout)', async () => {
+  it('sumOperatorHeldCollectedRedemptionShares counts only collected-LANDED rows with no payout path (collecting or failed-pre-payout)', async () => {
     const userId = await seedUser();
 
     // Collected, fast-path paid (payout_path='fast') — shares moved to the float pending count, EXCLUDED here.
@@ -240,11 +274,12 @@ describeIf('vault-share-accounting integration — real postgres (ADR 031 V5)', 
       state: 'redeemed',
       sharesToRedeem: 500_000n,
       collectTxHash: 'collect-fast',
+      collectedAt: new Date(),
       payoutPath: 'fast',
       redeemedAt: new Date(),
     });
 
-    // Collected, terminally failed BEFORE any payout (payout_path NULL) — operator still holds, COUNTS.
+    // Collected-landed, terminally failed BEFORE any payout (payout_path NULL) — operator still holds, COUNTS.
     const r2 = await seedOrder(userId);
     await db.insert(vaultRedemptions).values({
       sourceType: 'order_redeem',
@@ -257,6 +292,24 @@ describeIf('vault-share-accounting integration — real postgres (ADR 031 V5)', 
       state: 'failed',
       sharesToRedeem: 250_000n,
       collectTxHash: 'collect-failed',
+      collectedAt: new Date(),
+    });
+
+    // Collect SUBMITTED but NOT confirmed-landed (collect_tx_hash set,
+    // collected_at NULL) — the user still holds these on-chain, operator
+    // does NOT yet hold them → EXCLUDED (money-review V5, INV-V3).
+    const r3 = await seedOrder(userId);
+    await db.insert(vaultRedemptions).values({
+      sourceType: 'order_redeem',
+      sourceId: r3,
+      userId,
+      assetCode: 'LOOPUSD',
+      network: 'testnet',
+      valueMinor: 100n,
+      fromAddress: WALLET_ADDRESS,
+      state: 'collecting',
+      sharesToRedeem: 999_000n,
+      collectTxHash: 'collect-submitted-not-landed',
     });
 
     await expect(sumOperatorHeldCollectedRedemptionShares('LOOPUSD', 'testnet')).resolves.toBe(

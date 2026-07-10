@@ -347,7 +347,14 @@ A stranded vault emission must never be silent:
   `watchdog_alert_state` on breach:
   - **INV-V1 (share-count)**: on-chain user-held shares (`totalSupply
 − operatorShareBalance`) vs the off-chain-tracked net (Σ
-    transferred − Σ collected, `vault-share-accounting.ts`).
+    transferred − Σ collected, `vault-share-accounting.ts`). The
+    user-holds/operator-holds split keys on the CONFIRMED-landed
+    timestamps (`transferred_at`/`collected_at`), NOT the pre-submit
+    CF-18 `*_tx_hash` (INV-V3: a persisted hash is not proof of
+    landing) — so a submitted-but-unconfirmed transfer isn't
+    mis-counted as user-held, and a terminal-`failed` emission whose
+    transfer never landed is counted as OPERATOR-held (money-review
+    V5, both reviewers).
   - **INV-V2 (solvency)**: the vault path's OWN off-chain USD
     liability (`sumVaultMirrorLiabilityMinor` — Σ mirrored-emission
     `cashback_minor` − Σ settled-redemption `value_minor`) vs the
@@ -363,12 +370,19 @@ A stranded vault emission must never be silent:
     twin of `asset-drift-watcher.ts` — before V5 a vault desync (an
     unbacked share, a strategy impairment) was completely silent since
     the classic watcher only reads Horizon classic assets.
-    **Validate-before-flip caveat**: the INV-V1 closed-world premise
-    ("only operator + users hold shares") is UNVERIFIED against a real
-    vault — if DeFindex pays its performance fee as newly-minted shares
-    to the Fee Receiver (ADR 031 §D7 / OQ8), those inflate
-    `onChainUserShares` as false INV-V1 drift; confirm the fee-payout
-    mechanics during the vault config review (money-review V5 P2).
+    **Pre-flip config validation** (required before
+    `LOOP_VAULTS_ENABLED=true`; full checklist in
+    `vault-drift-watcher.ts`'s header): (i) the fee-receiver share-mint
+    — if DeFindex share-mints the performance fee, those shares can
+    **MASK** a real negative drift/shortfall (positive inflation of
+    `onChainUserShares`/`operatorShareBalance` that offsets a real
+    negative), not merely false-page; confirm the fee is taken from
+    managed funds pre-share-price or subtract the Fee-Receiver balance.
+    (ii) `DISCORD_WEBHOOK_MONITORING` must be set — an unset webhook
+    makes `sendWebhook` succeed silently, swallowing a real breach and
+    latching the fire-once alert on a phantom delivery. (iii)
+    `share_asset_issuer == vault_contract_id`, a 7-decimal at-par SAC
+    underlying, and `LOOP_STELLAR_DEPOSIT_ADDRESS == operator pubkey`.
 
 ### Known residual (accepted, V3)
 
@@ -501,11 +515,16 @@ closes the DETECTION half: every `LOOP_VAULT_FLOAT_RECONCILIATION_INTERVAL_HOURS
 (default 24h) it compares the operator's ACTUAL on-chain vault-share
 balance (`getShareBalance`) against the COMPLETE set of buckets the
 bookkeeping says the operator should hold — `sumOperatorHeldEmissionShares`
-(deposited OR failed-post-deposit) + `sumOperatorHeldCollectedRedemptionShares`
-(collected, `payout_path IS NULL`) + `vault_hot_float.pending_unredeemed_shares`
-(`vault-share-accounting.ts` enumerates all of them). **Completeness
-is load-bearing** (money-review V5 P1): omitting an operator-held
-bucket makes `expected` too low, `actual` looks too high, and that
+(`shares_minted` set AND `transferred_at` NULL AND state deposited/failed
+— i.e. minted but the transfer never CONFIRMED, INCLUDING a terminal-
+`failed` emission whose transfer didn't land) + `sumOperatorHeldCollectedRedemptionShares`
+(collected-landed via `collected_at`, `payout_path IS NULL`) +
+`vault_hot_float.pending_unredeemed_shares` (`vault-share-accounting.ts`
+enumerates all of them). **Completeness is load-bearing** (money-review
+V5 P1): omitting an operator-held bucket — e.g. the earlier version
+keyed on the pre-submit `transfer_tx_hash` and EXCLUDED a failed row
+whose transfer didn't land — makes `expected` too low, `actual` looks
+too high, and that
 positive phantom can numerically OFFSET — and thus mask — a real
 negative double-withdraw shortfall. It persists the run to
 `vault_float_reconciliation_runs` (migration 0063) and pages

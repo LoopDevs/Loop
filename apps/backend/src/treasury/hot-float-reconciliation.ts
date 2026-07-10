@@ -2,6 +2,15 @@
  * Vault-aware hot-float reconciliation (ADR 031 §Detailed design D4,
  * V5). Two independent, money-review-flagged gaps this closes:
  *
+ * ⚠ PRE-FLIP CONFIG VALIDATION (before LOOP_VAULTS_ENABLED=true): this
+ * reconciler shares the validate-before-flip checklist in
+ * `credits/vaults/vault-drift-watcher.ts`'s header — especially the
+ * fee-receiver share-mint MASKING risk (a positive phantom in
+ * `operatorShareBalance`/`expectedOperatorShares` can offset a real
+ * negative shortfall) and `LOOP_STELLAR_DEPOSIT_ADDRESS == operator
+ * pubkey` (this module's R3-1 movement notes attribute vault USDC
+ * moves to the deposit address). Confirm both at config review.
+ *
  * ── (a) Make R3-1 vault-aware (avoid FALSE drift) ───────────────────
  * `payments/operator-float-reconciliation.ts` (R3-1) reconciles the
  * operator/deposit account's XLM/USDC balance by walking Horizon's
