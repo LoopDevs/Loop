@@ -409,3 +409,116 @@ describe('authenticatedRequest', () => {
     expect(headers['X-Client-Id']).toBe('loopios');
   });
 });
+
+/**
+ * Q6-3: ADR-028 admin step-up header plumbing. `authenticatedRequest`
+ * is the one place that reads the held step-up JWT out of
+ * `useAdminStepUpStore` and turns it into `X-Admin-Step-Up` — every
+ * admin writer (`applyCreditAdjustment`, `redriveOrder`, `retryPayout`,
+ * …) just passes `withStepUp: true` and trusts this layer to do the
+ * header plumbing correctly.
+ */
+describe('authenticatedRequest — admin step-up header (ADR 028)', () => {
+  beforeEach(async () => {
+    vi.restoreAllMocks();
+    mockGetRefreshToken.mockReset();
+    mockGetPlatform.mockReturnValue('web');
+    useAuthStore.getState().clearSession();
+    useAuthStore.getState().setAccessToken('at-memory');
+    const { useAdminStepUpStore } = await import('~/stores/admin-step-up.store');
+    useAdminStepUpStore.getState().clear();
+  });
+
+  it('attaches X-Admin-Step-Up when withStepUp is true and the store holds a fresh token', async () => {
+    const { useAdminStepUpStore } = await import('~/stores/admin-step-up.store');
+    const futureExp = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+    useAdminStepUpStore.getState().setStepUp('fresh-step-up-jwt', futureExp);
+
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+
+    await authenticatedRequest('/api/admin/users/u1/credit-adjustments', {
+      method: 'POST',
+      withStepUp: true,
+    });
+
+    const init = fetchSpy.mock.calls[0]![1] as RequestInit;
+    const headers = init.headers as Record<string, string>;
+    expect(headers['X-Admin-Step-Up']).toBe('fresh-step-up-jwt');
+  });
+
+  it('does NOT attach X-Admin-Step-Up when withStepUp is not set, even if the store holds a token', async () => {
+    // Guards against the header leaking onto a non-gated write (e.g.
+    // revoke-sessions) just because a step-up token happens to be held
+    // in memory from an earlier, unrelated admin action.
+    const { useAdminStepUpStore } = await import('~/stores/admin-step-up.store');
+    const futureExp = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+    useAdminStepUpStore.getState().setStepUp('fresh-step-up-jwt', futureExp);
+
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+
+    await authenticatedRequest('/api/admin/users/u1/revoke-sessions', { method: 'POST' });
+
+    const init = fetchSpy.mock.calls[0]![1] as RequestInit;
+    const headers = init.headers as Record<string, string>;
+    expect(headers['X-Admin-Step-Up']).toBeUndefined();
+  });
+
+  it('sends no X-Admin-Step-Up value when withStepUp is true but the store is empty (server drives the 401)', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ code: 'STEP_UP_REQUIRED', message: 'step-up required' }), {
+        status: 401,
+      }),
+    );
+    mockGetRefreshToken.mockResolvedValue(null);
+
+    await expect(
+      authenticatedRequest('/api/admin/users/u1/credit-adjustments', {
+        method: 'POST',
+        withStepUp: true,
+      }),
+    ).rejects.toMatchObject({ code: 'STEP_UP_REQUIRED' });
+
+    const init = fetchSpy.mock.calls[0]![1] as RequestInit;
+    const headers = init.headers as Record<string, string>;
+    expect(headers['X-Admin-Step-Up']).toBeUndefined();
+  });
+
+  it('preserves the step-up header across the silent access-token-refresh retry path', async () => {
+    // A step-up-gated call can also race a stale/expired access token.
+    // If that happens mid-flow, the refresh-and-retry path must not
+    // silently drop X-Admin-Step-Up on the retried request.
+    const { useAdminStepUpStore } = await import('~/stores/admin-step-up.store');
+    const futureExp = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+    useAdminStepUpStore.getState().setStepUp('fresh-step-up-jwt', futureExp);
+    mockGetRefreshToken.mockResolvedValue('rt-stored');
+
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      // First call: 401 with a stale access token (not a step-up rejection)
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ code: 'UNAUTHORIZED', message: 'expired' }), {
+          status: 401,
+        }),
+      )
+      // Second call: /api/auth/refresh
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ accessToken: 'at-fresh' }), { status: 200 }),
+      )
+      // Third call: the retry
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+
+    await authenticatedRequest('/api/admin/users/u1/credit-adjustments', {
+      method: 'POST',
+      withStepUp: true,
+    });
+
+    const retryInit = fetchSpy.mock.calls[2]![1] as RequestInit;
+    const retryHeaders = retryInit.headers as Record<string, string>;
+    expect(retryHeaders['X-Admin-Step-Up']).toBe('fresh-step-up-jwt');
+    expect(retryHeaders.Authorization).toBe('Bearer at-fresh');
+  });
+});
