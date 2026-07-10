@@ -396,6 +396,28 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
           },
           { idempotencyKey: idempotencyKeyRef.current },
         );
+        // Q6-4 fix: the `isCurrentMerchant` guard above
+        // (`store.merchantId === merchant.id`) gates the
+        // `<LoopPaymentStep>` render just below, but on a
+        // fresh session `store.merchantId` starts `null` — this
+        // branch never called `store.startPurchase` (only the
+        // legacy branch did, a few lines down), so
+        // `isCurrentMerchant` stayed permanently false and the
+        // payment step never rendered: the order was created
+        // server-side, but the UI silently fell back to the
+        // amount-selection form with no visible next step. Caught by
+        // the new loop-native purchase-through-the-UI e2e
+        // (tests/e2e-loop-purchase/purchase-flow.test.ts, Q6-4,
+        // docs/money-auth-worklist.md) — the first test to ever drive
+        // this path through a real browser on a first-touch session.
+        // `loopCreate` itself is already correctly merchant-scoped
+        // (local component state, reset by the mount effect's
+        // `[merchant.id]` cleanup), so this call exists purely to
+        // satisfy the shared guard the same way the legacy branch
+        // does — it doesn't touch any of the legacy-shaped store
+        // fields (`setAmount`/`setOrderCreated`) the loop-native
+        // render path never reads.
+        store.startPurchase(merchant.id, merchant.name);
         setLoopCreate(result);
         // Successful create — reset the key so a follow-up "place
         // another order for this merchant" flow doesn't dedupe onto

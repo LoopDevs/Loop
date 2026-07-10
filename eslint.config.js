@@ -37,6 +37,7 @@ export default [
       'playwright.config.ts',
       'playwright.mocked.config.ts',
       'playwright.flywheel.config.ts',
+      'playwright.loop-purchase.config.ts',
       'commitlint.config.js',
       // NOTE: tests/ is intentionally NOT listed here. A top-level `ignores`
       // block excludes files from every subsequent config in flat config —

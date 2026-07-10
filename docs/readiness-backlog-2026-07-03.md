@@ -720,7 +720,21 @@ max_connections`, including the release-command migration machine
 
 ### Q6-4 · Gating loop-native purchase-through-the-UI E2E `[code]`
 
-- [ ] **Status:** ☐ Not started — the **actual production path** (`createLoopOrder`, gated on `config.loopOrdersEnabled`) is never browser-driven in CI; the mocked test drives the _legacy_ path. Add a mocked-CTX Playwright test that drives a loop-native order through the UI, and make it gate merges. ⚠️ A UI/config regression on the real path currently passes every gate.
+- [x] **Status:** ✅ Done 2026-07-10 — review-first PR open (not yet merged) — added `tests/e2e-loop-purchase/purchase-flow.test.ts` +
+      `playwright.loop-purchase.config.ts` + `tests/e2e-loop-purchase/fixtures/mock-horizon.mjs`, driving the real
+      `createLoopOrder` production path (`POST /api/orders/loop`) through a real browser: browse → pick the XLM rail →
+      amount → order create → payment step (deposit address/memo/asset-amount asserted against the real API response,
+      not hardcoded) → a simulated on-chain deposit via the new mock-Horizon fixture → payment watcher marks `paid` →
+      procurement worker settles with mock-CTX (`tests/e2e-mocked/fixtures/mock-ctx.mjs`, reused with a checksum-valid
+      destination address fix) and reaches `fulfilled` → redemption link revealed in the UI, cross-checked against
+      `GET /api/orders/loop/:id`. Runs as a second step in the existing CI `test-e2e-flywheel` job (own
+      config/port/backend process — `LOOP_PHASE_1_ONLY=true` pins the CTX rail to XLM and would hide the cashback
+      headline `flywheel-walk.test.ts` asserts on if the two suites shared a backend). ⚠️ Caught a real P1 UI bug on
+      the first honest run: `PurchaseContainer.tsx`'s loop-native branch never called `store.startPurchase`, so the
+      `isCurrentMerchant` guard gating `<LoopPaymentStep>` stayed false on any first-touch session — the order was
+      created server-side but the payment step never rendered. Fixed with one added line; PR left **review-first**
+      (not self-merged) because it touches product source. See `money-auth-worklist.md` Q6-4 for the full breakdown
+      of what was already covered vs. what this closes, the bug + fix detail, and the non-flakiness/proof approach.
 
 ### Q6-5 · Admin/support UI E2E smoke `[code]`
 

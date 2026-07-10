@@ -995,6 +995,14 @@ jobs:
     # surface: real session restore via the test-only mint-token
     # endpoint → /orders renders the seeded fulfilled order +
     # cashback earnings headline.
+    #
+    # Q6-4 (docs/money-auth-worklist.md): a SECOND, independent
+    # Playwright config/webServer (playwright.loop-purchase.config.ts)
+    # runs as a later step in this same job — the producer-side
+    # counterpart to the walk above: drives the real loop-native
+    # order-create → deposit → paid → procured → fulfilled →
+    # redemption-reveal path through the UI, against a mocked
+    # Horizon + mocked CTX, rather than seeding a terminal state.
     needs: [quality, test-unit]
     services:
       postgres:
@@ -1060,6 +1068,21 @@ jobs:
         with:
           name: playwright-report-flywheel
           path: playwright-report/
+          retention-days: 7
+      # Q6-4 (docs/money-auth-worklist.md): loop-native purchase-
+      # through-the-UI e2e. Runs as a second step in this SAME job
+      # (own config/port range/webServer — see
+      # playwright.loop-purchase.config.ts's header comment for why
+      # it can't share the flywheel suite's backend process) rather
+      # than a new CI job, reusing the postgres service above.
+      - name: Run loop-native purchase-through-the-UI e2e tests
+        run: npm run test:e2e:loop-purchase
+      - name: Upload Playwright report (loop-purchase)
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: playwright-report-loop-purchase
+          path: playwright-report-loop-purchase/
           retention-days: 7
 
   notify:
