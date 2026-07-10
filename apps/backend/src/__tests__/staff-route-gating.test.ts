@@ -297,6 +297,30 @@ describe('ADR 037 tier behaviour', () => {
     expect(denied.status).toBe(404);
   });
 
+  // A5-7: per-subject audit timeline is support-tier (ADR 037 §3 lists
+  // "audit" among the shared read views) — support needs the merged
+  // "what happened to this account" view to do the find→explain job,
+  // same rationale as the ledger browser above. This harness's generic
+  // db mock always resolves reads to `[]`, and the handler 404s on a
+  // missing subject row before reaching its list queries, so a full
+  // 200-with-empty-events isn't reachable here without per-row
+  // fixtures (see `admin/__tests__/user-audit-timeline.test.ts` for
+  // that full-fixture coverage incl. the real 200 shape). 400 (not
+  // 404) on a malformed `before` still proves the support tier passed
+  // the gate and reached the handler's own validation — same
+  // convention as the lookup / reopen / refetch-redemption probes
+  // above.
+  it('support can reach the per-subject audit timeline (A5-7) past the gate, non-staff cannot', async () => {
+    const ok = await app.request(
+      `/api/admin/users/${NOBODY_ID}/audit?before=not-a-date`,
+      asUser(SUPPORT_ID),
+    );
+    expect(ok.status).toBe(400);
+
+    const denied = await app.request(`/api/admin/users/${NOBODY_ID}/audit`, asUser(NOBODY_ID));
+    expect(denied.status).toBe(404);
+  });
+
   it.each(ADMIN_ONLY_PROBES)('support gets 404 on %s %s', async (method, path) => {
     const res = await app.request(path, asUser(SUPPORT_ID, { method }));
     expect(res.status).toBe(404);
@@ -379,9 +403,10 @@ describe('ADR 037 mount inventory (default-deny)', () => {
     //      membership is pinned by the matrix test above and the
     //      money-write list below.
     expect(adminTier).toHaveLength(38);
-    // 8 = lookup, watcher-skips ×3, wallet ×2, refetch-redemption,
-    //     ledger (A5-8 fleet-wide ledger browser).
-    expect(supportExplicit).toHaveLength(8);
+    // 9 = lookup, watcher-skips ×3, wallet ×2, refetch-redemption,
+    //     ledger (A5-8 fleet-wide ledger browser), audit timeline
+    //     (A5-7 per-subject audit timeline).
+    expect(supportExplicit).toHaveLength(9);
     expect(riders).toBeGreaterThanOrEqual(50);
   });
 

@@ -193,3 +193,57 @@ export interface AdminLedgerEntry {
 export interface AdminLedgerListResponse {
   transactions: AdminLedgerEntry[];
 }
+
+// ─── Per-subject audit timeline (ADR 037 §4 / A5-7) ─────────────────────────
+
+/**
+ * Discriminator for one merged timeline row. Each underlying DB row
+ * becomes exactly ONE event (never expanded into per-milestone
+ * sub-events) — an order or payout's full state history rides in
+ * `detail` instead, so the event count stays predictable regardless
+ * of how many timestamps a row has populated.
+ */
+export const ADMIN_AUDIT_TIMELINE_EVENT_KINDS = [
+  'admin_action',
+  'ledger',
+  'order',
+  'payout',
+  'session_revoked',
+  'auth_lock',
+] as const;
+export type AdminAuditTimelineEventKind = (typeof ADMIN_AUDIT_TIMELINE_EVENT_KINDS)[number];
+
+/**
+ * One row in `GET /api/admin/users/:userId/audit`. `detail` is a
+ * flat, kind-specific bag (bigint money fields as strings, per the
+ * repo-wide convention) — the UI renders it as a definition list
+ * under the event rather than the backend maintaining a per-kind
+ * response shape for every consumer.
+ */
+export interface AdminAuditTimelineEvent {
+  kind: AdminAuditTimelineEventKind;
+  /** ISO-8601 — the merge/sort key (newest first). */
+  at: string;
+  /** Short human-readable one-liner for the timeline row. */
+  summary: string;
+  /** Drill-link target for the web UI, when one exists. */
+  refType: 'order' | 'payout' | null;
+  refId: string | null;
+  detail: Record<string, string | number | boolean | null>;
+}
+
+/**
+ * `GET /api/admin/users/:userId/audit` — merges five bounded,
+ * already-indexed per-user reads (admin actions targeting this user,
+ * credit_transactions, orders, pending_payouts, refresh_tokens
+ * revocations) plus a current-state OTP-lock snapshot into one
+ * newest-first timeline. `?limit=` bounds EACH source independently
+ * (default 8, clamped [1, 20]) — see the handler doc
+ * (`admin/user-audit-timeline.ts`) for why the admin-actions source
+ * only covers a trailing 24h window and why OTP lock is a snapshot,
+ * not a history.
+ */
+export interface AdminUserAuditTimelineResponse {
+  userId: string;
+  events: AdminAuditTimelineEvent[];
+}

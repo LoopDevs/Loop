@@ -22,6 +22,7 @@ import { UserOperatorMixCard } from '~/components/features/admin/UserOperatorMix
 import { UserOrdersTable } from '~/components/features/admin/UserOrdersTable';
 import { UserRailMixCard } from '~/components/features/admin/UserRailMixCard';
 import { UserPayoutsTable } from '~/components/features/admin/UserPayoutsTable';
+import { UserAuditTimeline } from '~/components/features/admin/UserAuditTimeline';
 import { UserWalletCard } from '~/components/features/admin/UserWalletCard';
 import { Spinner } from '~/components/ui/Spinner';
 import { useStaffRole } from '~/hooks/use-staff-role';
@@ -471,6 +472,33 @@ function AdminUserDetailRouteInner(): React.JSX.Element {
           </header>
           <div className="px-6 py-5">
             <CreditTransactionsTable userId={userId} />
+          </div>
+        </section>
+      ) : null}
+
+      {/* A5-7: per-subject audit timeline — the consolidated "what
+          happened to this account" view (admin actions targeting
+          this user + ledger + orders + payouts + session
+          revocations, merged newest-first). Sits last on the page:
+          every section above is one axis of this view's source
+          material, so it reads as the summary once you've already
+          seen the individual tables. */}
+      {userId !== undefined && !userNotFound ? (
+        <section className="rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
+          <header className="border-b border-gray-200 px-6 py-4 dark:border-gray-800">
+            <h2 className="text-base font-semibold text-gray-900 dark:text-white">
+              Audit timeline
+            </h2>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              Merged, newest-first view of admin actions on this account, money movements, order and
+              payout state changes, and session revocations (ADR 037 / A5-7). Read-only; each row
+              drill-links to its own detail page. Admin actions older than 24h are no longer
+              retrievable (the write-audit store is a TTL cache, not a durable log) and the OTP-lock
+              row reflects current state only, not history.
+            </p>
+          </header>
+          <div className="px-6 py-5">
+            <UserAuditTimeline userId={userId} />
           </div>
         </section>
       ) : null}

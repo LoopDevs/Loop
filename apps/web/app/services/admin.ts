@@ -531,3 +531,13 @@ export {
 // the endpoint predates it (hardening B4) — but lives in its own
 // slice for the same reason: no other consumer needs the type.
 export { type AdminRevokeSessionsResult, revokeUserSessions } from './admin-user-sessions';
+
+// A5-7: per-subject audit timeline. Wire shape lives in
+// `@loop/shared/admin-support-ops.ts` alongside the fleet-wide ledger
+// browser above; the service lives in its own slice (per-user axis,
+// not fleet-wide) matching `./admin-ledger.ts`'s split.
+export {
+  type AdminAuditTimelineEvent,
+  type AdminUserAuditTimelineResponse,
+  getAdminUserAuditTimeline,
+} from './admin-user-audit';
