@@ -476,12 +476,15 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
         // render path never reads.
         store.startPurchase(merchant.id, merchant.name);
         setLoopCreate(result);
-        // Persist so a remount (see the `[merchant.id]` effect above)
-        // or a tab refresh can restore this exact payment screen
-        // instead of stranding the user at the amount-selection form
-        // with a live, payable order sitting unnoticed server-side.
+        // Persist a POINTER (merchant + order id only — no payment
+        // fields) so a remount (see the `[merchant.id]` effect above) or
+        // a tab refresh can restore this payment screen instead of
+        // stranding the user at the amount-selection form with a live,
+        // payable order sitting unnoticed server-side. On restore the
+        // screen is rebuilt ENTIRELY from GET /api/orders/loop/:id, so
+        // nothing payment-directing is ever trusted from client storage.
         // See ~/hooks/use-loop-order-restore.ts.
-        saveLoopPendingOrder({ merchantId: merchant.id, orderId: result.orderId, create: result });
+        saveLoopPendingOrder({ merchantId: merchant.id, orderId: result.orderId });
         // Successful create — reset the key so a follow-up "place
         // another order for this merchant" flow doesn't dedupe onto
         // the just-created row.

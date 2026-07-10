@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import { ApiException } from '@loop/shared';
 import type * as OrdersLoopModule from '~/services/orders-loop';
-import type { CreateLoopOrderResponse, LoopOrderView } from '~/services/orders-loop';
+import type { LoopOrderView } from '~/services/orders-loop';
 
 const getLoopOrderMock = vi.fn();
 vi.mock('~/services/orders-loop', async () => {
@@ -19,6 +19,7 @@ import {
   saveLoopPendingOrder,
   clearLoopPendingOrder,
   validatePersistedLoopOrder,
+  loopOrderViewToCreate,
   LOOP_PENDING_ORDER_TTL_SECONDS,
 } from '../use-loop-order-restore';
 import {
@@ -29,33 +30,14 @@ import {
 
 const MERCHANT_ID = 'm1';
 const ORDER_ID = '12345678-aaaa-bbbb-cccc-000000000000';
-
 const STELLAR_ADDRESS = 'GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW';
 const PAYMENT_MEMO = 'MEMO-ABCDEFGHIJKLMN';
+// The server-authoritative payment guidance a pending usdc order returns.
+const SERVER_ASSET_AMOUNT = '10.0000000';
+const SERVER_PAYMENT_URI = `web+stellar:pay?destination=${STELLAR_ADDRESS}&amount=${SERVER_ASSET_AMOUNT}&memo=${PAYMENT_MEMO}&memo_type=MEMO_TEXT&asset_code=USDC`;
 
-function mkCreate(
-  overrides: Partial<CreateLoopOrderResponse['payment']> = {},
-): CreateLoopOrderResponse {
-  return {
-    orderId: ORDER_ID,
-    payment: {
-      method: 'usdc',
-      stellarAddress: STELLAR_ADDRESS,
-      memo: PAYMENT_MEMO,
-      amountMinor: '1000',
-      currency: 'USD',
-      assetAmount: '10.0000000',
-      // Must embed the SAME destination + memo as stellarAddress/memo
-      // above — use-loop-order-restore.ts cross-checks both against
-      // the server record independently (a tampered paymentUri that
-      // deep-links elsewhere must fail even if the top-level fields
-      // are correct).
-      paymentUri: `web+stellar:pay?destination=${STELLAR_ADDRESS}&amount=10.0000000&memo=${PAYMENT_MEMO}&memo_type=MEMO_TEXT`,
-      ...overrides,
-    } as CreateLoopOrderResponse['payment'],
-  };
-}
-
+/** A server `LoopOrderView` for a pending usdc order, with the Q6-4b
+ *  server-derived payment-guidance fields populated. */
 function mkOrder(overrides: Partial<LoopOrderView> = {}): LoopOrderView {
   return {
     id: ORDER_ID,
@@ -68,6 +50,10 @@ function mkOrder(overrides: Partial<LoopOrderView> = {}): LoopOrderView {
     paymentMethod: 'usdc',
     paymentMemo: PAYMENT_MEMO,
     stellarAddress: STELLAR_ADDRESS,
+    assetAmount: SERVER_ASSET_AMOUNT,
+    paymentUri: SERVER_PAYMENT_URI,
+    assetCode: null,
+    assetIssuer: null,
     userCashbackMinor: '0',
     ctxOrderId: null,
     redeemCode: null,
@@ -82,23 +68,20 @@ function mkOrder(overrides: Partial<LoopOrderView> = {}): LoopOrderView {
   };
 }
 
-/** Seeds storage directly (bypassing the fire-and-forget persist queue)
- *  so tests get a deterministic starting state. */
-async function seed(
-  record: Partial<{
-    merchantId: string;
-    orderId: string;
-    create: CreateLoopOrderResponse;
-    savedAt: number;
-  }>,
+/** Seeds a persisted record directly. `extra` lets a test simulate a
+ *  TAMPERED record that carries attacker-injected payment fields on top
+ *  of the pointer — the restore must ignore them entirely. */
+async function seedPointer(
+  overrides: { merchantId?: string; orderId?: string; savedAt?: number } = {},
+  extra: Record<string, unknown> = {},
 ): Promise<void> {
   await savePendingOrder(
     {
       merchantId: MERCHANT_ID,
       orderId: ORDER_ID,
-      create: mkCreate(),
       savedAt: Math.floor(Date.now() / 1000),
-      ...record,
+      ...overrides,
+      ...extra,
     },
     LOOP_NATIVE_PENDING_ORDER_KEY,
   );
@@ -112,78 +95,130 @@ afterEach(() => {
   sessionStorage.clear();
 });
 
-describe('validatePersistedLoopOrder', () => {
-  it('accepts a well-formed record scoped to the expected merchant', () => {
-    const raw = {
-      merchantId: MERCHANT_ID,
-      orderId: ORDER_ID,
-      create: mkCreate(),
-      savedAt: Math.floor(Date.now() / 1000),
-    };
-    const result = validatePersistedLoopOrder(raw, MERCHANT_ID);
-    expect(result).not.toBeNull();
-    expect(result?.orderId).toBe(ORDER_ID);
+describe('validatePersistedLoopOrder (pointer-only)', () => {
+  it('accepts a well-formed pointer scoped to the expected merchant', () => {
+    const now = Math.floor(Date.now() / 1000);
+    const result = validatePersistedLoopOrder(
+      { merchantId: MERCHANT_ID, orderId: ORDER_ID, savedAt: now },
+      MERCHANT_ID,
+    );
+    expect(result).toEqual({ merchantId: MERCHANT_ID, orderId: ORDER_ID });
   });
 
-  it('rejects a record scoped to a different merchant', () => {
-    const raw = {
-      merchantId: 'other-merchant',
-      orderId: ORDER_ID,
-      create: mkCreate(),
-      savedAt: Math.floor(Date.now() / 1000),
-    };
-    expect(validatePersistedLoopOrder(raw, MERCHANT_ID)).toBeNull();
+  it('IGNORES extra tampered keys — returns only the pointer, never a payment blob', () => {
+    const now = Math.floor(Date.now() / 1000);
+    const result = validatePersistedLoopOrder(
+      {
+        merchantId: MERCHANT_ID,
+        orderId: ORDER_ID,
+        savedAt: now,
+        // Attacker-injected junk that must never be read:
+        create: {
+          payment: {
+            assetAmount: '999999.0000000',
+            paymentUri: 'web+stellar:pay?destination=GEVIL',
+          },
+        },
+      },
+      MERCHANT_ID,
+    );
+    expect(result).toEqual({ merchantId: MERCHANT_ID, orderId: ORDER_ID });
+    expect(result).not.toHaveProperty('create');
   });
 
-  it('rejects an expired (past-TTL) record', () => {
-    const raw = {
-      merchantId: MERCHANT_ID,
-      orderId: ORDER_ID,
-      create: mkCreate(),
-      savedAt: Math.floor(Date.now() / 1000) - LOOP_PENDING_ORDER_TTL_SECONDS - 1,
-    };
-    expect(validatePersistedLoopOrder(raw, MERCHANT_ID)).toBeNull();
+  it('rejects a pointer for a different merchant', () => {
+    const now = Math.floor(Date.now() / 1000);
+    expect(
+      validatePersistedLoopOrder(
+        { merchantId: 'other', orderId: ORDER_ID, savedAt: now },
+        MERCHANT_ID,
+      ),
+    ).toBeNull();
   });
 
-  it('rejects malformed / tampered payloads (missing payment fields, mismatched orderId, non-object)', () => {
+  it('rejects an expired (past-TTL) pointer', () => {
+    const savedAt = Math.floor(Date.now() / 1000) - LOOP_PENDING_ORDER_TTL_SECONDS - 1;
+    expect(
+      validatePersistedLoopOrder(
+        { merchantId: MERCHANT_ID, orderId: ORDER_ID, savedAt },
+        MERCHANT_ID,
+      ),
+    ).toBeNull();
+  });
+
+  it('rejects malformed payloads', () => {
     const now = Math.floor(Date.now() / 1000);
     expect(validatePersistedLoopOrder(null, MERCHANT_ID)).toBeNull();
-    expect(validatePersistedLoopOrder('not-an-object', MERCHANT_ID)).toBeNull();
+    expect(validatePersistedLoopOrder('nope', MERCHANT_ID)).toBeNull();
     expect(
-      validatePersistedLoopOrder(
-        { merchantId: MERCHANT_ID, orderId: ORDER_ID, savedAt: now, create: { orderId: 'other' } },
-        MERCHANT_ID,
-      ),
+      validatePersistedLoopOrder({ merchantId: MERCHANT_ID, savedAt: now }, MERCHANT_ID),
     ).toBeNull();
     expect(
-      validatePersistedLoopOrder(
-        {
-          merchantId: MERCHANT_ID,
-          orderId: ORDER_ID,
-          savedAt: now,
-          create: { orderId: ORDER_ID, payment: { method: 'usdc' /* missing fields */ } },
-        },
-        MERCHANT_ID,
-      ),
+      validatePersistedLoopOrder({ merchantId: MERCHANT_ID, orderId: ORDER_ID }, MERCHANT_ID),
     ).toBeNull();
   });
+});
 
-  it('accepts a credit-method record without stellar fields', () => {
-    const raw = {
-      merchantId: MERCHANT_ID,
-      orderId: ORDER_ID,
-      savedAt: Math.floor(Date.now() / 1000),
-      create: {
-        orderId: ORDER_ID,
-        payment: { method: 'credit', amountMinor: '1000', currency: 'USD' },
-      },
-    };
-    expect(validatePersistedLoopOrder(raw, MERCHANT_ID)).not.toBeNull();
+describe('loopOrderViewToCreate (server-authoritative rebuild)', () => {
+  it('builds a usdc create purely from the server view', () => {
+    const create = loopOrderViewToCreate(mkOrder());
+    expect(create).not.toBeNull();
+    expect(create!.orderId).toBe(ORDER_ID);
+    expect(create!.payment).toMatchObject({
+      method: 'usdc',
+      stellarAddress: STELLAR_ADDRESS,
+      memo: PAYMENT_MEMO,
+      amountMinor: '1000',
+      currency: 'USD',
+      assetAmount: SERVER_ASSET_AMOUNT,
+      paymentUri: SERVER_PAYMENT_URI,
+    });
+  });
+
+  it('builds a credit create (no stellar fields needed)', () => {
+    const create = loopOrderViewToCreate(
+      mkOrder({
+        paymentMethod: 'credit',
+        stellarAddress: null,
+        paymentMemo: null,
+        assetAmount: null,
+        paymentUri: null,
+      }),
+    );
+    expect(create).not.toBeNull();
+    expect(create!.payment).toEqual({ method: 'credit', amountMinor: '1000', currency: 'USD' });
+  });
+
+  it('builds a loop_asset create with the server assetCode/assetIssuer', () => {
+    const create = loopOrderViewToCreate(
+      mkOrder({ paymentMethod: 'loop_asset', assetCode: 'USDLOOP', assetIssuer: 'GISSUER' }),
+    );
+    expect(create).not.toBeNull();
+    expect(create!.payment).toMatchObject({
+      method: 'loop_asset',
+      assetCode: 'USDLOOP',
+      assetIssuer: 'GISSUER',
+      assetAmount: SERVER_ASSET_AMOUNT,
+    });
+  });
+
+  it('returns null when an on-chain order is missing server-derived guidance', () => {
+    expect(loopOrderViewToCreate(mkOrder({ assetAmount: null }))).toBeNull();
+    expect(loopOrderViewToCreate(mkOrder({ paymentUri: null }))).toBeNull();
+    expect(loopOrderViewToCreate(mkOrder({ stellarAddress: null }))).toBeNull();
+  });
+
+  it('returns null for a loop_asset order missing assetCode/assetIssuer', () => {
+    expect(
+      loopOrderViewToCreate(
+        mkOrder({ paymentMethod: 'loop_asset', assetCode: null, assetIssuer: null }),
+      ),
+    ).toBeNull();
   });
 });
 
 describe('useLoopOrderRestore', () => {
-  it('stays null when no persisted record exists (the common case)', async () => {
+  it('stays null when no pointer exists (the common case)', async () => {
     const { result } = renderHook(() =>
       useLoopOrderRestore({ merchantId: MERCHANT_ID, enabled: true }),
     );
@@ -192,28 +227,69 @@ describe('useLoopOrderRestore', () => {
   });
 
   it('does nothing while disabled — never fires the GET', async () => {
-    await seed({});
+    await seedPointer();
     renderHook(() => useLoopOrderRestore({ merchantId: MERCHANT_ID, enabled: false }));
     await new Promise((r) => setTimeout(r, 20));
     expect(getLoopOrderMock).not.toHaveBeenCalled();
   });
 
-  it('restores a still-payable (pending_payment) persisted order', async () => {
-    await seed({});
+  it('restores a pending order, rebuilt entirely from the server (read-only — one GET, no POST)', async () => {
+    await seedPointer();
     getLoopOrderMock.mockResolvedValue(mkOrder());
     const { result } = renderHook(() =>
       useLoopOrderRestore({ merchantId: MERCHANT_ID, enabled: true }),
     );
     await waitFor(() => expect(result.current.restored).not.toBeNull());
-    expect(result.current.restored?.create.orderId).toBe(ORDER_ID);
+    expect(result.current.restored!.create.payment).toMatchObject({
+      assetAmount: SERVER_ASSET_AMOUNT,
+      paymentUri: SERVER_PAYMENT_URI,
+    });
     expect(getLoopOrderMock).toHaveBeenCalledWith(ORDER_ID);
-    // Read-only: never calls the create endpoint (no createLoopOrder import
-    // even exists in this module — asserting the GET is the only call).
     expect(getLoopOrderMock).toHaveBeenCalledTimes(1);
   });
 
-  it('also restores while the order is already paid/procuring (still non-terminal)', async () => {
-    await seed({});
+  it('TAMPER-IGNORED: a persisted record with attacker-injected amount/asset/paymentUri is ignored — the restore uses the SERVER values', async () => {
+    // Simulate an attacker (XSS / malicious extension / device compromise)
+    // who inflated the stored blob's amount 100x, swapped the asset, and
+    // poisoned the SEP-7 deep-link to their own address. The pointer's
+    // orderId is left correct.
+    await seedPointer(
+      {},
+      {
+        create: {
+          orderId: ORDER_ID,
+          payment: {
+            method: 'usdc',
+            stellarAddress: STELLAR_ADDRESS,
+            memo: PAYMENT_MEMO,
+            amountMinor: '100000', // 100x
+            currency: 'USD',
+            assetAmount: '1000.0000000', // 100x
+            paymentUri:
+              'web+stellar:pay?destination=GATTACKERADDRESS&amount=1000.0000000&memo=MEMO-ABCDEFGHIJKLMN',
+          },
+        },
+      },
+    );
+    getLoopOrderMock.mockResolvedValue(mkOrder());
+    const { result } = renderHook(() =>
+      useLoopOrderRestore({ merchantId: MERCHANT_ID, enabled: true }),
+    );
+    await waitFor(() => expect(result.current.restored).not.toBeNull());
+    const payment = result.current.restored!.create.payment as {
+      assetAmount: string;
+      amountMinor: string;
+      paymentUri: string;
+    };
+    // Server-authoritative values, NOT the tampered blob's 100x figures.
+    expect(payment.assetAmount).toBe(SERVER_ASSET_AMOUNT);
+    expect(payment.amountMinor).toBe('1000');
+    expect(payment.paymentUri).toBe(SERVER_PAYMENT_URI);
+    expect(payment.paymentUri).not.toContain('GATTACKERADDRESS');
+  });
+
+  it('also restores while the order is paid/procuring (still non-terminal)', async () => {
+    await seedPointer();
     getLoopOrderMock.mockResolvedValue(mkOrder({ state: 'procuring' }));
     const { result } = renderHook(() =>
       useLoopOrderRestore({ merchantId: MERCHANT_ID, enabled: true }),
@@ -221,8 +297,8 @@ describe('useLoopOrderRestore', () => {
     await waitFor(() => expect(result.current.restored).not.toBeNull());
   });
 
-  it('does not restore a record scoped to a different merchant', async () => {
-    await seed({});
+  it('does not restore a pointer scoped to a different merchant (no GET fired)', async () => {
+    await seedPointer();
     const { result } = renderHook(() =>
       useLoopOrderRestore({ merchantId: 'a-different-merchant', enabled: true }),
     );
@@ -231,34 +307,20 @@ describe('useLoopOrderRestore', () => {
     expect(getLoopOrderMock).not.toHaveBeenCalled();
   });
 
-  it('clears the persisted record and does not restore a fulfilled order', async () => {
-    await seed({});
+  it('clears the pointer and does not restore a fulfilled order', async () => {
+    await seedPointer();
     getLoopOrderMock.mockResolvedValue(mkOrder({ state: 'fulfilled' }));
     const { result } = renderHook(() =>
       useLoopOrderRestore({ merchantId: MERCHANT_ID, enabled: true }),
     );
-    await waitFor(() => expect(getLoopOrderMock).toHaveBeenCalled());
-    await new Promise((r) => setTimeout(r, 20));
-    expect(result.current.restored).toBeNull();
-    await waitFor(async () => {
-      expect(await loadPendingOrder(LOOP_NATIVE_PENDING_ORDER_KEY)).toBeNull();
-    });
-  });
-
-  it('clears the persisted record and does not restore an expired order', async () => {
-    await seed({});
-    getLoopOrderMock.mockResolvedValue(mkOrder({ state: 'expired' }));
-    const { result } = renderHook(() =>
-      useLoopOrderRestore({ merchantId: MERCHANT_ID, enabled: true }),
-    );
     await waitFor(async () => {
       expect(await loadPendingOrder(LOOP_NATIVE_PENDING_ORDER_KEY)).toBeNull();
     });
     expect(result.current.restored).toBeNull();
   });
 
-  it('clears the persisted record on a 404 (order not found / not owned) without crashing', async () => {
-    await seed({});
+  it('clears the pointer on a 404 (order not found / not owned / tampered id) without crashing', async () => {
+    await seedPointer();
     getLoopOrderMock.mockRejectedValue(
       new ApiException(404, { code: 'NOT_FOUND', message: 'nope' }),
     );
@@ -271,11 +333,9 @@ describe('useLoopOrderRestore', () => {
     expect(result.current.restored).toBeNull();
   });
 
-  it('clears the persisted record on a 403 (forbidden — stale record from a different session) without crashing', async () => {
-    await seed({});
-    getLoopOrderMock.mockRejectedValue(
-      new ApiException(403, { code: 'FORBIDDEN', message: 'not yours' }),
-    );
+  it('clears the pointer on a 403 without crashing', async () => {
+    await seedPointer();
+    getLoopOrderMock.mockRejectedValue(new ApiException(403, { code: 'FORBIDDEN', message: 'no' }));
     const { result } = renderHook(() =>
       useLoopOrderRestore({ merchantId: MERCHANT_ID, enabled: true }),
     );
@@ -285,8 +345,8 @@ describe('useLoopOrderRestore', () => {
     expect(result.current.restored).toBeNull();
   });
 
-  it('leaves the persisted record alone on a transient 500 — a future remount gets another chance', async () => {
-    await seed({});
+  it('leaves the pointer alone on a transient 500 — a future remount retries', async () => {
+    await seedPointer();
     getLoopOrderMock.mockRejectedValue(
       new ApiException(500, { code: 'INTERNAL_ERROR', message: 'blip' }),
     );
@@ -296,97 +356,33 @@ describe('useLoopOrderRestore', () => {
     await waitFor(() => expect(getLoopOrderMock).toHaveBeenCalled());
     await new Promise((r) => setTimeout(r, 20));
     expect(result.current.restored).toBeNull();
-    // Not cleared — still there for a future attempt.
-    const stillThere = await loadPendingOrder(LOOP_NATIVE_PENDING_ORDER_KEY);
-    expect(stillThere).not.toBeNull();
+    expect(await loadPendingOrder(LOOP_NATIVE_PENDING_ORDER_KEY)).not.toBeNull();
   });
 
-  it('refuses to restore + clears when the server deposit address/memo do not match the persisted copy (tamper/staleness guard)', async () => {
-    await seed({});
-    getLoopOrderMock.mockResolvedValue(
-      mkOrder({ stellarAddress: 'GDIFFERENTADDRESSXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX' }),
-    );
+  it("does not restore (or clobber) when the server can't derive on-chain guidance (oracle down → null fields)", async () => {
+    await seedPointer();
+    getLoopOrderMock.mockResolvedValue(mkOrder({ assetAmount: null, paymentUri: null }));
     const { result } = renderHook(() =>
       useLoopOrderRestore({ merchantId: MERCHANT_ID, enabled: true }),
     );
-    await waitFor(async () => {
-      expect(await loadPendingOrder(LOOP_NATIVE_PENDING_ORDER_KEY)).toBeNull();
-    });
+    await waitFor(() => expect(getLoopOrderMock).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 20));
     expect(result.current.restored).toBeNull();
+    // Pointer retained so a later remount retries once the oracle recovers.
+    expect(await loadPendingOrder(LOOP_NATIVE_PENDING_ORDER_KEY)).not.toBeNull();
   });
 
-  it('refuses to restore when the persisted payment method disagrees with the server record', async () => {
-    await seed({ create: mkCreate({ method: 'xlm' }) });
-    getLoopOrderMock.mockResolvedValue(mkOrder({ paymentMethod: 'usdc' }));
-    const { result } = renderHook(() =>
-      useLoopOrderRestore({ merchantId: MERCHANT_ID, enabled: true }),
-    );
-    await waitFor(async () => {
-      expect(await loadPendingOrder(LOOP_NATIVE_PENDING_ORDER_KEY)).toBeNull();
-    });
-    expect(result.current.restored).toBeNull();
-  });
-
-  it('refuses to restore + clears when the persisted paymentUri deep-links to a DIFFERENT destination than stellarAddress/memo (SEP-7 tamper guard)', async () => {
-    // Top-level stellarAddress/memo match the server exactly — only the
-    // embedded SEP-7 URI is tampered. This is the attack the address/memo
-    // check alone can't catch: on native, `paymentUri` is the only
-    // payment affordance shown (NativePaymentBody has no separate
-    // address/memo text), so a correct-looking record with a poisoned
-    // deep-link must still fail closed.
-    await seed({
-      create: mkCreate({
-        paymentUri: `web+stellar:pay?destination=GATTACKERADDRESSXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX&amount=10.0000000&memo=${PAYMENT_MEMO}&memo_type=MEMO_TEXT`,
-      }),
-    });
-    getLoopOrderMock.mockResolvedValue(mkOrder());
-    const { result } = renderHook(() =>
-      useLoopOrderRestore({ merchantId: MERCHANT_ID, enabled: true }),
-    );
-    await waitFor(async () => {
-      expect(await loadPendingOrder(LOOP_NATIVE_PENDING_ORDER_KEY)).toBeNull();
-    });
-    expect(result.current.restored).toBeNull();
-  });
-
-  it('refuses to restore + clears when the persisted paymentUri is missing the memo (fails closed, not silently accepted)', async () => {
-    await seed({
-      create: mkCreate({
-        paymentUri: `web+stellar:pay?destination=${STELLAR_ADDRESS}&amount=10.0000000&memo_type=MEMO_TEXT`,
-      }),
-    });
-    getLoopOrderMock.mockResolvedValue(mkOrder());
-    const { result } = renderHook(() =>
-      useLoopOrderRestore({ merchantId: MERCHANT_ID, enabled: true }),
-    );
-    await waitFor(async () => {
-      expect(await loadPendingOrder(LOOP_NATIVE_PENDING_ORDER_KEY)).toBeNull();
-    });
-    expect(result.current.restored).toBeNull();
-  });
-
-  it('does not clobber a FRESHER persisted order that appeared while the restore GET was in flight', async () => {
-    await seed({});
+  it('does not clobber a FRESHER pointer that appeared while the restore GET was in flight', async () => {
+    await seedPointer();
     let resolveGet!: (order: LoopOrderView) => void;
     getLoopOrderMock.mockImplementation(
-      () =>
-        new Promise<LoopOrderView>((resolve) => {
-          resolveGet = resolve;
-        }),
+      () => new Promise<LoopOrderView>((resolve) => (resolveGet = resolve)),
     );
     const { result } = renderHook(() =>
       useLoopOrderRestore({ merchantId: MERCHANT_ID, enabled: true }),
     );
-    // While the GET for the original order is still pending, simulate a
-    // fresh order create superseding the persisted record — exactly what
-    // PurchaseContainer's saveLoopPendingOrder call does on a new
-    // createLoopOrder success.
     const FRESH_ORDER_ID = 'fresh-order-id';
-    saveLoopPendingOrder({
-      merchantId: MERCHANT_ID,
-      orderId: FRESH_ORDER_ID,
-      create: { ...mkCreate(), orderId: FRESH_ORDER_ID },
-    });
+    saveLoopPendingOrder({ merchantId: MERCHANT_ID, orderId: FRESH_ORDER_ID });
     await waitFor(async () => {
       const raw = (await loadPendingOrder(LOOP_NATIVE_PENDING_ORDER_KEY)) as Record<
         string,
@@ -394,48 +390,45 @@ describe('useLoopOrderRestore', () => {
       >;
       expect(raw.orderId).toBe(FRESH_ORDER_ID);
     });
-
-    // Now let the original (stale) GET resolve as still-valid.
     resolveGet(mkOrder());
     await waitFor(() => expect(getLoopOrderMock).toHaveBeenCalled());
-    // Give the hook's async continuation a turn to run.
     await new Promise((r) => setTimeout(r, 20));
-
-    // Must NOT have restored the stale order, and must NOT have
-    // overwritten the fresher persisted record.
     expect(result.current.restored).toBeNull();
     const raw = (await loadPendingOrder(LOOP_NATIVE_PENDING_ORDER_KEY)) as Record<string, unknown>;
     expect(raw.orderId).toBe(FRESH_ORDER_ID);
   });
 });
 
-describe('TTL consistency between the module TTL and the generic storage layer', () => {
-  it("saveLoopPendingOrder sets an explicit expiresAt so the record survives the full LOOP_PENDING_ORDER_TTL_SECONDS window (not the generic layer's shorter default)", async () => {
-    saveLoopPendingOrder({ merchantId: MERCHANT_ID, orderId: ORDER_ID, create: mkCreate() });
+describe('saveLoopPendingOrder / clearLoopPendingOrder', () => {
+  it('persists a POINTER only — no payment-directing field is written to storage', async () => {
+    saveLoopPendingOrder({ merchantId: MERCHANT_ID, orderId: ORDER_ID });
     await waitFor(async () => {
       expect(await loadPendingOrder(LOOP_NATIVE_PENDING_ORDER_KEY)).not.toBeNull();
     });
     const raw = (await loadPendingOrder(LOOP_NATIVE_PENDING_ORDER_KEY)) as Record<string, unknown>;
-    const savedAt = raw.savedAt as number;
-    const expiresAt = raw.expiresAt as number;
-    expect(expiresAt - savedAt).toBe(LOOP_PENDING_ORDER_TTL_SECONDS);
-  });
-});
-
-describe('saveLoopPendingOrder / clearLoopPendingOrder', () => {
-  it('persists a record that loadPendingOrder can read back', async () => {
-    saveLoopPendingOrder({ merchantId: MERCHANT_ID, orderId: ORDER_ID, create: mkCreate() });
-    await waitFor(async () => {
-      const raw = await loadPendingOrder(LOOP_NATIVE_PENDING_ORDER_KEY);
-      expect(raw).not.toBeNull();
-    });
-    const raw = (await loadPendingOrder(LOOP_NATIVE_PENDING_ORDER_KEY)) as Record<string, unknown>;
     expect(raw.orderId).toBe(ORDER_ID);
     expect(raw.merchantId).toBe(MERCHANT_ID);
+    // Nothing payment-directing is ever persisted.
+    expect(raw).not.toHaveProperty('create');
+    expect(raw).not.toHaveProperty('payment');
+    expect(raw).not.toHaveProperty('paymentUri');
+    expect(raw).not.toHaveProperty('assetAmount');
+    expect(raw).not.toHaveProperty('stellarAddress');
   });
 
-  it('clears a persisted record', async () => {
-    saveLoopPendingOrder({ merchantId: MERCHANT_ID, orderId: ORDER_ID, create: mkCreate() });
+  it('sets an explicit expiresAt = savedAt + LOOP_PENDING_ORDER_TTL_SECONDS', async () => {
+    saveLoopPendingOrder({ merchantId: MERCHANT_ID, orderId: ORDER_ID });
+    await waitFor(async () => {
+      expect(await loadPendingOrder(LOOP_NATIVE_PENDING_ORDER_KEY)).not.toBeNull();
+    });
+    const raw = (await loadPendingOrder(LOOP_NATIVE_PENDING_ORDER_KEY)) as Record<string, unknown>;
+    expect((raw.expiresAt as number) - (raw.savedAt as number)).toBe(
+      LOOP_PENDING_ORDER_TTL_SECONDS,
+    );
+  });
+
+  it('clears a persisted pointer', async () => {
+    saveLoopPendingOrder({ merchantId: MERCHANT_ID, orderId: ORDER_ID });
     await waitFor(async () => {
       expect(await loadPendingOrder(LOOP_NATIVE_PENDING_ORDER_KEY)).not.toBeNull();
     });

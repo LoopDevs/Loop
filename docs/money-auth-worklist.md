@@ -703,66 +703,79 @@ payment_method='loop_asset' AND state='pending_payment'` — plus a
       `[merchant.id]` cleanup effect, a slow-connection late fetch, a tab refresh —
       strands the user at the amount-selection form despite a live, payable order
       existing server-side (real order row, real deposit memo, real expiry).
-      Added `apps/web/app/hooks/use-loop-order-restore.ts`: on mount, if a
-      persisted loop-native order id exists for the current merchant, it
-      GET-verifies (`GET /api/orders/loop/:id`, owner-scoped) that the order is
-      still non-terminal before re-hydrating `loopCreate` + re-arming
-      `isCurrentMerchant` (via `store.startPurchase`, same call Q6-4 added).
-      Persists the FULL `POST /api/orders/loop` response (not just the order id)
-      under a new sessionStorage/secure-storage key
+      Added `apps/web/app/hooks/use-loop-order-restore.ts`, made
+      **SERVER-AUTHORITATIVE** after two rounds of money-review (see below):
+      what's persisted to sessionStorage/secure-storage is a **POINTER ONLY**
+      — `{ merchantId, orderId }` — under a new key
       (`LOOP_NATIVE_PENDING_ORDER_KEY = 'loop_native_pending_order'` in
       `apps/web/app/native/purchase-storage.ts`, separate from the legacy path's
-      `PENDING_ORDER_KEY`) — `GET /api/orders/loop/:id`'s `LoopOrderView` doesn't
-      carry `assetAmount`/`paymentUri` (quoted once at creation, not part of the
-      read-side view), so those can't be reconstructed from the GET response;
-      the GET is what makes restoring the persisted response safe, not what
-      supplies its payment fields. Money-safety: read-only (GET only, never
-      re-`POST`s — no double-order); a stale/different-user record 404s/403s and
-      is cleared, never shown (no cross-user leak — the GET is owner-scoped
-      server-side); a tamper/staleness guard cross-checks the persisted deposit
-      address+memo against the server's before ever restoring; the persisted
-      record clears on every terminal state (fulfilled/failed/expired) and a
-      20-minute client-side TTL bounds an otherwise-abandoned record. Also
-      hardened `LoopPaymentStep.tsx`: a non-retryable 404/403 on the order poll
-      now stops the 3s refetch loop and fires a new `onOrderNotFound` callback
-      instead of spinning on "Creating order…" forever (pre-existing gap, latent
-      for fresh orders too, exposed by testing the restore path's 404 case).
-      **`money-reviewer` pass (before merge) found 1 P1 + 2 P2, all fixed:**
-      (P1) the tamper cross-check validated `stellarAddress`/`memo` but not the
-      destination+memo EMBEDDED in the persisted `paymentUri` — on native the
-      SEP-7 "Open in wallet" deep-link is the ONLY payment affordance shown (no
-      separate address/memo text), so a record with correct top-level fields but
-      a poisoned `paymentUri` would have passed the guard and deep-linked the
-      user's wallet to an attacker destination; fixed by parsing + cross-checking
-      the URI's own `destination`/`memo` query params against the server record
-      too. (P2) a storage race: the hook's "refresh the TTL on a still-valid
-      restore" write and a fresh `createLoopOrder` success's write both queue
-      through the same serialized persist queue with no ordering guarantee, so a
-      stale restore's TTL-refresh could land after and silently overwrite a
-      just-created fresher order's persisted record (UI itself was never
-      clobbered — the container's `loopCreate !== null` guard already prevented
-      that — but a LATER remount could resurrect the wrong, if still legitimate,
-      order); fixed with a compare-before-write check that skips the refresh
-      (and the restore) if a different order id is now on disk. (P2) the TTL
-      comment claimed a 20-minute window but `saveLoopPendingOrder` never set an
-      explicit `expiresAt`, so the generic storage layer's own 15-minute default
-      silently expired records 5 minutes early (safe-direction — over-clearing,
-      not under — but contradicted the documented window); fixed by setting
-      `expiresAt` explicitly to `LOOP_PENDING_ORDER_TTL_SECONDS` out. Full
-      verdict + citations in the PR. Tests:
-      `apps/web/app/hooks/__tests__/use-loop-order-restore.test.ts` (23 cases —
-      validator shape/TTL/merchant-scoping, restore/no-restore per order state,
-      404/403/401 clear, transient-500 keeps the record, address/memo tamper
-      guard, SEP-7-embedded-destination tamper guard, SEP-7-missing-memo guard,
-      the storage-race non-clobber case, TTL/expiresAt consistency) +
+      `PENDING_ORDER_KEY`). On mount the hook GETs the order
+      (`GET /api/orders/loop/:id`, owner-scoped) and rebuilds the ENTIRE pay
+      screen from that server response, re-arming `isCurrentMerchant` (via
+      `store.startPurchase`, same call Q6-4 added). **No payment-directing field
+      (destination, memo, amount, asset code/issuer, SEP-7 `paymentUri`) is ever
+      read from client storage** — so there is no client-side field to tamper.
+      To make that possible the **`GET /api/orders/loop/:id` read view was
+      extended** (`LoopOrderView` in `packages/shared/src/loop-orders.ts` +
+      openapi `orders-loop-reads.ts`) with the server-derived guidance fields
+      `assetAmount`/`paymentUri`/`assetCode`/`assetIssuer`, populated in
+      `apps/backend/src/orders/loop-read-handlers.ts` for a non-terminal on-chain
+      order by **reusing the exact idempotent-POST-replay derivation** — the
+      live oracle/FX re-quote + SEP-7 build, extracted from `loop-replay-response.ts`
+      into `apps/backend/src/orders/loop-payment-instructions.ts`
+      (`deriveLoopPaymentInstructions`, no re-implementation — `replayOrderResponse`
+      is now a thin wrapper over it). Re-quoting on read is correct: it yields the
+      current required guidance for a still-pending order, and the deposit watcher
+      re-validates sufficiency at settlement regardless (the price feed's 60s cache
+      is shared with the watcher, so the 3s UI poll adds no per-poll oracle call).
+      Money-safety: read-only (GET only, never re-`POST`s — no double-order);
+      owner-scoped GET → an unknown/other-user/tampered order id 404s and the
+      pointer is cleared (no cross-user leak); a different order the SAME user owns
+      just rebuilds THAT order's real server payload (still safe); refuses terminal
+      orders + clears; 20-minute client TTL bounds an abandoned pointer. Also
+      hardened `LoopPaymentStep.tsx`: a non-retryable 404/403 on the order poll now
+      stops the 3s refetch loop and fires a new `onOrderNotFound` callback instead
+      of spinning on "Creating order…" forever.
+      **Two money-review rounds:**
+      Round 1 (self-run `money-reviewer`) on the original _persist-the-full-create-
+      response_ design found 1 P1 + 2 P2, all fixed at the time (SEP-7-embedded
+      destination/memo cross-check; a save/refresh storage race; an explicit
+      `expiresAt` so the storage layer's 15-min default didn't undercut the 20-min
+      TTL).
+      Round 2 (independent lead review) found the residual P1 that motivated the
+      server-authoritative rewrite: **AMOUNT + ASSET were never cross-checked**,
+      only destination+memo — so a tampered persisted blob with a 100×-inflated
+      `amountMinor`/`assetAmount` and a `paymentUri` whose `amount=` was inflated
+      (but destination+memo kept correct) passed every guard, and the native
+      "Open in wallet" deep-link asked the user's wallet for 100× to Loop's real
+      deposit address (overpay = user loss; underpay/wrong-asset = stranded funds).
+      It never broke Loop's ledger (the watcher computes required amount/asset from
+      server `chargeMinor`/`currency`/`method` + env issuers, so INV-3/7/8/9 held)
+      — a P1 user-facing payment-misdirection, not a P0. The fix ELIMINATES the
+      tamper surface rather than adding a fourth cross-check: with pointer-only
+      persistence + full server rebuild, there is nothing payment-directing in
+      storage to compare. **Chose the GET-extension (read-only) over the
+      reviewer's idempotency-key-replay fallback** because it needs no re-POST and
+      so carries zero double-order risk. Tests:
+      `apps/web/app/hooks/__tests__/use-loop-order-restore.test.ts` (26 cases —
+      pointer-only validator incl. "ignores injected extra keys",
+      `loopOrderViewToCreate` server rebuild per method, a TAMPER-IGNORED case
+      asserting the restored create uses SERVER amount/asset/paymentUri not the
+      injected 100× blob, restore/no-restore per state, 404/403/401 clear,
+      transient-500 + oracle-null-guidance keep the pointer, storage-race
+      non-clobber, pointer-carries-no-payment-field, TTL/expiresAt) +
       `apps/web/app/components/features/purchase/__tests__/PurchaseContainer.loop-order-restore.test.tsx`
-      (7 cases — first-touch regression guard, real unmount+remount with a fresh
-      `QueryClient` re-renders the payment step from the server, expired/404
-      clear + fall back to normal flow, fulfilled clears the persisted record
-      without kicking the user off the "Ready" screen, no persisted order is a
-      no-op, legacy CTX-proxy path untouched). Full web suite green
-      (1508+ tests), full `npm run verify` green. `money-reviewer` pass
-      completed pre-merge (see PR).
+      (8 cases — first-touch regression guard; real unmount+remount rebuilds the
+      pay screen from the server and asserts the rendered amount + deep-link href
+      are the SERVER's; a **SERVER-AUTHORITATIVE tamper test** that seeds a 100×
+      poisoned blob and asserts the DOM shows the server's `$10.00` /
+      `10.0000000 USDC` / real href — **proven to FAIL against the pre-fix
+      blob-trusting code** which rendered `$1,000.00` + the attacker href; expired/
+      404 clear; fulfilled clears without kicking off "Ready"; no-op; legacy path
+      untouched) + backend `loop-get-handler.test.ts` Q6-4b cases (overlay for
+      pending on-chain, loop_asset code/issuer, null for terminal/credit/derivation-
+      failure). Full web suite green, full `npm run verify` green. Two
+      `money-reviewer`/lead passes completed pre-merge (see PR).
 - [ ] **Q6-5 · Admin / support UI E2E smoke.** _M._
 - [x] **Q6-6 · Wallet-spend + on-chain interest-mint coverage** (mint has no real-Postgres test). _M._
       **Done 2026-07-10 (test-only PR — coverage cannot demote an

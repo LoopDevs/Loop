@@ -58,6 +58,21 @@ export function registerOrdersLoopReadsOpenApi(
       stellarAddress: z.string().nullable().openapi({
         description: "Loop's deposit address for on-chain methods; null for credit-funded orders.",
       }),
+      assetAmount: z.string().nullable().openapi({
+        description:
+          'Q6-4b: server-derived asset-native amount to send (7-decimal string), re-quoted on read from the order row. Populated by GET /api/orders/loop/{id} ONLY for a non-terminal, on-chain order; null for credit/terminal orders, in the list endpoint, and when the oracle/issuer is unavailable at read time. Lets the client rebuild the pay screen server-authoritatively on a remount.',
+      }),
+      paymentUri: z.string().nullable().openapi({
+        description:
+          'Q6-4b: server-derived SEP-7 `web+stellar:pay?...` deep-link. Same population rule as assetAmount.',
+      }),
+      assetCode: z.string().nullable().openapi({
+        description:
+          'Q6-4b: LOOP-asset code for a `loop_asset` order (USDLOOP/GBPLOOP/EURLOOP); null for xlm/usdc/credit and terminal orders.',
+      }),
+      assetIssuer: z.string().nullable().openapi({
+        description: 'Q6-4b: LOOP-asset issuer for a `loop_asset` order; null otherwise.',
+      }),
       userCashbackMinor: z.string(),
       ctxOrderId: z.string().nullable(),
       redeemCode: z.string().nullable(),

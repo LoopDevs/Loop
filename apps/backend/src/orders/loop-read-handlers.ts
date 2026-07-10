@@ -29,6 +29,17 @@ import type { LoopAuthContext } from '../auth/handler.js';
 import { type OrderPaymentMethod } from '../db/schema.js';
 import { type LoopOrderView as SharedLoopOrderView } from '@loop/shared';
 import { decryptRedeemField, RedeemDecryptError } from './redeem-crypto.js';
+import { deriveLoopPaymentInstructions } from './loop-payment-instructions.js';
+
+/**
+ * Terminal states carry no live payment guidance (nothing left to pay).
+ * Q6-4b: `loopGetOrderHandler` skips the oracle re-quote for these — both
+ * a cost saving on the polled-to-fulfillment hot path and the correct
+ * semantics (a fulfilled/failed/expired order has no pay screen to resume).
+ */
+function isTerminalOrderState(state: string): boolean {
+  return state === 'fulfilled' || state === 'failed' || state === 'expired';
+}
 
 const log = logger.child({ area: 'loop-order-reads' });
 
@@ -113,6 +124,15 @@ function orderToView(row: {
     paymentMemo: row.paymentMemo,
     stellarAddress:
       row.paymentMethod === 'credit' ? null : (env.LOOP_STELLAR_DEPOSIT_ADDRESS ?? null),
+    // Q6-4b: server-derived payment-guidance fields. Default null here;
+    // `loopGetOrderHandler` overlays them for a single, non-terminal,
+    // on-chain order (see below). The list handler leaves them null — it
+    // never renders pay instructions, and re-quoting the oracle per row
+    // would be wasteful.
+    assetAmount: null,
+    paymentUri: null,
+    assetCode: null,
+    assetIssuer: null,
     userCashbackMinor: row.userCashbackMinor.toString(),
     ctxOrderId: row.ctxOrderId,
     // CF-25 / X-PRIV-03: code + PIN are envelope-encrypted at rest;
@@ -158,7 +178,35 @@ export async function loopGetOrderHandler(c: Context): Promise<Response> {
     return c.json({ code: 'NOT_FOUND', message: 'Order not found' }, 404);
   }
 
-  return c.json(orderToView(row));
+  const view = orderToView(row);
+
+  // Q6-4b: server-authoritative payment guidance. For a non-terminal,
+  // on-chain order, re-derive the asset amount + SEP-7 deep-link from the
+  // server-authoritative order row (the SAME derivation the idempotent-POST
+  // replay uses — deriveLoopPaymentInstructions) and overlay them onto the
+  // view. This is what lets the client's remount-restore path
+  // (use-loop-order-restore.ts) rebuild the pay screen ENTIRELY from this
+  // response instead of from client-persisted storage — so no
+  // payment-directing field (address, memo, amount, asset, paymentUri) is
+  // ever trusted from sessionStorage/Keychain.
+  //
+  // Skipped for terminal orders (nothing to pay) and credit orders (no
+  // on-chain payment). A derivation failure (oracle down / issuer unset)
+  // leaves the fields null — the order view still returns fine; the client
+  // just can't resume the pay screen until config/oracle recovers.
+  if (!isTerminalOrderState(row.state) && row.paymentMethod !== 'credit') {
+    const derived = await deriveLoopPaymentInstructions(row);
+    if (derived.ok && derived.payment.method !== 'credit') {
+      view.assetAmount = derived.payment.assetAmount;
+      view.paymentUri = derived.payment.paymentUri;
+      if (derived.payment.method === 'loop_asset') {
+        view.assetCode = derived.payment.assetCode;
+        view.assetIssuer = derived.payment.assetIssuer;
+      }
+    }
+  }
+
+  return c.json(view);
 }
 
 /**

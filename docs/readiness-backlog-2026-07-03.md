@@ -745,27 +745,33 @@ max_connections`, including the release-command migration machine
       the server — any remount mid-payment (the `[merchant.id]` cleanup effect
       re-firing, a slow-connection late fetch, a tab refresh) strands the user at
       the amount-selection form despite a live, payable order server-side. Added
-      `apps/web/app/hooks/use-loop-order-restore.ts`: persists the full
-      `POST /api/orders/loop` response under a new key
-      (`LOOP_NATIVE_PENDING_ORDER_KEY`, separate from the legacy path's
-      `PENDING_ORDER_KEY`, both in `apps/web/app/native/purchase-storage.ts`);
-      on mount, GET-verifies (`GET /api/orders/loop/:id`, owner-scoped) the
-      order is still non-terminal before re-hydrating the payment screen.
-      Read-only (never re-`POST`s — no double-order); 404/403/tamper-mismatch
-      clears the record and falls back to normal flow, never crashes or leaks
-      across users; clears on every terminal state; 20-min client TTL. Also
-      closed a related latent gap in `LoopPaymentStep.tsx` (a non-retryable
-      404/403 on the order poll used to spin on "Creating order…" forever —
-      now stops polling and fires `onOrderNotFound`). Pre-merge `money-reviewer`
-      pass found + this PR fixed 1 P1 (the tamper check didn't cross-check the
-      destination/memo embedded in the persisted SEP-7 `paymentUri` — the only
-      payment affordance shown on native) + 2 P2 (a storage-write race between
-      a fresh order create and a stale restore's TTL-refresh; the TTL comment
-      said 20 min but the generic storage layer's own 15-min default silently
-      undercut it). Full detail + money-safety reasoning: `money-auth-worklist.md`
-      Q6-4b. Tests: 23 hook-level cases + 7 `PurchaseContainer` integration
-      cases (real unmount+remount with a fresh `QueryClient`); full web suite
-      green (1508+ tests), full `npm run verify` green.
+      `apps/web/app/hooks/use-loop-order-restore.ts`, made **SERVER-AUTHORITATIVE**
+      after two money-review rounds: what's persisted is a **POINTER ONLY**
+      (`{ merchantId, orderId }`, under a new `LOOP_NATIVE_PENDING_ORDER_KEY`
+      separate from the legacy path's `PENDING_ORDER_KEY`) — the pay screen is
+      rebuilt ENTIRELY from the owner-scoped `GET /api/orders/loop/:id`, so no
+      payment-directing field (destination, memo, amount, asset, SEP-7 deep-link)
+      is ever trusted from client storage. To enable that, the GET read view
+      (`LoopOrderView` + openapi) was extended with server-derived
+      `assetAmount`/`paymentUri`/`assetCode`/`assetIssuer`, populated in
+      `orders/loop-read-handlers.ts` by REUSING the idempotent-POST-replay
+      derivation (extracted to `orders/loop-payment-instructions.ts`;
+      `replayOrderResponse` is now a thin wrapper). Read-only (never re-`POST`s —
+      no double-order); owner-scoped GET → unknown/other-user/tampered id 404s +
+      pointer cleared (no cross-user leak); refuses terminal orders; 20-min TTL.
+      Also closed a latent `LoopPaymentStep.tsx` gap (a non-retryable 404/403 on
+      the poll used to spin on "Creating order…" forever — now fires
+      `onOrderNotFound`). **Round 1** money-review fixed a SEP-7-embedded
+      destination/memo cross-check + a storage race + the TTL default. **Round 2**
+      (lead) found the residual P1 the rewrite eliminates: the old cross-check
+      never validated AMOUNT/ASSET, so a tampered blob with a 100×-inflated amount + poisoned deep-link (destination/memo kept correct) could misdirect the
+      native "Open in wallet" payment (overpay=user loss, underpay=stranded) — no
+      ledger impact (watcher computes required amount server-side, INV-3/7/8/9
+      held), hence P1 not P0. Full detail: `money-auth-worklist.md` Q6-4b. Tests:
+      26 hook-level + 8 `PurchaseContainer` integration cases (incl. a
+      server-authoritative tamper test **proven to fail against the pre-fix
+      blob-trusting code**) + backend `loop-get-handler.test.ts` Q6-4b overlay
+      cases; full web suite green, full `npm run verify` green.
 
 ### Q6-5 · Admin/support UI E2E smoke `[code]`
 

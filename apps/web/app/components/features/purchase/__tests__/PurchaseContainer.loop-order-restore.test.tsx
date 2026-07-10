@@ -113,6 +113,8 @@ const MERCHANT: Merchant = {
 
 const STELLAR_ADDRESS = 'GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW';
 const PAYMENT_MEMO = 'MEMO-ABCDEFGHIJKLMN';
+const SERVER_ASSET_AMOUNT = '10.0000000';
+const SERVER_PAYMENT_URI = `web+stellar:pay?destination=${STELLAR_ADDRESS}&amount=${SERVER_ASSET_AMOUNT}&memo=${PAYMENT_MEMO}&memo_type=MEMO_TEXT&asset_code=USDC`;
 
 function mkCreateResponse(): CreateLoopOrderResponse {
   return {
@@ -123,14 +125,15 @@ function mkCreateResponse(): CreateLoopOrderResponse {
       memo: PAYMENT_MEMO,
       amountMinor: '1000',
       currency: 'USD',
-      assetAmount: '10.0000000',
-      // Must embed the same destination + memo as stellarAddress/memo —
-      // use-loop-order-restore.ts cross-checks both independently.
-      paymentUri: `web+stellar:pay?destination=${STELLAR_ADDRESS}&amount=10.0000000&memo=${PAYMENT_MEMO}&memo_type=MEMO_TEXT`,
+      assetAmount: SERVER_ASSET_AMOUNT,
+      paymentUri: SERVER_PAYMENT_URI,
     },
   };
 }
 
+/** The server GET response. Q6-4b: on-chain non-terminal orders carry the
+ *  server-derived payment-guidance fields; the restore rebuilds the pay
+ *  screen ENTIRELY from these. */
 function mkOrderView(overrides: Partial<LoopOrderView> = {}): LoopOrderView {
   return {
     id: '12345678-aaaa-bbbb-cccc-000000000000',
@@ -143,6 +146,10 @@ function mkOrderView(overrides: Partial<LoopOrderView> = {}): LoopOrderView {
     paymentMethod: 'usdc',
     paymentMemo: PAYMENT_MEMO,
     stellarAddress: STELLAR_ADDRESS,
+    assetAmount: SERVER_ASSET_AMOUNT,
+    paymentUri: SERVER_PAYMENT_URI,
+    assetCode: null,
+    assetIssuer: null,
     userCashbackMinor: '0',
     ctxOrderId: null,
     redeemCode: null,
@@ -224,9 +231,63 @@ describe('loop-native order restore across a remount', () => {
     await waitFor(() => {
       expect(screen.getByText(/Order 12345678/i)).toBeDefined();
     });
+    // The rendered pay screen is built from the SERVER GET response.
+    expect(screen.getByText(new RegExp(`${SERVER_ASSET_AMOUNT} USDC`))).toBeDefined();
+    expect(screen.getByRole('link', { name: /Open in wallet/i }).getAttribute('href')).toBe(
+      SERVER_PAYMENT_URI,
+    );
     // Read-only: restoring never re-creates the order.
     expect(createLoopOrderMock).toHaveBeenCalledTimes(1);
     expect(getLoopOrderMock).toHaveBeenCalledWith('12345678-aaaa-bbbb-cccc-000000000000');
+  });
+
+  it('SERVER-AUTHORITATIVE: a tampered persisted blob (100x amount + poisoned deep-link) is IGNORED — the pay screen renders the SERVER values', async () => {
+    // Proves the Q6-4b P1 fix. Against the pre-fix blob-trusting code this
+    // test FAILS: that code read the persisted `create` blob directly and
+    // rendered its 100x amount + attacker paymentUri (the tampered blob
+    // below keeps destination+memo correct, which is all the old
+    // cross-check validated — it never checked the *amount*). The new
+    // pointer-only + server-rebuild code ignores the blob entirely, so the
+    // screen shows the server's real $10.00 / 10.0000000 USDC and the real
+    // deposit deep-link.
+    sessionStorage.setItem(
+      LOOP_NATIVE_PENDING_ORDER_KEY,
+      JSON.stringify({
+        merchantId: 'm1',
+        orderId: '12345678-aaaa-bbbb-cccc-000000000000',
+        savedAt: Math.floor(Date.now() / 1000),
+        expiresAt: Math.floor(Date.now() / 1000) + 20 * 60,
+        // Attacker-injected payment blob (old storage shape):
+        create: {
+          orderId: '12345678-aaaa-bbbb-cccc-000000000000',
+          payment: {
+            method: 'usdc',
+            stellarAddress: STELLAR_ADDRESS,
+            memo: PAYMENT_MEMO,
+            amountMinor: '100000', // 100x
+            currency: 'USD',
+            assetAmount: '1000.0000000', // 100x
+            paymentUri: `web+stellar:pay?destination=${STELLAR_ADDRESS}&amount=1000.0000000&memo=${PAYMENT_MEMO}&memo_type=MEMO_TEXT`,
+          },
+        },
+      }),
+    );
+    getLoopOrderMock.mockResolvedValue(mkOrderView());
+    renderContainer();
+
+    await waitFor(() => {
+      expect(screen.getByText(/Order 12345678/i)).toBeDefined();
+    });
+    // Server-authoritative amount + deep-link, NOT the tampered blob's.
+    expect(screen.getByText(new RegExp(`${SERVER_ASSET_AMOUNT} USDC`))).toBeDefined();
+    expect(screen.queryByText(/1000\.0000000 USDC/)).toBeNull();
+    expect(screen.getByText(/\$10\.00/)).toBeDefined();
+    expect(screen.queryByText(/\$1,000\.00/)).toBeNull();
+    expect(screen.getByRole('link', { name: /Open in wallet/i }).getAttribute('href')).toBe(
+      SERVER_PAYMENT_URI,
+    );
+    // No new order was created by the restore.
+    expect(createLoopOrderMock).not.toHaveBeenCalled();
   });
 
   it('terminal order (expired): clears the persisted record and falls back to the normal amount-selection flow', async () => {
