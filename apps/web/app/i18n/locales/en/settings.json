@@ -1,0 +1,119 @@
+{
+  "privacy": {
+    "meta": {
+      "title": "Privacy & data — Loop"
+    },
+    "signedOut": {
+      "heading": "Privacy & data",
+      "body": "Sign in to export your data or delete your account.",
+      "cta": "Go to sign-in"
+    },
+    "heading": "Privacy & data",
+    "introPrefix": "Export the data we hold about you, or permanently delete your account. See our",
+    "introLink": "privacy policy",
+    "introSuffix": "for what we collect and why.",
+    "export": {
+      "heading": "Export your data",
+      "body": "Download a machine-readable copy of everything tied to your account — profile, credit ledger, orders, and payouts. Gift-card codes are not included for security; you can always view them on the relevant order.",
+      "working": "Preparing…",
+      "cta": "Download my data",
+      "doneNative": "Your data was prepared — save it via the share sheet.",
+      "doneWeb": "Your data download has started.",
+      "shareTitle": "Your Loop data export",
+      "shareText": "Your Loop account data export",
+      "shareError": "Couldn't prepare your data for sharing. Please try again, or email privacy@loopfinance.io.",
+      "exportError": "Couldn't build your export. Please try again, or email privacy@loopfinance.io."
+    },
+    "sessions": {
+      "heading": "Sign out everywhere",
+      "body": "Revoke every active session, on this and all other devices. Use this if you think someone else has access to your account — you'll need to sign in again.",
+      "working": "Signing out…",
+      "cta": "Sign out of all devices",
+      "error": "Could not sign out of all devices."
+    },
+    "delete": {
+      "heading": "Delete your account",
+      "body": "This permanently removes your personal data and signs you out everywhere. For legal and tax reasons we keep an anonymised transaction record, but it no longer links to you. This can't be undone. If you have a payout or order in flight, finish or wait for it first.",
+      "confirmLabelPrefix": "Type",
+      "confirmLabelSuffix": "to confirm",
+      "working": "Deleting…",
+      "cta": "Delete my account",
+      "fallbackError": "Something went wrong. Please try again, or email privacy@loopfinance.io.",
+      "blockedPendingPayouts": "You have a cashback payout in flight. Wait for it to settle, then try again — or contact support.",
+      "blockedInFlightOrders": "You have an order being fulfilled. Wait for it to finish (or expire), then try again — or contact support.",
+      "blockedFailedWithdrawals": "A failed withdrawal is awaiting compensation. Contact support about it before deleting your account.",
+      "blockedBalanceNotZero": "You have an unredeemed cashback balance. Spend it, or contact support to withdraw it, before deleting your account."
+    }
+  },
+  "wallet": {
+    "meta": {
+      "title": "Wallet — Loop"
+    },
+    "signedOut": {
+      "heading": "Wallet",
+      "body": "Sign in to link a Stellar wallet.",
+      "cta": "Go to sign-in"
+    },
+    "loadError": "Couldn't load your profile.",
+    "heading": "Wallet",
+    "introPrefix": "Link a Stellar wallet to receive your cashback as",
+    "introSuffix": "on-chain. Unlinked, your cashback still accrues server-side — you just can't spend it outside of Loop until you link one.",
+    "homeCurrency": {
+      "heading": "Home currency",
+      "introPrefix": "Determines which LOOP asset your cashback lands in on-chain. Your current currency is",
+      "introMiddle": ", so payouts arrive as",
+      "introSuffix": ".",
+      "radiogroupLabel": "Home currency",
+      "locked": "You've already placed an order, so your home currency is locked. Contact support to change it.",
+      "fallbackError": "Couldn't change currency."
+    },
+    "linked": {
+      "heading": "Linked address",
+      "copy": "Copy address",
+      "copied": "Copied",
+      "unlink": "Unlink wallet",
+      "unlinking": "Saving…",
+      "empty": "No wallet linked. Add one below to start receiving on-chain cashback."
+    },
+    "link": {
+      "headingLink": "Link a wallet",
+      "headingRelink": "Relink to a different wallet",
+      "pubkeyLabel": "Stellar public key",
+      "pubkeyPlaceholder": "GABC…",
+      "pubkeyHintPart1": "56 characters, starts with",
+      "pubkeyHintPart2": ". Make sure the wallet has a trustline to",
+      "pubkeyHintPart3": "before linking — without it, payouts fail with",
+      "pubkeyHintPart4": ".",
+      "invalidAddress": "That doesn't look like a Stellar public key.",
+      "saving": "Saving…",
+      "update": "Update wallet",
+      "linkCta": "Link wallet",
+      "fallbackError": "Couldn't save — check the address and retry."
+    }
+  },
+  "cashback": {
+    "meta": {
+      "title": "Cashback history — Loop"
+    },
+    "signedOut": {
+      "heading": "Cashback history",
+      "body": "Sign in to see your cashback activity.",
+      "cta": "Go to sign-in"
+    },
+    "heading": "Cashback history",
+    "subtitle": "Every credit-ledger event on your account — newest first.",
+    "ledgerHeading": "Off-chain ledger",
+    "pageError": "Couldn't load this page of your history. Please try again in a moment.",
+    "empty": "No cashback activity yet. Your first Loop order will show up here.",
+    "loadMore": "Load more",
+    "labels": {
+      "cashback": "Cashback",
+      "interest": "Interest",
+      "spend": "Spend",
+      "withdrawal": "Withdrawal",
+      "refund": "Refund",
+      "adjustment": "Adjustment"
+    },
+    "orderReference": "Order {{shortId}}"
+  }
+}

@@ -1,9 +1,12 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import type { Route } from './+types/orders';
 import type { Order } from '@loop/shared';
 import { ApiException } from '@loop/shared';
+import i18n from '~/i18n/i18next';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 import { useAuth } from '~/hooks/use-auth';
 import { useOrders } from '~/hooks/use-orders';
@@ -22,42 +25,51 @@ import { friendlyError } from '~/utils/error-messages';
 import { formatMoney, useLocaleTag } from '~/i18n/format';
 
 export function meta(): Route.MetaDescriptors {
-  return [{ title: 'Orders — Loop' }];
+  return [{ title: i18n.t('orders:list.meta.title') }];
 }
 
 export function ErrorBoundary(): React.JSX.Element {
+  const { t } = useTranslation(['orders', 'common']);
   return (
     <div className="flex items-center justify-center min-h-screen">
       <div className="text-center">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
-          Something went wrong
+          {t('common:errorBoundary.heading')}
         </h1>
         <a href="/orders" className="text-blue-600 underline">
-          Try again
+          {t('orders:list.error.tryAgain')}
         </a>
       </div>
     </div>
   );
 }
 
-const STATUS_LABELS: Record<string, { label: string; color: string }> = {
-  pending: {
-    label: 'Pending',
-    color: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
-  },
-  completed: {
-    label: 'Completed',
-    color: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
-  },
-  failed: {
-    label: 'Failed',
-    color: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
-  },
-  expired: {
-    label: 'Expired',
-    color: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300',
-  },
-};
+/**
+ * Plain helper (not a component) — `t` threaded in from the caller's
+ * `useTranslation('orders')`, same pattern as `routes/auth.tsx`'s
+ * `ledgerLabel(t, type)` (docs/i18n.md #3).
+ */
+function statusLabel(t: TFunction, status: string): { label: string; color: string } {
+  const labels: Record<string, { label: string; color: string }> = {
+    pending: {
+      label: t('status.pending'),
+      color: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
+    },
+    completed: {
+      label: t('status.completed'),
+      color: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
+    },
+    failed: {
+      label: t('status.failed'),
+      color: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
+    },
+    expired: {
+      label: t('status.expired'),
+      color: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300',
+    },
+  };
+  return labels[status] ?? labels['pending']!;
+}
 
 /**
  * Per-row payout-state dot. Compact by design — the list renders a
@@ -67,42 +79,38 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
  * (the order is pre-cashback, credit-only, or the user's payouts
  * list isn't cached yet).
  */
-const PAYOUT_DOT_UI: Record<
-  UserPendingPayoutState,
-  { label: string; dot: string; classes: string }
-> = {
+const PAYOUT_DOT_UI: Record<UserPendingPayoutState, { dot: string; classes: string }> = {
   pending: {
-    label: 'Queued',
     dot: 'bg-gray-400',
     classes: 'text-gray-600 dark:text-gray-400',
   },
   submitted: {
-    label: 'Submitting',
     dot: 'bg-yellow-500',
     classes: 'text-yellow-700 dark:text-yellow-400',
   },
   confirmed: {
-    label: 'Paid',
     dot: 'bg-green-500',
     classes: 'text-green-700 dark:text-green-400',
   },
   failed: {
-    label: 'Failed',
     dot: 'bg-red-500',
     classes: 'text-red-700 dark:text-red-400',
   },
 };
 
 function PayoutDot({ state }: { state: UserPendingPayoutState }): React.JSX.Element {
+  const { t } = useTranslation('orders');
   const ui = PAYOUT_DOT_UI[state];
+  const label = t(`payoutState.${state}`);
+  const ariaLabel = t('payoutAriaLabel', { label });
   return (
     <span
       className={`inline-flex items-center gap-1 text-xs font-medium ${ui.classes}`}
-      aria-label={`Cashback payout: ${ui.label}`}
-      title={`Cashback payout: ${ui.label}`}
+      aria-label={ariaLabel}
+      title={ariaLabel}
     >
       <span aria-hidden="true" className={`inline-block h-1.5 w-1.5 rounded-full ${ui.dot}`} />
-      {ui.label}
+      {label}
     </span>
   );
 }
@@ -114,8 +122,9 @@ function OrderRow({
   order: Order;
   payoutState: UserPendingPayoutState | null;
 }): React.JSX.Element {
+  const { t } = useTranslation('orders');
   const locale = useLocaleTag();
-  const status = STATUS_LABELS[order.status] ?? STATUS_LABELS['pending']!;
+  const status = statusLabel(t, order.status);
   // A malformed upstream createdAt would otherwise render "Invalid Date" in
   // the UI. Fall back to the raw string so the row is still informative.
   const parsed = new Date(order.createdAt);
@@ -151,18 +160,19 @@ function OrderRow({
   );
 }
 
-function errorMessage(err: Error | null): string | null {
+function errorMessage(t: TFunction, err: Error | null): string | null {
   if (err === null) return null;
   // 401 is the only status with list-specific copy — every other class of
   // error (offline / 429 / 503 / 502 / 504 / timeout) has a better generic
   // message in friendlyError than our old "Failed to load orders." string.
   if (err instanceof ApiException && err.status === 401) {
-    return 'Please sign in to view your orders.';
+    return t('list.signInRequired');
   }
-  return friendlyError(err, 'Failed to load orders.');
+  return friendlyError(err, t('list.loadErrorFallback'));
 }
 
 export default function OrdersRoute(): React.JSX.Element {
+  const { t } = useTranslation('orders');
   const { isNative } = useNativePlatform();
   const { isAuthenticated } = useAuth();
   const { config } = useAppConfig();
@@ -184,7 +194,7 @@ export default function OrdersRoute(): React.JSX.Element {
   // to the pending order mid-payment) — we just don't advertise them
   // on the overview.
   const orders = allOrders.filter((o) => o.status !== 'pending');
-  const errorText = errorMessage(error);
+  const errorText = errorMessage(t, error);
 
   // Single fetch of the user's pending-payouts, mapped by orderId
   // so each OrderRow gets a cheap O(1) lookup for its settlement
@@ -213,7 +223,7 @@ export default function OrdersRoute(): React.JSX.Element {
   return (
     <>
       {!isNative && <Navbar />}
-      <PageHeader title="Orders" fallbackHref="/" />
+      <PageHeader title={t('list.pageTitle')} fallbackHref="/" />
 
       {/* Native: NativeShell's `native-safe-page` already pads by
           `var(--safe-top)`, so we only need to clear the PageHeader
@@ -260,15 +270,13 @@ export default function OrdersRoute(): React.JSX.Element {
 
         {!isAuthenticated && (
           <div className="text-center py-12">
-            <p className="text-gray-500 dark:text-gray-400 mb-4">
-              Sign in to view your order history.
-            </p>
+            <p className="text-gray-500 dark:text-gray-400 mb-4">{t('list.signedOut.body')}</p>
             <Button
               onClick={() => {
                 void navigate('/auth');
               }}
             >
-              Sign in
+              {t('list.signedOut.cta')}
             </Button>
           </div>
         )}
@@ -294,20 +302,20 @@ export default function OrdersRoute(): React.JSX.Element {
                 refetch();
               }}
             >
-              Retry
+              {t('list.retry')}
             </Button>
           </div>
         )}
 
         {isAuthenticated && !isLoading && errorText === null && orders.length === 0 && (
           <div className="text-center py-12">
-            <p className="text-gray-500 dark:text-gray-400 mb-4">No orders yet.</p>
+            <p className="text-gray-500 dark:text-gray-400 mb-4">{t('list.empty')}</p>
             <Button
               onClick={() => {
                 void navigate('/');
               }}
             >
-              Browse gift cards
+              {t('list.browseGiftCards')}
             </Button>
           </div>
         )}
@@ -330,14 +338,14 @@ export default function OrdersRoute(): React.JSX.Element {
                 disabled={!hasPrev || isLoading}
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
               >
-                Previous
+                {t('list.previous')}
               </Button>
               <Button
                 variant="secondary"
                 disabled={!hasNext || isLoading}
                 onClick={() => setPage((p) => p + 1)}
               >
-                Next
+                {t('list.next')}
               </Button>
             </div>
           </>

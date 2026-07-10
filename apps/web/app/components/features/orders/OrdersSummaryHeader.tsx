@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { getUserOrdersSummary, type UserOrdersSummary } from '~/services/user';
 import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
@@ -22,6 +23,7 @@ import { formatMinorCurrency, formatNumber, useLocaleTag } from '~/i18n/format';
  * mount.
  */
 export function OrdersSummaryHeader(): React.JSX.Element | null {
+  const { t } = useTranslation('orders');
   // A2-1156: auth-gate so cold-start doesn't fire before session restore.
   const { isAuthenticated } = useAuth();
   const locale = useLocaleTag();
@@ -42,17 +44,20 @@ export function OrdersSummaryHeader(): React.JSX.Element | null {
 
   return (
     <section
-      aria-label="Orders summary"
+      aria-label={t('summary.ariaLabel')}
       className="grid grid-cols-2 sm:grid-cols-4 gap-2 rounded-xl border border-gray-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-900"
     >
-      <Stat label="Total" value={formatNumber(summary.totalOrders, locale)} />
-      <Stat label="Fulfilled" value={formatNumber(summary.fulfilledCount, locale)} />
+      <Stat label={t('summary.total')} value={formatNumber(summary.totalOrders, locale)} />
+      <Stat label={t('summary.fulfilled')} value={formatNumber(summary.fulfilledCount, locale)} />
       <Stat
-        label="In flight"
+        label={t('summary.inFlight')}
         value={formatNumber(summary.pendingCount, locale)}
         emphasis={summary.pendingCount > 0 ? 'yellow' : 'neutral'}
       />
-      <Stat label="Spent" value={formatMinor(summary.totalSpentMinor, summary.currency, locale)} />
+      <Stat
+        label={t('summary.spent')}
+        value={formatMinor(summary.totalSpentMinor, summary.currency, locale)}
+      />
     </section>
   );
 }

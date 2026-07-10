@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
+import { useTranslation } from 'react-i18next';
 import {
   ApiException,
   HOME_CURRENCIES,
@@ -9,6 +10,7 @@ import {
   type HomeCurrency,
 } from '@loop/shared';
 import type { Route } from './+types/settings.wallet';
+import i18n from '~/i18n/i18next';
 import { useAuth } from '~/hooks/use-auth';
 import { getMe, setHomeCurrency, setStellarAddress, type UserMeView } from '~/services/user';
 import { shouldRetry } from '~/hooks/query-retry';
@@ -20,7 +22,7 @@ import { copyToClipboard } from '~/native/clipboard';
 import { Phase2Gate } from '~/components/Phase2Gate';
 
 export function meta(): Route.MetaDescriptors {
-  return [{ title: 'Wallet — Loop' }];
+  return [{ title: i18n.t('settings:wallet.meta.title') }];
 }
 
 // `STELLAR_PUBKEY_REGEX` (ADR 015/016) + `loopAssetForCurrency`
@@ -48,6 +50,7 @@ export default function SettingsWalletRoute(): React.JSX.Element {
 }
 
 function SettingsWalletBody(): React.JSX.Element {
+  const { t } = useTranslation('settings');
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
   const queryClient = useQueryClient();
@@ -72,9 +75,7 @@ function SettingsWalletBody(): React.JSX.Element {
       setFormError(null);
     },
     onError: (err) => {
-      setFormError(
-        err instanceof ApiException ? err.message : "Couldn't save — check the address and retry.",
-      );
+      setFormError(err instanceof ApiException ? err.message : t('wallet.link.fallbackError'));
     },
   });
   const currencyMutation = useMutation({
@@ -85,20 +86,22 @@ function SettingsWalletBody(): React.JSX.Element {
     },
     onError: (err) => {
       if (err instanceof ApiException && err.status === 409) {
-        setCurrencyError(
-          "You've already placed an order, so your home currency is locked. Contact support to change it.",
-        );
+        setCurrencyError(t('wallet.homeCurrency.locked'));
         return;
       }
-      setCurrencyError(err instanceof ApiException ? err.message : "Couldn't change currency.");
+      setCurrencyError(
+        err instanceof ApiException ? err.message : t('wallet.homeCurrency.fallbackError'),
+      );
     },
   });
 
   if (!isAuthenticated) {
     return (
       <main className="max-w-2xl mx-auto px-6 py-12">
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white mb-4">Wallet</h1>
-        <p className="text-gray-700 dark:text-gray-300 mb-6">Sign in to link a Stellar wallet.</p>
+        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white mb-4">
+          {t('wallet.signedOut.heading')}
+        </h1>
+        <p className="text-gray-700 dark:text-gray-300 mb-6">{t('wallet.signedOut.body')}</p>
         <button
           type="button"
           className="text-blue-600 underline"
@@ -106,7 +109,7 @@ function SettingsWalletBody(): React.JSX.Element {
             void navigate('/auth');
           }}
         >
-          Go to sign-in
+          {t('wallet.signedOut.cta')}
         </button>
       </main>
     );
@@ -123,8 +126,10 @@ function SettingsWalletBody(): React.JSX.Element {
   if (meQuery.isError) {
     return (
       <main className="max-w-2xl mx-auto px-6 py-12">
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white mb-4">Wallet</h1>
-        <p className="text-red-600 dark:text-red-400">Couldn&rsquo;t load your profile.</p>
+        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white mb-4">
+          {t('wallet.heading')}
+        </h1>
+        <p className="text-red-600 dark:text-red-400">{t('wallet.loadError')}</p>
       </main>
     );
   }
@@ -162,11 +167,11 @@ function SettingsWalletBody(): React.JSX.Element {
   return (
     <main className="max-w-2xl mx-auto px-6 py-12 space-y-8">
       <header>
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Wallet</h1>
+        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">
+          {t('wallet.heading')}
+        </h1>
         <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-          Link a Stellar wallet to receive your cashback as <strong>{assetCode}</strong> on-chain.
-          Unlinked, your cashback still accrues server-side — you just can&rsquo;t spend it outside
-          of Loop until you link one.
+          {t('wallet.introPrefix')} <strong>{assetCode}</strong> {t('wallet.introSuffix')}
         </p>
       </header>
 
@@ -185,13 +190,18 @@ function SettingsWalletBody(): React.JSX.Element {
           id="home-currency-heading"
           className="text-base font-semibold text-gray-900 dark:text-white"
         >
-          Home currency
+          {t('wallet.homeCurrency.heading')}
         </h2>
         <p className="text-sm text-gray-600 dark:text-gray-400">
-          Determines which LOOP asset your cashback lands in on-chain. Your current currency is{' '}
-          <strong>{user.homeCurrency}</strong>, so payouts arrive as <strong>{assetCode}</strong>.
+          {t('wallet.homeCurrency.introPrefix')} <strong>{user.homeCurrency}</strong>
+          {t('wallet.homeCurrency.introMiddle')} <strong>{assetCode}</strong>
+          {t('wallet.homeCurrency.introSuffix')}
         </p>
-        <div role="radiogroup" aria-label="Home currency" className="flex flex-wrap gap-2">
+        <div
+          role="radiogroup"
+          aria-label={t('wallet.homeCurrency.radiogroupLabel')}
+          className="flex flex-wrap gap-2"
+        >
           {HOME_CURRENCIES.map((code, i) => {
             const active = code === user.homeCurrency;
             // A11Y-021 / CF-35: WAI-ARIA radiogroup keyboard contract — one
@@ -247,7 +257,7 @@ function SettingsWalletBody(): React.JSX.Element {
         className="rounded-xl border border-gray-200 dark:border-gray-800 p-5 bg-white dark:bg-gray-900 space-y-4"
       >
         <h2 id="linked-heading" className="text-base font-semibold text-gray-900 dark:text-white">
-          Linked address
+          {t('wallet.linked.heading')}
         </h2>
         {linked ? (
           <>
@@ -266,7 +276,7 @@ function SettingsWalletBody(): React.JSX.Element {
                 aria-live="polite"
                 className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
               >
-                {copied ? 'Copied' : 'Copy address'}
+                {copied ? t('wallet.linked.copied') : t('wallet.linked.copy')}
               </button>
               <button
                 type="button"
@@ -274,14 +284,12 @@ function SettingsWalletBody(): React.JSX.Element {
                 disabled={linkMutation.isPending}
                 className="rounded-lg border border-red-300 bg-white px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800 dark:bg-gray-900 dark:text-red-400 dark:hover:bg-red-900/20"
               >
-                {linkMutation.isPending ? 'Saving…' : 'Unlink wallet'}
+                {linkMutation.isPending ? t('wallet.linked.unlinking') : t('wallet.linked.unlink')}
               </button>
             </div>
           </>
         ) : (
-          <p className="text-sm text-gray-600 dark:text-gray-400">
-            No wallet linked. Add one below to start receiving on-chain cashback.
-          </p>
+          <p className="text-sm text-gray-600 dark:text-gray-400">{t('wallet.linked.empty')}</p>
         )}
       </section>
 
@@ -310,11 +318,11 @@ function SettingsWalletBody(): React.JSX.Element {
         className="rounded-xl border border-gray-200 dark:border-gray-800 p-5 bg-white dark:bg-gray-900 space-y-4"
       >
         <h2 id="link-heading" className="text-base font-semibold text-gray-900 dark:text-white">
-          {linked ? 'Relink to a different wallet' : 'Link a wallet'}
+          {linked ? t('wallet.link.headingRelink') : t('wallet.link.headingLink')}
         </h2>
         <label htmlFor="stellar-address" className="block">
           <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Stellar public key
+            {t('wallet.link.pubkeyLabel')}
           </span>
           <input
             id="stellar-address"
@@ -324,13 +332,14 @@ function SettingsWalletBody(): React.JSX.Element {
             inputMode="text"
             value={draftAddress}
             onChange={(e) => setDraftAddress(e.target.value)}
-            placeholder="GABC…"
+            placeholder={t('wallet.link.pubkeyPlaceholder')}
             className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-mono text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-950 dark:text-white dark:placeholder-gray-600"
           />
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            56 characters, starts with <code>G</code>. Make sure the wallet has a trustline to{' '}
-            <strong>{assetCode}</strong> before linking — without it, payouts fail with{' '}
-            <code>op_no_trust</code>.
+            {t('wallet.link.pubkeyHintPart1')} <code>G</code>
+            {t('wallet.link.pubkeyHintPart2')} <strong>{assetCode}</strong>{' '}
+            {t('wallet.link.pubkeyHintPart3')} <code>op_no_trust</code>
+            {t('wallet.link.pubkeyHintPart4')}
           </p>
         </label>
         {formError !== null ? (
@@ -340,7 +349,7 @@ function SettingsWalletBody(): React.JSX.Element {
         ) : null}
         {trimmed.length > 0 && !draftValid ? (
           <div className="text-sm text-amber-700 dark:text-amber-400">
-            That doesn&rsquo;t look like a Stellar public key.
+            {t('wallet.link.invalidAddress')}
           </div>
         ) : null}
         <button
@@ -349,7 +358,11 @@ function SettingsWalletBody(): React.JSX.Element {
           disabled={!draftValid || linkMutation.isPending}
           className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-white dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100 dark:disabled:bg-gray-700 dark:disabled:text-gray-400"
         >
-          {linkMutation.isPending ? 'Saving…' : linked ? 'Update wallet' : 'Link wallet'}
+          {linkMutation.isPending
+            ? t('wallet.link.saving')
+            : linked
+              ? t('wallet.link.update')
+              : t('wallet.link.linkCta')}
         </button>
       </section>
     </main>

@@ -1,6 +1,8 @@
 import { useParams, useNavigate } from 'react-router';
+import { useTranslation } from 'react-i18next';
 import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import type { Route } from './+types/gift-card.$name';
+import i18n from '~/i18n/i18next';
 import { useMerchantBySlug, useMerchant, useMerchantCashbackRate } from '~/hooks/use-merchants';
 import { useAuth } from '~/hooks/use-auth';
 import { useNativePlatform } from '~/hooks/use-native-platform';
@@ -25,26 +27,28 @@ export function meta({ params }: Route.MetaArgs): Route.MetaDescriptors {
   }
   name = name.replace(/-/g, ' ');
   return [
-    { title: `${name} Gift Card — Loop` },
-    { name: 'description', content: `Buy ${name} gift cards with XLM and save money.` },
+    { title: i18n.t('giftCard:meta.title', { name }) },
+    { name: 'description', content: i18n.t('giftCard:meta.description', { name }) },
   ];
 }
 
 export function ErrorBoundary(): React.JSX.Element {
+  const { t } = useTranslation(['giftCard', 'common']);
   return (
     <div className="container mx-auto px-4 py-16 text-center">
       <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
-        Something went wrong
+        {t('common:errorBoundary.heading')}
       </h1>
-      <p className="text-gray-600 dark:text-gray-300 mb-6">We couldn&apos;t load this gift card.</p>
+      <p className="text-gray-600 dark:text-gray-300 mb-6">{t('giftCard:error.body')}</p>
       <Link to="/" className="text-blue-600 underline">
-        Back to home
+        {t('giftCard:error.backToHome')}
       </Link>
     </div>
   );
 }
 
 export default function GiftCardRoute(): React.JSX.Element {
+  const { t } = useTranslation('giftCard');
   const { name = '' } = useParams<{ name: string }>();
   const { isNative } = useNativePlatform();
   const navigate = useNavigate();
@@ -87,10 +91,10 @@ export default function GiftCardRoute(): React.JSX.Element {
     return (
       <div className="container mx-auto px-4 py-16 text-center">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
-          Merchant not found
+          {t('notFound.heading')}
         </h1>
         <Link to="/" className="text-blue-600 underline">
-          Back to home
+          {t('notFound.backToHome')}
         </Link>
       </div>
     );
@@ -131,7 +135,7 @@ export default function GiftCardRoute(): React.JSX.Element {
           <button
             type="button"
             onClick={handleBack}
-            aria-label="Back"
+            aria-label={t('backAriaLabel')}
             className="pointer-events-auto h-10 w-10 rounded-full bg-black/45 text-white backdrop-blur-md shadow-lg flex items-center justify-center"
           >
             <svg
@@ -312,7 +316,7 @@ export default function GiftCardRoute(): React.JSX.Element {
                       />
                     </svg>
                     <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
-                      Instant Delivery
+                      {t('features.instantDelivery')}
                     </span>
                   </div>
                   <div className="flex flex-col items-center">
@@ -328,7 +332,7 @@ export default function GiftCardRoute(): React.JSX.Element {
                       <path d="m7 11V7a5 5 0 0 1 10 0v4" />
                     </svg>
                     <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
-                      Private & Secure
+                      {t('features.privateSecure')}
                     </span>
                   </div>
                   {savings !== undefined && savings > 0 && (
@@ -347,7 +351,7 @@ export default function GiftCardRoute(): React.JSX.Element {
                         />
                       </svg>
                       <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
-                        {savings.toFixed(1)}% Savings
+                        {t('features.savingsPct', { pct: savings.toFixed(1) })}
                       </span>
                     </div>
                   )}
@@ -367,7 +371,9 @@ export default function GiftCardRoute(): React.JSX.Element {
                         />
                       </svg>
                       <span className="text-xs font-medium text-green-700 dark:text-green-400">
-                        {cashbackPctShown.toFixed(2).replace(/\.0+$/, '')}% Cashback
+                        {t('features.cashbackPct', {
+                          pct: cashbackPctShown.toFixed(2).replace(/\.0+$/, ''),
+                        })}
                       </span>
                     </div>
                   )}
@@ -399,7 +405,7 @@ export default function GiftCardRoute(): React.JSX.Element {
                   )}
                   <div>
                     <h1 className="text-3xl font-bold text-white mb-2 drop-shadow">
-                      {merchant.name} Gift Card
+                      {t('heading', { name: merchant.name })}
                     </h1>
                     {merchant.intro ? (
                       <p className="text-white/90 text-base mb-2 drop-shadow">{merchant.intro}</p>
@@ -407,7 +413,7 @@ export default function GiftCardRoute(): React.JSX.Element {
                     <div className="flex flex-wrap gap-2">
                       {savings !== undefined && savings > 0 && (
                         <span className="bg-green-500 text-white px-3 py-1 rounded-full text-sm font-medium">
-                          {savings.toFixed(1)}% savings
+                          {t('savingsBadge', { pct: savings.toFixed(1) })}
                         </span>
                       )}
                       {merchant.denominations?.type === 'min-max' &&
@@ -428,7 +434,7 @@ export default function GiftCardRoute(): React.JSX.Element {
               {/* About section */}
               <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 lg:p-8 mb-8">
                 <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">
-                  About {merchant.name}
+                  {t('about.heading', { name: merchant.name })}
                 </h2>
 
                 {merchant.denominations && (
@@ -437,7 +443,7 @@ export default function GiftCardRoute(): React.JSX.Element {
                     merchant.denominations.denominations.length > 0 ? (
                       <div>
                         <span className="font-medium text-gray-900 dark:text-white text-sm">
-                          Available Denominations:
+                          {t('about.availableDenominations')}
                         </span>
                         <div className="mt-2 flex flex-wrap gap-2">
                           {merchant.denominations.denominations.map((d) => (
@@ -455,7 +461,9 @@ export default function GiftCardRoute(): React.JSX.Element {
                       merchant.denominations.min !== undefined &&
                       merchant.denominations.max !== undefined ? (
                       <p className="text-sm text-gray-600 dark:text-gray-300">
-                        <span className="font-medium text-gray-900 dark:text-white">Range:</span>{' '}
+                        <span className="font-medium text-gray-900 dark:text-white">
+                          {t('about.range')}
+                        </span>{' '}
                         {currencySymbol(merchant.denominations.currency, locale)}
                         {merchant.denominations.min} &ndash;{' '}
                         {currencySymbol(merchant.denominations.currency, locale)}
@@ -481,8 +489,7 @@ export default function GiftCardRoute(): React.JSX.Element {
                   </div>
                 ) : (
                   <p className="text-gray-500 dark:text-gray-400 text-sm">
-                    Purchase a {merchant.name} gift card and save with crypto. Delivered instantly
-                    to your device.
+                    {t('about.fallback', { name: merchant.name })}
                   </p>
                 )}
               </div>
@@ -494,18 +501,17 @@ export default function GiftCardRoute(): React.JSX.Element {
                   fulfilment) that claims no specific method. */}
               <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 lg:p-8 mb-8">
                 <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">
-                  How to redeem
+                  {t('howToRedeem.heading')}
                 </h2>
                 <div className="text-gray-600 dark:text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">
-                  {merchant.instructions ??
-                    "After purchase, you'll receive your gift card code and everything you need to redeem it."}
+                  {merchant.instructions ?? t('howToRedeem.fallback')}
                 </div>
               </div>
 
               {merchant.terms && (
                 <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 lg:p-8 mb-8">
                   <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">
-                    Terms & conditions
+                    {t('terms.heading')}
                   </h2>
                   <p className="text-gray-500 dark:text-gray-400 text-xs leading-relaxed whitespace-pre-wrap">
                     {merchant.terms}

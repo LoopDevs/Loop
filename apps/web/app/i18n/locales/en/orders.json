@@ -1,0 +1,87 @@
+{
+  "status": {
+    "pending": "Pending",
+    "completed": "Completed",
+    "failed": "Failed",
+    "expired": "Expired"
+  },
+  "payoutState": {
+    "pending": "Queued",
+    "submitted": "Submitting",
+    "confirmed": "Paid",
+    "failed": "Failed"
+  },
+  "payoutAriaLabel": "Cashback payout: {{label}}",
+  "list": {
+    "meta": {
+      "title": "Orders — Loop"
+    },
+    "pageTitle": "Orders",
+    "error": {
+      "tryAgain": "Try again"
+    },
+    "signInRequired": "Please sign in to view your orders.",
+    "loadErrorFallback": "Failed to load orders.",
+    "signedOut": {
+      "body": "Sign in to view your order history.",
+      "cta": "Sign in"
+    },
+    "empty": "No orders yet.",
+    "browseGiftCards": "Browse gift cards",
+    "retry": "Retry",
+    "previous": "Previous",
+    "next": "Next"
+  },
+  "detail": {
+    "meta": {
+      "title": "Order — Loop"
+    },
+    "pageTitle": "Order",
+    "backToOrders": "Back to orders",
+    "allOrders": "All orders",
+    "signedOutBody": "Sign in to view this order.",
+    "signInRequired": "Please sign in to view this order.",
+    "loadErrorFallback": "Failed to load order.",
+    "retry": "Retry",
+    "pendingPayment": "This order is still awaiting payment confirmation.",
+    "terminalStatus": "This order {{status}}. The XLM you sent (if any) should refund automatically.",
+    "redemption": {
+      "body": "This gift card is redeemed on the merchant's site. Open the page below and, if prompted, paste the challenge code.",
+      "challengeCodeLabel": "Challenge code",
+      "openError": "We could not open the redemption page.",
+      "opening": "Opening…",
+      "cta": "Open redemption page"
+    }
+  },
+  "loopList": {
+    "heading": "Your orders",
+    "failedFallback": "Order failed.",
+    "expired": "Order expired before payment arrived.",
+    "pendingPayment": "Awaiting payment. Send {{amount}} of {{asset}} to the address below with the memo, then this row will move to Paid.",
+    "openRedemptionLink": "Open redemption link",
+    "cashbackCredited": "{{amount}} cashback credited.",
+    "earnedCashback": "+{{amount}} cashback",
+    "fields": {
+      "code": "Code",
+      "pin": "PIN",
+      "address": "Address",
+      "memo": "Memo"
+    },
+    "copy": "Copy",
+    "copied": "Copied",
+    "copyAriaLabel": "Copy {{label}}",
+    "copiedAnnouncement": "{{label}} copied to clipboard.",
+    "recycledPill": {
+      "label": "Recycled",
+      "ariaLabel": "Paid with recycled cashback",
+      "title": "You paid for this order with LOOP-asset cashback you earned on earlier orders."
+    }
+  },
+  "summary": {
+    "ariaLabel": "Orders summary",
+    "total": "Total",
+    "fulfilled": "Fulfilled",
+    "inFlight": "In flight",
+    "spent": "Spent"
+  }
+}

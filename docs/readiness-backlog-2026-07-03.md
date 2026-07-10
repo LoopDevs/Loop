@@ -912,27 +912,39 @@ max_connections`, including the release-command migration machine
 
 ### B-6 · i18n is English-only behind a good scaffold `[code]` (large)
 
-- [ ] **Status:** 🟡 In progress (2026-07-10) — **framework + first extraction
-      tranche done** (ADR 043): i18next + react-i18next chosen and wired into
-      `root.tsx` (route-driven locale via `~/i18n/locale.ts#useLocale()`,
-      synchronous bundled-resources init so both the SSR and static-mobile-export
-      builds work with no async/Suspense gymnastics). First tranche extracted:
-      `Footer.tsx`, `not-found.tsx`/`not-found-ssr.tsx`, `home.tsx`'s desktop
-      hero + section headers, `auth.tsx` in full (OTP flow + Account view),
-      `Onboarding.tsx`'s copy bank + CTA labels, `screens-trust.tsx`. Catalogs
-      at `apps/web/app/i18n/locales/en/*.json`, English-only — see
+- [ ] **Status:** 🟡 In progress (2026-07-10) — **framework + first two
+      extraction tranches done** (ADR 043): i18next + react-i18next chosen and
+      wired into `root.tsx` (route-driven locale via
+      `~/i18n/locale.ts#useLocale()`, synchronous bundled-resources init so
+      both the SSR and static-mobile-export builds work with no
+      async/Suspense gymnastics). Tranche 1 extracted: `Footer.tsx`,
+      `not-found.tsx`/`not-found-ssr.tsx`, `home.tsx`'s desktop hero +
+      section headers, `auth.tsx` in full (OTP flow + Account view),
+      `Onboarding.tsx`'s copy bank + CTA labels, `screens-trust.tsx`. Tranche 2
+      (this pass) extracted: the three `/settings/*` pages (privacy, wallet,
+      cashback), the orders surfaces (`orders.tsx`, `orders.$id.tsx`,
+      `LoopOrdersList.tsx`, `OrdersSummaryHeader.tsx`), and the gift-card
+      detail page (`gift-card.$name.tsx`) — new `settings.json`, `orders.json`,
+      `giftCard.json` namespaces. Catalogs at
+      `apps/web/app/i18n/locales/en/*.json`, English-only — see
       `docs/i18n.md`. Supersedes the old CF-22 `i18n/t.ts`/`messages.ts`
       scaffold (deleted; see ADR 034's updated "i18n seam status"). RTL wiring
       (`<html dir>`) predates this and is unchanged — still unverified against
       a real RTL language since none ships yet. **Still open:** the remaining
-      customer-facing tranches (`MobileHome.tsx`, the other onboarding screens,
-      `OnboardingDesktop.tsx`'s own OTP-capture copy, gift-card detail,
-      purchase flow, orders, settings), and actual non-English translations —
-      both gated on the 🧭 language-set decision (which language(s) to ship).
-      Watch `scripts/check-bundle-budget.sh`'s `MAX_SSR_KB` — this tranche used
-      56 of the prior 60 KB headroom (3296/3300 KB); the next web PR that adds
-      client bytes may need to raise it (documented escape hatch in that
-      script).
+      customer-facing tranches (`MobileHome.tsx`, `brand.$slug.tsx`, the other
+      onboarding screens, `OnboardingDesktop.tsx`'s own OTP-capture copy, the
+      purchase flow), and actual non-English translations — both gated on the
+      🧭 language-set decision (which language(s) to ship). Also deferred:
+      `services/orders-loop.ts#loopOrderStateLabel()` (a plain helper shared
+      by `LoopOrdersList.tsx` and the purchase flow's `LoopPaymentStep.tsx`)
+      stayed hardcoded English rather than threading `t` through both call
+      sites, to keep this tranche's diff scoped to orders/settings/gift-card
+      surfaces — pick it up with the purchase-flow tranche.
+      Watch `scripts/check-bundle-budget.sh`'s `MAX_SSR_KB` — tranche 1 used
+      56 of the prior 60 KB headroom (3296/3300 KB); this tranche's new
+      catalogs pushed the SSR client to 3320 KB, so `MAX_SSR_KB` was raised to
+      3400 (documented escape hatch in that script) — the next tranche that
+      adds meaningful catalog JSON should watch it again.
 
 ---
 

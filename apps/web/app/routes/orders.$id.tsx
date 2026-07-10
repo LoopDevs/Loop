@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams, useNavigate } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { ApiException } from '@loop/shared';
 import type { Order } from '@loop/shared';
 import type { Route } from './+types/orders.$id';
+import i18n from '~/i18n/i18next';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 import { useAuth } from '~/hooks/use-auth';
 import { fetchOrder } from '~/services/orders';
@@ -22,18 +24,19 @@ import { openWebView } from '~/native/webview';
 import { buildChallengeBarScript } from '~/utils/redeem-challenge-bar';
 
 export function meta(): Route.MetaDescriptors {
-  return [{ title: 'Order — Loop' }];
+  return [{ title: i18n.t('orders:detail.meta.title') }];
 }
 
 export function ErrorBoundary(): React.JSX.Element {
+  const { t } = useTranslation(['orders', 'common']);
   return (
     <div className="flex items-center justify-center min-h-screen">
       <div className="text-center">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
-          Something went wrong
+          {t('common:errorBoundary.heading')}
         </h1>
         <Link to="/orders" className="text-blue-600 underline">
-          Back to orders
+          {t('orders:detail.backToOrders')}
         </Link>
       </div>
     </div>
@@ -49,6 +52,7 @@ export function ErrorBoundary(): React.JSX.Element {
  * code locally (refresh token is enough to re-authenticate).
  */
 export default function OrderDetailRoute(): React.JSX.Element {
+  const { t } = useTranslation('orders');
   const { id = '' } = useParams<{ id: string }>();
   const { isAuthenticated } = useAuth();
   const { isNative } = useNativePlatform();
@@ -74,14 +78,14 @@ export default function OrderDetailRoute(): React.JSX.Element {
   const errText =
     error !== null && error !== undefined
       ? error instanceof ApiException && error.status === 401
-        ? 'Please sign in to view this order.'
-        : friendlyError(error, 'Failed to load order.')
+        ? t('detail.signInRequired')
+        : friendlyError(error, t('detail.loadErrorFallback'))
       : null;
 
   return (
     <>
       {!isNative && <Navbar />}
-      <PageHeader title="Order" fallbackHref="/orders" />
+      <PageHeader title={t('detail.pageTitle')} fallbackHref="/orders" />
 
       {/* Native only needs to clear the PageHeader row height
           (`h-14` = 3.5rem); NativeShell already adds `var(--safe-top)`
@@ -112,13 +116,13 @@ export default function OrderDetailRoute(): React.JSX.Element {
             >
               <path d="M15 18 9 12l6-6" />
             </svg>
-            All orders
+            {t('detail.allOrders')}
           </button>
         )}
 
         {!isAuthenticated && (
           <p className="text-center text-gray-500 dark:text-gray-400 py-12">
-            Sign in to view this order.
+            {t('detail.signedOutBody')}
           </p>
         )}
 
@@ -132,7 +136,7 @@ export default function OrderDetailRoute(): React.JSX.Element {
           <div className="text-center py-12">
             <p className="text-red-500 mb-4">{errText}</p>
             <Button variant="secondary" onClick={() => void refetch()}>
-              Retry
+              {t('detail.retry')}
             </Button>
           </div>
         )}
@@ -144,6 +148,7 @@ export default function OrderDetailRoute(): React.JSX.Element {
 }
 
 function OrderDetailBody({ order, now }: { order: Order; now: number }): React.JSX.Element {
+  const { t } = useTranslation('orders');
   const locale = useLocaleTag();
   const created = new Date(order.createdAt);
   const createdLabel = Number.isNaN(created.getTime())
@@ -221,13 +226,13 @@ function OrderDetailBody({ order, now }: { order: Order; now: number }): React.J
 
       {order.status === 'pending' && (
         <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-4">
-          This order is still awaiting payment confirmation.
+          {t('detail.pendingPayment')}
         </p>
       )}
 
       {(order.status === 'failed' || order.status === 'expired') && (
         <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-4">
-          This order {order.status}. The XLM you sent (if any) should refund automatically.
+          {t('detail.terminalStatus', { status: order.status })}
         </p>
       )}
     </>
@@ -235,28 +240,16 @@ function OrderDetailBody({ order, now }: { order: Order; now: number }): React.J
 }
 
 function StatusBadge({ status }: { status: Order['status'] }): React.JSX.Element {
-  const map: Record<Order['status'], { label: string; className: string }> = {
-    pending: {
-      label: 'Pending',
-      className: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
-    },
-    completed: {
-      label: 'Completed',
-      className: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
-    },
-    failed: {
-      label: 'Failed',
-      className: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
-    },
-    expired: {
-      label: 'Expired',
-      className: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300',
-    },
+  const { t } = useTranslation('orders');
+  const classNames: Record<Order['status'], string> = {
+    pending: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
+    completed: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
+    failed: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
+    expired: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300',
   };
-  const cfg = map[status];
   return (
-    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${cfg.className}`}>
-      {cfg.label}
+    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${classNames[status]}`}>
+      {t(`status.${status}`)}
     </span>
   );
 }
@@ -281,6 +274,7 @@ function RedemptionBlock({
   redeemUrl: string;
   challengeCode?: string | undefined;
 }): React.JSX.Element {
+  const { t } = useTranslation('orders');
   const [opening, setOpening] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
 
@@ -300,7 +294,7 @@ function RedemptionBlock({
       setOpenError(
         err instanceof Error && err.message.length > 0
           ? err.message
-          : 'We could not open the redemption page.',
+          : t('detail.redemption.openError'),
       );
     } finally {
       setOpening(false);
@@ -309,13 +303,12 @@ function RedemptionBlock({
 
   return (
     <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6">
-      <p className="text-sm text-gray-600 dark:text-gray-300 mb-3">
-        This gift card is redeemed on the merchant&apos;s site. Open the page below and, if
-        prompted, paste the challenge code.
-      </p>
+      <p className="text-sm text-gray-600 dark:text-gray-300 mb-3">{t('detail.redemption.body')}</p>
       {challengeCode !== undefined && challengeCode.length > 0 && (
         <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3 mb-4">
-          <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Challenge code</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+            {t('detail.redemption.challengeCodeLabel')}
+          </p>
           <p className="font-mono text-sm text-gray-900 dark:text-gray-100">{challengeCode}</p>
         </div>
       )}
@@ -325,7 +318,7 @@ function RedemptionBlock({
         </p>
       )}
       <Button className="w-full" onClick={() => void handleOpen()} disabled={opening}>
-        {opening ? 'Opening\u2026' : 'Open redemption page'}
+        {opening ? t('detail.redemption.opening') : t('detail.redemption.cta')}
       </Button>
     </div>
   );

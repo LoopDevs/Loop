@@ -20,8 +20,11 @@
  */
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { ApiException } from '@loop/shared';
 import type { Route } from './+types/settings.privacy';
+import i18n from '~/i18n/i18next';
 import { useAuth } from '~/hooks/use-auth';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 import { Button } from '~/components/ui/Button';
@@ -30,32 +33,38 @@ import { signOutAllDevices } from '~/services/auth';
 import { shareJsonFile } from '~/native/share';
 
 export function meta(): Route.MetaDescriptors {
-  return [{ title: 'Privacy & data — Loop' }];
+  return [{ title: i18n.t('settings:privacy.meta.title') }];
 }
 
 const CONFIRM_PHRASE = 'DELETE';
 
-/** Maps the backend's typed 409 deletion-block codes to UX copy. */
-function deletionBlockMessage(err: unknown): string {
+/**
+ * Maps the backend's typed 409 deletion-block codes to UX copy. Plain
+ * helper function (not a component) — `t` is threaded in from the
+ * caller's `useTranslation('settings')`, same pattern as
+ * `routes/auth.tsx`'s `ledgerLabel(t, type)` (see docs/i18n.md #3).
+ */
+function deletionBlockMessage(t: TFunction, err: unknown): string {
   if (err instanceof ApiException) {
     if (err.code === 'PENDING_PAYOUTS') {
-      return 'You have a cashback payout in flight. Wait for it to settle, then try again — or contact support.';
+      return t('privacy.delete.blockedPendingPayouts');
     }
     if (err.code === 'IN_FLIGHT_ORDERS') {
-      return 'You have an order being fulfilled. Wait for it to finish (or expire), then try again — or contact support.';
+      return t('privacy.delete.blockedInFlightOrders');
     }
     if (err.code === 'FAILED_UNCOMPENSATED_WITHDRAWALS') {
-      return 'A failed withdrawal is awaiting compensation. Contact support about it before deleting your account.';
+      return t('privacy.delete.blockedFailedWithdrawals');
     }
     if (err.code === 'BALANCE_NOT_ZERO') {
-      return 'You have an unredeemed cashback balance. Spend it, or contact support to withdraw it, before deleting your account.';
+      return t('privacy.delete.blockedBalanceNotZero');
     }
     return err.message;
   }
-  return 'Something went wrong. Please try again, or email privacy@loopfinance.io.';
+  return t('privacy.delete.fallbackError');
 }
 
 export default function SettingsPrivacyRoute(): React.JSX.Element {
+  const { t } = useTranslation('settings');
   const navigate = useNavigate();
   const { isAuthenticated, logout } = useAuth();
   const { isNative } = useNativePlatform();
@@ -80,9 +89,7 @@ export default function SettingsPrivacyRoute(): React.JSX.Element {
         await logout();
         void navigate('/');
       } catch (err) {
-        setSignOutAllError(
-          err instanceof ApiException ? err.message : 'Could not sign out of all devices.',
-        );
+        setSignOutAllError(err instanceof ApiException ? err.message : t('privacy.sessions.error'));
         setSignOutAllState('idle');
       }
     })();
@@ -92,11 +99,9 @@ export default function SettingsPrivacyRoute(): React.JSX.Element {
     return (
       <main className="max-w-2xl mx-auto px-6 py-12">
         <h1 className="text-2xl font-semibold text-gray-900 dark:text-white mb-4">
-          Privacy &amp; data
+          {t('privacy.signedOut.heading')}
         </h1>
-        <p className="text-gray-700 dark:text-gray-300 mb-6">
-          Sign in to export your data or delete your account.
-        </p>
+        <p className="text-gray-700 dark:text-gray-300 mb-6">{t('privacy.signedOut.body')}</p>
         <button
           type="button"
           className="text-blue-600 underline"
@@ -104,7 +109,7 @@ export default function SettingsPrivacyRoute(): React.JSX.Element {
             void navigate('/auth');
           }}
         >
-          Go to sign-in
+          {t('privacy.signedOut.cta')}
         </button>
       </main>
     );
@@ -125,12 +130,13 @@ export default function SettingsPrivacyRoute(): React.JSX.Element {
           const shared = await shareJsonFile(
             `loop-data-export-${new Date().toISOString().slice(0, 10)}.json`,
             payload,
-            { title: 'Your Loop data export', text: 'Your Loop account data export' },
+            {
+              title: t('privacy.export.shareTitle'),
+              text: t('privacy.export.shareText'),
+            },
           );
           if (!shared) {
-            setExportError(
-              "Couldn't prepare your data for sharing. Please try again, or email privacy@loopfinance.io.",
-            );
+            setExportError(t('privacy.export.shareError'));
             setExportState('error');
             return;
           }
@@ -140,11 +146,7 @@ export default function SettingsPrivacyRoute(): React.JSX.Element {
         await downloadMyData();
         setExportState('done');
       } catch (err) {
-        setExportError(
-          err instanceof ApiException
-            ? err.message
-            : "Couldn't build your export. Please try again, or email privacy@loopfinance.io.",
-        );
+        setExportError(err instanceof ApiException ? err.message : t('privacy.export.exportError'));
         setExportState('error');
       }
     })();
@@ -163,7 +165,7 @@ export default function SettingsPrivacyRoute(): React.JSX.Element {
         await logout();
         void navigate('/');
       } catch (err) {
-        setDeleteError(deletionBlockMessage(err));
+        setDeleteError(deletionBlockMessage(t, err));
         setDeleteState('idle');
       }
     })();
@@ -172,13 +174,15 @@ export default function SettingsPrivacyRoute(): React.JSX.Element {
   return (
     <main className="max-w-2xl mx-auto px-6 py-12 space-y-8">
       <header>
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Privacy &amp; data</h1>
+        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">
+          {t('privacy.heading')}
+        </h1>
         <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-          Export the data we hold about you, or permanently delete your account. See our{' '}
+          {t('privacy.introPrefix')}{' '}
           <a href="/privacy" className="text-blue-600 underline">
-            privacy policy
+            {t('privacy.introLink')}
           </a>{' '}
-          for what we collect and why.
+          {t('privacy.introSuffix')}
         </p>
       </header>
 
@@ -188,15 +192,11 @@ export default function SettingsPrivacyRoute(): React.JSX.Element {
         className="rounded-xl border border-gray-200 dark:border-gray-800 p-5 bg-white dark:bg-gray-900 space-y-4"
       >
         <h2 id="export-heading" className="text-base font-semibold text-gray-900 dark:text-white">
-          Export your data
+          {t('privacy.export.heading')}
         </h2>
-        <p className="text-sm text-gray-600 dark:text-gray-400">
-          Download a machine-readable copy of everything tied to your account — profile, credit
-          ledger, orders, and payouts. Gift-card codes are not included for security; you can always
-          view them on the relevant order.
-        </p>
+        <p className="text-sm text-gray-600 dark:text-gray-400">{t('privacy.export.body')}</p>
         <Button variant="secondary" onClick={handleExport} disabled={exportState === 'working'}>
-          {exportState === 'working' ? 'Preparing…' : 'Download my data'}
+          {exportState === 'working' ? t('privacy.export.working') : t('privacy.export.cta')}
         </Button>
         {exportState === 'done' ? (
           <p
@@ -204,9 +204,7 @@ export default function SettingsPrivacyRoute(): React.JSX.Element {
             aria-live="polite"
             className="text-sm text-green-700 dark:text-green-400"
           >
-            {isNative
-              ? 'Your data was prepared — save it via the share sheet.'
-              : 'Your data download has started.'}
+            {isNative ? t('privacy.export.doneNative') : t('privacy.export.doneWeb')}
           </p>
         ) : null}
         {exportError !== null ? (
@@ -222,18 +220,17 @@ export default function SettingsPrivacyRoute(): React.JSX.Element {
         className="rounded-xl border border-gray-200 dark:border-gray-800 p-5 bg-white dark:bg-gray-900 space-y-4"
       >
         <h2 id="sessions-heading" className="text-base font-semibold text-gray-900 dark:text-white">
-          Sign out everywhere
+          {t('privacy.sessions.heading')}
         </h2>
-        <p className="text-sm text-gray-600 dark:text-gray-400">
-          Revoke every active session, on this and all other devices. Use this if you think someone
-          else has access to your account — you&apos;ll need to sign in again.
-        </p>
+        <p className="text-sm text-gray-600 dark:text-gray-400">{t('privacy.sessions.body')}</p>
         <Button
           variant="secondary"
           onClick={handleSignOutAll}
           disabled={signOutAllState === 'working'}
         >
-          {signOutAllState === 'working' ? 'Signing out…' : 'Sign out of all devices'}
+          {signOutAllState === 'working'
+            ? t('privacy.sessions.working')
+            : t('privacy.sessions.cta')}
         </Button>
         {signOutAllError !== null ? (
           <p role="alert" className="text-sm text-red-600 dark:text-red-400">
@@ -248,17 +245,13 @@ export default function SettingsPrivacyRoute(): React.JSX.Element {
         className="rounded-xl border border-red-200 dark:border-red-900 p-5 bg-white dark:bg-gray-900 space-y-4"
       >
         <h2 id="delete-heading" className="text-base font-semibold text-red-700 dark:text-red-400">
-          Delete your account
+          {t('privacy.delete.heading')}
         </h2>
-        <p className="text-sm text-gray-600 dark:text-gray-400">
-          This permanently removes your personal data and signs you out everywhere. For legal and
-          tax reasons we keep an anonymised transaction record, but it no longer links to you. This
-          can&rsquo;t be undone. If you have a payout or order in flight, finish or wait for it
-          first.
-        </p>
+        <p className="text-sm text-gray-600 dark:text-gray-400">{t('privacy.delete.body')}</p>
         <label htmlFor="delete-confirm" className="block">
           <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Type <strong>{CONFIRM_PHRASE}</strong> to confirm
+            {t('privacy.delete.confirmLabelPrefix')} <strong>{CONFIRM_PHRASE}</strong>{' '}
+            {t('privacy.delete.confirmLabelSuffix')}
           </span>
           <input
             id="delete-confirm"
@@ -281,7 +274,7 @@ export default function SettingsPrivacyRoute(): React.JSX.Element {
           onClick={handleDelete}
           disabled={!confirmed || deleteState === 'working'}
         >
-          {deleteState === 'working' ? 'Deleting…' : 'Delete my account'}
+          {deleteState === 'working' ? t('privacy.delete.working') : t('privacy.delete.cta')}
         </Button>
       </section>
     </main>

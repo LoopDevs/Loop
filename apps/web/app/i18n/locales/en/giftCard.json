@@ -1,0 +1,36 @@
+{
+  "meta": {
+    "title": "{{name}} Gift Card — Loop",
+    "description": "Buy {{name}} gift cards with XLM and save money."
+  },
+  "error": {
+    "body": "We couldn't load this gift card.",
+    "backToHome": "Back to home"
+  },
+  "notFound": {
+    "heading": "Merchant not found",
+    "backToHome": "Back to home"
+  },
+  "backAriaLabel": "Back",
+  "heading": "{{name}} Gift Card",
+  "features": {
+    "instantDelivery": "Instant Delivery",
+    "privateSecure": "Private & Secure",
+    "savingsPct": "{{pct}}% Savings",
+    "cashbackPct": "{{pct}}% Cashback"
+  },
+  "savingsBadge": "{{pct}}% savings",
+  "about": {
+    "heading": "About {{name}}",
+    "availableDenominations": "Available Denominations:",
+    "range": "Range:",
+    "fallback": "Purchase a {{name}} gift card and save with crypto. Delivered instantly to your device."
+  },
+  "howToRedeem": {
+    "heading": "How to redeem",
+    "fallback": "After purchase, you'll receive your gift card code and everything you need to redeem it."
+  },
+  "terms": {
+    "heading": "Terms & conditions"
+  }
+}

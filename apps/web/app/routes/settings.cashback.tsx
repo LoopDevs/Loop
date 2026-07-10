@@ -13,7 +13,10 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import type { Route } from './+types/settings.cashback';
+import i18n from '~/i18n/i18next';
 import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
@@ -33,19 +36,27 @@ import { RailMixCard } from '~/components/features/cashback/RailMixCard';
 import { PendingPayoutsCard } from '~/components/features/cashback/PendingPayoutsCard';
 
 export function meta(): Route.MetaDescriptors {
-  return [{ title: 'Cashback history — Loop' }];
+  return [{ title: i18n.t('settings:cashback.meta.title') }];
 }
 
 const PAGE_SIZE = 25;
 
-const LEDGER_LABELS: Record<CashbackHistoryEntry['type'], string> = {
-  cashback: 'Cashback',
-  interest: 'Interest',
-  spend: 'Spend',
-  withdrawal: 'Withdrawal',
-  refund: 'Refund',
-  adjustment: 'Adjustment',
-};
+/**
+ * Plain helper (not a component) — `t` threaded in from the caller's
+ * `useTranslation('settings')`, same pattern as `routes/auth.tsx`'s
+ * `ledgerLabel(t, type)` (docs/i18n.md #3).
+ */
+function ledgerLabel(t: TFunction, type: CashbackHistoryEntry['type']): string {
+  const labels: Record<CashbackHistoryEntry['type'], string> = {
+    cashback: t('cashback.labels.cashback'),
+    interest: t('cashback.labels.interest'),
+    spend: t('cashback.labels.spend'),
+    withdrawal: t('cashback.labels.withdrawal'),
+    refund: t('cashback.labels.refund'),
+    adjustment: t('cashback.labels.adjustment'),
+  };
+  return labels[type];
+}
 
 function formatAmount(minor: string, currency: string): string {
   try {
@@ -90,6 +101,7 @@ export default function SettingsCashbackRoute(): React.JSX.Element {
 }
 
 function SettingsCashbackBody(): React.JSX.Element {
+  const { t } = useTranslation('settings');
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
 
@@ -102,11 +114,9 @@ function SettingsCashbackBody(): React.JSX.Element {
     return (
       <main className="max-w-2xl mx-auto px-6 py-12">
         <h1 className="text-2xl font-semibold text-gray-900 dark:text-white mb-4">
-          Cashback history
+          {t('cashback.signedOut.heading')}
         </h1>
-        <p className="text-gray-700 dark:text-gray-300 mb-6">
-          Sign in to see your cashback activity.
-        </p>
+        <p className="text-gray-700 dark:text-gray-300 mb-6">{t('cashback.signedOut.body')}</p>
         <button
           type="button"
           className="text-blue-600 underline"
@@ -114,7 +124,7 @@ function SettingsCashbackBody(): React.JSX.Element {
             void navigate('/auth');
           }}
         >
-          Go to sign-in
+          {t('cashback.signedOut.cta')}
         </button>
       </main>
     );
@@ -123,10 +133,10 @@ function SettingsCashbackBody(): React.JSX.Element {
   return (
     <main className="max-w-2xl mx-auto px-6 py-12 space-y-8">
       <header>
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Cashback history</h1>
-        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-          Every credit-ledger event on your account — newest first.
-        </p>
+        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">
+          {t('cashback.heading')}
+        </h1>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{t('cashback.subtitle')}</p>
       </header>
 
       {/* Current balance card — the user's first question is "how
@@ -185,7 +195,7 @@ function SettingsCashbackBody(): React.JSX.Element {
           id="history-heading"
           className="px-5 pt-4 pb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400"
         >
-          Off-chain ledger
+          {t('cashback.ledgerHeading')}
         </h2>
         {cursors.map((cursor, idx) => (
           <HistoryPage
@@ -211,6 +221,7 @@ function HistoryPage({
   isLastPage: boolean;
   onLoadMore: (nextCursor: string) => void;
 }): React.JSX.Element {
+  const { t } = useTranslation('settings');
   const query = useQuery<CashbackHistoryResponse>({
     queryKey: ['me', 'cashback-history', cursor ?? null, PAGE_SIZE],
     queryFn: () =>
@@ -233,7 +244,7 @@ function HistoryPage({
   if (query.isError) {
     return (
       <div className="px-5 py-6 text-sm text-red-600 dark:text-red-400">
-        Couldn&rsquo;t load this page of your history. Please try again in a moment.
+        {t('cashback.pageError')}
       </div>
     );
   }
@@ -243,7 +254,7 @@ function HistoryPage({
   if (entries.length === 0 && cursor === undefined) {
     return (
       <div className="px-5 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
-        No cashback activity yet. Your first Loop order will show up here.
+        {t('cashback.empty')}
       </div>
     );
   }
@@ -265,7 +276,7 @@ function HistoryPage({
           >
             <div className="min-w-0">
               <p className="truncate text-sm font-medium text-gray-900 dark:text-white">
-                {LEDGER_LABELS[entry.type]}
+                {ledgerLabel(t, entry.type)}
               </p>
               <p className="text-xs text-gray-500 dark:text-gray-400">
                 {formatDate(entry.createdAt)}
@@ -277,7 +288,9 @@ function HistoryPage({
                         to={`/orders/${entry.referenceId}`}
                         className="capitalize text-blue-600 hover:underline dark:text-blue-400"
                       >
-                        Order {entry.referenceId.slice(0, 8)}
+                        {t('cashback.orderReference', {
+                          shortId: entry.referenceId.slice(0, 8),
+                        })}
                       </Link>
                     ) : (
                       <>
@@ -309,7 +322,7 @@ function HistoryPage({
               onLoadMore(lastCreatedAt);
             }}
           >
-            Load more
+            {t('cashback.loadMore')}
           </Button>
         </div>
       ) : null}
