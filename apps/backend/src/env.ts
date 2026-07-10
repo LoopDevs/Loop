@@ -205,6 +205,17 @@ export function parseEnv(source: NodeJS.ProcessEnv): Env {
     }
   }
 
+  // ADR 031 §Detailed design D9, V2 cross-field requirement: the vault
+  // subsystem flag without a Soroban RPC endpoint would only surface
+  // as a terminal error on the first deposit/withdraw call. Fail at
+  // boot instead — mirrors the LOOP_WALLET_PROVIDER=privy check above.
+  if (parsed.data.LOOP_VAULTS_ENABLED && parsed.data.LOOP_SOROBAN_RPC_URL === undefined) {
+    throw new Error(
+      'Invalid environment variables — LOOP_VAULTS_ENABLED=true requires LOOP_SOROBAN_RPC_URL to be ' +
+        'set (ADR 031). Unset LOOP_VAULTS_ENABLED to keep the vault subsystem dark instead.',
+    );
+  }
+
   // ADR 031 / ADR 036 Phase D: issuer-secret ↔ issuer-address pinning.
   // A `LOOP_STELLAR_<ASSET>_ISSUER_SECRET` whose derived public key
   // doesn't match the configured `LOOP_STELLAR_<ASSET>_ISSUER` would

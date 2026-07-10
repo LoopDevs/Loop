@@ -69,10 +69,31 @@ src/
 │   ├── payout-compensation.ts ← Compensation for LEGACY debited emissions only (ADR 024 §5 / ADR 036)
 │   ├── accrue-interest.ts ← LEGACY daily APY accrual primitive on user_credits (off-chain
 │   │                     only — hard-gated off while LOOP_INTEREST_ONCHAIN_ENABLED=true)
-│   └── interest-mint.ts ← ADR 031/036 Phase D nightly ON-CHAIN interest: UTC-day periods
-│                         (watcher_cursors name='interest_mint'), Horizon balance snapshots
-│                         → interest_mint_snapshots (migration 0041, sub-minor carry),
-│                         mirror credit + kind='interest_mint' payout in one txn per user
+│   ├── interest-mint.ts ← ADR 031/036 Phase D nightly ON-CHAIN interest: UTC-day periods
+│   │                     (watcher_cursors name='interest_mint'), Horizon balance snapshots
+│   │                     → interest_mint_snapshots (migration 0041, sub-minor carry),
+│   │                     mirror credit + kind='interest_mint' payout in one txn per user
+│   └── vaults/          ← ADR 031 §D2/D3/D9 LOOPUSD/LOOPEUR DeFindex-vault subsystem,
+│       │                 all gated on LOOP_VAULTS_ENABLED (belt-and-suspenders — every
+│       │                 function checks the flag itself, not just callers)
+│       ├── registry.ts  ← V1: loop_vaults / vault_share_price_snapshots read layer
+│       │                 (getActiveVault / listActiveVaults / share-price snapshot
+│       │                 record+read); starts dark, empty table
+│       ├── scval.ts     ← V2 (ADR 049): ScVal encode/decode helpers (i128/Vec/Address/
+│       │                 bool) + assertExpectedInvocation, the verify-before-sign
+│       │                 decode-and-assert check every built tx passes before signing
+│       ├── soroban-submit.ts ← V2: low-level Soroban invoke pipeline — build → verify
+│       │                 → simulateTransaction → assemble → verify again → sign →
+│       │                 sendTransaction → pollTransaction, classified SorobanSubmitError,
+│       │                 CF-18 at-most-once fence (onSigned hook + priorTxHash pre-check);
+│       │                 simulateSorobanCall is the separate read-only (never signs) path
+│       └── vault-client.ts ← V2: public API — depositToVault / withdrawFromVault /
+│                           transferShares (signWith='operator' only; 'provider' is a
+│                           V4 stub, ADR 031 §D6) / readVaultState (share-price ppm).
+│                           Client library only — NOT wired into any emission/withdraw
+│                           flow yet; mock-tested against a faked Soroban RPC, no real
+│                           testnet vault call has validated the exact on-chain return
+│                           shapes (see ADR 049 §Negative)
 ├── fraud/              ← ADR 045 (B-3) Phase-1 fraud/abuse controls
 │   ├── velocity.ts     ← Per-user order-create velocity gate (bounded/indexed
 │   │                     query, fail-closed) — called from orders/loop-handler.ts
