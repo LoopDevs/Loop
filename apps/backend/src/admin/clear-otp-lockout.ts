@@ -31,6 +31,23 @@
  * lockout row gets cleared. Idempotent: deleting an already-clear (or
  * never-existing) counter row is a no-op success (`wasLocked: false`),
  * so a double-click or a retried request can't error.
+ *
+ * PER-TARGET VELOCITY CAP (A5-3 review P1): the per-IP route limit
+ * (20/min) does NOT bound the "clear → guess → clear" B5-defeat loop —
+ * that loop only needs ONE clear per ~60s to keep re-arming the lockout
+ * just ahead of the per-IP verify-otp cap (10/min), and a compromised
+ * bearer can spread its clears across several IPs all aimed at ONE
+ * victim. So we ALSO cap clears PER TARGET userId in a rolling 24h
+ * window (`CLEAR_LOCKOUT_MAX_PER_TARGET_PER_DAY`, default 5 — a
+ * locked-out legit user needs 1, occasionally 2). This is the control
+ * that actually bounds the loop: it collapses the admin-assisted guess
+ * ceiling from the pre-B5 ~14,400/day back to ~960 + (5 × 10) ≈
+ * 1,010/day per account, restoring essentially all of B5's value even
+ * under a compromised admin bearer. The count reuses the existing
+ * `admin_idempotency_keys` audit rows (the path encodes the target
+ * userId; a row exists only for an APPLIED clear; replays don't inflate
+ * it) — no new table. Fail-CLOSED: if the count query errors we reject
+ * (503) rather than allow an unbounded clear.
  */
 import type { Context } from 'hono';
 import { eq } from 'drizzle-orm';
@@ -46,11 +63,48 @@ import { buildAuditEnvelope, type AdminAuditEnvelope } from './audit-envelope.js
 import {
   IDEMPOTENCY_KEY_MIN,
   IDEMPOTENCY_KEY_MAX,
+  countAppliedActionsForPath,
   validateIdempotencyKey,
   withIdempotencyGuard,
 } from './idempotency.js';
 
 const log = logger.child({ handler: 'admin-clear-otp-lockout' });
+
+/**
+ * Max clears APPLIED to a single target userId inside
+ * `CLEAR_LOCKOUT_WINDOW_MS` before further clears are rejected. Default
+ * 5 — generous for the "fat-fingered the code" case (a legit user needs
+ * 1, occasionally 2), tight enough that the clear→guess loop can't
+ * meaningfully erode B5's ceiling. A code constant (not an env var) to
+ * keep the surface small; promote to env if operators ever need to tune
+ * it live.
+ */
+export const CLEAR_LOCKOUT_MAX_PER_TARGET_PER_DAY = 5;
+
+/**
+ * Rolling window for the per-target cap. Kept at 24h to match
+ * `IDEMPOTENCY_TTL_HOURS` — the `admin_idempotency_keys` rows the count
+ * reads are swept at that TTL, so a longer window would silently miss
+ * reaped rows. Equal is safe: the effective window can only be
+ * shorter-or-equal, never looser.
+ */
+export const CLEAR_LOCKOUT_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/** Thrown from inside the idempotency guard when the per-target cap is hit → 429 (no snapshot stored). */
+class ClearLockoutRateExceededError extends Error {
+  constructor(readonly priorClears: number) {
+    super(`clear-otp-lockout per-target cap reached (${priorClears})`);
+    this.name = 'ClearLockoutRateExceededError';
+  }
+}
+
+/** Thrown when the per-target COUNT query itself fails → 503, fail-closed (no clear performed). */
+class ClearLockoutRateCheckUnavailableError extends Error {
+  constructor(readonly cause: unknown) {
+    super('clear-otp-lockout rate-check query failed');
+    this.name = 'ClearLockoutRateCheckUnavailableError';
+  }
+}
 
 export async function adminClearOtpLockoutHandler(c: Context): Promise<Response> {
   const userId = c.req.param('userId');
@@ -96,6 +150,7 @@ export async function adminClearOtpLockoutHandler(c: Context): Promise<Response>
     return c.json({ code: 'USER_NOT_FOUND', message: 'User not found' }, 404);
   }
   const targetEmail = target.email;
+  const clearPath = `/api/admin/users/${userId}/clear-otp-lockout`;
 
   let guardResult: Awaited<ReturnType<typeof withIdempotencyGuard>>;
   try {
@@ -104,9 +159,29 @@ export async function adminClearOtpLockoutHandler(c: Context): Promise<Response>
         adminUserId: actor.id,
         key: idempotencyKey,
         method: 'POST',
-        path: `/api/admin/users/${userId}/clear-otp-lockout`,
+        path: clearPath,
       },
       async () => {
+        // PER-TARGET velocity cap (review P1) — checked BEFORE the clear
+        // so a capped request never mutates the counter. Runs inside the
+        // guard's doWrite (so a REPLAY of an already-applied clear skips
+        // it entirely) but on the global `db` connection, so it counts
+        // only PRIOR committed clears for this target — not this
+        // request's own not-yet-stored row. FAIL-CLOSED: a count-query
+        // error rejects (503) rather than allowing an uncounted clear.
+        let priorClears: number;
+        try {
+          priorClears = await countAppliedActionsForPath({
+            path: clearPath,
+            windowMs: CLEAR_LOCKOUT_WINDOW_MS,
+          });
+        } catch (err) {
+          throw new ClearLockoutRateCheckUnavailableError(err);
+        }
+        if (priorClears >= CLEAR_LOCKOUT_MAX_PER_TARGET_PER_DAY) {
+          throw new ClearLockoutRateExceededError(priorClears);
+        }
+
         const [lockRow] = await db
           .select({ lockedUntil: otpAttemptCounters.lockedUntil })
           .from(otpAttemptCounters)
@@ -133,6 +208,37 @@ export async function adminClearOtpLockoutHandler(c: Context): Promise<Response>
       },
     );
   } catch (err) {
+    // The cap rejection + fail-closed count error are thrown from inside
+    // the guard's doWrite, so no snapshot is stored (a rolled-back
+    // transaction) — a later retry re-evaluates against a fresh count.
+    if (err instanceof ClearLockoutRateExceededError) {
+      log.warn(
+        { userId, adminUserId: actor.id, priorClears: err.priorClears },
+        'A5-3: clear-otp-lockout per-target cap reached — rejecting',
+      );
+      return c.json(
+        {
+          code: 'OTP_LOCKOUT_CLEAR_RATE_EXCEEDED',
+          message: `This account's OTP lockout has already been cleared ${CLEAR_LOCKOUT_MAX_PER_TARGET_PER_DAY} times in the last 24h — refusing further clears. Escalate if a legitimate user is still locked out.`,
+        },
+        429,
+      );
+    }
+    if (err instanceof ClearLockoutRateCheckUnavailableError) {
+      // FAIL CLOSED: could not verify the per-target rate, so we did NOT
+      // clear. A support agent can retry; an attacker gets no free pass.
+      log.error(
+        { err: err.cause, userId, adminUserId: actor.id },
+        'A5-3: clear-otp-lockout rate-check query failed — failing closed',
+      );
+      return c.json(
+        {
+          code: 'OTP_LOCKOUT_CLEAR_RATE_CHECK_UNAVAILABLE',
+          message: 'Could not verify the clear-rate limit; no change was made. Please retry.',
+        },
+        503,
+      );
+    }
     log.error({ err, userId, actorUserId: actor.id }, 'Clear OTP lockout failed');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to clear OTP lockout' }, 500);
   }

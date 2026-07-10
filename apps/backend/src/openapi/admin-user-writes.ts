@@ -262,7 +262,7 @@ export function registerAdminUserWritesOpenApi(
     path: '/api/admin/users/{userId}/clear-otp-lockout',
     summary: 'Clear a user’s B5 verify-otp lockout (readiness-backlog A5-3).',
     description:
-      "Deletes the user's `otp_attempt_counters` row via the same `clearOtpAttempts` primitive a successful `verify-otp` uses — no bespoke unlock path. Idempotent: clearing an already-clear (or never-locked) counter is a no-op success (`wasLocked: false`). Admin-tier; NOT step-up-gated — like `revoke-sessions`, this moves no value and clearing the counter alone doesn't grant access, it only lets the user retry (any further wrong guess re-arms the same B5 lockout). Requires a `reason` (2..500 chars) and fires the Discord admin-audit fanout after commit, unlike `revoke-sessions` which predates that convention.",
+      "Deletes the user's `otp_attempt_counters` row via the same `clearOtpAttempts` primitive a successful `verify-otp` uses — no bespoke unlock path. Idempotent: clearing an already-clear (or never-locked) counter is a no-op success (`wasLocked: false`). Admin-tier; NOT step-up-gated — like `revoke-sessions`, this moves no value and clearing the counter alone doesn't grant access, it only lets the user retry (any further wrong guess re-arms the same B5 lockout). Requires a `reason` (2..500 chars) and fires the Discord admin-audit fanout after commit, unlike `revoke-sessions` which predates that convention. Bounded by a PER-TARGET velocity cap (5 clears / 24h / account, `OTP_LOCKOUT_CLEAR_RATE_EXCEEDED` → 429) — this, not the per-IP route limit, is what stops a compromised admin bearer using the clear→guess→clear loop to erode B5's ceiling on one account; the count fails closed (503) if it can't be evaluated.",
     tags: ['Admin'],
     security: [{ bearerAuth: [] }],
     request: {
@@ -296,12 +296,18 @@ export function registerAdminUserWritesOpenApi(
         content: { 'application/json': { schema: errorResponse } },
       },
       429: {
-        description: 'Rate limit exceeded (20/min per IP)',
+        description:
+          'Per-IP rate limit (20/min), OR the per-target velocity cap: this account has already had its OTP lockout cleared `CLEAR_LOCKOUT_MAX_PER_TARGET_PER_DAY` (5) times in the last 24h (`OTP_LOCKOUT_CLEAR_RATE_EXCEEDED`) — the control that bounds the clear→guess→clear loop against a single account.',
         content: { 'application/json': { schema: errorResponse } },
       },
       500: {
         description:
           'Internal error (`INTERNAL_ERROR`), or unreadable replay snapshot (`IDEMPOTENCY_SNAPSHOT_CORRUPT`)',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      503: {
+        description:
+          'Fail-closed: the per-target clear-rate check query failed, so no clear was performed (`OTP_LOCKOUT_CLEAR_RATE_CHECK_UNAVAILABLE`) — retry.',
         content: { 'application/json': { schema: errorResponse } },
       },
     },

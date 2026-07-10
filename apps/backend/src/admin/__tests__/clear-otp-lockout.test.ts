@@ -24,6 +24,9 @@ const state = vi.hoisted(() => ({
   lockRows: [] as Array<{ lockedUntil: Date | null }>,
   clearCalls: [] as string[],
   clearThrow: null as Error | null,
+  priorClearCount: 0,
+  countThrow: null as Error | null,
+  countCalls: [] as Array<{ path: string; windowMs: number }>,
   priorSnapshot: null as null | { status: number; body: Record<string, unknown> },
   storedSnapshot: null as null | Record<string, unknown>,
   discordCalls: [] as Array<Record<string, unknown>>,
@@ -67,6 +70,11 @@ vi.mock('../idempotency.js', () => ({
   IDEMPOTENCY_KEY_MAX: 128,
   validateIdempotencyKey: (k: string | undefined): k is string =>
     k !== undefined && k.length >= 16 && k.length <= 128,
+  countAppliedActionsForPath: vi.fn(async (args: { path: string; windowMs: number }) => {
+    state.countCalls.push(args);
+    if (state.countThrow !== null) throw state.countThrow;
+    return state.priorClearCount;
+  }),
   withIdempotencyGuard: vi.fn(
     async (
       args: { adminUserId: string; key: string; method: string; path: string },
@@ -103,7 +111,11 @@ vi.mock('../../logger.js', () => ({
   logger: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }) },
 }));
 
-import { adminClearOtpLockoutHandler } from '../clear-otp-lockout.js';
+import {
+  adminClearOtpLockoutHandler,
+  CLEAR_LOCKOUT_MAX_PER_TARGET_PER_DAY,
+  CLEAR_LOCKOUT_WINDOW_MS,
+} from '../clear-otp-lockout.js';
 
 const adminUser = { id: '11111111-1111-1111-1111-111111111111', email: 'admin@loop.test' };
 const targetUserId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
@@ -143,6 +155,9 @@ beforeEach(() => {
   state.lockRows = [];
   state.clearCalls = [];
   state.clearThrow = null;
+  state.priorClearCount = 0;
+  state.countThrow = null;
+  state.countCalls = [];
   state.priorSnapshot = null;
   state.storedSnapshot = null;
   state.discordCalls = [];
@@ -345,5 +360,90 @@ describe('adminClearOtpLockoutHandler', () => {
     );
     expect(res.status).toBe(500);
     expect(state.discordCalls).toHaveLength(0);
+  });
+});
+
+// Review P1: the per-target (userId) velocity cap is the control that
+// actually bounds the clear→guess→clear B5-defeat loop (the per-IP
+// route limit can't). These assertions FAIL against the pre-cap code
+// (which had no count check, so `state.priorClearCount` was ignored and
+// every clear returned 200) and pass after.
+describe('adminClearOtpLockoutHandler — per-target velocity cap (A5-3 P1)', () => {
+  const body = { reason: 'user locked out, support ticket #7' };
+
+  it('allows the first CLEAR_LOCKOUT_MAX_PER_TARGET_PER_DAY clears, rejects the next with 429', async () => {
+    // `priorClearCount` = already-applied clears for this target in the
+    // window. 0..MAX-1 prior → this request is the 1st..MAXth → allowed;
+    // MAX prior → this request is the (MAX+1)th → rejected.
+    for (let prior = 0; prior < CLEAR_LOCKOUT_MAX_PER_TARGET_PER_DAY; prior++) {
+      state.priorClearCount = prior;
+      state.clearCalls = [];
+      const res = await adminClearOtpLockoutHandler(
+        makeCtx({ headers: { 'idempotency-key': validKey }, body }),
+      );
+      expect(res.status, `clear #${prior + 1} should succeed`).toBe(200);
+      expect(state.clearCalls).toEqual([targetEmail]);
+    }
+
+    // The (MAX+1)th clear — MAX already applied — is rejected.
+    state.priorClearCount = CLEAR_LOCKOUT_MAX_PER_TARGET_PER_DAY;
+    state.clearCalls = [];
+    state.discordCalls = [];
+    state.storedSnapshot = null;
+    const rejected = await adminClearOtpLockoutHandler(
+      makeCtx({ headers: { 'idempotency-key': validKey }, body }),
+    );
+    expect(rejected.status).toBe(429);
+    const rejBody = (await rejected.json()) as { code: string };
+    expect(rejBody.code).toBe('OTP_LOCKOUT_CLEAR_RATE_EXCEEDED');
+    // The rejected clear must NOT mutate the counter, fire an audit, or
+    // burn an idempotency snapshot (so a later retry re-evaluates).
+    expect(state.clearCalls).toHaveLength(0);
+    expect(state.discordCalls).toHaveLength(0);
+    expect(state.storedSnapshot).toBeNull();
+  });
+
+  it('is PER-TARGET: the cap counts the target userId’s own clear path (24h window)', async () => {
+    state.priorClearCount = 0;
+    const res = await adminClearOtpLockoutHandler(
+      makeCtx({ userId: targetUserId, headers: { 'idempotency-key': validKey }, body }),
+    );
+    expect(res.status).toBe(200);
+    // The count is scoped to THIS user's clear path — proving the cap is
+    // per-target, not a global counter shared across accounts.
+    expect(state.countCalls).toHaveLength(1);
+    expect(state.countCalls[0]).toEqual({
+      path: `/api/admin/users/${targetUserId}/clear-otp-lockout`,
+      windowMs: CLEAR_LOCKOUT_WINDOW_MS,
+    });
+  });
+
+  it('a DIFFERENT target with its own (empty) count still succeeds even when another user is capped', async () => {
+    const otherUserId = 'bbbbbbbb-cccc-dddd-eeee-ffffffffffff';
+    state.getUserByIdResult = { id: otherUserId, email: 'other@loop.test' };
+    // The mocked count returns 0 for this fresh target (a real per-path
+    // count would too — no prior clears against otherUserId's path).
+    state.priorClearCount = 0;
+    const res = await adminClearOtpLockoutHandler(
+      makeCtx({ userId: otherUserId, headers: { 'idempotency-key': validKey }, body }),
+    );
+    expect(res.status).toBe(200);
+    expect(state.countCalls[0]?.path).toBe(`/api/admin/users/${otherUserId}/clear-otp-lockout`);
+    expect(state.clearCalls).toEqual(['other@loop.test']);
+  });
+
+  it('FAILS CLOSED (503) when the count query errors — no clear, no audit, no snapshot', async () => {
+    state.countThrow = new Error('count query blew up');
+    const res = await adminClearOtpLockoutHandler(
+      makeCtx({ headers: { 'idempotency-key': validKey }, body }),
+    );
+    expect(res.status).toBe(503);
+    const errBody = (await res.json()) as { code: string };
+    expect(errBody.code).toBe('OTP_LOCKOUT_CLEAR_RATE_CHECK_UNAVAILABLE');
+    // Fail-closed: the counter was NOT cleared, so an attacker gets no
+    // free pass on a transient DB error.
+    expect(state.clearCalls).toHaveLength(0);
+    expect(state.discordCalls).toHaveLength(0);
+    expect(state.storedSnapshot).toBeNull();
   });
 });

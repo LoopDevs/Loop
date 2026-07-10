@@ -41,6 +41,7 @@ export {
   lookupIdempotencyKey,
   storeIdempotencyKey,
   sweepStaleIdempotencyKeys,
+  countAppliedActionsForPath,
   type IdempotencySnapshot,
 } from './idempotency-store.js';
 

@@ -18,7 +18,7 @@
  * Re-exported from `./idempotency.ts` so the wide network of
  * existing import sites (admin handlers + tests) keeps resolving.
  */
-import { and, eq, lt } from 'drizzle-orm';
+import { and, eq, gt, lt, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { adminIdempotencyKeys } from '../db/schema.js';
 import { logger } from '../logger.js';
@@ -90,6 +90,44 @@ export async function sweepStaleIdempotencyKeys(): Promise<number> {
     log.error({ err }, 'Admin idempotency sweep failed');
     return 0;
   }
+}
+
+/**
+ * A5-3: count how many admin actions on a given exact `path` were
+ * APPLIED within the trailing `windowMs`. Used by
+ * `clear-otp-lockout.ts` as a PER-TARGET velocity cap (the path
+ * encodes the target `:userId`, e.g.
+ * `/api/admin/users/<uuid>/clear-otp-lockout`), which is what actually
+ * bounds the "clear → guess → clear" B5-defeat loop — the per-IP route
+ * limit can't (an attacker's several IPs under one bearer all target
+ * one victim).
+ *
+ * Counts stored idempotency rows, and a row exists only if the write
+ * committed — so this is a count of APPLIED actions, not attempts. A
+ * replay of an already-applied action does NOT create a new row, so it
+ * doesn't inflate the count. The table is TTL-swept at the same
+ * `IDEMPOTENCY_TTL_HOURS` (24h) window, so callers must keep
+ * `windowMs <= that TTL` or older applied actions will have been
+ * reaped before the window closes (a shorter effective window only
+ * makes the cap *stricter*, never looser — safe direction).
+ *
+ * Deliberately does NOT catch its own errors: the sole caller treats a
+ * throw as FAIL-CLOSED (reject the action) so a transient DB error
+ * cannot hand an attacker a free, uncounted action.
+ */
+export async function countAppliedActionsForPath(args: {
+  path: string;
+  windowMs: number;
+  now?: Date;
+}): Promise<number> {
+  const since = new Date((args.now ?? new Date()).getTime() - args.windowMs);
+  const [row] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(adminIdempotencyKeys)
+    .where(
+      and(eq(adminIdempotencyKeys.path, args.path), gt(adminIdempotencyKeys.createdAt, since)),
+    );
+  return row?.n ?? 0;
 }
 
 /**

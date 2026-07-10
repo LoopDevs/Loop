@@ -48,8 +48,11 @@ src/
 │   │                     timestamps + live-session count, support-tier,
 │   │                     A5-3), clear-otp-lockout.ts (POST clear the B5
 │   │                     lockout counter — admin-tier, NOT step-up, reuses
-│   │                     auth/otp-attempt-counter.ts's clearOtpAttempts,
-│   │                     A5-3); routes in routes/admin-staff.ts +
+│   │                     auth/otp-attempt-counter.ts's clearOtpAttempts;
+│   │                     bounded by a PER-TARGET 5/24h velocity cap via
+│   │                     idempotency-store.ts's countAppliedActionsForPath,
+│   │                     fail-closed on count error, A5-3); routes in
+│   │                     routes/admin-staff.ts +
 │   │                     routes/admin-support-ops.ts (auth-state) +
 │   │                     routes/admin-user-writes.ts (clear-otp-lockout).
 ├── config/handler.ts   ← GET /api/config (feature-flag snapshot — ADR 010)
