@@ -56,6 +56,7 @@ import {
   listActiveVaults,
   recordSharePriceSnapshot,
   getLatestSharePrice,
+  listSharePriceSnapshotsSince,
 } from '../registry.js';
 
 const mutableEnv = env as unknown as { LOOP_VAULTS_ENABLED: boolean };
@@ -185,5 +186,20 @@ describe('recordSharePriceSnapshot / getLatestSharePrice round-trip', () => {
       sharePricePpm: 1_000_000n,
       sourceLedger: null,
     });
+  });
+});
+
+describe('listSharePriceSnapshotsSince', () => {
+  it('returns an empty array when the flag is off, regardless of table contents', async () => {
+    dbState.selectRows = [SNAPSHOT_ROW];
+    const result = await listSharePriceSnapshotsSince('LOOPUSD', 'testnet', new Date(0));
+    expect(result).toEqual([]);
+  });
+
+  it('returns the configured rows when the flag is on', async () => {
+    mutableEnv.LOOP_VAULTS_ENABLED = true;
+    dbState.selectRows = [SNAPSHOT_ROW];
+    const result = await listSharePriceSnapshotsSince('LOOPUSD', 'testnet', new Date(0));
+    expect(result).toEqual([SNAPSHOT_ROW]);
   });
 });

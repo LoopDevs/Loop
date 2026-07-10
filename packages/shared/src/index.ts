@@ -37,3 +37,4 @@ export * from './user-favorites.js';
 export * from './user-recently-purchased.js';
 export * from './users-me.js';
 export * from './users-wallet.js';
+export * from './vault-apy.js';

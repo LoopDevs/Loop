@@ -45,6 +45,11 @@
  *   GET /flywheel-stats (60 — recycled-vs-total chip),
  *   GET /payment-method-share (60 — user's own rail mix; #643
  *   self-view of the admin /admin/orders/payment-method-share).
+ * - **Embedded wallet** (ADR 030 / ADR 031, mounted at `/api/me/*`
+ *   rather than `/api/users/me/*`) — GET /api/me/wallet (60 —
+ *   address + provisioning + on-chain balances + interest APY),
+ *   GET /api/me/vault-apy (60 — past-30d/90d APY per LOOP-branded
+ *   yield asset, ADR 031 §D8).
  */
 import type { Hono } from 'hono';
 import { rateLimit } from '../middleware/rate-limit.js';
@@ -78,6 +83,7 @@ import {
 } from '../users/favorites-handler.js';
 import { listRecentlyPurchasedHandler } from '../users/recently-purchased-handler.js';
 import { getMyWalletHandler } from '../users/wallet-handler.js';
+import { getVaultApyHandler } from '../users/vault-apy-handler.js';
 
 /** Mounts all `/api/users/me/*` routes on the supplied Hono app. */
 export function mountUserRoutes(app: Hono): void {
@@ -89,16 +95,25 @@ export function mountUserRoutes(app: Hono): void {
   // (the wallet-integration-plan's pinned path); same cache-control
   // + auth discipline as the /api/users/me namespace.
   app.use('/api/me/wallet', privateNoStoreResponse);
+  // ADR 031 §D8 (V5b) — the vault-APY surface sits beside /api/me/wallet
+  // under the same /api/me/* auth + cache discipline.
+  app.use('/api/me/vault-apy', privateNoStoreResponse);
 
   app.use('/api/users/me', requireAuth);
   app.use('/api/users/me/*', requireAuth);
   app.use('/api/me/wallet', requireAuth);
+  app.use('/api/me/vault-apy', requireAuth);
 
   // ── Profile ─────────────────────────────────────────────────
   app.get('/api/users/me', rateLimit('GET /api/users/me', 60, 60_000), getMeHandler);
   // ADR 030 Phase C4 — embedded-wallet balance card. 60/min matches
   // the profile read; the Horizon read behind it is 30s-cached.
   app.get('/api/me/wallet', rateLimit('GET /api/me/wallet', 60, 60_000), getMyWalletHandler);
+  // ADR 031 §D8 (V5b) — past-30-day / past-90-day APY per LOOP-branded
+  // yield asset. Same 60/min budget as the sibling wallet read; pure
+  // DB reads behind it (no live Soroban call), so no tighter limit
+  // needed for latency/cost reasons.
+  app.get('/api/me/vault-apy', rateLimit('GET /api/me/vault-apy', 60, 60_000), getVaultApyHandler);
   app.post(
     '/api/users/me/home-currency',
     rateLimit('POST /api/users/me/home-currency', 10, 60_000),

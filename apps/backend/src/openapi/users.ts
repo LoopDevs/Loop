@@ -33,6 +33,7 @@ import { registerUsersHistoryCreditsOpenApi } from './users-history-credits.js';
 import { registerUsersPendingPayoutsOpenApi } from './users-pending-payouts.js';
 import { registerUsersProfileOpenApi } from './users-profile.js';
 import { registerUsersWalletOpenApi } from './users-wallet.js';
+import { registerUsersVaultApyOpenApi } from './users-vault-apy.js';
 
 /**
  * Registers all `/api/users/me/*` schemas + paths on the
@@ -60,6 +61,12 @@ export function registerUsersOpenApi(
   // GET /api/me/wallet — address + provisioning + on-chain LOOP
   // balances + interest APY. Lives in ./users-wallet.ts.
   registerUsersWalletOpenApi(registry, errorResponse, loopAssetCode);
+
+  // ADR 031 §D8 (V5b) — GET /api/me/vault-apy: past-30d/90d APY per
+  // LOOP-branded yield asset. Lives in ./users-vault-apy.ts. Its own
+  // asset-code enum (current LOOPUSD/LOOPEUR/GBPLOOP naming), not the
+  // shared `loopAssetCode` param — see that module's header.
+  registerUsersVaultApyOpenApi(registry, errorResponse);
 
   // ─── Users cashback-history + credits (ADR 009 / 015) ──────────────────────
   //

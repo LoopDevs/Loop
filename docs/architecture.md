@@ -400,6 +400,7 @@ GET  /api/users/me/orders/summary   [authenticated — 5-number orders-page summ
 GET  /api/users/me/flywheel-stats   [authenticated — caller's LOOP-asset recycled order count + charge, ADR 015]
 GET  /api/users/me/payment-method-share [authenticated — caller's own rail mix, home-currency locked, ADR 010/015]
 GET  /api/me/wallet                [authenticated — embedded-wallet balance surface: address + provisioning + on-chain LOOP balances + interest APY (non-zero only when the ADR 031 on-chain mint path is enabled); never-500 last-known-good fallback, ADR 030 C4 / ADR 036]
+GET  /api/me/vault-apy             [authenticated — past-30d/90d realised APY per LOOP-branded yield asset (LOOPUSD/LOOPEUR from vault share-price history, GBPLOOP from interest-mint history); never discloses the yield mechanism, ADR 031 §D8]
 GET  /api/public/cashback-stats    [public — landing-page aggregates, never-500, ADR 009/015/020]
 GET  /api/public/top-cashback-merchants [public — landing-page "best cashback" list: ?limit + ?country (CAT-02) scoping, never-500, ADR 011/020]
 GET  /api/public/merchants/:id     [public — per-merchant SEO detail (accepts id or slug); ?country (CAT-02) 404s an out-of-country merchant, never-500, ADR 011/020]

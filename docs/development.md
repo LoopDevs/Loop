@@ -444,6 +444,14 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # ledger REST API). Required when LOOP_VAULTS_ENABLED=true.
 # LOOP_SOROBAN_RPC_URL=https://soroban-testnet.stellar.org
 
+# ADR 031 §Detailed design D8, V5b: APY snapshot cron
+# (credits/vaults/vault-apy-snapshot.ts) — periodically records each
+# active vault's live share price into vault_share_price_snapshots so
+# GET /api/me/vault-apy can compute a past-30d/90d APY from history
+# without hitting Soroban per request. 24h default. Runs under
+# LOOP_WORKERS_ENABLED AND LOOP_VAULTS_ENABLED.
+# LOOP_VAULT_APY_SNAPSHOT_INTERVAL_HOURS=24
+
 # Hardening A6: auto-refund late deposits (those landing after the
 # order expired). Default false → admin-triggered refunds only
 # (POST /api/admin/deposits/:paymentId/refund, admin + step-up). true →
