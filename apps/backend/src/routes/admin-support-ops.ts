@@ -1,15 +1,21 @@
 /**
  * Support-dashboard route mounts (ADR 037 §4) — the watcher-skip
  * browser, the per-user wallet card, the redemption re-fetch, the
- * reverse lookup, the fleet-wide ledger browser (A5-8), and the
- * per-subject audit timeline (A5-7). All SUPPORT-tier: these are
- * exactly the "find the customer, explain the state, unstick the
- * delivery" (plus, for the ledger browser and audit timeline, "see
- * where the money moved / what happened to this account") surfaces
- * the support role exists for. The explicit `requireStaff('support')`
- * markers are functionally redundant with the namespace blanket but
- * make each mount's tier reviewable in-place (and visible to
- * staff-route-gating.test.ts).
+ * reverse lookup, the fleet-wide ledger browser (A5-8), the
+ * per-subject audit timeline (A5-7), and the login/OTP support-state
+ * read (A5-3). All SUPPORT-tier: these are exactly the "find the
+ * customer, explain the state, unstick the delivery" (plus, for the
+ * ledger browser and audit timeline, "see where the money moved /
+ * what happened to this account", and for auth-state, "is this
+ * account locked out and why") surfaces the support role exists for.
+ * The explicit `requireStaff('support')` markers are functionally
+ * redundant with the namespace blanket but make each mount's tier
+ * reviewable in-place (and visible to staff-route-gating.test.ts).
+ *
+ * The login/OTP support-state read's companion ACTION (clearing the
+ * B5 lockout) is deliberately NOT here — it's admin-tier, mounted in
+ * `routes/admin-user-writes.ts` alongside `revoke-sessions`. See
+ * `admin/clear-otp-lockout.ts` for why.
  *
  * The three POST actions are idempotent re-drives of work the
  * customer already paid for; each carries the full ADR 017
@@ -40,6 +46,7 @@ import { adminRefetchRedemptionHandler } from '../admin/order-refetch-redemption
 import { adminLookupHandler } from '../admin/lookup.js';
 import { adminLedgerHandler } from '../admin/ledger.js';
 import { adminUserAuditTimelineHandler } from '../admin/user-audit-timeline.js';
+import { adminUserAuthStateHandler } from '../admin/user-auth-state.js';
 
 /**
  * Mounts the ADR 037 support-ops routes on the supplied Hono app.
@@ -127,5 +134,15 @@ export function mountAdminSupportOpsRoutes(app: Hono): void {
     rateLimit('GET /api/admin/users/:userId/audit', 120, 60_000),
     requireStaff('support'),
     adminUserAuditTimelineHandler,
+  );
+  // A5-3: login/OTP support state — B5 lockout snapshot + OTP
+  // request/verify history + live-session count. Read-only, never
+  // returns a code/hash. 120/min matches the other per-user JSON
+  // drills (ADR 022). See admin/user-auth-state.ts.
+  app.get(
+    '/api/admin/users/:userId/auth-state',
+    rateLimit('GET /api/admin/users/:userId/auth-state', 120, 60_000),
+    requireStaff('support'),
+    adminUserAuthStateHandler,
   );
 }

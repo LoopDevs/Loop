@@ -386,7 +386,7 @@
 - [ ] **A5-8 · Fleet-wide ledger browser.** _M · 💰._
 - [ ] **A5-7 · Per-subject audit view.** _M._
 - [ ] **A5-2 · Admin session-revocation UI.** _S–M · 🔐._
-- [ ] **A5-3 · Login / OTP support tooling.** _S–M · 🔐._
+- [x] **A5-3 · Login / OTP support tooling.** _S–M · 🔐._ Shipped 2026-07-10 — see readiness-backlog A5-3 for the full tier reasoning.
 
 ## Phase 5 — Fraud / abuse controls (currently absent)
 

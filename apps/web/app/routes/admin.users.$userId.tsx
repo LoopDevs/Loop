@@ -8,6 +8,7 @@ import { AdminNav } from '~/components/features/admin/AdminNav';
 import { AdminLookupSearch } from '~/components/features/admin/AdminLookupSearch';
 import { RequireStaff } from '~/components/features/admin/RequireAdmin';
 import { RevokeSessionsPanel } from '~/components/features/admin/RevokeSessionsPanel';
+import { AuthStatePanel } from '~/components/features/admin/AuthStatePanel';
 import { AdminUserFlywheelChip } from '~/components/features/admin/AdminUserFlywheelChip';
 import { CashbackSummaryChip } from '~/components/features/admin/CashbackSummaryChip';
 import { CopyButton } from '~/components/features/admin/CopyButton';
@@ -190,6 +191,15 @@ function AdminUserDetailRouteInner(): React.JSX.Element {
           own isAdminRole check. */}
       {isAdminRole && userQuery.data !== undefined && !userNotFound && userId !== undefined ? (
         <RevokeSessionsPanel userId={userId} userEmail={userQuery.data.email} />
+      ) : null}
+
+      {/* A5-3: login/OTP support state. Renders for BOTH staff roles
+          (unlike RevokeSessionsPanel above) — the read half is
+          support-visible; only the "Clear OTP lockout" button inside
+          self-hides for non-admin (server is admin-tier for the
+          clear; see AuthStatePanel's own doc for the tier reasoning). */}
+      {userQuery.data !== undefined && !userNotFound && userId !== undefined ? (
+        <AuthStatePanel userId={userId} userEmail={userQuery.data.email} />
       ) : null}
 
       <section className="rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">

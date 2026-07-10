@@ -1,10 +1,13 @@
 /**
- * `/api/admin/users/:userId/home-currency` route mount.
+ * Admin-tier user-scoped write mounts: `/api/admin/users/:userId/home-currency`,
+ * `/revoke-sessions` (B4), `/clear-otp-lockout` (A5-3), plus the
+ * sibling `/api/admin/deposits/:paymentId/refund` (A6).
  *
  * Sibling of `./admin-credit-writes.ts` for admin-mediated user-
- * property writes that aren't credit/refund/withdrawal — currently
- * just the home-currency flip (ADR 015 deferred § "self-serve
- * home-currency change — currently support-mediated").
+ * property writes that aren't credit/refund/withdrawal — the
+ * home-currency flip (ADR 015 deferred § "self-serve home-currency
+ * change — currently support-mediated"), incident-response session
+ * revocation (B4), and the B5 OTP-lockout clear (A5-3).
  *
  * Same middleware envelope as the credit writes:
  *   - mounted AFTER the parent admin middleware stack
@@ -23,6 +26,7 @@ import { requireAdminStepUp } from '../auth/admin-step-up-middleware.js';
 import { adminHomeCurrencySetHandler } from '../admin/home-currency-set.js';
 import { adminRevokeUserSessionsHandler } from '../auth/revoke-sessions-handler.js';
 import { adminDepositRefundHandler } from '../admin/deposit-refund-handler.js';
+import { adminClearOtpLockoutHandler } from '../admin/clear-otp-lockout.js';
 
 export function mountAdminUserWritesRoutes(app: Hono): void {
   app.post(
@@ -44,6 +48,21 @@ export function mountAdminUserWritesRoutes(app: Hono): void {
     rateLimit('POST /api/admin/users/:userId/revoke-sessions', 20, 60_000),
     requireStaff('admin'),
     adminRevokeUserSessionsHandler,
+  );
+
+  // A5-3: incident-response lever — clear the B5 verify-otp lockout
+  // counter for a user (the common support case: legit user
+  // fat-fingered the code, is locked out, needs to be let back in).
+  // Admin-tier; NOT step-up-gated (moves no value, and clearing the
+  // counter doesn't itself grant access — see admin/clear-otp-lockout.ts
+  // for the full tier reasoning). Requires `reason` + fires the ADR
+  // 017-lite Discord audit (unlike revoke-sessions, which predates
+  // that convention).
+  app.post(
+    '/api/admin/users/:userId/clear-otp-lockout',
+    rateLimit('POST /api/admin/users/:userId/clear-otp-lockout', 20, 60_000),
+    requireStaff('admin'),
+    adminClearOtpLockoutHandler,
   );
 
   // A6: refund an abandoned late deposit to its on-chain sender.

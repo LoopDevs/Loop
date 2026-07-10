@@ -394,6 +394,8 @@ POST /api/admin/users/:userId/refunds                   [admin — order-bound r
 POST /api/admin/users/:userId/emissions                 [admin — queue on-chain LOOP backfill, mirror NOT debited, ADR-024 / ADR 036]
 POST /api/admin/users/:userId/home-currency              [admin — change home_currency with safety preflight, ADR 015 deferred]
 POST /api/admin/users/:userId/revoke-sessions            [admin — B4: revoke a user's live sessions (incident response); step-up-exempt]
+GET  /api/admin/users/:userId/auth-state                 [staff — A5-3: B5 verify-otp lockout snapshot + OTP request/verify timestamps + live-session count; read-only, never returns a code/hash]
+POST /api/admin/users/:userId/clear-otp-lockout          [admin — A5-3: clear the B5 verify-otp lockout counter (reuses clearOtpAttempts); ADR-017-lite (Idempotency-Key + reason), step-up-exempt]
 POST /api/admin/deposits/:paymentId/refund               [admin + step-up — A6: refund an abandoned late deposit to its on-chain sender]
 GET  /api/users/me/favorites                            [user — favourite merchants, newest first; joined to in-memory catalog]
 POST /api/users/me/favorites                            [user — add a merchant to favourites; idempotent on (user_id, merchant_id)]

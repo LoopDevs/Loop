@@ -322,3 +322,48 @@ export interface AdminUserAuditTimelineResponse {
   /** Per-source cursors to fetch the next (older) page. */
   nextCursors: AdminAuditTimelineCursors;
 }
+
+// ─── Login / OTP support state (ADR 037 / readiness-backlog A5-3) ──────────
+
+/**
+ * `GET /api/admin/users/:userId/auth-state` — read-only login/OTP
+ * support snapshot: the B5 verify-otp lockout state
+ * (`otp_attempt_counters`), OTP issuance/verify history (aggregates
+ * over `otps` — never the codes or their hashes), and a live-session
+ * count (`refresh_tokens`). Support-tier (ADR 037 §3 — read views are
+ * shared). Deliberately never carries an OTP code, a code hash, or a
+ * refresh-token hash — state + timestamps + a count only, so this
+ * view can't be used to brute-force or replay a login.
+ */
+export interface AdminUserAuthStateResponse {
+  userId: string;
+  /** B5 per-email verify-otp lockout (`otp_attempt_counters`). */
+  otpLock: {
+    /** True when `lockedUntil` is set and still in the future. */
+    locked: boolean;
+    lockedUntil: string | null;
+    /** Failed verify attempts counted in the current (possibly lapsed) window. */
+    failedAttempts: number;
+  };
+  /** Most recent `request-otp` for this email, or null if none on record. */
+  lastOtpRequestedAt: string | null;
+  /** Most recent SUCCESSFUL `verify-otp` for this email, or null. */
+  lastOtpVerifiedAt: string | null;
+  /** Count of live (unrevoked, unexpired) `refresh_tokens` rows for this user. */
+  activeSessionCount: number;
+}
+
+/**
+ * `result` half of `POST /api/admin/users/:userId/clear-otp-lockout`
+ * (readiness-backlog A5-3). Admin-tier incident-response lever: clears
+ * the B5 verify-otp lockout counter for the user's email via the same
+ * `clearOtpAttempts` primitive a successful verify already uses, so a
+ * legitimate user who fat-fingered their code past the threshold can
+ * retry immediately instead of waiting out `OTP_EMAIL_LOCKOUT_MS`.
+ */
+export interface AdminClearOtpLockoutResult {
+  userId: string;
+  /** Whether the account was actually locked before this call — an idempotency signal, not just an echo. */
+  wasLocked: boolean;
+  cleared: true;
+}

@@ -543,3 +543,11 @@ export {
   type AdminUserAuditTimelineResponse,
   getAdminUserAuditTimeline,
 } from './admin-user-audit';
+
+// A5-3: login/OTP support state — read (support-tier) + the
+// B5-lockout clear action (admin-tier). Wire shapes live in
+// `@loop/shared/admin-support-ops.ts` alongside the other per-user
+// ADR 037 reads above; its own slice because the clear action's tier
+// (admin, not support) differs from every other read/action pair on
+// this page.
+export { getAdminUserAuthState, clearAdminOtpLockout } from './admin-user-auth-state';

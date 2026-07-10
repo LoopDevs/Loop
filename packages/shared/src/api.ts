@@ -72,6 +72,10 @@ export const ApiErrorCode = {
   DAILY_LIMIT_EXCEEDED: 'DAILY_LIMIT_EXCEEDED',
   // Hardening B5 — per-email OTP verify lockout (verify-otp).
   TOO_MANY_ATTEMPTS: 'TOO_MANY_ATTEMPTS',
+  // A5-3 — per-target velocity cap on admin clear-otp-lockout (429).
+  OTP_LOCKOUT_CLEAR_RATE_EXCEEDED: 'OTP_LOCKOUT_CLEAR_RATE_EXCEEDED',
+  // A5-3 — clear-otp-lockout fail-closed when the per-target count query errors (503).
+  OTP_LOCKOUT_CLEAR_RATE_CHECK_UNAVAILABLE: 'OTP_LOCKOUT_CLEAR_RATE_CHECK_UNAVAILABLE',
   // Server / upstream
   INTERNAL_ERROR: 'INTERNAL_ERROR',
   UPSTREAM_ERROR: 'UPSTREAM_ERROR',

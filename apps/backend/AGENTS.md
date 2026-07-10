@@ -42,9 +42,19 @@ src/
 │   │                     lookup), ledger.ts (fleet-wide credit_transactions
 │   │                     browser, A5-8), user-audit-timeline.ts (per-subject
 │   │                     audit timeline merging admin actions + ledger +
-│   │                     orders + payouts + session revocations, A5-7);
-│   │                     routes in routes/admin-staff.ts +
-│   │                     routes/admin-support-ops.ts.
+│   │                     orders + payouts + session revocations, A5-7),
+│   │                     user-auth-state.ts (GET login/OTP support-state
+│   │                     read: B5 lockout snapshot + OTP request/verify
+│   │                     timestamps + live-session count, support-tier,
+│   │                     A5-3), clear-otp-lockout.ts (POST clear the B5
+│   │                     lockout counter — admin-tier, NOT step-up, reuses
+│   │                     auth/otp-attempt-counter.ts's clearOtpAttempts;
+│   │                     bounded by a PER-TARGET 5/24h velocity cap via
+│   │                     idempotency-store.ts's countAppliedActionsForPath,
+│   │                     fail-closed on count error, A5-3); routes in
+│   │                     routes/admin-staff.ts +
+│   │                     routes/admin-support-ops.ts (auth-state) +
+│   │                     routes/admin-user-writes.ts (clear-otp-lockout).
 ├── config/handler.ts   ← GET /api/config (feature-flag snapshot — ADR 010)
 ├── public/             ← ADR 020 Tier-1 unauthenticated never-500 surface:
 │   │                     cashback-stats, top-cashback-merchants, cashback-preview,
