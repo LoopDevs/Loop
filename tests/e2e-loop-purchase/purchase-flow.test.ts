@@ -168,6 +168,27 @@ test.describe('loop-native purchase-through-the-UI', () => {
   }) => {
     const session = await signIn(page);
     await gotoFirstMerchantDetail(page);
+    // Flake fix (Q6-4 follow-up #2): let the merchant-detail page fully
+    // settle before starting the purchase. The gift-card route
+    // (routes/gift-card.$name.tsx) fires an AUTHENTICATED enriched
+    // `GET /api/merchants/:id` detail fetch after the cached record
+    // loads. An instrumented local timeline showed it lands ~110ms
+    // BEFORE the order POST on a fast machine — but on a slow CI runner
+    // it lands AFTER order-create, and the resulting mid-flow re-render
+    // remounts `PurchaseContainer`, firing its `useEffect` cleanup
+    // (`store.reset()` + `setLoopCreate(null)`) and permanently dropping
+    // the ephemeral loop-native payment screen back to a blank amount
+    // form (the exact failure in #1621's + #1624's first CI attempts:
+    // order fine server-side, UI reset — USDC re-selected, amount
+    // cleared). Waiting for network idle here — no order-polling has
+    // started yet, so it resolves cleanly once the merchant queries
+    // finish — removes that race and mirrors a real user who reads the
+    // fully-loaded page before choosing an amount. (The auth-settle
+    // wait in signIn and the deterministic order-state poll below,
+    // both merged in #1624, were necessary but not sufficient on their
+    // own — this settle is the piece that closes the enriched-detail
+    // race.)
+    await page.waitForLoadState('networkidle');
 
     // Loop-native order creation offers a payment-rail picker
     // (`config.loopOrdersEnabled` — the whole point of this suite).
