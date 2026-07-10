@@ -157,6 +157,19 @@ export const infraEnvFields = {
   // + this flag off is byte-identical to pre-migration.
   LOOP_VAULTS_ENABLED: envBoolean.default(false),
 
+  // ADR 031 §Detailed design D2/D9, V2 (Soroban vault client). Soroban
+  // RPC endpoint the vault client (`credits/vaults/vault-client.ts`)
+  // uses for account loads, `simulateTransaction` /
+  // `prepareTransaction` / `sendTransaction` / `getTransaction` —
+  // distinct from `LOOP_STELLAR_HORIZON_URL` (Horizon is a classic-
+  // ledger REST API; Soroban RPC is a separate JSON-RPC endpoint,
+  // even on the same network). Nullable — the cross-field check below
+  // requires it only when `LOOP_VAULTS_ENABLED=true` (mirrors the
+  // `LOOP_WALLET_PROVIDER=privy` → `PRIVY_APP_ID`/`PRIVY_APP_SECRET`
+  // pattern), so a deployment that never flips the vault flag doesn't
+  // need to configure Soroban RPC at all.
+  LOOP_SOROBAN_RPC_URL: z.string().url().optional(),
+
   // Hardening A6: auto-refund late deposits. A deposit that lands just
   // after its order expires is recorded + abandoned; an operator can
   // always refund it to the sender via
