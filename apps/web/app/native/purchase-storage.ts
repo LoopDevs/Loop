@@ -1,11 +1,20 @@
 import { Capacitor } from '@capacitor/core';
 
 /**
- * Storage key for pending order state. Exported so stores/purchase.store.ts
- * can read the same key from sessionStorage on synchronous init without
- * duplicating the literal string.
+ * Storage key for pending order state (legacy CTX-proxy path). Exported so
+ * stores/purchase.store.ts can read the same key from sessionStorage on
+ * synchronous init without duplicating the literal string.
  */
 export const PENDING_ORDER_KEY = 'loop_pending_order';
+/**
+ * Storage key for an in-progress loop-native order (ADR 010), consumed by
+ * `~/hooks/use-loop-order-restore.ts`. Deliberately a SEPARATE key from
+ * `PENDING_ORDER_KEY` above — the two paths persist differently-shaped
+ * records (this one wraps a full `CreateLoopOrderResponse`, the legacy one
+ * is a flat `paymentAddress`/`xlmAmount`/`memo` record), so sharing a key
+ * risks one path's stale record being misread as the other's.
+ */
+export const LOOP_NATIVE_PENDING_ORDER_KEY = 'loop_native_pending_order';
 /** Default expiry window for a saved pending order if caller doesn't set one. */
 const DEFAULT_EXPIRY_SECONDS = 15 * 60; // 15 minutes
 
@@ -94,8 +103,15 @@ async function nativeReadWithMigration(key: string): Promise<string | null> {
  * for records without one — a silent no-op footgun if the caller forgets.
  * Default to now + 15min so a caller that omits expiresAt still gets a
  * functional round-trip. Callers can override by including their own.
+ *
+ * `key` defaults to the legacy CTX-proxy `PENDING_ORDER_KEY` — pass
+ * `LOOP_NATIVE_PENDING_ORDER_KEY` (or any other key) to store under a
+ * different namespace, e.g. `~/hooks/use-loop-order-restore.ts`.
  */
-export async function savePendingOrder(data: Record<string, unknown>): Promise<void> {
+export async function savePendingOrder(
+  data: Record<string, unknown>,
+  key: string = PENDING_ORDER_KEY,
+): Promise<void> {
   const payload =
     typeof data.expiresAt === 'number'
       ? data
@@ -103,31 +119,33 @@ export async function savePendingOrder(data: Record<string, unknown>): Promise<v
   const json = JSON.stringify(payload);
   if (Capacitor.isNativePlatform()) {
     const secure = await loadSecureStorage();
-    await secure.set(PENDING_ORDER_KEY, json);
+    await secure.set(key, json);
     // Belt-and-braces: if a Preferences record is still around from
     // before A4-055 (pre-migration), the next read would migrate it
     // and clobber the value we're writing now. Drop the legacy copy
     // here too so the secure-storage write is canonical.
     const prefs = await loadPreferences();
-    await prefs.remove({ key: PENDING_ORDER_KEY });
+    await prefs.remove({ key });
     return;
   }
   try {
-    sessionStorage.setItem(PENDING_ORDER_KEY, json);
+    sessionStorage.setItem(key, json);
   } catch {
     /* sessionStorage unavailable */
   }
 }
 
 /** Loads pending order state. Returns null if not found or expired. */
-export async function loadPendingOrder(): Promise<Record<string, unknown> | null> {
+export async function loadPendingOrder(
+  key: string = PENDING_ORDER_KEY,
+): Promise<Record<string, unknown> | null> {
   let raw: string | null = null;
 
   if (Capacitor.isNativePlatform()) {
-    raw = await nativeReadWithMigration(PENDING_ORDER_KEY);
+    raw = await nativeReadWithMigration(key);
   } else {
     try {
-      raw = sessionStorage.getItem(PENDING_ORDER_KEY);
+      raw = sessionStorage.getItem(key);
     } catch {
       /* sessionStorage unavailable */
     }
@@ -141,7 +159,7 @@ export async function loadPendingOrder(): Promise<Record<string, unknown> | null
   } catch {
     // Invalid JSON — corrupt record, clean it up so we don't keep
     // failing to parse on every cold start.
-    void clearPendingOrder();
+    void clearPendingOrder(key);
     return null;
   }
 
@@ -163,24 +181,24 @@ export async function loadPendingOrder(): Promise<Record<string, unknown> | null
   }
 
   // Genuinely expired record — clean it up.
-  void clearPendingOrder();
+  void clearPendingOrder(key);
   return null;
 }
 
 /** Clears pending order state. */
-export async function clearPendingOrder(): Promise<void> {
+export async function clearPendingOrder(key: string = PENDING_ORDER_KEY): Promise<void> {
   if (Capacitor.isNativePlatform()) {
     const secure = await loadSecureStorage();
-    await secure.remove(PENDING_ORDER_KEY);
+    await secure.remove(key);
     // Sweep the legacy Preferences key too so a stale plaintext
     // copy from before A4-055 doesn't resurrect the order on the
     // next read.
     const prefs = await loadPreferences();
-    await prefs.remove({ key: PENDING_ORDER_KEY });
+    await prefs.remove({ key });
     return;
   }
   try {
-    sessionStorage.removeItem(PENDING_ORDER_KEY);
+    sessionStorage.removeItem(key);
   } catch {
     /* sessionStorage unavailable */
   }

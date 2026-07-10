@@ -113,6 +113,33 @@ export interface LoopOrderView {
   paymentMethod: OrderPaymentMethod;
   paymentMemo: string | null;
   stellarAddress: string | null;
+  /**
+   * Server-derived payment-guidance fields (Q6-4b hardening) — the amount
+   * + SEP-7 deep-link a client needs to render the pay screen, re-quoted
+   * from server-authoritative `chargeMinor`/`chargeCurrency`/`paymentMethod`
+   * + env issuers on read (the same derivation the idempotent-POST replay
+   * uses). Populated by `GET /api/orders/loop/:id` ONLY for a non-terminal,
+   * on-chain (xlm/usdc/loop_asset) order whose asset-amount + address could
+   * be resolved; null otherwise — for credit-funded orders (no on-chain
+   * payment), for terminal orders (nothing left to pay), in the list
+   * endpoint (which never renders pay instructions), and when the oracle /
+   * issuer config is unavailable at read time. Re-quoting on read is correct:
+   * it yields the CURRENT required guidance for a still-pending order, and
+   * the deposit watcher re-validates sufficiency at settlement regardless.
+   *
+   * These make the restore-on-remount path (`use-loop-order-restore.ts`)
+   * server-authoritative: the client rebuilds the pay screen ENTIRELY from
+   * this response, never from client-persisted storage, so no
+   * payment-directing field can be tampered via sessionStorage/Keychain.
+   */
+  /** Asset-native amount to send (decimal string, 7 decimals). Null when not derivable/applicable. */
+  assetAmount: string | null;
+  /** SEP-7 `web+stellar:pay?...` deep-link. Null when not derivable/applicable. */
+  paymentUri: string | null;
+  /** LOOP-asset code for `loop_asset` orders (USDLOOP/GBPLOOP/EURLOOP); null for xlm/usdc/credit. */
+  assetCode: string | null;
+  /** LOOP-asset issuer for `loop_asset` orders; null for xlm/usdc/credit. */
+  assetIssuer: string | null;
   userCashbackMinor: string;
   ctxOrderId: string | null;
   redeemCode: string | null;

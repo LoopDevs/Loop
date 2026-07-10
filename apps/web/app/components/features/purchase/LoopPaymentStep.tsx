@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { ApiException } from '@loop/shared';
 import {
   getLoopOrder,
   isLoopOrderTerminal,
@@ -18,6 +19,17 @@ export interface LoopPaymentStepProps {
   create: CreateLoopOrderResponse;
   /** Called when the order reaches a terminal state (fulfilled / failed / expired). */
   onTerminal?: ((order: LoopOrderView) => void) | undefined;
+  /**
+   * Called once if `GET /api/orders/loop/:id` settles into a
+   * non-retryable 404/403 — the order doesn't exist, or doesn't belong
+   * to the caller (e.g. a different account restored a stale persisted
+   * order id from the same device). Without this, the poll would keep
+   * re-firing the same failing request every 3s and the screen would
+   * sit on "Creating order…" forever. Distinct from `onTerminal`
+   * because there's no `LoopOrderView` to hand back — nothing was ever
+   * fetched.
+   */
+  onOrderNotFound?: (() => void) | undefined;
 }
 
 /**
@@ -32,8 +44,13 @@ export interface LoopPaymentStepProps {
  * will flip it to paid on the next tick. We still poll so the UI
  * follows the state through to fulfilled.
  */
-export function LoopPaymentStep({ create, onTerminal }: LoopPaymentStepProps): React.JSX.Element {
+export function LoopPaymentStep({
+  create,
+  onTerminal,
+  onOrderNotFound,
+}: LoopPaymentStepProps): React.JSX.Element {
   const [notifiedTerminal, setNotifiedTerminal] = useState(false);
+  const [notifiedNotFound, setNotifiedNotFound] = useState(false);
   // A11Y-001 / CF-35: move focus to the redemption block once the order
   // reaches `fulfilled` so an SR user lands on the gift card code/PIN
   // instead of the change being announced silently somewhere off-screen.
@@ -47,7 +64,19 @@ export function LoopPaymentStep({ create, onTerminal }: LoopPaymentStepProps): R
     // 120/min — a single-tab poll at 3s is well inside that.
     refetchInterval: (query) => {
       const order = query.state.data as LoopOrderView | undefined;
-      if (order === undefined) return 3000;
+      if (order === undefined) {
+        // A non-retryable 404/403 means this order id doesn't exist for
+        // this caller — stop hammering the same doomed request every
+        // 3s. Any other error (5xx, network, timeout) keeps polling;
+        // `shouldRetry` already backs off TanStack's own inline retry
+        // for those, but this interval poll is what recovers once a
+        // transient blip clears.
+        const err = query.state.error;
+        if (err instanceof ApiException && (err.status === 404 || err.status === 403)) {
+          return false;
+        }
+        return 3000;
+      }
       return isLoopOrderTerminal(order.state) ? false : 3000;
     },
   });
@@ -63,6 +92,17 @@ export function LoopPaymentStep({ create, onTerminal }: LoopPaymentStepProps): R
     setNotifiedTerminal(true);
     onTerminal?.(order);
   }, [orderQuery.data, notifiedTerminal, onTerminal]);
+
+  // Fire onOrderNotFound exactly once if the GET settles into a
+  // non-retryable 404/403 — see the prop doc for why this needs its own
+  // signal (no LoopOrderView was ever fetched, so onTerminal can't fire).
+  useEffect(() => {
+    if (notifiedNotFound) return;
+    const err = orderQuery.error;
+    if (!(err instanceof ApiException) || (err.status !== 404 && err.status !== 403)) return;
+    setNotifiedNotFound(true);
+    onOrderNotFound?.();
+  }, [orderQuery.error, notifiedNotFound, onOrderNotFound]);
 
   const stateLabel =
     orderQuery.data !== undefined ? loopOrderStateLabel(orderQuery.data.state) : 'Creating order…';

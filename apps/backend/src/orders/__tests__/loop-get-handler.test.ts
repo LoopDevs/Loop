@@ -51,6 +51,35 @@ vi.mock('../../db/schema.js', async () => {
   };
 });
 
+// Q6-4b: the get handler overlays server-derived payment guidance for
+// non-terminal on-chain orders. Mock the derivation so these tests stay
+// deterministic (no live oracle/FX call). Default returns a usdc payload;
+// tests override `derivedState.result`. The derivation logic itself is
+// covered directly by loop-replay-response.test.ts (same shared function).
+const { derivedState } = vi.hoisted(() => ({
+  derivedState: {
+    result: {
+      ok: true as const,
+      payment: {
+        method: 'usdc' as const,
+        stellarAddress: 'GDERIVED',
+        memo: 'MEMO-ABC',
+        amountMinor: '10000',
+        currency: 'USD',
+        assetAmount: '24.0000000',
+        paymentUri: 'web+stellar:pay?destination=GDERIVED&amount=24.0000000&memo=MEMO-ABC',
+      },
+    } as unknown,
+    calls: 0,
+  },
+}));
+vi.mock('../loop-payment-instructions.js', () => ({
+  deriveLoopPaymentInstructions: vi.fn(async () => {
+    derivedState.calls += 1;
+    return derivedState.result;
+  }),
+}));
+
 import { loopGetOrderHandler } from '../loop-handler.js';
 import { encryptRedeemField, resetRedeemKeyCache } from '../redeem-crypto.js';
 
@@ -80,7 +109,46 @@ function makeCtx(opts: { auth?: LoopAuthContext; param?: string }): Context {
 beforeEach(() => {
   orderState.row = undefined;
   resetRedeemKeyCache();
+  derivedState.calls = 0;
+  derivedState.result = {
+    ok: true,
+    payment: {
+      method: 'usdc',
+      stellarAddress: 'GDERIVED',
+      memo: 'MEMO-ABC',
+      amountMinor: '10000',
+      currency: 'USD',
+      assetAmount: '24.0000000',
+      paymentUri: 'web+stellar:pay?destination=GDERIVED&amount=24.0000000&memo=MEMO-ABC',
+    },
+  };
 });
+
+function onChainRow(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: 'order-oc',
+    userId: 'user-uuid',
+    merchantId: 'm1',
+    faceValueMinor: 10_000n,
+    currency: 'USD',
+    chargeMinor: 10_000n,
+    chargeCurrency: 'USD',
+    paymentMethod: 'usdc',
+    paymentMemo: 'MEMO-ABC',
+    userCashbackMinor: 0n,
+    ctxOrderId: null,
+    redeemCode: null,
+    redeemPin: null,
+    redeemUrl: null,
+    state: 'pending_payment',
+    failureReason: null,
+    createdAt: new Date('2026-04-21T00:00:00Z'),
+    paidAt: null,
+    fulfilledAt: null,
+    failedAt: null,
+    ...overrides,
+  };
+}
 
 describe('loopGetOrderHandler', () => {
   it('404 when auth missing', async () => {
@@ -256,5 +324,82 @@ describe('loopGetOrderHandler', () => {
     const body = (await res.json()) as Record<string, unknown>;
     expect(body['redeemCode']).toBe('LEGACY-PLAINTEXT-CODE');
     expect(body['redeemPin']).toBeNull();
+  });
+
+  describe('Q6-4b: server-derived payment guidance', () => {
+    it('overlays assetAmount + paymentUri for a non-terminal on-chain order', async () => {
+      orderState.row = onChainRow({ state: 'pending_payment' });
+      const res = await loopGetOrderHandler(makeCtx({ auth: LOOP_AUTH, param: 'order-oc' }));
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(body['assetAmount']).toBe('24.0000000');
+      expect(body['paymentUri']).toBe(
+        'web+stellar:pay?destination=GDERIVED&amount=24.0000000&memo=MEMO-ABC',
+      );
+      // usdc → asset code/issuer not surfaced as top-level fields
+      expect(body['assetCode']).toBeNull();
+      expect(body['assetIssuer']).toBeNull();
+      expect(derivedState.calls).toBe(1);
+    });
+
+    it('surfaces assetCode + assetIssuer for a loop_asset order', async () => {
+      derivedState.result = {
+        ok: true,
+        payment: {
+          method: 'loop_asset',
+          stellarAddress: 'GDERIVED',
+          memo: 'MEMO-ABC',
+          amountMinor: '10000',
+          currency: 'USD',
+          assetCode: 'USDLOOP',
+          assetIssuer: 'GISSUER',
+          assetAmount: '100.0000000',
+          paymentUri: 'web+stellar:pay?destination=GDERIVED&amount=100.0000000',
+        },
+      };
+      orderState.row = onChainRow({ state: 'pending_payment', paymentMethod: 'loop_asset' });
+      const res = await loopGetOrderHandler(makeCtx({ auth: LOOP_AUTH, param: 'order-oc' }));
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(body['assetCode']).toBe('USDLOOP');
+      expect(body['assetIssuer']).toBe('GISSUER');
+      expect(body['assetAmount']).toBe('100.0000000');
+    });
+
+    it('does NOT derive guidance for a terminal order (nulls, no derivation call)', async () => {
+      orderState.row = onChainRow({ state: 'fulfilled', fulfilledAt: new Date() });
+      const res = await loopGetOrderHandler(makeCtx({ auth: LOOP_AUTH, param: 'order-oc' }));
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(body['assetAmount']).toBeNull();
+      expect(body['paymentUri']).toBeNull();
+      expect(derivedState.calls).toBe(0);
+    });
+
+    it('does NOT derive guidance for a credit order (nulls, no derivation call)', async () => {
+      orderState.row = onChainRow({
+        state: 'pending_payment',
+        paymentMethod: 'credit',
+        paymentMemo: null,
+      });
+      const res = await loopGetOrderHandler(makeCtx({ auth: LOOP_AUTH, param: 'order-oc' }));
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(body['assetAmount']).toBeNull();
+      expect(body['paymentUri']).toBeNull();
+      expect(derivedState.calls).toBe(0);
+    });
+
+    it('leaves guidance null when the derivation fails (oracle down / issuer unset) — order view still returns', async () => {
+      derivedState.result = {
+        ok: false,
+        status: 503,
+        code: 'SERVICE_UNAVAILABLE',
+        message: 'USDC payment not configured',
+      };
+      orderState.row = onChainRow({ state: 'pending_payment' });
+      const res = await loopGetOrderHandler(makeCtx({ auth: LOOP_AUTH, param: 'order-oc' }));
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(body['state']).toBe('pending_payment');
+      expect(body['assetAmount']).toBeNull();
+      expect(body['paymentUri']).toBeNull();
+    });
   });
 });

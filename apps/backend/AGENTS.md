@@ -76,6 +76,7 @@ src/
 ├── orders/
 │   ├── handler.ts      ← Legacy CTX-proxy order creation
 │   ├── loop-handler.ts ← Loop-native order creation with FX-pin (ADR 010 + 015)
+│   ├── loop-payment-instructions.ts ← Pure server-authoritative payment-guidance derivation (oracle/FX re-quote + SEP-7 build) shared by the idempotent-POST replay (loop-replay-response.ts, thin wrapper) AND GET /api/orders/loop/:id's payment fields (Q6-4b remount-restore hardening)
 │   ├── repo.ts         ← Order INSERT + cashback-split computation
 │   ├── transitions.ts  ← markOrderPaid (loop_asset: mirror debit + issuer-return burn enqueue, ADR 036) / markOrderProcuring / markOrderFulfilled (writes ledger + pending_payouts inside one txn)
 │   ├── procurement.ts  ← paid → procuring → fulfilled worker (USDC-default, XLM-floor fallback, ADR 015)
