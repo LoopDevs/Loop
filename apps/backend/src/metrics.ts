@@ -25,6 +25,10 @@
  * O(observed URLs) — see the request-counter middleware in
  * `app.ts` for the labelling rule.
  */
+import { WEB_VITAL_NAMES, type WebVitalName } from '@loop/shared';
+
+export { WEB_VITAL_NAMES };
+export type { WebVitalName };
 
 /**
  * A4-076: ASCII Unit Separator. Cannot appear in any HTTP method,
@@ -56,6 +60,15 @@ export interface Metrics {
    * 5xx-rate signal.
    */
   requestDurationHistograms: Map<string, RequestDurationHistogram>;
+  /**
+   * ADR 048: Core Web Vitals histograms captured via
+   * `POST /api/public/rum`, keyed by vital name. Fixed 5-entry set
+   * (`WEB_VITAL_NAMES`) rather than a `Map` — cardinality is bounded
+   * by construction, unlike the route-keyed maps above.
+   */
+  webVitals: Record<WebVitalName, ValueHistogram>;
+  /** ADR 048: total page-view events recorded via `POST /api/public/rum`. */
+  pageViewsTotal: number;
 }
 
 /**
@@ -86,10 +99,54 @@ function emptyHistogram(): RequestDurationHistogram {
   };
 }
 
+/**
+ * ADR 048: bucket boundaries per Core Web Vital, in the vital's
+ * native unit — milliseconds for LCP/INP/FCP/TTFB, an unitless
+ * layout-shift score for CLS. Chosen from the vitals.dev "good" /
+ * "needs improvement" / "poor" thresholds so `histogram_quantile()`
+ * queries land on meaningful boundaries without an operator having to
+ * memorise the Web Vitals spec.
+ */
+export const WEB_VITAL_BUCKETS: Record<WebVitalName, readonly number[]> = {
+  LCP: [500, 1000, 1800, 2500, 3000, 4000, 6000, 10000],
+  INP: [50, 100, 200, 300, 500, 800, 1500],
+  CLS: [0.01, 0.05, 0.1, 0.15, 0.25, 0.5, 1],
+  FCP: [500, 1000, 1800, 2500, 3000, 4500],
+  TTFB: [100, 200, 400, 800, 1200, 1800, 3000],
+};
+
+/**
+ * Generic value histogram — same cumulative-bucket shape as
+ * `RequestDurationHistogram` but field names that don't imply
+ * "seconds", since Core Web Vitals mix ms (four of them) and an
+ * unitless score (CLS).
+ */
+export interface ValueHistogram {
+  /** Cumulative bucket counts; length matches the metric's bucket-boundary array. */
+  buckets: number[];
+  /** Sum of observed raw values, in the metric's native unit. */
+  sum: number;
+  /** Total observation count (matches the +Inf bucket). */
+  count: number;
+}
+
+function emptyValueHistogram(bucketCount: number): ValueHistogram {
+  return { buckets: new Array<number>(bucketCount).fill(0), sum: 0, count: 0 };
+}
+
+function initialWebVitals(): Record<WebVitalName, ValueHistogram> {
+  const entries = WEB_VITAL_NAMES.map(
+    (name) => [name, emptyValueHistogram(WEB_VITAL_BUCKETS[name].length)] as const,
+  );
+  return Object.fromEntries(entries) as Record<WebVitalName, ValueHistogram>;
+}
+
 export const metrics: Metrics = {
   rateLimitHitsTotal: 0,
   requestsTotal: new Map(),
   requestDurationHistograms: new Map(),
+  webVitals: initialWebVitals(),
+  pageViewsTotal: 0,
 };
 
 /**
@@ -149,6 +206,31 @@ export function recordRequestDuration(
 }
 
 /**
+ * ADR 048: records one Core Web Vital observation from
+ * `POST /api/public/rum` into its fixed histogram. Negative or
+ * non-finite values are clamped to 0 defensively — the handler
+ * already Zod-validates the range, but this mirrors
+ * `recordRequestDuration`'s belt-and-braces.
+ */
+export function recordWebVital(name: WebVitalName, value: number): void {
+  const obs = Number.isFinite(value) && value > 0 ? value : 0;
+  const hist = metrics.webVitals[name];
+  const bounds = WEB_VITAL_BUCKETS[name];
+  hist.count++;
+  hist.sum += obs;
+  for (let i = 0; i < bounds.length; i++) {
+    if (obs <= bounds[i]!) {
+      hist.buckets[i]!++;
+    }
+  }
+}
+
+/** ADR 048: increments the page-view counter from `POST /api/public/rum`. */
+export function incrementPageView(): void {
+  metrics.pageViewsTotal++;
+}
+
+/**
  * Test helper: reset both counters between vitest cases. Module
  * state persists across `app.request(...)` calls inside a single
  * `vitest run`, so any test that asserts on absolute counter
@@ -158,4 +240,6 @@ export function __resetMetricsForTests(): void {
   metrics.rateLimitHitsTotal = 0;
   metrics.requestsTotal.clear();
   metrics.requestDurationHistograms.clear();
+  metrics.webVitals = initialWebVitals();
+  metrics.pageViewsTotal = 0;
 }

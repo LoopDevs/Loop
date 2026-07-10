@@ -397,6 +397,7 @@ GET  /api/public/cashback-preview  [public — pre-signup "calculate your cashba
 GET  /api/public/loop-assets       [public — configured (code, issuer) pairs for trustline setup, never-500, ADR 015/020]
 GET  /api/public/flywheel-stats    [public — 30-day fulfilled + recycled counts + % pill, never-500, ADR 015/020]
 GET  /api/public/geo               [public — IP-geolocation first guess for the `/` locale redirect + onboarding currency → { countryCode, region }, never-500, ADR 020/033/034]
+POST /api/public/rum               [public — first-party, cookieless RUM intake: one Core Web Vital observation or a bare page-view marker, folded into /metrics (loop_web_vital_* / loop_page_views_total); no DB, no PII, no persistent id, never-500, ADR 020/048]
 GET  /api/admin/merchant-cashback-configs              [admin]
 GET  /api/admin/merchant-cashback-configs/history      [admin — fleet-wide config-edit audit feed, ADR 011/018]
 PUT  /api/admin/merchant-cashback-configs/:merchantId  [admin]

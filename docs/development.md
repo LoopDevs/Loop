@@ -45,6 +45,12 @@ VITE_API_URL=http://localhost:8080
 
 # Error tracking (optional — get DSN from sentry.io)
 # VITE_SENTRY_DSN=https://xxx@yyy.ingest.sentry.io/zzz
+
+# ADR 048: first-party, cookieless Core Web Vitals + page-view capture.
+# 'true' → dynamically imports `web-vitals` and POSTs observations to
+# POST /api/public/rum (folded into /metrics — no DB, no PII, no
+# persistent id). Default unset/off.
+# VITE_ANALYTICS_ENABLED=true
 ```
 
 ### apps/web/.env.production (committed, safe — no secrets)

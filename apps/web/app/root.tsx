@@ -13,6 +13,7 @@ import { QueryClient, QueryCache, MutationCache, QueryClientProvider } from '@ta
 import { I18nextProvider } from 'react-i18next';
 import i18n from '~/i18n/i18next';
 import { initSentryLazily, captureExceptionLazily } from '~/utils/sentry-lazy';
+import { initAnalyticsLazily } from '~/utils/analytics-lazy';
 import { scrubErrorForSentry } from '~/utils/sentry-error-scrubber';
 import { forwardQueryErrorToSentry, type SentryLike } from '~/utils/query-error-reporting';
 import type { Route } from './+types/root';
@@ -53,6 +54,12 @@ const Onboarding = lazy(() =>
 // scrubber) is preserved verbatim in `~/utils/sentry-lazy`. No-op on the
 // server and when no DSN is configured.
 initSentryLazily();
+
+// ADR 048: first-party, cookieless Core Web Vitals + page-view capture.
+// No-op on the server and when `VITE_ANALYTICS_ENABLED` isn't set —
+// dark by default, same idle-scheduled dynamic-import pattern as the
+// Sentry loader above so an unset flag costs nothing.
+initAnalyticsLazily();
 
 // A2-1322: forward unexpected TanStack Query / Mutation failures into
 // Sentry. Before this hook, call-site `onError` was the only way errors
