@@ -1,7 +1,7 @@
 # ADR 031: Per-currency yield via Loop-curated vaults and treasury
 
-Status: Proposed
-Date: 2026-05-05 (rewritten across six iterations mid-session — see Decision history)
+Status: Proposed — **detailed to build-ready 2026-07-10** (deploy-by-config confirmed → no from-scratch contract audit; Privy downgraded from critical-path blocker to assumption + fallback per operator; full implementation spec added under §Detailed design). Remaining for **Accepted**: signing-path chosen (D1), vault config review + Blend/DeFindex protocol DD, counsel sign-off.
+Date: 2026-05-05 (six iterations mid-session — see Decision history); detailed 2026-07-10
 Supersedes: ADR 015 §"Defindex deposit automation — currently manual ops top-up" — replaced by Loop-curated DeFindex vaults backing LOOPUSD/LOOPEUR + treasury-managed yield for GBPLOOP.
 Amends: ADR 015 §"Loop issues three branded Stellar assets" — three Loop-branded yield assets retained, with LOOP-prefix naming. LOOPUSD and LOOPEUR are DeFindex vault shares (Soroban) where Loop is the curator. GBPLOOP is a Stellar classic asset, 1:1 backed, since no Stellar GBP yield primitive exists. GBPLOOP retains its existing name — the v6 LOOPGBP rename was dropped in v7. None of the three assets has been issued in production.
 Related: ADR 015 (stablecoin topology — amended), ADR 016 (operator-signed payouts), ADR 030 (Privy wallet)
@@ -117,6 +117,8 @@ Mass-withdraw stress: queue withdraws above hot-float capacity with visible "ETA
 
 ### Fee adjustment process (LOOPUSD / LOOPEUR vaults)
 
+> **Superseded in part by §Detailed design D7 (2026-07-10).** The "caps in vault contract" and the on-chain `propose_fee_change` / `apply_fee_change` 7-day timelock below assumed Loop-authored contract logic. Under deploy-by-config Loop authors no contract: the stock DeFindex fee is performance-only and **Manager-adjustable at any time**, DeFindex keeps 25% of collected fees and Loop's Fee Receiver 75%, and Loop's governance (multisig approval + user-notice hold) is **off-chain**. Read D7 as the current model; the below is retained for the design rationale.
+
 Vault fee schedule is on-chain state with caps:
 
 - Initial: 0% management + 50% performance, single schedule across both vaults
@@ -153,6 +155,95 @@ All three currencies surface the same shape:
 - **Source-level (ToS / regulator-facing)**: full vault structure, fee schedule, change history, cap values
 
 **No yield-source / strategy disclosure to users.** No mention of Blend, DeFindex, Soroban, lending pools, vaults, or treasury investment. The product is "earn yield on your Loop balance"; everything else is operational detail surfaced only to regulators.
+
+## Detailed design (build-ready — 2026-07-10)
+
+Details the LOOPUSD/LOOPEUR vault path to build-ready depth, incorporating the 2026-07-10 DeFindex deploy-by-config finding and the operator decision that Privy custody is **assumed workable, with a documented fallback rather than a hard blocker** (if Privy's Soroban support is insufficient, Loop swaps the signing layer — another provider or a self-managed signer — without changing the vault architecture). GBPLOOP's design is already built (`credits/interest-mint.ts`, migration 0041) and is unchanged; this section is the vault path only.
+
+### D1. Custody & signing — two roles, and why the wallet-provider's job is narrow
+
+The earlier framing ("Privy must sign arbitrary `vault.deposit` / `vault.redeem` calls") overstated the requirement. Split signing into two roles:
+
+- **Operator / treasury signing (server-side, Loop-held key).** ALL vault-contract interactions — `deposit` (supply backing → receive shares), `withdraw` / `redeem` (burn shares → receive backing), and the fee sweep — are invoked from Loop's **operator account** and signed server-side with the operator secret (the same KMS/env-held signing already used for payouts, ADR 016, extended to Soroban `InvokeHostFunction`). The user's wallet is never involved in a vault call. The operator→user **share transfer** on emission is also operator-signed.
+- **User-wallet signing (via the ADR 030 provider abstraction).** The ONLY user-side operation is signing a **transfer of the vault share token** from the user's wallet back to the operator on withdraw / spend. The provider must: (a) custody a Soroban token, (b) surface its balance, (c) sign one `transfer(from=user, to=operator, amount)` on the share-token contract via policy-gated server signing. Nothing more.
+
+So the Soroban requirement on the wallet provider collapses to **"hold a Soroban token and sign a transfer of it"** — far closer to classic-asset support than "authorise arbitrary contract calls." That is the whole Privy dependency.
+
+**Provider abstraction + fallback (operator decision, 2026-07-10).** Signing goes through `getWalletProvider()` (ADR 030); primary is Privy. If Privy's Soroban support is insufficient, the fallback is a **signing-layer swap only** — vault, backing, fee, and invariants are unchanged:
+
+1. Another Soroban-capable custody provider (dfns / Turnkey) behind the same interface.
+2. A Loop-managed signer: a KMS-custodied per-user keypair, transfers signed server-side under the same policy engine — acceptable for a yield-wallet instrument and consistent with a neobank-custodial posture.
+3. Graceful degradation (the old v5 wrapper, now a fallback not a failure): if no provider can custody a Soroban token at all, the user instead holds a Loop-issued **classic** receipt asset 1:1 with their vault position while Loop holds the actual shares operator-side; withdraw burns the classic receipt and the operator redeems shares. More Loop-side code, zero Soroban custody requirement.
+
+Because deposit / redeem are operator-signed regardless, none of these fallbacks touches the vault, the backing, the fee, or the invariants — only where the user's "I authorise this withdraw" signature originates.
+
+### D2. Soroban interaction spec
+
+Vault calls use `@stellar/stellar-sdk` against the Soroban RPC, operator-signed:
+
+- **Emission deposit:** `vault.deposit(amounts=[backing], min_shares, from=operator, invest=true)` → operator receives N shares (Blend supply happens inside the strategy). `min_shares` guards against a share-price move between quote and submit.
+- **Withdraw / redeem:** `vault.withdraw(shares=N, min_amounts=[backing], from=operator)` → burns N shares, returns backing (Blend withdraw inside the strategy). `min_amounts` slippage guard.
+- **Submit pipeline:** build → `simulateTransaction` (resource fee + footprint) → assemble → operator-sign → `sendTransaction` → poll `getTransaction`. Wrap in a fee-bump (or a channel account, ADR 044) for reliability.
+- **At-most-once fence (reuse CF-18):** build the tx deterministically, persist its hash before submit, submit; a retry re-submits the SAME hash (Stellar dedupes) rather than minting a second deposit — the same idempotency discipline the payout worker already uses.
+
+### D3. Data model
+
+New tables (`credits` / `payments` domain migrations):
+
+- `loop_vaults` — registry: `asset_code` (LOOPUSD | LOOPEUR), `vault_contract_id`, `share_asset_id`, `underlying_asset` (USDC/EURC + issuer), `strategy` (Blend pool id), `network` (testnet | mainnet), `active`. One row per currency per network.
+- `vault_share_price_snapshots` — `(vault, taken_at, share_price_ppm, source_ledger)`; a daily snapshot for APY + value display, plus an on-emission / on-withdraw snapshot.
+- The off-chain conservation mirror reuses the EXISTING `credit_transactions` + `user_credits` (ADR 009), extended so a vault emission / redemption is a conserved event under the `assert_emission_conservation` trigger. Authority model (per ADR 036): the on-chain **share balance** is authoritative for the user's holding; `user_credits` mirrors the underlying-denominated liability (`shares × share_price`). Redemption extinguishes both halves (burn shares + zero the mirror slice), same shape as ADR 036's issuer-return burn.
+
+### D4. Money invariants (vault path) + watchers
+
+- **INV-V1 (no unbacked shares):** every user-held LOOPUSD/LOOPEUR share was minted against a real backing deposit in the same tx-chain. Enforced by the operator-signed emission (deposit → receive exactly-N shares → transfer N to user), the conservation trigger, and the drift watcher.
+- **INV-V2 (redemption solvency):** `Σ user share value ≤ vault-redeemable backing + hot float` at all times. A scheduled watcher compares total user share value (`Σ shares × share_price`) against `vault_redeemable + hot_float` and pages on breach.
+- **INV-V3 (fee ≠ backing):** the Fee-Receiver's accrued performance fee is Loop revenue, never counted as user backing / liability.
+- Extend the existing `asset-drift-watcher` to the two share assets: on-chain shares held-for-users vs the off-chain mirror, plus the solvency band.
+
+### D5. Emission flow (idempotent)
+
+Cashback of $X (USD home) — every step idempotent on the cashback event id:
+
+1. Backend records the emission intent (idempotency key = cashback event id).
+2. Operator `vault.deposit([X USDC], min_shares, from=operator)` → receives N shares (CF-18 hash fence).
+3. Operator `share.transfer(operator → user_wallet, N)`.
+4. Write the conserved `credit_transactions` mirror row (`assert_emission_conservation`); snapshot the share price.
+5. On any step failure the idempotency key + CF-18 fence make a retry resume, not duplicate. A partial state (deposited-but-not-transferred) is recoverable — the operator holds the shares; a re-drive completes the transfer — the same recovery discipline as the order-procurement sweep.
+
+### D6. Withdraw / spend flow
+
+1. User taps "Withdraw $50". Backend computes shares `N = 50 / share_price + buffer`.
+2. Wallet provider signs `share.transfer(user → operator, N)` — the only user-side signature in the whole system.
+3. **Fast path:** operator pays the user from the **hot float** (canonical USDC/EURC) immediately — settles in seconds; the received shares replenish the float asynchronously via a batched `vault.withdraw`.
+4. **Slow path (float exhausted / mass withdraw):** operator `vault.withdraw(N)` synchronously, then pays out; above hot-float capacity, queue with a visible ETA (the EMI pattern, §Liquidity safeguard).
+5. Gift-card spend uses the same redeem mechanic, routing the underlying USDC to the order's payment path.
+
+### D7. Fee accounting — reconciled with deploy-by-config
+
+The v6/v7 assumptions of a Loop-authored fee contract (5%/75% caps enforced in Loop's own code; a 7-day on-chain `propose_fee_change` / `apply_fee_change` timelock, §Fee adjustment) are **superseded** — Loop authors no contract. The real model:
+
+- **DeFindex stock fee:** performance-only, set at vault creation, **Manager-adjustable at any time** (no built-in on-chain timelock). Of collected fees, **DeFindex protocol keeps 25%**, Loop's **Fee Receiver keeps 75%** (a 50% fee → Loop nets 37.5% of gains; the user keeps the other 50%). Any hard fee ceiling is DeFindex's, not Loop's — confirm during config review (OQ8).
+- **Loop's fee governance is therefore OFF-CHAIN:** the multisig-approval + user-notice policy gates _who is allowed to call_ the Manager fee-change; the "timelock" is an operational hold, not a contract guarantee. If a contract-level timelock turns out to be required for the regulatory posture, that is the one concrete reason to reconsider a fork — otherwise default to off-chain governance.
+- **Revenue realization:** the Fee Receiver (a Loop Stellar address, ideally a multisig) accrues the fee at the vault-contract level on yield events; Loop sweeps to treasury on a schedule.
+
+### D8. APY computation
+
+- Vaults: `APY = (share_price(now) / share_price(30d_ago)) ^ (365/30) − 1`, from `vault_share_price_snapshots`; the 90-day range from the same series. GBPLOOP: from `gbploop_interest_payments` mint history (already built).
+- A read endpoint exposes `{ assetCode, past30dApy, past90dRange }` for the wallet display (§User-facing display); it never exposes the strategy / source.
+
+### D9. Build sequence (ships dark behind `LOOP_PHASE_1_ONLY`)
+
+1. Deploy testnet vaults via the DeFindex Factory (config: asset, Blend strategy, roles, fee, symbol) — no contract code.
+2. Backend: the `loop_vaults` registry + the Soroban deposit/redeem/transfer integration + the conservation mirror + snapshots + the withdraw hot-float path, all behind the flag.
+3. Wire the wallet provider's share-token custody + transfer signing (Privy; validate against a Privy dev account — the narrow "hold + transfer a Soroban token" requirement, D1).
+4. Extend the drift / solvency watchers; add the APY endpoint + display.
+5. Config review (roles, fee, upgradability, admin-key custody) + Blend/DeFindex protocol DD + counsel sign-off.
+6. Deploy mainnet vaults; provision the hot floats; flip `LOOP_PHASE_1_ONLY=false` once T1 + the discount demo are done.
+
+### D10. Superseded by deploy-by-config
+
+For the record, these earlier-version assumptions are void: "Loop owns the vault contract code" (§Negative → a config-only deploy); "caps in vault contract 5%/75%, contract-enforced" and the on-chain "propose/apply_fee_change 7-day timelock" (§Fee adjustment → Loop-authored-contract logic; the stock DeFindex fee is Manager-adjustable with governance moved off-chain, D7); and the from-scratch contract audit (retired — see the 2026-07-10 finding under §LOOPUSD/LOOPEUR).
 
 ## Consequences
 
@@ -193,8 +284,8 @@ All three currencies surface the same shape:
 
 ## Open questions
 
-1. **Privy custody of Soroban tokens (vault shares).** **Critical-path blocker.** Verify with Privy via dev account: can they (a) custody a Soroban token, (b) display balance in their UI, (c) authorise programmatic transfer via policy-gated server signing? If any "no", this architecture fails. Fallback: if Privy can't support Soroban, fall back to v5-style classic-asset wrappers with hidden vault backing (more complex on Loop's side, simpler on Privy's).
-2. **Privy programmatic signing of Soroban contract calls.** Specifically `vault.deposit(amount)` and `vault.redeem(amount)` on the LOOPUSD/LOOPEUR vault contracts. Need Privy to authorise these without per-tx user prompts.
+1. **Privy custody + transfer of the Soroban share token.** **Downgraded from critical-path blocker → assumption + fallback** (operator decision, 2026-07-10; see §Detailed design D1). The requirement is narrow: the wallet provider need only (a) custody a Soroban token, (b) display its balance, (c) sign a single `transfer(user → operator)` of it via policy-gated server signing — it does **not** sign vault calls (those are operator-signed). Validate against a Privy dev account; if insufficient, swap the signing layer (alt provider / Loop-managed KMS signer / the v5 classic-receipt wrapper, D1) — a signing-layer change, not a design failure.
+2. ~~**Privy programmatic signing of Soroban contract calls (`vault.deposit` / `vault.redeem`).**~~ **Void (2026-07-10):** vault `deposit` / `redeem` are **operator-signed**, not user-wallet-signed (§Detailed design D1) — the wallet provider never touches a vault call. Folded into OQ1's narrow "custody + transfer a share token" requirement.
 3. ~~**DeFindex curator template / fork lineage.**~~ **Resolved 2026-07-10**: neither — DeFindex is deploy-by-config (its Factory mints an instance of DeFindex's own **audited** vault contract; the Blend pool strategy is DeFindex-audited too). Loop authors no contract, so there is **no from-scratch contract audit** — see the finding under §LOOPUSD/LOOPEUR and the re-scoped §Negative item. Residual work is a deployment-configuration review + Blend/DeFindex protocol DD (Open-questions 4/5).
 4. **DeFindex vault DD: USDC strategy (Blend USDC pool).** Depth, audit posture, historical worst-case redemption.
 5. **DeFindex vault DD: EURC strategy (Blend EURC pool).** Same checks.
@@ -209,7 +300,7 @@ All three currencies surface the same shape:
 
 This ADR stays **Proposed** — and no implementation work (vault contract, mint cron, payout-builder changes) starts — until every blocking condition below has a **recorded** answer:
 
-1. **Privy Soroban custody DD passes** (Open questions 1–2; shared critical-path blocker with ADR 030). Privy must custody the LOOPUSD/LOOPEUR vault-share tokens, display their balances, and policy-gate programmatic `vault.deposit` / `vault.redeem` signing without per-tx prompts. If Privy fails, the gate re-runs against the dfns fallback (ADR 030) or this design reverts to the v5-style classic-asset wrapper noted in Open question 1.
+1. **Wallet-provider signing path chosen** (Open question 1; operator decided 2026-07-10 that Privy is assumed workable with a fallback, so this is **no longer a hard blocker**). Confirm the narrow requirement — custody + `transfer` a Soroban share token, NOT vault-call signing (§Detailed design D1) — against a Privy dev account; if insufficient, select the fallback (alt provider / Loop-managed KMS signer / v5 classic-receipt wrapper). Accepted requires the signing path **chosen**, not a specific vendor passing.
 2. ~~**DeFindex template / fork lineage chosen**~~ **Resolved 2026-07-10** (Open question 3): deploy-by-config, no fork — Loop authors no contract.
 3. **Vault deployment-config review + Blend/DeFindex protocol DD** (§Negative; replaces the former from-scratch contract audit, now moot per item 2). Accepted requires the configuration review (roles, fee, upgradability, admin-key custody) + the protocol DD **recorded** — there is no external audit slot to book, so this is no longer an uncompressible-lead-time gate.
 4. **Blend strategy DD recorded** (Open questions 4–5). Depth, audit posture, and historical worst-case redemption for the Blend USDC and EURC pools.
