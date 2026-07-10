@@ -49,6 +49,7 @@ import { vaultHotFloat, type LoopVaultAssetCode, type LoopVaultNetwork } from '.
 import { logger } from '../logger.js';
 import { readVaultState, withdrawFromVault } from '../credits/vaults/vault-client.js';
 import type { LoopVaultRow } from '../credits/vaults/registry.js';
+import { recordVaultOperatorMovement } from './vault-operator-movement.js';
 
 const log = logger.child({ area: 'hot-float' });
 
@@ -269,5 +270,29 @@ export async function runHotFloatReplenishTick(
     },
     'hot-float replenished',
   );
+
+  // V5 (ADR 031 §D4): explain this USDC-denominated inflow to R3-1
+  // (`treasury/hot-float-reconciliation.ts`) — best-effort, placed
+  // after the float credit commits. UNLIKE the emission depositStep
+  // and redemption slow-path call sites (both fenced by a state-CAS
+  // claim, so they genuinely record-once), THIS site has no per-call
+  // idempotency fence — it inherits the module's own documented KNOWN
+  // GAP above (no CF-18 hash persisted for the replenish withdraw). So
+  // in the accepted double-withdraw residual, two landed withdraws each
+  // reach their own `recordVaultOperatorMovement` and BOTH movements
+  // are recorded. That is the CORRECT outcome here: each real on-chain
+  // USDC inflow is a distinct movement R3-1 must account for, and each
+  // is credited to the float by at most the tick that observed it —
+  // suppressing the second note would hide the very drift R3-1 exists
+  // to surface. It is a genuine double-record, not the "record-once"
+  // guarantee the other two sites have; called out so a future reader
+  // doesn't assume parity.
+  await recordVaultOperatorMovement({
+    vault,
+    direction: 'in',
+    amountStroops: amountOutStroops,
+    reason: `Hot-float replenish withdraw (${vault.assetCode}/${vault.network}, ${shares} shares)`,
+  });
+
   return { replenished: true, amountMinor: amountOutMinor, txHash: result.txHash };
 }

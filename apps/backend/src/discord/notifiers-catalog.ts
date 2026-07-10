@@ -98,6 +98,36 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
       'Closes the notifyDriftFailedRows incident once the failed burn / interest-mint rows for the asset converge (retried to confirmation). Paired open + close, same pattern as notifyAssetDrift / notifyAssetDriftRecovered.',
   },
   {
+    name: 'notifyVaultShareDrift',
+    channel: 'monitoring',
+    description:
+      "Fires when a LOOPUSD/LOOPEUR vault's on-chain user-held shares (totalSupply minus the operator's own share balance) drifts from the off-chain-tracked net emitted/redeemed shares past the configured threshold (INV-V1, ADR 031 §D4, V5). Fire-once/re-arm via watchdog_alert_state, paired with notifyVaultShareDriftRecovered.",
+  },
+  {
+    name: 'notifyVaultShareDriftRecovered',
+    channel: 'monitoring',
+    description:
+      'Closes the notifyVaultShareDrift incident once share drift returns within threshold. Paired open + close, same pattern as notifyAssetDrift / notifyAssetDriftRecovered.',
+  },
+  {
+    name: 'notifyVaultSolvencyBreach',
+    channel: 'monitoring',
+    description:
+      "Fires when a LOOPUSD/LOOPEUR vault's own off-chain USD liability (fixed cashback credited minus redemption debits) exceeds the vault-redeemable backing plus hot float past tolerance (INV-V2, ADR 031 §D4, V5) — a genuine strategy impairment drops totalManaged below the fixed liability. Fire-once/re-arm via watchdog_alert_state, paired with notifyVaultSolvencyRecovered.",
+  },
+  {
+    name: 'notifyVaultSolvencyRecovered',
+    channel: 'monitoring',
+    description:
+      'Closes the notifyVaultSolvencyBreach incident once the off-chain USD liability returns within the vault-redeemable backing + hot float tolerance.',
+  },
+  {
+    name: 'notifyVaultFloatDesync',
+    channel: 'monitoring',
+    description:
+      "Fires on every bad-state run (not fire-once — same at-least-once-reminder posture as notifyOperatorFloatDrift) of treasury/hot-float-reconciliation.ts's float/pool desync check: the operator's actual on-chain vault-share balance disagrees with what the emission/redemption bookkeeping expects, beyond tolerance (ADR 031 §D4, V5) — the reconciler for the V4-accepted slow-withdraw-race residual.",
+  },
+  {
     name: 'notifyCircuitBreaker',
     channel: 'monitoring',
     description:

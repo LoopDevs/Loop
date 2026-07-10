@@ -286,4 +286,50 @@ export const infraEnvFields = {
   // advisory lock. Runs under LOOP_WORKERS_ENABLED.
   LOOP_LEDGER_INVARIANT_INTERVAL_HOURS: z.coerce.number().int().positive().default(24),
   LOOP_AUTH_ROW_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
+
+  // ADR 031 §Detailed design D4, V5: vault drift + solvency watcher
+  // (`credits/vaults/vault-drift-watcher.ts`) — the Soroban
+  // LOOPUSD/LOOPEUR twin of the classic asset-drift watcher above.
+  // 300s (5m) default, same cadence reasoning: an accounting metric,
+  // not latency-sensitive. Runs under LOOP_WORKERS_ENABLED AND
+  // LOOP_VAULTS_ENABLED (checked inside the tick — an unstarted
+  // watcher with vaults off is consistent, not merely inert).
+  LOOP_VAULT_DRIFT_WATCHER_INTERVAL_SECONDS: z.coerce.number().int().positive().default(300),
+
+  // INV-V1 threshold, in the vault share token's 7-decimal smallest
+  // unit (same convention as LOOP-asset stroops). 1e8 = 10 whole
+  // shares — mirrors LOOP_ASSET_DRIFT_THRESHOLD_STROOPS's default
+  // reasoning: room for a handful of in-flight emissions/redemptions
+  // without paging on normal queue depth.
+  LOOP_VAULT_DRIFT_SHARES_THRESHOLD_STROOPS: z.coerce.bigint().nonnegative().default(100_000_000n),
+
+  // INV-V2 threshold, in the vault's underlying-asset 7-decimal
+  // smallest unit. 1e8 = $10 of tolerance on user-share value vs
+  // vault-redeemable backing + hot float — same default as the
+  // classic asset-drift threshold for consistency.
+  LOOP_VAULT_DRIFT_SOLVENCY_THRESHOLD_STROOPS: z.coerce
+    .bigint()
+    .nonnegative()
+    .default(100_000_000n),
+
+  // ADR 031 §Detailed design D4, V5: vault-aware hot-float
+  // reconciliation (`treasury/hot-float-reconciliation.ts`) — checks
+  // the operator's actual on-chain vault-share balance against what
+  // the emission/redemption bookkeeping (`vault_hot_float
+  // .pending_unredeemed_shares` + in-flight `vault_emissions
+  // 'deposited'` rows) says it should be holding, catching the V4-
+  // accepted slow-withdraw-race / phantom-share residual
+  // (`docs/invariants.md`'s "Known residual (NOT self-correcting)"
+  // under Vault redemptions). Daily default, matching R3-1's cadence
+  // (an accounting reconciliation, not latency-sensitive). Runs under
+  // LOOP_WORKERS_ENABLED AND LOOP_VAULTS_ENABLED.
+  LOOP_VAULT_FLOAT_RECONCILIATION_INTERVAL_HOURS: z.coerce.number().int().positive().default(24),
+
+  // Share-count tolerance for the float/pool desync check above, same
+  // 7-decimal share-token unit as LOOP_VAULT_DRIFT_SHARES_THRESHOLD_STROOPS.
+  // Tighter than the drift watcher's threshold (1e6 = 0.1 share)
+  // because this check compares two figures that should track exactly
+  // in normal operation (no in-flight emission/redemption window to
+  // absorb) — see the module header for why a gap here is meaningful.
+  LOOP_VAULT_FLOAT_SHARES_THRESHOLD_STROOPS: z.coerce.bigint().nonnegative().default(1_000_000n),
 };

@@ -78,6 +78,7 @@ import {
   withdrawFromVault,
   transferShares,
   readVaultState,
+  getShareBalance,
   VaultDisabledError,
   VaultSlippageError,
   VaultPostSubmitSlippageError,
@@ -718,5 +719,24 @@ describe('readVaultState', () => {
       return nativeToScVal([]); // empty managed-funds
     });
     await expect(readVaultState({ vault: VAULT })).rejects.toThrow(VaultResultParseError);
+  });
+});
+
+describe('getShareBalance', () => {
+  it('reads SEP-41 balance(address) on the share-token contract', async () => {
+    simulateMock.mockImplementation(async (args: { functionName: string; contractId: string }) => {
+      expect(args.functionName).toBe('balance');
+      expect(args.contractId).toBe(SHARE_CONTRACT_ID);
+      return nativeToScVal(4_200_000n, { type: 'i128' });
+    });
+    const balance = await getShareBalance({ vault: VAULT, address: USER_ADDRESS });
+    expect(balance).toBe(4_200_000n);
+  });
+
+  it('throws VaultDisabledError when the flag is off', async () => {
+    vaultsEnabledMock.mockReturnValueOnce(false);
+    await expect(getShareBalance({ vault: VAULT, address: USER_ADDRESS })).rejects.toThrow(
+      VaultDisabledError,
+    );
   });
 });

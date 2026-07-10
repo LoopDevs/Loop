@@ -54,6 +54,11 @@ const TABLES_TO_TRUNCATE = [
   // seeded float balance would leak across tests within this file.
   'vault_redemptions',
   'vault_hot_float',
+  // ADR 031 §D4 (V5, migration 0063): the vault-aware hot-float
+  // reconciliation's audit trail. No FK to anything else in this
+  // list (a standalone per-(asset_code, network, tick) run row) —
+  // same "CASCADE never reaches it" reasoning as `vault_hot_float`.
+  'vault_float_reconciliation_runs',
   'interest_pool_alert_state',
   'watchdog_alert_state',
   'otp_attempt_counters',

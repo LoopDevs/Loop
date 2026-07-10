@@ -746,6 +746,19 @@ export {
   notifyDriftFailedRowsCleared,
 } from './monitoring-asset-drift.js';
 
+// `notifyVaultShareDrift` / `notifyVaultShareDriftRecovered` /
+// `notifyVaultSolvencyBreach` / `notifyVaultSolvencyRecovered` (the
+// paired open-and-close vault-drift-watcher notifiers, ADR 031 §D4,
+// V5) live in `./monitoring-vault-drift.ts`. Re-exported below so
+// existing import sites resolve unchanged.
+export {
+  notifyVaultShareDrift,
+  notifyVaultShareDriftRecovered,
+  notifyVaultSolvencyBreach,
+  notifyVaultSolvencyRecovered,
+  notifyVaultFloatDesync,
+} from './monitoring-vault-drift.js';
+
 // `notifyStuckProcurementSwept` (A2-621) and
 // `notifyPaymentWatcherStuck` (A2-626) — the two stuck-row sweeper
 // notifiers — live in `./monitoring-stuck-sweepers.ts`. Re-exported

@@ -256,13 +256,53 @@ against the ADR 030 wallet-provider abstraction, reusing the SAME
 `attachUserWalletSignature` raw-hash-signing mechanism
 `orders/redeem.ts`'s classic-asset flow already uses — this is an
 ASSUMPTION flagged for operator DD (§D1 open question 1), not yet
-validated against a real Privy dev account. Still open: the scheduled
-share-price snapshotter (§D8 — the `recordSharePriceSnapshot` helper
-exists and V3's mirror step calls it per-emission, but no periodic
-snapshotter runs independently of an emission), the APY endpoint +
-display, and real-Privy-Soroban validation (the one remaining piece of
-step 3, wallet-side share-token custody — the narrow "hold + transfer"
-requirement is coded, unverified against a live provider).
+validated against a real Privy dev account.
+
+**V5 (§D4, observability — required before `LOOP_VAULTS_ENABLED` flips
+on) shipped**: `credits/vaults/vault-drift-watcher.ts` — the Soroban
+LOOPUSD/LOOPEUR twin of `payments/asset-drift-watcher.ts`, checking
+INV-V1 (on-chain user-held shares `totalSupply − operatorBalance` vs
+the off-chain-tracked net, `credits/vaults/vault-share-accounting.ts`)
+and INV-V2 (the vault path's OWN off-chain USD mirror liability vs
+`totalManaged` + hot float — deliberately NOT `userShares × sharePrice`,
+which is tautologically dead since `sharePrice = totalManaged/totalSupply`)
+on a schedule, paging Discord fire-once/re-arm via
+`watchdog_alert_state`. The user-holds/operator-holds split keys on the
+CONFIRMED-landed timestamps (`transferred_at`/`collected_at`), NOT the
+pre-submit CF-18 `*_tx_hash` (a terminal-`failed` emission whose
+transfer never landed is correctly counted as operator-held, so it
+can't mask a real shortfall). `treasury/hot-float-reconciliation.ts`
+closes two V4-review gaps: (a) makes R3-1
+(`payments/operator-float-reconciliation.ts`) vault-aware by recording
+an explanatory `operator_manual_movements` row
+(`treasury/vault-operator-movement.ts`) whenever a vault call moves the
+operator's USDC balance — R3-1's indexer only sees classic Horizon
+`payment` ops, so a Soroban `InvokeHostFunction` vault deposit/withdraw
+was previously invisible and would have read as false drift; scoped to
+USDC (LOOPUSD) only, LOOPEUR/EURC still has no R3-1 coverage — and (b)
+detects (does not yet prevent) the V4-accepted slow-withdraw-race /
+phantom-share float desync via a new `vault_float_reconciliation_runs`
+audit table (migration 0063).
+
+**Pre-flip config validation (required before `LOOP_VAULTS_ENABLED=true`
+— confirm at the §D9 step 5 config review, full detail in
+`vault-drift-watcher.ts`'s header):** (i) the DeFindex performance-fee
+payout mechanics — if the fee is share-minted to a Fee-Receiver, those
+shares can MASK a real negative drift/shortfall (not merely false-page),
+so confirm it's taken from managed funds pre-share-price, or subtract
+the Fee-Receiver balance; (ii) `DISCORD_WEBHOOK_MONITORING` is set (an
+unset webhook makes `sendWebhook` succeed silently → a real breach is
+swallowed and the fire-once alert never re-fires); (iii) the underlying
+is a 7-decimal at-par SAC, `share_asset_issuer == vault_contract_id`,
+and `LOOP_STELLAR_DEPOSIT_ADDRESS == the operator-secret pubkey`.
+
+Still open: the scheduled share-price snapshotter (§D8 — the
+`recordSharePriceSnapshot` helper exists and V3's mirror step calls it
+per-emission, but no periodic snapshotter runs independently of an
+emission), the APY endpoint + display, and real-Privy-Soroban
+validation (the one remaining piece of step 3, wallet-side share-token
+custody — the narrow "hold + transfer" requirement is coded, unverified
+against a live provider).
 
 ### D10. Superseded by deploy-by-config
 

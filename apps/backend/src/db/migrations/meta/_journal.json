@@ -442,6 +442,13 @@
       "when": 1780189300000,
       "tag": "0062_vault_redemptions",
       "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1780189400000,
+      "tag": "0063_vault_float_reconciliation",
+      "breakpoints": true
     }
   ]
 }
