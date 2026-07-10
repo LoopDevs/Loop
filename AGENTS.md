@@ -492,6 +492,19 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # under LOOP_WORKERS_ENABLED.
 # LOOP_LEDGER_INVARIANT_INTERVAL_HOURS=24
 
+# R3-1: operator XLM/USDC float reconciliation — historical conservation
+# check over the deposit/operator wallet from an operator-created
+# baseline (POST /api/admin/operator-float/baselines, admin + step-up).
+# Fails closed to `needs_baseline` (and pages) with no active baseline —
+# it never re-scans Horizon from genesis. XLM gets a wider default
+# tolerance to absorb Stellar tx fees (~100-200 stroops/tx, uncounted by
+# the model); USDC pays no fee so its default stays exact. Operator
+# runbook (baseline setup + memo policy + drift triage):
+# docs/runbooks/operator-float-drift.md. Runs under LOOP_WORKERS_ENABLED.
+# LOOP_OPERATOR_FLOAT_RECONCILIATION_INTERVAL_HOURS=24
+# LOOP_OPERATOR_FLOAT_XLM_THRESHOLD_STROOPS=10000000    # 1 XLM
+# LOOP_OPERATOR_FLOAT_USDC_THRESHOLD_STROOPS=1          # 1 stroop (exact)
+
 # ADR 030: provider-agnostic embedded-wallet layer. '' (default)
 # → OFF: getWalletProvider() returns null. 'privy' → Privy REST adapter
 # (fetch + Zod, no SDK dep); PRIVY_APP_ID + PRIVY_APP_SECRET then

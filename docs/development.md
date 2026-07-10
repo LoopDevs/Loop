@@ -475,6 +475,31 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # advisory lock; runs under LOOP_WORKERS_ENABLED.
 # LOOP_LEDGER_INVARIANT_INTERVAL_HOURS=24
 
+# R3-1 operator XLM/USDC float reconciliation (production-readiness
+# pass, 2026-07-10). Historical conservation check over the real
+# deposit/operator Stellar wallet — the one automated reconciliation
+# INV-1 (mirror=ledger) and INV-4 (on-chain-LOOP-vs-mirror) don't cover,
+# since neither watches the wallet every real deposit dollar actually
+# flows through. Fails CLOSED to a `needs_baseline` state (and pages
+# Discord, same at-least-once cadence as drift) until an operator
+# creates a baseline via the audited, step-up-gated
+# `POST /api/admin/operator-float/baselines` — with no active baseline
+# the indexer never touches Horizon at all, so a fresh production
+# deploy cannot accidentally re-scan the account's entire payment
+# history. Once a baseline exists, its Horizon cursor columns are
+# DB-enforced NOT NULL + non-empty (migration 0057) for the same
+# reason: an omitted `cursor` query param walks Horizon from genesis
+# instead of the baseline's anchor point. XLM's threshold defaults
+# wider than USDC's to absorb Stellar tx fees the model doesn't count
+# (~100-200 stroops per operator-submitted tx); USDC pays no on-chain
+# fee so its default stays exact. Operator runbook (how to compute +
+# set the real production baseline, the manual-movement memo/linkage
+# policy, and drift-page triage): docs/runbooks/operator-float-drift.md.
+# Runs under LOOP_WORKERS_ENABLED.
+# LOOP_OPERATOR_FLOAT_RECONCILIATION_INTERVAL_HOURS=24
+# LOOP_OPERATOR_FLOAT_XLM_THRESHOLD_STROOPS=10000000    # 1 XLM
+# LOOP_OPERATOR_FLOAT_USDC_THRESHOLD_STROOPS=1          # 1 stroop (exact)
+
 # ── Embedded wallet (ADR 030) ────────────────────────────────────────
 # Provider-agnostic embedded-wallet layer. '' (default) → OFF:
 # getWalletProvider() returns null and no vendor code path is

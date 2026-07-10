@@ -250,8 +250,38 @@
       classifier, single-flight worker, Discord drift/unclassified page,
       Treasury state, unclassified movement drilldown, and audited
       baseline/manual movement admin writes landed.
-      Remains open for production baselines/cursors, thresholds,
-      operator memo policy, and money review.
+      **Code-complete 2026-07-10** (review-first, not yet merged at
+      doc-write time): cold-start cursor safety promoted from an
+      app-layer (Zod-only) check to a DB-enforced NOT NULL + non-empty
+      constraint on `operator_wallet_baselines.starting_horizon_cursor`
+      / `current_horizon_cursor` (migration 0057) — a baseline with a
+      null cursor made the indexer omit Horizon's `cursor` param
+      entirely and walk the account's full payment history from
+      genesis; with no active baseline at all the watcher already
+      failed closed to `needs_baseline` without touching Horizon.
+      `needs_baseline` now pages Discord (same at-least-once cadence as
+      drift/unclassified) — previously a deployed-but-unconfigured
+      watcher sat silent forever with nothing prompting an operator to
+      set it up. Thresholds
+      (`LOOP_OPERATOR_FLOAT_XLM_THRESHOLD_STROOPS` /
+      `_USDC_THRESHOLD_STROOPS` / `_RECONCILIATION_INTERVAL_HOURS`)
+      were already `parseEnv`-validated with safe production defaults;
+      this pass adds boot-fail tests and closes the doc gap (AGENTS.md
+      / `docs/development.md` / `docs/deployment.md` /
+      `apps/backend/.env.example` were all missing these three vars).
+      Memo policy documented (the classifier never trusts memo text —
+      only authenticated DB linkage — so operator-initiated movements
+      always need an explicit manual-movement explanation via
+      `POST /api/admin/operator-float/manual-movements`) in the
+      new `docs/runbooks/operator-float-drift.md`, which also covers
+      `needs_baseline`/`unclassified`/`drift` triage. Confirmed: this
+      module makes **no balance-adjusting writes** — classification +
+      audit-trail + paging only.
+      **👤 Remains open** until an operator creates the real production
+      baseline (opening balance + Horizon cursor snapshot for
+      `LOOP_STELLAR_DEPOSIT_ADDRESS`, both `xlm` and `usdc`) via
+      `POST /api/admin/operator-float/baselines` per the runbook, and
+      money review signs off.
 - [ ] **R3-4 · Auto-refund on redemption-null exhaustion (+ policy).** _M · 💰 + policy decision._
 - [x] **R3-6 · Page the drift channel on money-path contract drift.** _S · 💰._
 

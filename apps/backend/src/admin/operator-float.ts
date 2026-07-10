@@ -78,7 +78,9 @@ export interface AdminOperatorFloatBaselineResult {
   asset: OperatorFloatAsset;
   account: string;
   openingBalanceStroops: string;
-  startingHorizonCursor: string | null;
+  // DB-guaranteed non-null since migration 0057 (cold-start cursor
+  // safety) — the Zod body schema below already required it.
+  startingHorizonCursor: string;
   active: number;
   createdAt: string;
 }

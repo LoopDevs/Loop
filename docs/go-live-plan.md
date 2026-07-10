@@ -41,7 +41,7 @@ Phase-2 surfaces ship dark behind `LOOP_PHASE_1_ONLY=true`, so T1 launches witho
 ## T1-B · Money correctness 💰 / 🔐 — _sequenced in [`money-auth-worklist.md`](./money-auth-worklist.md)_
 
 - [x] **AUDIT-1 · Regression-verify the GBPLOOP unbacked-mint P0** (it was **fixed** 2026-07-01/02 via `ONCHAIN_MINT_ELIGIBLE_ASSETS` allowlist + DB CHECK — confirm no regression, read-only). 💰 **Done 2026-07-07:** read-only verification passed; see [`audit-2026-07-07-gbploop-regression.md`](./audit-2026-07-07-gbploop-regression.md).
-- [ ] **R3-2** wrong-asset refund _(partial: XLM/USDC refund-to-sender done; loop_asset re-mint/re-credit still open)_ · **R3-1** float reconciliation _(partial: schema/indexer/classifier/worker/Treasury read surface + audited baseline/manual writes done; production baselines/cursors/thresholds + money review still open)_ · **R3-4** redemption-null-exhaustion refund (+policy). 💰
+- [ ] **R3-2** wrong-asset refund _(partial: XLM/USDC refund-to-sender done; loop_asset re-mint/re-credit still open)_ · **R3-1** float reconciliation _(code-complete: schema/indexer/classifier/worker/Treasury read surface, audited baseline/manual writes, DB-enforced cold-start cursor safety, `needs_baseline` paging, threshold config+docs, and the operator runbook all done; 👤 remaining: operator sets the real production baseline + money-review sign-off)_ · **R3-4** redemption-null-exhaustion refund (+policy). 💰
 - [x] **T0-1b** dup deposit vs paid order. 💰
 - [x] **R3-9** durable redeem in-flight fence. 💰
 - [x] **R3-10** idempotency default-on · **T0-1c** sub-dust deposits. 💰

@@ -412,6 +412,36 @@ describe('runOperatorFloatReconciliationForAsset', () => {
   });
 });
 
+describe('cold start (no active baseline configured)', () => {
+  it('fails closed to needs_baseline, touches NO Horizon endpoint, and pages ops', async () => {
+    // No `stage('operator_wallet_baselines', …)` call — the FIFO is
+    // empty, so `loadActiveBaseline` resolves undefined → null, the
+    // same shape a genuinely empty table produces on a fresh
+    // production DB before any operator has created a baseline.
+    const summary = await runOperatorFloatReconciliationForAsset(RUN_ARGS);
+
+    expect(summary.state).toBe('needs_baseline');
+    expect(summary.error).toMatch(/baseline is not configured/);
+    // The whole point of failing closed BEFORE indexing: a fresh
+    // production deploy must not walk the account's full Horizon
+    // history (or read a balance) just because nobody has anchored a
+    // baseline yet.
+    expect(horizonMocks.listAccountPayments).not.toHaveBeenCalled();
+    expect(horizonMocks.getAccountBalances).not.toHaveBeenCalled();
+    const runs = dbState.inserts.filter((i) => i.table === 'operator_float_reconciliation_runs');
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.values).toMatchObject({ state: 'needs_baseline', baselineId: null });
+    // Production readiness (2026-07-10): needs_baseline must page,
+    // same as drift/unclassified — a silently-idle watcher is not a
+    // healthy "nothing to report" signal, it means R3-1 is checking
+    // nothing and an operator has not been prompted to fix that.
+    expect(notifyOperatorFloatDrift).toHaveBeenCalledTimes(1);
+    expect(notifyOperatorFloatDrift).toHaveBeenCalledWith(
+      expect.objectContaining({ state: 'needs_baseline' }),
+    );
+  });
+});
+
 describe('watcher tick health', () => {
   async function flushTick(): Promise<void> {
     await new Promise<void>((r) => setImmediate(r));
