@@ -33,6 +33,12 @@ import { db } from '../../db/client.js';
  */
 const TABLES_TO_TRUNCATE = [
   'asset_drift_state',
+  // ADR 031 §D3/D9 (V1 foundation, migration 0060): the vault registry
+  // + share-price snapshot tables. No FK to users/orders, but listed
+  // explicitly so `loop-vaults.test.ts` gets a clean slate per test
+  // like every other suite here.
+  'loop_vaults',
+  'vault_share_price_snapshots',
   'interest_pool_alert_state',
   'watchdog_alert_state',
   'otp_attempt_counters',

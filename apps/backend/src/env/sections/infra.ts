@@ -146,6 +146,17 @@ export const infraEnvFields = {
   // CTX pre-configuration.
   LOOP_WORKERS_ENABLED: envBoolean.default(false),
 
+  // ADR 031 §Detailed design D9: vault-subsystem master switch for the
+  // LOOPUSD/LOOPEUR DeFindex-vault path (V1 foundation — schema +
+  // read layer only, no Soroban client / emission / withdraw logic
+  // yet). Distinct from `LOOP_PHASE_1_ONLY`, which gates the
+  // user-facing cashback/wallet surface generally — this flag gates
+  // the vault subsystem specifically, so the read layer
+  // (`credits/vaults/registry.ts`) stays a no-op even once
+  // `loop_vaults` rows exist. Default false: an empty registry table
+  // + this flag off is byte-identical to pre-migration.
+  LOOP_VAULTS_ENABLED: envBoolean.default(false),
+
   // Hardening A6: auto-refund late deposits. A deposit that lands just
   // after its order expires is recorded + abandoned; an operator can
   // always refund it to the sender via

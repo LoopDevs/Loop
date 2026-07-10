@@ -427,6 +427,15 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # are configured above.
 # LOOP_WORKERS_ENABLED=true
 
+# ADR 031 §Detailed design D9: vault-subsystem master switch for the
+# LOOPUSD/LOOPEUR DeFindex-vault path (V1 foundation — schema + read
+# layer only, no Soroban client / emission / withdraw logic yet).
+# Distinct from LOOP_PHASE_1_ONLY. Default false — an empty
+# `loop_vaults` registry table + this flag off is byte-identical to
+# pre-migration. The read layer (credits/vaults/registry.ts) checks
+# this flag before every read regardless of table contents.
+# LOOP_VAULTS_ENABLED=true
+
 # Hardening A6: auto-refund late deposits (those landing after the
 # order expired). Default false → admin-triggered refunds only
 # (POST /api/admin/deposits/:paymentId/refund, admin + step-up). true →

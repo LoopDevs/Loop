@@ -302,6 +302,16 @@ USDLOOP and EURLOOP **retire** in State 3 — users hold canonical vault shares 
 
 **State 2 → State 3 migration**: removes `LinkWalletNudge`, `TrustlineSetupCard`, the `PUT /api/users/me/stellar-address` user-input endpoint (becomes Privy-webhook-populated), and the asset-drift watcher's USDLOOP/EURLOOP entries. Keeps the `users.stellar_address` column (now populated by Privy webhook), the FX-pin behaviour, the cross-FX cashback emission, and the operator/issuer-account architecture for GBPLOOP. ADR 030's File map and ADR 031's File map list the affected files.
 
+### Vault subsystem foundation (ADR 031 §Detailed design D3/D9, V1 — dark)
+
+The first build increment toward State 3's LOOPUSD/LOOPEUR vaults (above) is schema + config + a read layer only — NO Soroban client, NO emission/withdraw logic (those are later PRs, ADR 031 §D5/D6). Ships dark: `LOOP_VAULTS_ENABLED` (default `false`) is the vault-subsystem master switch — distinct from `LOOP_PHASE_1_ONLY`, which gates the user-facing cashback/wallet surface generally. An empty `loop_vaults` table + the flag off is byte-identical to pre-migration.
+
+- `loop_vaults` (migration 0060) — registry, one row per `(asset_code, network)` (unique index): the deployed DeFindex vault's contract id, share-token identity (`share_asset_code`/`share_asset_issuer`), underlying asset + issuer, Blend strategy id, and performance-fee bps. CHECK constraints pin `asset_code` to `LOOPUSD`/`LOOPEUR` (GBPLOOP is a classic 1:1 asset with its own interest-mint path, migration 0041 — not a vault) and `network` to `testnet`/`mainnet`. Starts EMPTY — the operator inserts the deployed vault addresses post-deploy (ADR 031 §D9 step 1/6); no admin write endpoint exists yet.
+- `vault_share_price_snapshots` (migration 0060) — `(asset_code, network, taken_at, share_price_ppm, source_ledger)`, indexed on `(asset_code, network, taken_at DESC)`. Feeds the later past-30-day APY computation (ADR 031 §D8); this PR ships the table + a record/read helper pair, no scheduled snapshotter yet.
+- `apps/backend/src/credits/vaults/registry.ts` — the read layer: `vaultsEnabled()`, `getActiveVault()`, `listActiveVaults()`, `recordSharePriceSnapshot()`, `getLatestSharePrice()`. Every function checks `vaultsEnabled()` first — belt-and-suspenders so a populated-but-not-yet-live registry can't be read by anything downstream even once rows exist.
+
+Full build sequence (vault deploy → Soroban integration → wallet-provider signing → watchers/APY → config review → mainnet): ADR 031 §Detailed design D9.
+
 ---
 
 ## Fraud / abuse controls (ADR 045, B-3)
