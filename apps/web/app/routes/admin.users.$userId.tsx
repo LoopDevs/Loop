@@ -449,14 +449,25 @@ function AdminUserDetailRouteInner(): React.JSX.Element {
                 CSV download for a compliance / subject-access export of the last 366 days.
               </p>
             </div>
-            {/* ADR 037 §3: CSV mass exports are admin-only (PII-mass
-                surface) — hidden for support, not disabled. */}
-            {isAdminRole ? (
-              <CsvDownloadButton
-                path={`/api/admin/users/${encodeURIComponent(userId)}/credit-transactions.csv`}
-                filename={`credit-transactions-${userId.slice(0, 8)}-${new Date().toISOString().slice(0, 10)}.csv`}
-              />
-            ) : null}
+            <div className="flex items-center gap-3">
+              {/* ADR 018 drill-down: the fleet-wide browser (A5-8) is
+                  the natural "zoom out from this user" companion to
+                  this per-user view. */}
+              <Link
+                to={`/admin/ledger?userId=${encodeURIComponent(userId)}`}
+                className="text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
+              >
+                View in fleet-wide ledger →
+              </Link>
+              {/* ADR 037 §3: CSV mass exports are admin-only (PII-mass
+                  surface) — hidden for support, not disabled. */}
+              {isAdminRole ? (
+                <CsvDownloadButton
+                  path={`/api/admin/users/${encodeURIComponent(userId)}/credit-transactions.csv`}
+                  filename={`credit-transactions-${userId.slice(0, 8)}-${new Date().toISOString().slice(0, 10)}.csv`}
+                />
+              ) : null}
+            </div>
           </header>
           <div className="px-6 py-5">
             <CreditTransactionsTable userId={userId} />

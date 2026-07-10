@@ -1,12 +1,13 @@
 /**
  * Support-dashboard wire shapes (ADR 037 §4) — the watcher-skip
- * browser, the per-user wallet card, the reverse lookup, and the
- * three delivery-unsticking action results. Lives in `@loop/shared`
- * per ADR 019: backend emits them, the admin web views consume
- * them, and the shared-type-parity gate holds both sides to one
- * definition.
+ * browser, the per-user wallet card, the reverse lookup, the
+ * fleet-wide ledger browser (A5-8), and the three delivery-
+ * unsticking action results. Lives in `@loop/shared` per ADR 019:
+ * backend emits them, the admin web views consume them, and the
+ * shared-type-parity gate holds both sides to one definition.
  */
 import type { WalletProvisioningState } from './users-wallet.js';
+import type { CreditTransactionType } from './credit-transaction-type.js';
 
 // ─── Watcher skip rows (payment_watcher_skips, migration 0033) ─────────────
 
@@ -159,4 +160,36 @@ export interface AdminLookupResponse {
   userId: string;
   /** Present for `order` and `payment_memo` lookups. */
   orderId?: string;
+}
+
+// ─── Fleet-wide ledger browser (ADR 037 §4.2 / A5-8) ────────────────────────
+
+/**
+ * One row in `GET /api/admin/ledger` — the fleet-wide (all users)
+ * paginated browse over `credit_transactions`. Same shape as the
+ * per-user `AdminCreditTransactionView`
+ * (`admin/user-credit-transactions.ts`) plus `userId`, since this
+ * view spans every user rather than being scoped under a
+ * `/users/:userId` path.
+ */
+export interface AdminLedgerEntry {
+  id: string;
+  userId: string;
+  type: CreditTransactionType;
+  /** bigint-as-string, signed. Positive for cashback/interest/refund, negative for spend/withdrawal; adjustment can be either. */
+  amountMinor: string;
+  currency: string;
+  referenceType: string | null;
+  referenceId: string | null;
+  createdAt: string;
+}
+
+/**
+ * `GET /api/admin/ledger` (newest first, keyset-paginated via
+ * `?before=<iso>`, bounded `?limit=` [1, 200] default 50). See the
+ * handler doc (`admin/ledger.ts`) for how every filter combination
+ * stays on an indexed access path.
+ */
+export interface AdminLedgerListResponse {
+  transactions: AdminLedgerEntry[];
 }

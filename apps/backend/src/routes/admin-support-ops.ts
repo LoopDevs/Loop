@@ -1,12 +1,14 @@
 /**
  * Support-dashboard route mounts (ADR 037 §4) — the watcher-skip
- * browser, the per-user wallet card, the redemption re-fetch, and
- * the reverse lookup. All SUPPORT-tier: these are exactly the
- * "find the customer, explain the state, unstick the delivery"
- * surfaces the support role exists for. The explicit
- * `requireStaff('support')` markers are functionally redundant with
- * the namespace blanket but make each mount's tier reviewable
- * in-place (and visible to staff-route-gating.test.ts).
+ * browser, the per-user wallet card, the redemption re-fetch, the
+ * reverse lookup, and the fleet-wide ledger browser (A5-8). All
+ * SUPPORT-tier: these are exactly the "find the customer, explain
+ * the state, unstick the delivery" (plus, for the ledger browser,
+ * "see where the money moved") surfaces the support role exists
+ * for. The explicit `requireStaff('support')` markers are
+ * functionally redundant with the namespace blanket but make each
+ * mount's tier reviewable in-place (and visible to
+ * staff-route-gating.test.ts).
  *
  * The three POST actions are idempotent re-drives of work the
  * customer already paid for; each carries the full ADR 017
@@ -35,6 +37,7 @@ import {
 import { adminGetUserWalletHandler, adminWalletReprovisionHandler } from '../admin/user-wallet.js';
 import { adminRefetchRedemptionHandler } from '../admin/order-refetch-redemption.js';
 import { adminLookupHandler } from '../admin/lookup.js';
+import { adminLedgerHandler } from '../admin/ledger.js';
 
 /**
  * Mounts the ADR 037 support-ops routes on the supplied Hono app.
@@ -97,5 +100,17 @@ export function mountAdminSupportOpsRoutes(app: Hono): void {
     rateLimit('POST /api/admin/orders/:orderId/refetch-redemption', 10, 60_000),
     requireStaff('support'),
     adminRefetchRedemptionHandler,
+  );
+  // A5-8: fleet-wide ledger browser — paginated, filterable
+  // `credit_transactions` browse across every user (see
+  // admin/ledger.ts for the full filter/index-path doc). Read-only,
+  // bounded by `limit` (max 200), always ordered by an indexed
+  // `created_at`. 60/min matches the other fleet-wide JSON reads
+  // (`/api/admin/orders`, `/api/admin/top-users`).
+  app.get(
+    '/api/admin/ledger',
+    rateLimit('GET /api/admin/ledger', 60, 60_000),
+    requireStaff('support'),
+    adminLedgerHandler,
   );
 }

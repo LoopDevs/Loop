@@ -176,6 +176,7 @@ describe('AdminNav — role-aware tabs (ADR 037 §6)', () => {
       'Merchants',
       'Users',
       'Skips',
+      'Ledger',
       'Operators',
       'Assets',
       'Audit',
@@ -189,7 +190,15 @@ describe('AdminNav — role-aware tabs (ADR 037 §6)', () => {
     userMock.staffRole = 'support';
     userMock.isAdmin = false;
     renderAt('/admin');
-    for (const label of ['Treasury', 'Payouts', 'Orders', 'Merchants', 'Users', 'Skips']) {
+    for (const label of [
+      'Treasury',
+      'Payouts',
+      'Orders',
+      'Merchants',
+      'Users',
+      'Skips',
+      'Ledger',
+    ]) {
       expect(await screen.findByRole('link', { name: label })).toBeDefined();
     }
     for (const label of ['Cashback', 'Operators', 'Assets', 'Audit', 'Staff']) {
@@ -220,12 +229,20 @@ describe('AdminNav — role-aware tabs (ADR 037 §6)', () => {
 
 describe('visibleTabs', () => {
   it('returns every tab for admin', () => {
-    expect(visibleTabs('admin').length).toBe(11);
+    expect(visibleTabs('admin').length).toBe(12);
   });
 
   it('filters to support-visible tabs for support', () => {
     const labels = visibleTabs('support').map((t) => t.label);
-    expect(labels).toEqual(['Treasury', 'Payouts', 'Orders', 'Merchants', 'Users', 'Skips']);
+    expect(labels).toEqual([
+      'Treasury',
+      'Payouts',
+      'Orders',
+      'Merchants',
+      'Users',
+      'Skips',
+      'Ledger',
+    ]);
   });
 
   it('returns nothing for null', () => {

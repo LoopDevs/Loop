@@ -50,6 +50,7 @@ const TABS: ReadonlyArray<{ href: string; label: string; minRole: StaffRole }> =
   { href: '/admin/merchants', label: 'Merchants', minRole: 'support' },
   { href: '/admin/users', label: 'Users', minRole: 'support' },
   { href: '/admin/skips', label: 'Skips', minRole: 'support' },
+  { href: '/admin/ledger', label: 'Ledger', minRole: 'support' },
   { href: '/admin/operators', label: 'Operators', minRole: 'admin' },
   { href: '/admin/assets', label: 'Assets', minRole: 'admin' },
   { href: '/admin/audit', label: 'Audit', minRole: 'admin' },
