@@ -605,7 +605,58 @@ payment_method='loop_asset' AND state='pending_payment'` — plus a
 
 ## Ongoing — remaining money/auth test coverage
 
-- [ ] **Q6-3 · Web money-write client tests** (`admin-write-envelope` step-up + Idempotency-Key). _S–M._
+- [x] **Q6-3 · Web money-write client tests** (`admin-write-envelope` step-up + Idempotency-Key). _S–M._
+      **Done 2026-07-10 (test-only PR — no product source changed, self-
+      merged once CI was green):** the shared client envelope
+      (`apps/web/app/services/admin-write-envelope.ts`'s
+      `generateIdempotencyKey`, `authenticatedRequest`'s `withStepUp` →
+      `X-Admin-Step-Up` header plumbing in `api-client.ts`, and the
+      `useAdminStepUp` retry hook) had one CF-09-style
+      reuse-key-across-retry test (`admin.payouts.$id.test.tsx`,
+      `retryPayout` only) and otherwise zero direct coverage — the
+      header-attachment logic in `authenticatedRequest` and the four
+      other named writers (credit-adjust, order-redrive, clear-otp-
+      lockout, revoke-sessions) were untested at the client layer;
+      `CreditAdjustmentForm.test.tsx` in particular covered only the
+      pure `parseAmountMajor` helper, nothing about the mutation flow.
+      Added: `admin-write-envelope.test.ts` (key uniqueness + the
+      `crypto.randomUUID` / fallback branches), `admin-step-up.test.ts`
+      (`mintAdminStepUp` request shape + error propagation), and one
+      service-level test per named writer —
+      `admin-user-credits.test.ts` (`applyCreditAdjustment` /
+      `applyAdminEmission`), `admin-orders.test.ts` (`redriveOrder`),
+      `admin-user-auth-state.test.ts` (`clearAdminOtpLockout`),
+      `admin-user-sessions.test.ts` (`revokeUserSessions`) — each
+      pinning its Idempotency-Key / reason / `withStepUp` contract,
+      including the two writers that deliberately opt OUT of parts of
+      the envelope (`clearAdminOtpLockout`: keyed + reasoned but NOT
+      step-up-gated; `revokeUserSessions`: none of the three). Extended
+      `api-client.test.ts` with the `X-Admin-Step-Up` header contract:
+      attached when `withStepUp: true` and the store holds a token,
+      omitted when `withStepUp` is unset (even with a token held —
+      guards against the header leaking onto a non-gated write),
+      omitted (not empty-string) on the first call when the store is
+      empty, and preserved across the silent access-token-refresh retry
+      path. Extended `OrderRedrivePanel.test.tsx` and rewrote
+      `CreditAdjustmentForm.test.tsx` with the full submit → confirm →
+      step-up-retry flow, each with its own CF-09 reuse-key-across-
+      retry assertion, a cancelled-step-up-does-not-retry assertion, and
+      non-step-up-error-does-not-retry assertions. Non-vacuousness:
+      every new assertion was confirmed to fail against a deliberately
+      broken version of the code it pins (constant idempotency key;
+      step-up header dropped on the post-refresh retry; header attached
+      unconditionally regardless of `withStepUp`; `applyCreditAdjustment`
+      / `redriveOrder` ignoring the caller-supplied key both at the
+      service layer AND — by temporarily breaking the two forms'
+      `mutationFn` to re-mint the key on retry — at the component layer;
+      `clearAdminOtpLockout` accidentally gaining `withStepUp: true`;
+      `revokeUserSessions` accidentally gaining an `Idempotency-Key`;
+      `mintAdminStepUp` sending the wrong body field name), then
+      reverted; full `apps/web` suite stayed green throughout
+      (201 files / 1539 tests). No envelope bug found — the
+      idempotency-key-reuse-on-retry contract holds for every step-up-
+      gated writer tested, and the two deliberately-ungated writers
+      match their documented contracts.
 - [x] **Q6-4 · Gating loop-native purchase-through-the-UI E2E** (the real production path). _M._
       **Done 2026-07-10 — review-first PR open (not yet merged; this
       PR touches a one-line product fix alongside the new e2e suite,

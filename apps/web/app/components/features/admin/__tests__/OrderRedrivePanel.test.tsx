@@ -262,4 +262,77 @@ describe('<OrderRedrivePanel /> — redrive flow', () => {
       expect(screen.getByText(/Confirm with your verification code/)).toBeDefined();
     });
   });
+
+  it('reuses the same Idempotency-Key across the step-up retry (CF-09) — no double-redrive risk', async () => {
+    // First call rejects with step-up, second (post-mint) resolves.
+    adminMock.redriveOrder
+      .mockRejectedValueOnce(
+        new ApiException(401, { code: 'STEP_UP_REQUIRED', message: 'Step-up required' }),
+      )
+      .mockResolvedValueOnce(
+        envelope({ orderId: 'ord-1', outcome: 'fulfilled', state: 'fulfilled' }),
+      );
+    stepUpMock.requestOtp.mockResolvedValue(undefined);
+    stepUpMock.mintAdminStepUp.mockResolvedValue({
+      stepUpToken: 'tok',
+      expiresAt: '2026-07-09T10:10:00.000Z',
+    });
+
+    renderPanel('paid');
+    await redriveWithReason('stuck for 20min, worker looks dead');
+
+    // Modal opens; send + confirm the code.
+    const sendBtn = await screen.findByRole('button', { name: /Send code/ });
+    await act(async () => {
+      fireEvent.click(sendBtn);
+    });
+    const otpInput = await screen.findByLabelText(/Verification code/);
+    await act(async () => {
+      fireEvent.change(otpInput, { target: { value: '123456' } });
+    });
+    const confirmBtn = await screen.findByRole('button', { name: 'Confirm' });
+    await act(async () => {
+      fireEvent.click(confirmBtn);
+    });
+
+    await waitFor(() => {
+      expect(adminMock.redriveOrder).toHaveBeenCalledTimes(2);
+    });
+    const firstArgs = adminMock.redriveOrder.mock.calls[0]?.[0] as
+      | { idempotencyKey?: string }
+      | undefined;
+    const secondArgs = adminMock.redriveOrder.mock.calls[1]?.[0] as
+      | { idempotencyKey?: string }
+      | undefined;
+    expect(firstArgs?.idempotencyKey).toBeDefined();
+    // The retry must re-send the SAME key so ADR-017 dedup collapses it
+    // into the original request rather than re-driving the order twice.
+    expect(secondArgs?.idempotencyKey).toBe(firstArgs?.idempotencyKey);
+  });
+
+  it('cancelling the step-up modal does not retry the write', async () => {
+    adminMock.redriveOrder.mockRejectedValue(
+      new ApiException(401, { code: 'STEP_UP_REQUIRED', message: 'Step-up required' }),
+    );
+    renderPanel('paid');
+    await redriveWithReason();
+    await waitFor(() => {
+      expect(screen.getByText(/Confirm with your verification code/)).toBeDefined();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    });
+
+    await waitFor(() => {
+      expect(
+        useUiStore
+          .getState()
+          .toasts.some((t) => t.type === 'error' && /redrive failed/i.test(t.message)),
+      ).toBe(true);
+    });
+    // Exactly the one rejected call — the cancelled step-up must not
+    // produce a second (retried) call to the service.
+    expect(adminMock.redriveOrder).toHaveBeenCalledTimes(1);
+  });
 });
