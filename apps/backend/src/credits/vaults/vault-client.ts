@@ -22,7 +22,13 @@
  * wallet-provider-signed user→operator transfer, which is V4's job,
  * not V2's.
  */
-import { Keypair, Networks, scValToNative, type xdr } from '@stellar/stellar-sdk';
+import {
+  Keypair,
+  Networks,
+  TransactionBuilder,
+  scValToNative,
+  type xdr,
+} from '@stellar/stellar-sdk';
 import { env } from '../../env.js';
 import { vaultsEnabled, type LoopVaultRow } from './registry.js';
 import {
@@ -35,7 +41,16 @@ import {
   decodeVecElements,
   VaultResultParseError,
 } from './scval.js';
-import { submitSorobanInvocation, simulateSorobanCall } from './soroban-submit.js';
+import {
+  submitSorobanInvocation,
+  simulateSorobanCall,
+  checkPriorSorobanTx,
+  prepareSorobanInvocationForExternalSigning,
+  DEFAULT_MAX_ASSEMBLED_FEE_STROOPS,
+} from './soroban-submit.js';
+import { attachUserWalletSignature } from '../../wallet/user-signer.js';
+import type { WalletProvider } from '../../wallet/provider.js';
+import { submitPreSignedTransaction } from '../../payments/payout-submit.js';
 
 /** Thrown by every exported function here when `LOOP_VAULTS_ENABLED` is false. */
 export class VaultDisabledError extends Error {
@@ -144,6 +159,11 @@ function resolveOperatorSecret(): string {
     );
   }
   return env.LOOP_STELLAR_OPERATOR_SECRET;
+}
+
+/** Horizon submit endpoint — the provider-signed path submits its fee-bumped envelope through the SAME rails `orders/redeem.ts` uses for the classic redemption tx, not the Soroban RPC (V4). */
+function resolveHorizonUrl(): string {
+  return env.LOOP_STELLAR_HORIZON_URL;
 }
 
 /**
@@ -393,13 +413,20 @@ export interface TransferSharesArgs {
   /**
    * `'operator'` (V2, implemented + tested): the operator signs the
    * transfer — the emission path (operator → user) and any
-   * operator-initiated rebalancing. `'provider'` (V4, a deliberate
-   * stub — see below): the ADR 030 wallet-provider signs a
-   * user-initiated transfer (user → operator on withdraw). ADR 031
-   * §D1 scopes the user-wallet-signing surface to exactly this one
-   * call; V2 does not build it.
+   * operator-initiated rebalancing. `'provider'` (V4, implemented
+   * below): the ADR 030 wallet-provider signs a user-initiated
+   * transfer (user → operator on redeem/withdraw) — the ONLY
+   * user-wallet signature ADR 031 §D1 scopes into the whole vault
+   * system.
    */
   signWith: 'operator' | 'provider';
+  /**
+   * Required when `signWith='provider'` — the ADR 030 wallet-provider
+   * instance plus the user's provider-side wallet id
+   * (`users.wallet_id`) `attachUserWalletSignature` needs to raw-sign
+   * the built transfer transaction's hash. Ignored for `'operator'`.
+   */
+  userWallet?: { provider: WalletProvider; walletId: string };
   priorTxHash?: string;
   /** CF-18: required — persist durably, pass back as `priorTxHash` on retry (see `soroban-submit.ts`). */
   onSigned: (txHash: string) => Promise<void> | void;
@@ -422,16 +449,7 @@ export async function transferShares(args: TransferSharesArgs): Promise<Transfer
   assertPositiveBigint(args.amount, 'transferShares: amount');
 
   if (args.signWith === 'provider') {
-    // TODO(ADR 031 §D6, V4): user-wallet-signed share transfer via the
-    // ADR 030 wallet-provider abstraction (policy-gated server signing
-    // of `transfer(from=user, to=operator)`). Deliberately NOT built
-    // here — V2's scope is the operator-signed path only. Wiring this
-    // requires the provider's Soroban-token-transfer capability
-    // (`wallet/provider.ts`), which is a separate PR's job.
-    throw new VaultNotImplementedError(
-      "transferShares: signWith='provider' is not implemented in V2 " +
-        '(ADR 031 §D6/V4 — user-wallet-signed transfers land in a later PR)',
-    );
+    return transferSharesViaProvider(args);
   }
 
   const operatorSecret = resolveOperatorSecret();
@@ -447,6 +465,121 @@ export async function transferShares(args: TransferSharesArgs): Promise<Transfer
   });
 
   return { txHash: result.txHash, deduped: result.deduped };
+}
+
+/**
+ * ADR 031 §D1 — the ONE user-wallet-signed call in the whole vault
+ * system: `transfer(from=user, to=operator, amount)` on the
+ * share-token contract. Mirrors `orders/redeem.ts`'s classic-asset
+ * redemption shape (build → user-signs via the wallet provider →
+ * operator fee-bumps → submit through the SAME Horizon rails), with
+ * the Soroban-specific build/simulate/assemble step done by
+ * `prepareSorobanInvocationForExternalSigning`.
+ *
+ * ASSUMPTION flagged for operator DD (ADR 031 §D1 open question 1):
+ * `attachUserWalletSignature` raw-signs the transaction's hash
+ * regardless of what operation the transaction carries — the SAME
+ * mechanism `orders/redeem.ts` already uses for a classic Payment op.
+ * A Soroban `transfer` invoked with the tx SOURCE account equal to the
+ * `from` address relies on "source-account authorization" (Soroban's
+ * implicit-auth rule: if the account invoking/authorizing IS the tx's
+ * source and signs the envelope, no separate signed Soroban auth entry
+ * is required) — so this reuses the identical signing primitive
+ * `redeem.ts` already ships, rather than inventing a second one. If a
+ * real Privy dev account's policy engine rejects this (e.g. it
+ * insists on interpreting the operation type before authorizing raw
+ * signing, or Soroban auth for this call needs an explicit signed auth
+ * entry Privy can't produce), that is EXACTLY the "real-Privy-Soroban
+ * validation" gap ADR 031 §D1 calls out as operator DD — the fix is a
+ * signing-layer swap behind `getWalletProvider()` (alt provider /
+ * Loop-managed KMS signer / the v5 classic-receipt wrapper), not a
+ * change to this call shape.
+ */
+async function transferSharesViaProvider(args: TransferSharesArgs): Promise<TransferSharesResult> {
+  if (args.userWallet === undefined) {
+    throw new VaultConfigError(
+      "transferShares: signWith='provider' requires userWallet (ADR 031 §D1)",
+    );
+  }
+  const rpcUrl = resolveRpcUrl();
+  const networkPassphrase = networkPassphraseFor(args.vault.network);
+
+  // CF-18 pre-check — a prior attempt's landed hash wins over building
+  // anything new (mirrors `submitSorobanInvocation`'s own pre-check;
+  // this path can't reuse that function directly since it never has a
+  // local signer secret to sign with).
+  if (args.priorTxHash !== undefined) {
+    const prior = await checkPriorSorobanTx(rpcUrl, args.priorTxHash);
+    if (prior.landed) {
+      return { txHash: args.priorTxHash, deduped: true };
+    }
+  }
+
+  const prepared = await prepareSorobanInvocationForExternalSigning({
+    rpcUrl,
+    networkPassphrase,
+    sourcePublicKey: args.from,
+    contractId: args.vault.shareAssetIssuer,
+    functionName: 'transfer',
+    args: [encodeAddress(args.from), encodeAddress(args.to), encodeI128(args.amount)],
+  });
+
+  // CF-18: the hash is fully determined by the built+assembled tx
+  // (source + seq + ops + soroban data + fee) before anyone signs it.
+  // Persist BEFORE requesting the user's signature — the riskiest
+  // external call in this sequence — so a crash after this point
+  // always has a hash to resume from.
+  const txHash = prepared.tx.hash().toString('hex');
+  await args.onSigned(txHash);
+
+  await attachUserWalletSignature({
+    provider: args.userWallet.provider,
+    walletId: args.userWallet.walletId,
+    address: args.from,
+    tx: prepared.tx,
+  });
+
+  const operatorSecret = resolveOperatorSecret();
+  const operatorKeypair = Keypair.fromSecret(operatorSecret);
+  const feeBump = TransactionBuilder.buildFeeBumpTransaction(
+    operatorKeypair,
+    feeBumpBaseFeeForInner(prepared.tx.fee),
+    prepared.tx,
+    networkPassphrase,
+  );
+  feeBump.sign(operatorKeypair);
+
+  const result = await submitPreSignedTransaction({
+    horizonUrl: resolveHorizonUrl(),
+    tx: feeBump,
+  });
+
+  return { txHash: result.txHash, deduped: false };
+}
+
+/**
+ * Fee-bump base fee for a user-signed Soroban tx (V4). Unlike
+ * `orders/redeem.ts`'s classic `feeBumpBaseFee()` (a fixed multiple of
+ * `LOOP_PAYOUT_FEE_BASE_STROOPS`, sized for a plain Payment op), a
+ * Soroban invocation's assembled fee already bundles resource costs
+ * that can exceed that classic baseline — so the outer bump is set
+ * from the INNER tx's own assembled fee (doubled for headroom),
+ * bounded by the SAME `DEFAULT_MAX_ASSEMBLED_FEE_STROOPS` sanity cap
+ * `soroban-submit.ts` uses for operator-signed vault calls, so a
+ * hostile/buggy RPC still can't get the operator to fee-bump an
+ * absurd amount.
+ */
+function feeBumpBaseFeeForInner(innerFeeStroops: string): string {
+  let doubled: bigint;
+  try {
+    doubled = BigInt(innerFeeStroops) * 2n;
+  } catch {
+    doubled = DEFAULT_MAX_ASSEMBLED_FEE_STROOPS;
+  }
+  const floor = 2n * 100n; // 2x classic BASE_FEE (100 stroops) — the SDK's own fee-bump minimum multiple.
+  const bounded =
+    doubled > DEFAULT_MAX_ASSEMBLED_FEE_STROOPS ? DEFAULT_MAX_ASSEMBLED_FEE_STROOPS : doubled;
+  return (bounded > floor ? bounded : floor).toString();
 }
 
 // ---------------------------------------------------------------------------

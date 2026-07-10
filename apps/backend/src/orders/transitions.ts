@@ -257,6 +257,38 @@ export class LoopAssetMissingCreditRowError extends Error {
   }
 }
 
+/** Transaction type accepted by `markOrderPaidViaVaultRedemption` — the same pattern `credits/vaults/vault-emissions.ts` uses for a helper that must run INSIDE a caller-owned transaction. */
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * ADR 031 §D6 (V4) — the vault-redemption mirror of `markOrderPaid`'s
+ * `pending_payment -> paid` transition, WITHOUT the `loop_asset`
+ * debit/burn special-case above: a vault-share redemption never lands
+ * a classic on-chain LOOP-asset payment at the deposit address (the
+ * payment watcher never sees it), so `markOrderPaid` is never called
+ * for this order at all. `credits/vaults/vault-redemptions.ts`'s own
+ * mirror step performs the EQUIVALENT debit + `kind='burn'` audit-row
+ * write through its own primitives (driven by a vault-share collect,
+ * not a Horizon-observed payment) — this function is ONLY the state
+ * flip, MUST be called from INSIDE that SAME transaction so a crash
+ * between the debit and this flip leaves NEITHER applied (the
+ * `vault_redemptions` row stays `redeemed`, not `settled`, and a
+ * resume redrives the mirror step, which is idempotent on
+ * `credit_transactions_reference_unique`).
+ */
+export async function markOrderPaidViaVaultRedemption(
+  tx: Tx,
+  orderId: string,
+): Promise<Order | null> {
+  const now = new Date();
+  const [paid] = await tx
+    .update(orders)
+    .set({ state: 'paid', paidAt: now, paymentReceivedAt: now })
+    .where(and(eq(orders.id, orderId), eq(orders.state, 'pending_payment')))
+    .returning();
+  return paid ?? null;
+}
+
 /**
  * Transition: `paid` → `procuring`. Called when the procurement
  * worker picks the order up and is about to place the CTX wholesale

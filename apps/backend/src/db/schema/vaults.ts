@@ -245,3 +245,209 @@ export const vaultEmissions = pgTable(
     ),
   ],
 );
+
+/**
+ * Source events a vault-share REDEMPTION can be claimed against (ADR
+ * 031 §D6, V4 — migration 0062). `'order_redeem'` is the ONLY live
+ * writer today (`orders/redeem.ts`'s gated fork of the `loop_asset`
+ * gift-card spend path). `'withdrawal'` is scaffolded for a future
+ * fiat off-ramp (ADR 036 marks it a "future redemption target") — no
+ * caller creates one in V4.
+ */
+export const VAULT_REDEMPTION_SOURCE_TYPES = ['order_redeem', 'withdrawal'] as const;
+export type VaultRedemptionSourceType = (typeof VAULT_REDEMPTION_SOURCE_TYPES)[number];
+
+export const VAULT_REDEMPTION_PAYOUT_PATHS = ['fast', 'slow'] as const;
+export type VaultRedemptionPayoutPath = (typeof VAULT_REDEMPTION_PAYOUT_PATHS)[number];
+
+/**
+ * Vault-share REDEMPTION state machine (ADR 031 §D6, V4 — migration
+ * 0062) — the withdraw/spend mirror of V3's `vaultEmissions`. One row
+ * per "spend the vault balance" event: today, exactly one gift-card
+ * order redeemed via `paymentMethod='loop_asset'` when the order's
+ * `chargeCurrency` is vault-eligible (USD/EUR) and `LOOP_VAULTS_ENABLED`
+ * is on — `orders/redeem.ts`'s gated fork of the classic on-chain
+ * redemption path (the classic path stays byte-identical for GBPLOOP
+ * and for every currency while the flag is off).
+ *
+ * `(source_type, source_id)` is the durable claim fence — reused, not
+ * regenerated, so a re-entrant redeem call always resolves to the SAME
+ * row (mirrors `vault_emissions.order_id`'s reuse of the order id).
+ *
+ * State machine: `pending` (claimed, nothing on-chain yet) →
+ * `collecting` (CAS-claimed; covers BOTH "collect landed, not yet
+ * paid" and, once the payout succeeds, the same DB state persists
+ * `payout_path`/`redeem_tx_hash` before the row advances) → `redeemed`
+ * (the user's shares are collected AND the fiat-equivalent value has
+ * been paid out — either from the hot float (`payout_path='fast'`) or
+ * via a synchronous `vault.withdraw` (`payout_path='slow'`, which also
+ * populates `redeem_tx_hash`)) → `settled` (the off-chain
+ * `user_credits` liability is debited by `value_minor` AND a
+ * `pending_payouts kind='burn'` conservation-trigger audit row is
+ * written — REUSING the existing burn primitive `orders/transitions.ts`
+ * already writes for classic-asset redemptions, not a new payout kind;
+ * for `source_type='order_redeem'` the source order also transitions
+ * `pending_payment -> paid` in the SAME DB transaction). `failed` is
+ * terminal after `VAULT_REDEMPTION_MAX_ATTEMPTS` consecutive step
+ * failures — pages Discord, not auto-retried.
+ *
+ * Sub-step resume markers (why there are only 4 live states + failed,
+ * fewer than `vault_emissions`'s 5): `shares_to_redeem` is computed
+ * ONCE from a live share-price read (with a small buffer, ADR 031 §D6
+ * step 2) and persisted BEFORE the collect transfer is built — a
+ * resume within `collecting` reuses the persisted value rather than
+ * recomputing (unlike `vault_emissions.min_shares_used`, which IS
+ * recomputed each attempt — that's safe there because it is only a
+ * slippage FLOOR on `deposit()`, not the transferred amount itself; a
+ * SEP-41 `transfer` has no such floor, so the amount must stay fixed
+ * across retries for the CF-18 `priorTxHash` hash-based dedup to ever
+ * match). `collect_tx_hash IS NOT NULL` marks "shares collected,
+ * proceed to payout, do not re-collect". `payout_path IS NOT NULL`
+ * (persisted only once the payout genuinely lands) marks "paid,
+ * proceed to mirror, do not re-pay" — the state name `redeemed` itself
+ * *is* that marker, since the collecting -> redeemed transition only
+ * fires after a successful payout.
+ */
+export const vaultRedemptions = pgTable(
+  'vault_redemptions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sourceType: text('source_type').notNull().$type<VaultRedemptionSourceType>(),
+    // Polymorphic (order id today; a future withdrawal-request id) —
+    // no FK, same reasoning `credit_transactions.reference_id` uses.
+    sourceId: uuid('source_id').notNull(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    assetCode: text('asset_code').notNull(),
+    network: text('network').notNull(),
+    // Fiat value being redeemed, in the vault currency's minor units —
+    // fixed at claim time (the order's chargeMinor for a spend). The
+    // mirror debit + burn audit row always use THIS value, never a
+    // value derived from the (buffered) share count actually
+    // collected — see the table doc comment.
+    valueMinor: bigint('value_minor', { mode: 'bigint' }).notNull(),
+    // The user's activated embedded wallet — the source of the
+    // provider-signed share transfer (ADR 031 §D1).
+    fromAddress: text('from_address').notNull(),
+
+    state: text('state').notNull().default('pending'),
+
+    sharesToRedeem: bigint('shares_to_redeem', { mode: 'bigint' }),
+    // Money-review P1-B: per-step COLLECT claim lease — an atomic
+    // state-CAS a driver stamps BEFORE the user-signed share transfer,
+    // so exactly one driver submits the collect even though
+    // `state='collecting'` alone doesn't serialize processing (the HTTP
+    // inline drive + the sweep can both reach a `collecting` row).
+    // Re-acquirable once past the lease so a crashed collector doesn't
+    // wedge the row. See `collectSharesStep`.
+    collectClaimedAt: timestamp('collect_claimed_at', { withTimezone: true }),
+    collectTxHash: text('collect_tx_hash'),
+    payoutPath: text('payout_path').$type<VaultRedemptionPayoutPath | null>(),
+    // Only set when payoutPath='slow' (a synchronous vault.withdraw
+    // was needed because the hot float couldn't cover value_minor).
+    redeemTxHash: text('redeem_tx_hash'),
+    // The audit-trail `pending_payouts kind='burn'` row written at the
+    // mirror step (see the table doc comment).
+    pendingPayoutId: uuid('pending_payout_id').references(() => pendingPayouts.id, {
+      onDelete: 'set null',
+    }),
+
+    attempts: integer('attempts').notNull().default(0),
+    lastError: text('last_error'),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    collectedAt: timestamp('collected_at', { withTimezone: true }),
+    redeemedAt: timestamp('redeemed_at', { withTimezone: true }),
+    settledAt: timestamp('settled_at', { withTimezone: true }),
+    failedAt: timestamp('failed_at', { withTimezone: true }),
+  },
+  (t) => [
+    // The durable claim fence — one vault redemption per source
+    // event, ever.
+    uniqueIndex('vault_redemptions_source_unique').on(t.sourceType, t.sourceId),
+    // Sweep query shape: `WHERE state IN (...) ORDER BY created_at`.
+    index('vault_redemptions_state_created').on(t.state, t.createdAt),
+    check(
+      'vault_redemptions_source_type_known',
+      sql`${t.sourceType} IN ('order_redeem', 'withdrawal')`,
+    ),
+    check('vault_redemptions_asset_code_known', sql`${t.assetCode} IN ('LOOPUSD', 'LOOPEUR')`),
+    check('vault_redemptions_network_known', sql`${t.network} IN ('testnet', 'mainnet')`),
+    check(
+      'vault_redemptions_state_known',
+      sql`${t.state} IN ('pending', 'collecting', 'redeemed', 'settled', 'failed')`,
+    ),
+    check('vault_redemptions_value_positive', sql`${t.valueMinor} > 0`),
+    check('vault_redemptions_attempts_non_negative', sql`${t.attempts} >= 0`),
+    check('vault_redemptions_from_address_format', sql`${t.fromAddress} ~ '^G[A-Z2-7]{55}$'`),
+    check(
+      'vault_redemptions_payout_path_known',
+      sql`${t.payoutPath} IS NULL OR ${t.payoutPath} IN ('fast', 'slow')`,
+    ),
+    check(
+      'vault_redemptions_state_shape',
+      sql`
+        (${t.state} = 'pending')
+        OR (${t.state} = 'collecting')
+        OR (
+          ${t.state} = 'redeemed'
+          AND ${t.collectTxHash} IS NOT NULL
+          AND ${t.sharesToRedeem} IS NOT NULL
+          AND ${t.payoutPath} IS NOT NULL
+          AND ${t.redeemedAt} IS NOT NULL
+          AND (${t.payoutPath} != 'slow' OR ${t.redeemTxHash} IS NOT NULL)
+        )
+        OR (
+          ${t.state} = 'settled'
+          AND ${t.collectTxHash} IS NOT NULL
+          AND ${t.sharesToRedeem} IS NOT NULL
+          AND ${t.payoutPath} IS NOT NULL
+          AND ${t.redeemedAt} IS NOT NULL
+          AND (${t.payoutPath} != 'slow' OR ${t.redeemTxHash} IS NOT NULL)
+          AND ${t.settledAt} IS NOT NULL
+        )
+        OR (${t.state} = 'failed')
+      `,
+    ),
+  ],
+);
+
+/**
+ * Per-(asset_code, network) hot float (ADR 031 §Liquidity safeguard,
+ * V4). The operator's canonical-asset (USDC/EURC) working balance,
+ * denominated in the vault currency's FIAT minor units (the same
+ * convention `vault_redemptions.value_minor` uses) so redemption
+ * payouts can draw against it without a share-price conversion at
+ * draw time. `pending_unredeemed_shares` tracks vault shares the
+ * operator holds from FAST-path collects that have not yet been
+ * redeemed via a batched `vault.withdraw` — `treasury/hot-float.ts`'s
+ * replenish tick drains this back to the vault and credits the
+ * proceeds into `balance_minor`.
+ *
+ * Starts at zero for every vault (no seed/top-up admin endpoint ships
+ * in V4 — mirrors `loop_vaults` shipping empty in V1). A zero float
+ * just means every redemption takes the SLOW path (a synchronous
+ * `vault.withdraw`) until the float organically grows from slow-path
+ * replenishment — still correct, only ever a latency difference.
+ */
+export const vaultHotFloat = pgTable(
+  'vault_hot_float',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    assetCode: text('asset_code').notNull(),
+    network: text('network').notNull(),
+    balanceMinor: bigint('balance_minor', { mode: 'bigint' }).notNull().default(0n),
+    pendingUnredeemedShares: bigint('pending_unredeemed_shares', { mode: 'bigint' })
+      .notNull()
+      .default(0n),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('vault_hot_float_asset_network_unique').on(t.assetCode, t.network),
+    check('vault_hot_float_asset_code_known', sql`${t.assetCode} IN ('LOOPUSD', 'LOOPEUR')`),
+    check('vault_hot_float_network_known', sql`${t.network} IN ('testnet', 'mainnet')`),
+    check('vault_hot_float_balance_non_negative', sql`${t.balanceMinor} >= 0`),
+    check('vault_hot_float_pending_shares_non_negative', sql`${t.pendingUnredeemedShares} >= 0`),
+  ],
+);

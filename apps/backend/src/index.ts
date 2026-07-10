@@ -39,6 +39,10 @@ import {
   startVaultEmissionSweep,
   stopVaultEmissionSweep,
 } from './credits/vaults/vault-emissions.js';
+import {
+  startVaultRedemptionSweep,
+  stopVaultRedemptionSweep,
+} from './credits/vaults/vault-redemptions.js';
 import { vaultsEnabled } from './credits/vaults/registry.js';
 import { markWorkerBlocked, markWorkerDisabled } from './runtime-health.js';
 import { getGeoDbStatus } from './public/geo.js';
@@ -297,8 +301,14 @@ if (env.LOOP_WORKERS_ENABLED) {
   // sweep here is consistent, not merely inert.
   if (vaultsEnabled()) {
     startVaultEmissionSweep();
+    // ADR 031 §D6 (V4) — vault WITHDRAW/REDEEM sweep. Same gating
+    // reasoning as the emission sweep above: with vaults off,
+    // `orders/redeem.ts`'s gated fork never claims a `vault_redemptions`
+    // row, so an unstarted sweep here is consistent, not merely inert.
+    startVaultRedemptionSweep();
   } else {
     markWorkerDisabled('vault_emission_sweep', 'LOOP_VAULTS_ENABLED is false');
+    markWorkerDisabled('vault_redemption_sweep', 'LOOP_VAULTS_ENABLED is false');
   }
 } else {
   markWorkerDisabled('payment_watcher', 'LOOP_WORKERS_ENABLED is false');
@@ -312,6 +322,7 @@ if (env.LOOP_WORKERS_ENABLED) {
   markWorkerDisabled('interest_mint', 'LOOP_WORKERS_ENABLED is false');
   markWorkerDisabled('wallet_provisioning', 'LOOP_WORKERS_ENABLED is false');
   markWorkerDisabled('vault_emission_sweep', 'LOOP_WORKERS_ENABLED is false');
+  markWorkerDisabled('vault_redemption_sweep', 'LOOP_WORKERS_ENABLED is false');
 }
 
 logger.info({ port: env.PORT }, 'Loop backend starting');
@@ -353,6 +364,7 @@ function shutdown(signal: string): void {
   stopLedgerInvariantWatcher();
   stopWalletProvisioning();
   stopVaultEmissionSweep();
+  stopVaultRedemptionSweep();
 
   server.close(() => {
     void Promise.allSettled([sentryFlush(5000), closeDb()]).finally(() => {

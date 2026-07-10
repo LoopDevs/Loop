@@ -44,6 +44,16 @@ const TABLES_TO_TRUNCATE = [
   // CASCADE sweeps it transitively, listed explicitly for the same
   // self-documenting reason as its V1 siblings above.
   'vault_emissions',
+  // ADR 031 §D6 (V4, migration 0062): the vault-share REDEMPTION
+  // state machine + its hot-float ledger. `vault_redemptions`
+  // references users/pending_payouts (CASCADE sweeps it transitively,
+  // same self-documenting reasoning as `vault_emissions` above), but
+  // `vault_hot_float` has NO foreign key to anything else in this list
+  // (it's a standalone per-(asset_code, network) ledger row) — without
+  // listing it explicitly here, CASCADE would never reach it and a
+  // seeded float balance would leak across tests within this file.
+  'vault_redemptions',
+  'vault_hot_float',
   'interest_pool_alert_state',
   'watchdog_alert_state',
   'otp_attempt_counters',

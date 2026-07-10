@@ -758,6 +758,8 @@ export {
   notifyWalletProvisioningStuck,
   notifyVaultEmissionFailed,
   notifyVaultEmissionsStuck,
+  notifyVaultRedemptionFailed,
+  notifyVaultRedemptionsStuck,
 } from './monitoring-stuck-sweepers.js';
 
 // `notifyCtxSchemaDrift` (A2-1915) and its per-surface dedup state

@@ -355,6 +355,122 @@ sweep's OWN rows are serialised, via its own fleet-wide advisory lock
 
 ---
 
+## Vault redemptions (ADR 031 §D6, V4)
+
+LOOPUSD/LOOPEUR spend/withdraw via the vault path
+(`credits/vaults/vault-redemptions.ts` + `treasury/hot-float.ts`, gated
+on `LOOP_VAULTS_ENABLED` — dark by default). One `vault_redemptions`
+row per spend event: `pending → collecting → redeemed → settled`
+(+`failed`). The gift-card spend fork lives in `orders/redeem.ts`
+(→`orders/redeem-vault.ts`) for a vault-eligible (USD/EUR) `loop_asset`
+order; with the flag off, the classic on-chain redemption is
+byte-identical.
+
+### INV-V2 (redemption) — Never pay out more value than the collected shares are worth
+
+The value paid for a redemption (`value_minor`) is bounded below by
+what the collected shares actually redeem to.
+
+- **runtime**: the SLOW path's `withdrawFromVault({ minAmountsOut =
+value_minor × stroops })` throws `VaultPostSubmitSlippageError` rather
+  than let a row reach `redeemed` for less than `value_minor` is worth;
+  `shares_to_redeem` is computed from a FRESH `readVaultState` price
+  (plus a bounded buffer, `REDEMPTION_SHARE_BUFFER_BPS`), pinned once,
+  never recomputed across retries.
+- **test**: `credits/vaults/__tests__/vault-redemptions.test.ts`
+  (below-floor withdraw → `recordStepFailure`, row never `redeemed`).
+
+### INV-V1 (redemption) — Mirror debit == burn == value_minor; both halves extinguished exactly once
+
+Redemption debits the off-chain `user_credits` mirror by `value_minor`
+AND writes a conserved `pending_payouts kind='burn'` audit row for the
+SAME `value_minor` — through the EXISTING primitives, so the
+`assert_emission_conservation` trigger (migration 0044, currency-scoped
+by 0061) still balances. No new payout kind, no trigger change.
+
+- **DB (idempotency + conservation)**:
+  - `vault_redemptions_source_unique` (migration 0062) — one redemption
+    row per `(source_type, source_id)`, ever (the durable claim fence).
+  - `credit_transactions_reference_unique` — one `type='spend'` ledger
+    row per `(order, source_id)`; a re-driven mirror step hits this
+    (caught → treated as already-mirrored, advance to `settled`).
+  - `pending_payouts_burn_order_unique` — one burn per order (the mirror
+    step's burn insert `ON CONFLICT DO NOTHING`s on it).
+  - `assert_emission_conservation` — counts the burn in `burned_stroops`
+    for the mirror currency (`loop_asset_mirror_currency`).
+- **runtime (strict order-payability coupling, money-review P2-3)**: the
+  mirror step re-reads the source order `FOR UPDATE` and requires
+  `pending_payment` BEFORE any debit (like classic `markOrderPaid`'s
+  `if (paid === undefined) return null`). An order that became
+  non-payable (expired) before the debit routes to a terminal
+  refund-needed `failed` state (`markRedemptionNeedsRefund`, pages ops)
+  WITHOUT debiting — never debits the user for an order that delivers no
+  card. A missing `user_credits` mirror row throws + rolls back
+  (money-review P2-4) rather than inserting an unbalanced debit.
+- **test**: `credits/vaults/__tests__/vault-redemptions.test.ts` (mocked
+  — happy-path conserves, expired-order refund path, missing-row fail-
+  closed, replay = no second debit) + `__tests__/integration/vault-
+redemptions.test.ts` (real postgres — the real conservation trigger
+  accepts the burn, `source_unique` fires as a real 23505).
+
+### INV-V3 (redemption) — Collect is at-most-once; a persisted collect_tx_hash is NOT proof of landing
+
+The user-signed `transfer(user → operator)` — the ONLY user-wallet
+signature (ADR 031 §D1) — is submitted at most once per redemption, and
+`collected_at` is set ONLY after the transfer CONFIRMS landed.
+
+- **DB (per-step claim, money-review P1-B)**: `collect_claimed_at`
+  (migration 0062) — an atomic CAS-claim committed BEFORE the transfer's
+  network call, so exactly one driver submits even though the HTTP
+  inline drive and the sweep can both reach a `collecting` row (the
+  `pending → collecting` transition-CAS alone does not serialize
+  processing). Re-acquirable once past `COLLECT_CLAIM_LEASE_MS` (a
+  crashed collector). Mirrors V3's `pending → depositing` CAS, adapted
+  to V4's extra driver.
+- **runtime (verify-on-resume, money-review P1-A)**: the transfer is
+  (re-)invoked with `priorTxHash: collect_tx_hash`, whose CF-18
+  `checkPriorSorobanTx` VERIFIES the prior tx landed (dedupes) or
+  re-submits — because `onSigned` persists `collect_tx_hash` BEFORE the
+  sign+submit round trip, a persisted hash is NOT proof of landing. The
+  same discipline V3's `transferStep` uses.
+- **request-level fence**: `orders/redeem-vault.ts` also wraps
+  claim+drive in the classic two-belt fence (in-process Set + fleet-wide
+  advisory lock keyed on order id) — defence-in-depth over the per-step
+  CAS.
+- **test**: `credits/vaults/__tests__/vault-redemptions.test.ts` (resume
+  with `collect_tx_hash` set / `collected_at` null re-invokes the
+  transfer with `priorTxHash`; two concurrent drivers → exactly one
+  transfer submitted).
+
+### Vault-redemption observability
+
+Same shape as the emission side: `recordStepFailure` /
+`markRedemptionNeedsRefund` page `notifyVaultRedemptionFailed` on a
+terminal row; `runVaultRedemptionStuckWatchdog` pages
+`notifyVaultRedemptionsStuck` (fire-once/re-arm, at-least-once) when a
+row sits in `collecting`/`redeemed` past the threshold; the sweep tick
+marks `markWorkerTickFailure('vault_redemption_sweep')` on any terminal
+failure. The admin re-drive endpoint for a `failed` row is deferred
+(V5).
+
+### Known residual (NOT self-correcting — needs drift reconcile, V5)
+
+The SLOW-path payout and the hot-float replenish (`treasury/hot-float.ts`)
+each have a documented residual: two drivers that both fail the
+fast-path draw (redemption) or two replenish ticks (float) can each
+build a REAL on-chain `withdrawFromVault` for the same shares before
+either commits. The loser's on-chain call typically fails (the vault
+can't burn shares the operator doesn't hold), but a rare interleaving
+where BOTH land is an OVER-withdraw that leaves UNTRACKED float/pool
+drift (it fails CLOSED to drift, never a double-credit of the float).
+This is NOT self-correcting: the **vault-aware R3-1 operator-float
+reconciliation must catch and reconcile it, and being vault-aware is a
+prerequisite before `LOOP_VAULTS_ENABLED` is flipped on** (a V5 item,
+alongside a per-row payout advisory lock and a durable
+`hot_float_replenish_attempts` CF-18 row). See the module headers.
+
+---
+
 ## Auth & access (the money-adjacent invariants)
 
 ### INV-11 — Every destructive admin write requires fresh step-up

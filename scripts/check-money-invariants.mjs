@@ -298,6 +298,10 @@ const REQUIRED_INDEXES = [
     name: 'vault_emissions_order_unique',
     inv: 'INV-V2 (vault-emission idempotency claim precedes any on-chain action, ADR 031 V3)',
   },
+  {
+    name: 'vault_redemptions_source_unique',
+    inv: 'INV-V1/V3 redemption (one redemption claim per source event — the durable idempotency fence, ADR 031 V4)',
+  },
 ];
 
 const REQUIRED_CHECKS = [

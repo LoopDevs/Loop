@@ -74,6 +74,9 @@ import { getUserById } from '../db/users.js';
 import { getWalletProvider } from '../wallet/provider.js';
 import { WalletProviderError } from '../wallet/provider.js';
 import { attachUserWalletSignature } from '../wallet/user-signer.js';
+import { isVaultEligibleCurrency } from '../credits/vaults/vault-emissions.js';
+import { vaultsEnabled } from '../credits/vaults/registry.js';
+import { redeemLoopOrderViaVault } from './redeem-vault.js';
 
 const log = logger.child({ handler: 'redeem' });
 
@@ -243,6 +246,21 @@ export async function redeemLoopOrderHandler(c: Context): Promise<Response> {
       400,
     );
   }
+
+  // ADR 031 §D6 (V4) — the vault-share gated fork. Vault-eligible
+  // currencies (USD/EUR) redeem via a Soroban share transfer to the
+  // operator, not a classic on-chain payment to the deposit address —
+  // the payment watcher below never sees that, so `redeem-vault.ts`
+  // drives the order's `pending_payment -> paid` transition itself.
+  // Gated on `vaultsEnabled()` alone (on top of the `LOOP_PHASE_1_ONLY`
+  // check just above, which already applies to every loop_asset
+  // redemption regardless of path) — with vaults off, every currency
+  // (including USD/EUR) falls through to the classic path below,
+  // byte-identical to pre-V4 behaviour.
+  if (vaultsEnabled() && isVaultEligibleCurrency(order.chargeCurrency)) {
+    return redeemLoopOrderViaVault(c, order, auth.userId);
+  }
+
   if (order.paymentMemo === null) {
     // loop_asset orders always carry a memo (repo.ts) — a null here
     // is schema drift / hand-edited row. Fail loud.
