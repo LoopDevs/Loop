@@ -118,6 +118,15 @@ export const creditTransactions = pgTable(
     // count + per-currency SUM over `type='cashback'`). (Migration 0036.)
     index('credit_transactions_type_created').on(t.type, t.createdAt),
     index('credit_transactions_reference').on(t.referenceType, t.referenceId),
+    // A5-8: plain btree on created_at, mirroring PERF-005's
+    // `orders_created_at` (migration 0036) for the same reason —
+    // neither composite index above has `created_at` as its leading
+    // column, so an unfiltered or date-range-only fleet-wide ledger
+    // browse (`GET /api/admin/ledger` with no `userId`/`type` filter)
+    // would otherwise seq-scan + sort the whole table. This lets the
+    // planner serve `ORDER BY created_at DESC LIMIT n` as a bounded
+    // backward index scan instead. (Migration 0058.)
+    index('credit_transactions_created_at').on(t.createdAt),
     // Partial unique index enforces period-level idempotency for
     // interest accrual. A re-tick with the same `periodCursor`
     // fails at the DB layer rather than silently double-crediting.

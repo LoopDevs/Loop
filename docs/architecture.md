@@ -473,6 +473,7 @@ GET  /api/admin/users/:userId/wallet                    [staff — wallet card: 
 POST /api/admin/users/:userId/wallet/reprovision        [staff — support action: reset provisioning attempts + re-enqueue the drive; ADR-017 envelope, ADR 037]
 POST /api/admin/orders/:orderId/refetch-redemption      [staff — support action: one-shot redemption re-fetch via the backfill machinery; ADR-017 envelope, ADR 037]
 POST /api/admin/orders/:orderId/redrive                 [admin — A5-1 order re-drive lever: re-runs the procurement worker's own path for a stuck PAID order the worker never drained (procuring refused — the recovery sweep owns those); step-up gated, ADR-017 envelope]
+GET  /api/admin/ledger                                  [staff — fleet-wide credit_transactions browser: ?userId/?type/?referenceType+?referenceId/?since/?before filters, keyset-paginated (?before cursor, limit [1,200] default 50), read-only, ADR 037 §4.2 / A5-8]
 ```
 
 Since ADR 037 the `/api/admin/*` namespace is staff-gated, not
