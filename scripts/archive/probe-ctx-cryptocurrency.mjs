@@ -1,5 +1,11 @@
 #!/usr/bin/env node
 /**
+ * ARCHIVED (§P3 scripts-pile cleanup, 2026-07): consumed one-shot.
+ * The answer this probe found — bare `'XLM'` / `'USDC'` strings, no
+ * chain prefix — is now hardcoded with rationale in
+ * apps/backend/src/orders/procure-one.ts. Kept for provenance only;
+ * do not run against production CTX.
+ *
  * One-off probe: discover what `cryptoCurrency` value CTX's
  * production `POST /gift-cards` expects in 2026. Tries a series of
  * candidate formats against spend.ctx.com using a fresh user OTP

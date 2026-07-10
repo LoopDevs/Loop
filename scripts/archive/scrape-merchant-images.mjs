@@ -1,5 +1,12 @@
 #!/usr/bin/env node
 /**
+ * ARCHIVED (§P3 scripts-pile cleanup, 2026-07): superseded by
+ * tools/ctx-catalog/scrape-merchant-images-v2.mjs, which also drops
+ * the Clearbit autocomplete dependency this v1 used (Clearbit/recall
+ * name-search is no longer the resolution strategy — see
+ * docs/adr/041-media-pipeline-tooling-deps.md and the domain-tools.mjs
+ * PSL-based resolver). Kept for provenance only; do not run.
+ *
  * Merchant brand-image scraper (one-off data-enrichment tool).
  *
  * The CTX catalogue ships ~87% of merchants with no logo / card image.
