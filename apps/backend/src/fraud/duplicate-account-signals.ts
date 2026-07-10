@@ -8,13 +8,13 @@
  * writes a row to `fraud_signals` for ops review and pages Discord on
  * a FRESH signal (never re-pages for an already-known pair).
  *
- * Called from `payments/watcher.ts` AFTER `markOrderPaid` commits,
- * fire-and-forget — never inside the money transition itself, and
- * never able to affect its outcome. Every failure path in this module
- * logs and returns; it must not throw past its caller, because by the
- * time it runs the order is already paid and there is no gate left to
- * close (contrast with `fraud/velocity.ts`, which fails CLOSED because
- * it runs BEFORE the write it's guarding).
+ * Called from `payments/watcher.ts` AFTER `markOrderPaid` commits. The
+ * caller awaits it, but it runs strictly OUTSIDE (never inside) the
+ * money transition, so it can never affect that outcome. Every failure
+ * path in this module logs and returns; it must not throw past its
+ * caller, because by the time it runs the order is already paid and
+ * there is no gate left to close (contrast with `fraud/velocity.ts`,
+ * which fails CLOSED because it runs BEFORE the write it's guarding).
  */
 import { and, ne, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
