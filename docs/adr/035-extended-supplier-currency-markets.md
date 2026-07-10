@@ -25,11 +25,36 @@ wired:
   `users_home_currency_known`) deliberately stay USD/GBP/EUR.
 
 **External dependency (not in Loop's repo):** a market only goes live end-to-end
-once the external rates service (`~/code/rates`) actually serves a fiat→crypto
-rate for the currency (task #8). Until then an extended-market order returns a
-clean `CURRENCY_NOT_AVAILABLE` 503 ("ordering for this market is coming soon") —
-it never crashes, 500s, or computes a wrong charge. This PR makes Loop _ready and
-safe_; flipping a market live is purely a rates-service capability.
+once the external rates service actually serves a live rate for the currency.
+Until then an extended-market order returns a clean `CURRENCY_NOT_AVAILABLE` 503
+("ordering for this market is coming soon") — it never crashes, 500s, or
+computes a wrong charge. This PR makes Loop _ready and safe_; flipping a market
+live is purely a rates-service capability.
+
+**Which "rates service", precisely (§P3, 2026-07-10):** the gate is the fiat FX
+feed in `apps/backend/src/payments/price-feed-fx.ts` (Frankfurter,
+`api.frankfurter.app` → ECB reference rates), NOT CTX's `rates.ctx.com`. The two
+are different hops in the design: an extended-market order is FX-pinned
+catalog-currency → home-currency (USD/GBP/EUR) via Frankfurter first, and only
+the resulting **home-currency** charge is ever sized against `rates.ctx.com` for
+the on-chain XLM/USDC payment — a currency `rates.ctx.com` already fully serves
+for USD/GBP/EUR. So an extended currency going live end-to-end depends only on
+Frankfurter carrying it, not on any CTX-side capability. (The original text
+above referenced a separate `~/code/rates` service and an internal task #8 —
+that was the pre-CF-19 assumption; CF-19 shipped the Frankfurter-hop design
+instead, which is what's live today.)
+
+**Confirmed live status (checked directly against the production Frankfurter
+API, 2026-07-10):** Frankfurter serves **AUD, INR, and MXN** today — orders in
+those three currencies work end-to-end right now. It does **not** serve **AED**
+or **SAR** — both are USD-pegged Gulf currencies the ECB's reference-rate table
+(which Frankfurter republishes) doesn't quote, so those two markets correctly
+and repeatably 503 `CURRENCY_NOT_AVAILABLE` today. This is a real vendor gap,
+not a Loop code gap: the check is a live per-request feed read (never a static
+allowlist), so AED/SAR orders start working automatically, with no Loop
+deploy, the moment Frankfurter (or a replacement feed) adds them. Closing that
+gap for real (switching feeds, or sourcing AED/SAR from elsewhere) is a
+👤/vendor decision, tracked outside this ADR.
 
 ## Context
 

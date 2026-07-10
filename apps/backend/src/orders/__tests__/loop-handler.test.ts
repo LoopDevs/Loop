@@ -522,6 +522,29 @@ describe('loopCreateOrderHandler', () => {
     );
   });
 
+  it.each(['AED', 'INR', 'SAR', 'AUD', 'MXN'] as const)(
+    'accepts every ADR-035 extended currency (%s) as a valid catalog currency — none 400 VALIDATION_ERROR',
+    async (currency) => {
+      // §P3 (go-live-plan): the AED test above proves the mechanism once;
+      // this closes coverage for all five so a future accidental narrowing
+      // of `isOrderableCurrency`/`EXTENDED_ORDER_CURRENCIES` to a subset
+      // fails a test, not just a prod 400.
+      fxState.impl = async () => 999n;
+      const { ctx } = makeCtx({
+        auth: LOOP_AUTH,
+        body: {
+          merchantId: 'm1',
+          amountMinor: 10_000,
+          currency,
+          paymentMethod: 'xlm',
+        },
+      });
+      const res = await loopCreateOrderHandler(ctx);
+      expect(res.status).toBe(200);
+      expect(createOrderMock).toHaveBeenCalledWith(expect.objectContaining({ currency }));
+    },
+  );
+
   it('returns 503 CURRENCY_NOT_AVAILABLE when the rates service has no rate for the extended currency yet', async () => {
     // CF-19: the market is SEO-promoted but the external rates service
     // doesn't serve INR yet. Fail gracefully ("coming soon") — never
