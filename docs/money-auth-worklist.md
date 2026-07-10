@@ -116,8 +116,7 @@
       **Done when:** any payment-op with `to === depositAddress` that fails
       every rail match routes into `recordSkip` with a new reason, visible
       on `/admin/skips`.
-      ✅ Done 2026-07-09 (#1604, review-first — not yet merged at doc-write
-      time). `horizon.ts` now accepts `path_payment_strict_send`/
+      ✅ Done 2026-07-09 (#1604, review-first, merged 2026-07-10). `horizon.ts` now accepts `path_payment_strict_send`/
       `path_payment_strict_receive` (same destination-side field names as
       `payment`) and adds `isInboundDeliveryToAccount` — the exact
       inbound-vs-outbound discriminator (successful payment/path-payment op,
@@ -250,8 +249,7 @@
       classifier, single-flight worker, Discord drift/unclassified page,
       Treasury state, unclassified movement drilldown, and audited
       baseline/manual movement admin writes landed.
-      **Code-complete 2026-07-10** (review-first, not yet merged at
-      doc-write time): cold-start cursor safety promoted from an
+      **Code-complete 2026-07-10** (review-first, merged 2026-07-10): cold-start cursor safety promoted from an
       app-layer (Zod-only) check to a DB-enforced NOT NULL + non-empty
       constraint on `operator_wallet_baselines.starting_horizon_cursor`
       / `current_horizon_cursor` (migration 0057) — a baseline with a
@@ -306,7 +304,7 @@
       **Done when:** the test-endpoints router requires a second, independent
       control (shared secret header or loopback bind) even under
       `NODE_ENV=test`.
-      **Done (review-first, not yet merged):** `test-endpoints.ts` now
+      **Done (review-first, merged 2026-07-10):** `test-endpoints.ts` now
       requires `LOOP_TEST_ENDPOINTS_SECRET` (matched per-request via the
       `X-Test-Endpoints-Secret` header) in addition to `NODE_ENV==='test'`
       (re-checked inside the module itself); either missing/wrong → 404,
@@ -367,7 +365,7 @@
       **Done 2026-07-07:** admin reconciliation now uses a transaction-local
       2s statement timeout and a 30s success cache, with focused unit coverage.
 - [ ] **S4-1 · Stellar payout throughput ceiling** (the one architectural item). _L · 💰._
-      **2026-07-10: code shipped** (review-first PR open, not yet merged) —
+      **2026-07-10: code shipped** (merged 2026-07-10) —
       `docs/adr/044-payout-throughput.md` picks Stellar channel accounts (N
       pre-funded sequence-owning accounts; op-level `source` override keeps
       the operator/issuer as the real funder) over operator/issuer account
@@ -380,8 +378,7 @@
 ## Phase 4 — Admin / support money tooling (ops can't intervene today)
 
 - [x] **A5-1 · Order re-drive lever** (biggest hole). _M · 💰._
-      **Done 2026-07-09, paid-only after money-review (review-first PR #1609 open, not yet
-      merged):** `POST /api/admin/orders/:orderId/redrive` — admin-tier + step-up (`order-redrive`
+      **Done 2026-07-09, paid-only after money-review (merged 2026-07-10 (#1609)):** `POST /api/admin/orders/:orderId/redrive` — admin-tier + step-up (`order-redrive`
       scope), ADR-017 envelope. Re-runs `procureOne` for a stuck **`paid`** order the worker never
       drained (the recovery sweep only touches `procuring`). Safe under concurrency:
       `markOrderProcuring`'s CAS is a hard single-flight gate, so never a double-procure or
@@ -391,7 +388,7 @@
       the sweep, and safe manual re-procure needs a liveness signal + bounded Horizon I/O (follow-up).
       No new money logic — reuses `procureOne` / `ctx_settlements`. Cancel-and-refund deferred to A5-4.
 - [x] **A5-4 · Order-bound refund UI + fulfilled-order policy.** _M · 💰 + policy._
-      **Done 2026-07-10 (review-first PR open, not yet merged):** new `POST /api/admin/orders/:orderId/refund`, admin-tier + step-up (`order-refund` scope), ADR-017 envelope. Operator-decided policy: paid/procuring/failed refund directly; **fulfilled** refundable ONLY behind a required code-unused attestation (`{codeUnused,attestationNote}`). No new money path — dispatches to the EXISTING primitives per `payment_method`: xlm/usdc → `applyOrderAutoRefund`→A6 `refundDeposit` (on-chain to sender); credit → `applyAdminRefund` (mirror); **loop_asset fails closed** (R3-2 posture). paid/procuring fenced to `failed` first; procuring-with-CTX-paid refused (`loopPaidCtx`). INV-8-idempotent (rides the migration-0013 index + deposit-refund claim guard — no new uniqueness logic). Web `RefundOrderPanel` with the fulfilled-order warning + attestation checkbox. Double-spend risk operator-accepted (attestation + audit) — `docs/threat-model.md`.
+      **Done 2026-07-10 (merged 2026-07-10):** new `POST /api/admin/orders/:orderId/refund`, admin-tier + step-up (`order-refund` scope), ADR-017 envelope. Operator-decided policy: paid/procuring/failed refund directly; **fulfilled** refundable ONLY behind a required code-unused attestation (`{codeUnused,attestationNote}`). No new money path — dispatches to the EXISTING primitives per `payment_method`: xlm/usdc → `applyOrderAutoRefund`→A6 `refundDeposit` (on-chain to sender); credit → `applyAdminRefund` (mirror); **loop_asset fails closed** (R3-2 posture). paid/procuring fenced to `failed` first; procuring-with-CTX-paid refused (`loopPaidCtx`). INV-8-idempotent (rides the migration-0013 index + deposit-refund claim guard — no new uniqueness logic). Web `RefundOrderPanel` with the fulfilled-order warning + attestation checkbox. Double-spend risk operator-accepted (attestation + audit) — `docs/threat-model.md`.
 - [ ] **A5-6 · Make stuck-orders / stuck-payouts support-visible.** _M · 💰._
 - [x] **A5-9 · Bulk actions + drift-correction action.** _M · 💰._
       **Drift-correction RESOLVED 2026-07-10 (operator decision):** NO new drift-write primitive. Drift is corrected via the EXISTING per-user credit-adjust (`POST /api/admin/users/:userId/credit-adjustments`, step-up + reason + audit, already conservation-trigger + INV-5-cap guarded), driven by the A5-8 ledger browser + R3-1 reconciliation tools. Procedure documented in `docs/runbooks/ledger-drift.md` + `operator-float-drift.md`. Bulk selection (UX-only over already-guarded single writes) deferred.
@@ -403,7 +400,7 @@
 ## Phase 5 — Fraud / abuse controls (currently absent)
 
 - [x] **B-3 · User-level fraud/abuse controls.** _L · 💰 + design/ADR._
-      Phase 1 shipped 2026-07-10 (ADR 045, review-first PR open — not yet merged):
+      Phase 1 shipped 2026-07-10 (ADR 045, merged 2026-07-10):
       per-user order-create velocity limit (bounded/indexed, fail-closed) +
       duplicate-account shared-funding-source detection (flag-only, never
       auto-block). Chargeback handling scoped as a T3/Plaid-card hook (no
@@ -423,7 +420,7 @@ depth of a numbered ID, but worth tracking so they don't get lost.
       — but the same "unconfigured issuer silently matches anything" shape
       is worth closing for consistency and to stop it from misreporting
       operator treasury balances against a spoofed/self-issued asset.
-      **Done (review-first, not yet merged):** `getAccountBalances` now
+      **Done (review-first, merged 2026-07-10):** `getAccountBalances` now
       mirrors `isMatchingIncomingPayment`'s fail-closed shape — a 'USDC'
       code balance is only counted when `usdcIssuer` is configured AND
       matches; unset issuer now reads as `usdcStroops: null` (unknown),
@@ -447,7 +444,7 @@ depth of a numbered ID, but worth tracking so they don't get lost.
       surface the misconfiguration immediately instead of via silent
       24h-later expiry. Liveness/UX, not a money-safety gap (no unbacked
       value can move).
-      **Done (review-first, not yet merged):** both
+      **Done (review-first, merged 2026-07-10):** both
       `loop-create-response.ts` and `loop-replay-response.ts` (the
       idempotent-replay twin — same gap, same fix) now 503
       `SERVICE_UNAVAILABLE` for a
@@ -674,7 +671,7 @@ payment_method='loop_asset' AND state='pending_payment'` — plus a
       gated writer tested, and the two deliberately-ungated writers
       match their documented contracts.
 - [x] **Q6-4 · Gating loop-native purchase-through-the-UI E2E** (the real production path). _M._
-      **Done 2026-07-10 — review-first PR open (not yet merged; this
+      **Done 2026-07-10 — merged 2026-07-10 (this
       PR touches a one-line product fix alongside the new e2e suite,
       so it does NOT self-merge — see below):** confirmed the gap the
       item names was real (not stale): `tests/e2e-mocked/purchase-flow.test.ts`
@@ -762,7 +759,7 @@ payment_method='loop_asset' AND state='pending_payment'` — plus a
       reachable at all, so the background-tick approach needed no new
       manual-trigger endpoint).
 - [x] **Q6-4b · Loop-native payment-screen remount fragility** (Q6-4 follow-up). _S–M · 💰._
-      **Done 2026-07-10 — review-first PR open (not yet merged):** Q6-4's e2e work
+      **Done 2026-07-10 — merged 2026-07-10:** Q6-4's e2e work
       fixed the first-touch guard (`store.startPurchase`) but flagged a deeper
       problem: the loop-native payment screen renders ONLY from `loopCreate`,
       ephemeral `useState` in `PurchaseContainer.tsx`, never re-derived from the
