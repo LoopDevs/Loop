@@ -25,6 +25,18 @@ import { randomUUID } from 'node:crypto';
 const PORT = Number(process.env.PORT ?? 9091);
 const OTP = '123456';
 
+// Q6-4 (loop-native purchase-through-the-UI e2e): the operator-side
+// procurement worker (apps/backend/src/orders/procure-one.ts) parses
+// this destination out of `paymentUrls.XLM` via `parseSep7PayUri` and
+// hands it straight to `@stellar/stellar-sdk`'s `Operation.payment`,
+// which throws on an invalid StrKey checksum. The legacy CTX-proxy
+// flow (the only consumer before Q6-4) never validates this value —
+// it just displays it to the end user as text — so a syntactically
+// invalid placeholder was harmless there. A real, checksum-valid G...
+// address (never funded, never used on any real network) keeps both
+// consumers working from the same fixture.
+const CTX_MOCK_DESTINATION = 'GAY6JKQ5XYKHLEM5QJU7P336Y675XAJKYH56HX3UHHCZO7KVWWAVYOKJ';
+
 // ───────── Seed data ─────────────────────────────────────────────────
 
 const merchants = [
@@ -173,7 +185,7 @@ const server = http.createServer(async (req, res) => {
       cardFiatCurrency: body.fiatCurrency ?? merchant.currency,
       paymentCryptoAmount: xlmAmount,
       paymentUrls: {
-        XLM: `web+stellar:pay?destination=GMOCK0000000000000000000000000000000000000000000000000000&amount=${xlmAmount}&memo=${encodeURIComponent(memo)}`,
+        XLM: `web+stellar:pay?destination=${CTX_MOCK_DESTINATION}&amount=${xlmAmount}&memo=${encodeURIComponent(memo)}`,
       },
       status: 'unpaid',
       fulfilmentStatus: 'pending',

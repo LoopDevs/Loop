@@ -606,7 +606,94 @@ payment_method='loop_asset' AND state='pending_payment'` — plus a
 ## Ongoing — remaining money/auth test coverage
 
 - [ ] **Q6-3 · Web money-write client tests** (`admin-write-envelope` step-up + Idempotency-Key). _S–M._
-- [ ] **Q6-4 · Gating loop-native purchase-through-the-UI E2E** (the real production path). _M._
+- [x] **Q6-4 · Gating loop-native purchase-through-the-UI E2E** (the real production path). _M._
+      **Done 2026-07-10 — review-first PR open (not yet merged; this
+      PR touches a one-line product fix alongside the new e2e suite,
+      so it does NOT self-merge — see below):** confirmed the gap the
+      item names was real (not stale): `tests/e2e-mocked/purchase-flow.test.ts`
+      drives the **legacy** CTX-proxy path (`LOOP_AUTH_NATIVE_ENABLED`
+      unset in `playwright.mocked.config.ts`); `tests/e2e-flywheel/flywheel-walk.test.ts`
+      seeds an **already-fulfilled** loop-native order directly via SQL
+      in its `global-setup.ts` and only walks the read/consumer side
+      (`/orders` list rendering) — neither drives `createLoopOrder`
+      (`POST /api/orders/loop`, gated on `config.loopOrdersEnabled`)
+      through a browser, and neither simulates an on-chain deposit
+      landing at all. Closed the full gap rather than a partial slice:
+      added `tests/e2e-loop-purchase/purchase-flow.test.ts` +
+      `playwright.loop-purchase.config.ts` (a third, separate
+      Playwright config/webServer — see its header comment for why it
+      can't share `playwright.flywheel.config.ts`'s backend process:
+      this suite needs `LOOP_PHASE_1_ONLY=true` to pin the CTX-payment
+      rail to XLM deterministically, which hides the cashback headline
+      `flywheel-walk.test.ts` asserts on) that drives: sign-in (reusing
+      the existing `/__test__/mint-loop-token` + sessionStorage-plant
+      technique `flywheel-walk.test.ts` already established — loop-native
+      OTPs have no inbox to scrape, same rationale as that suite) →
+      browse to a merchant → pick the XLM payment rail → enter an
+      amount → `POST /api/orders/loop` (asserted against the REAL
+      captured API response, not a hardcoded assumption) → the payment
+      step renders the deposit address/memo/asset-amount → a new
+      `tests/e2e-loop-purchase/fixtures/mock-horizon.mjs` fixture
+      simulates the matching on-chain XLM deposit landing (serves
+      `GET /accounts/:id/payments` for the payment watcher's poll, plus
+      `GET /accounts/:id` + `POST /transactions` so `@stellar/stellar-sdk`'s
+      `Horizon.Server` can build/sign/submit the procurement worker's
+      own outbound payment to CTX — investigated the SDK's actual
+      wire contract (`AccountResponse` only reads `account_id`/`sequence`;
+      `submitTransaction` skips XDR-decoding when the response omits
+      `result_xdr`) rather than assuming a full Horizon mock was
+      infeasible) → the payment watcher marks the order `paid` →
+      the procurement worker settles with `tests/e2e-mocked/fixtures/mock-ctx.mjs`
+      (reused unmodified except a checksum-valid destination address —
+      the fake placeholder the legacy path never validated fails
+      `stellar-sdk`'s `Operation.payment` StrKey check) → `fulfilled` →
+      the redemption link is revealed in the UI and cross-checked
+      against `GET /api/orders/loop/:id`. Both worker tick intervals
+      run at 1s (config-only) so the polling waits stay fast without
+      trading determinism for speed — every wait is on a UI/API
+      assertion (`toBeVisible`/`toPass`), never a fixed sleep.
+      Non-vacuousness — two proofs, not one: (1) the test caught a REAL
+      production bug on its first honest run (below) before any fix
+      existed; (2) after the fix, ran the suite with the "Ready"
+      state-label assertion retargeted to a string the app never
+      renders — the test failed red (timeout) exactly as expected;
+      reverted before landing. Runs as a second step in the existing
+      CI `test-e2e-flywheel` job (not a new job, not a new required
+      check — same posture `flywheel-walk.test.ts` already has).
+      **⚠️ Found + fixed a real P1 production bug, not just a test
+      gap:** `PurchaseContainer.tsx`'s loop-native branch called
+      `setLoopCreate(result)` after `POST /api/orders/loop` succeeded
+      but never called `store.startPurchase(merchant.id, ...)` (only
+      the legacy branch did). The `<LoopPaymentStep>` render is gated
+      on `isCurrentMerchant = store.merchantId === merchant.id`, so on
+      any first-touch session (`store.merchantId` starts `null`) that
+      guard stayed false forever — the order was created server-side
+      (a real order row, a real deposit memo) but the UI silently fell
+      back to the amount-selection form with no visible next step. No
+      existing test (unit or e2e) exercised this transition, which is
+      exactly the "UI/config regression on the real path currently
+      passes every gate" risk this item's own description warned
+      about. Fixed with one added line
+      (`store.startPurchase(merchant.id, merchant.name);` right before
+      `setLoopCreate(result)`) — verified against the actual guard
+      logic (`loopCreate` is already merchant-scoped local state via
+      the mount effect's `[merchant.id]` cleanup, so this call exists
+      purely to satisfy the shared-store guard the same way the legacy
+      branch does, touching none of the legacy-shaped store fields the
+      loop-native render path reads). **Because this PR touches
+      product source (`apps/web/app/components/features/purchase/PurchaseContainer.tsx`),
+      it is NOT self-merged** — left open, review-first, per the
+      CLAUDE.md rule that a product-source change (even a one-line,
+      clearly-scoped bug fix a test forced into the open) needs a
+      human pass before merge. Also touched
+      `tests/e2e-mocked/fixtures/mock-ctx.mjs`'s hardcoded fake Stellar
+      destination address (not a checksum-valid StrKey, which the
+      legacy path never validated but `stellar-sdk`'s
+      `Operation.payment` does) — a test-fixture constant, not runtime
+      logic. No `apps/backend/src/test-endpoints.ts` change was needed
+      (workers already had to run for `config.loopOrdersEnabled` to be
+      reachable at all, so the background-tick approach needed no new
+      manual-trigger endpoint).
 - [ ] **Q6-5 · Admin / support UI E2E smoke.** _M._
 - [x] **Q6-6 · Wallet-spend + on-chain interest-mint coverage** (mint has no real-Postgres test). _M._
       **Done 2026-07-10 (test-only PR — coverage cannot demote an
