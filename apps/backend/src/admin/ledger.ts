@@ -24,16 +24,26 @@
  * matches its filter + the `ORDER BY created_at DESC`, so none of
  * them can degrade into a full-table sort:
  *
- *   - `userId` set              → `credit_transactions_user_created (user_id, created_at)`
- *   - `type` set (no `userId`)  → `credit_transactions_type_created (type, created_at)`
- *   - `referenceType`/`Id` set  → `credit_transactions_reference (reference_type, reference_id)`
- *     (reference lookups are inherently narrow — at most a handful
- *     of rows per order/payout — so the missing `created_at` tail on
- *     this index is immaterial; there's nothing left to sort)
- *   - none of the above         → `credit_transactions_created_at` (migration 0058, mirrors
- *     PERF-005's `orders_created_at`) — a plain btree so the fully
- *     unfiltered / date-range-only browse still serves as a bounded
- *     backward index scan instead of a seq-scan + sort.
+ *   - `userId` set                    → `credit_transactions_user_created (user_id, created_at)`
+ *   - `type` set (no `userId`)        → `credit_transactions_type_created (type, created_at)`
+ *   - `referenceType` + `referenceId` → `credit_transactions_reference (reference_type, reference_id)`
+ *     — an exact-match probe on BOTH columns of that composite index
+ *     (a specific order/payout id), so it's cheap regardless of hit
+ *     count, including the zero-match case.
+ *   - none of the above               → `credit_transactions_created_at` (migration 0058,
+ *     mirrors PERF-005's `orders_created_at`) — a plain btree so the
+ *     fully unfiltered / date-range-only browse still serves as a
+ *     bounded backward index scan instead of a seq-scan + sort.
+ *
+ *   `referenceType` and `referenceId` are therefore REQUIRED together
+ *   (400 `VALIDATION_ERROR` if only one is set) — money-review finding
+ *   on PR #1620: `referenceType` alone is a broad equality prefix on
+ *   the composite index (e.g. `referenceType=order` matches most of
+ *   the table — cashback/refund/spend all write it) with no
+ *   `created_at` tail to bound the scan, and `referenceId` alone
+ *   isn't even the index's leading column, so a typo'd/stale id can't
+ *   be proven "no match" without walking the whole index. Pairing
+ *   them restores the narrow-lookup guarantee above.
  *
  * This is a READ-ONLY endpoint — no mutation, no balance write, no
  * idempotency envelope. Support-tier (ADR 037 §3: "ledger" is listed
@@ -120,6 +130,23 @@ export async function adminLedgerHandler(c: Context): Promise<Response> {
     (referenceIdRaw.length === 0 || referenceIdRaw.length > 128)
   ) {
     return c.json({ code: 'VALIDATION_ERROR', message: 'referenceId is malformed' }, 400);
+  }
+
+  // Money-review finding (PR #1620): reject either one supplied
+  // without the other. `credit_transactions_reference` is a composite
+  // index on `(reference_type, reference_id)` — only an equality on
+  // BOTH columns is a bounded, index-selective lookup. Either alone
+  // degrades toward an unindexed-tail scan (see the handler doc
+  // comment above) — exactly the S4-6 pathology this endpoint is
+  // supposed to avoid.
+  if ((referenceTypeRaw !== undefined) !== (referenceIdRaw !== undefined)) {
+    return c.json(
+      {
+        code: 'VALIDATION_ERROR',
+        message: 'referenceType and referenceId must be provided together',
+      },
+      400,
+    );
   }
 
   const limitRaw = c.req.query('limit');

@@ -173,6 +173,24 @@ describe('adminLedgerHandler', () => {
     expect((await adminLedgerHandler(makeCtx({ before: 'nope' }))).status).toBe(400);
   });
 
+  // Money-review finding on PR #1620: referenceType alone is a broad
+  // equality prefix on the (reference_type, reference_id) index with
+  // no created_at tail (most of the table has referenceType='order');
+  // referenceId alone isn't even that index's leading column. Either
+  // one supplied without the other must 400 rather than silently
+  // running an unbounded-shaped query.
+  it('400 when referenceType is supplied without referenceId (well-formed but unpaired)', async () => {
+    const res = await adminLedgerHandler(makeCtx({ referenceType: 'order' }));
+    expect(res.status).toBe(400);
+    expect(selectMock).not.toHaveBeenCalled();
+  });
+
+  it('400 when referenceId is supplied without referenceType (well-formed but unpaired)', async () => {
+    const res = await adminLedgerHandler(makeCtx({ referenceId: 'o-1' }));
+    expect(res.status).toBe(400);
+    expect(selectMock).not.toHaveBeenCalled();
+  });
+
   it('accepts userId + type + referenceType + referenceId + since + before together', async () => {
     const res = await adminLedgerHandler(
       makeCtx({

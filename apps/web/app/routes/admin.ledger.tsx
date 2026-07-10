@@ -110,6 +110,14 @@ function AdminLedgerRouteInner(): React.JSX.Element {
     userIdParam !== undefined && UUID_RE.test(userIdParam) ? userIdParam : undefined;
   const referenceTypeParam = searchParams.get('referenceType') ?? undefined;
   const referenceIdParam = searchParams.get('referenceId') ?? undefined;
+  // Backend requires referenceType + referenceId together (money-review
+  // finding on PR #1620 — either alone isn't index-selective, see
+  // admin/ledger.ts). A URL with only one set is an incomplete/stale
+  // deep link, not a valid filter — drop both rather than send a
+  // request the backend will 400.
+  const referencePairComplete = referenceTypeParam !== undefined && referenceIdParam !== undefined;
+  const referencePairIncomplete =
+    (referenceTypeParam !== undefined) !== (referenceIdParam !== undefined);
   const sinceParam = searchParams.get('since') ?? undefined;
   const before = searchParams.get('before') ?? undefined;
 
@@ -120,7 +128,7 @@ function AdminLedgerRouteInner(): React.JSX.Element {
   const [sinceDraft, setSinceDraft] = useState(
     sinceParam !== undefined ? sinceParam.slice(0, 10) : '',
   );
-  const [userIdError, setUserIdError] = useState<string | null>(null);
+  const [filterError, setFilterError] = useState<string | null>(null);
 
   const resetCursor = (): void => {
     setSearchParams((params) => {
@@ -132,19 +140,27 @@ function AdminLedgerRouteInner(): React.JSX.Element {
   const applyFilters = (): void => {
     const trimmedUserId = userIdDraft.trim();
     if (trimmedUserId.length > 0 && !UUID_RE.test(trimmedUserId)) {
-      setUserIdError('userId must be a UUID.');
+      setFilterError('userId must be a UUID.');
       return;
     }
-    setUserIdError(null);
+
+    const trimmedRefId = referenceIdDraft.trim();
+    const trimmedRefType = referenceTypeDraft.trim();
+    // Mirrors the backend's pairing requirement (money-review finding,
+    // PR #1620) — reject client-side instead of round-tripping a 400.
+    if (trimmedRefType.length > 0 !== trimmedRefId.length > 0) {
+      setFilterError('Reference type and reference ID must be provided together.');
+      return;
+    }
+
+    setFilterError(null);
     setSearchParams((params) => {
       if (trimmedUserId.length === 0) params.delete('userId');
       else params.set('userId', trimmedUserId);
 
-      const trimmedRefId = referenceIdDraft.trim();
       if (trimmedRefId.length === 0) params.delete('referenceId');
       else params.set('referenceId', trimmedRefId);
 
-      const trimmedRefType = referenceTypeDraft.trim();
       if (trimmedRefType.length === 0) params.delete('referenceType');
       else params.set('referenceType', trimmedRefType);
 
@@ -161,7 +177,7 @@ function AdminLedgerRouteInner(): React.JSX.Element {
     setReferenceIdDraft('');
     setReferenceTypeDraft('');
     setSinceDraft('');
-    setUserIdError(null);
+    setFilterError(null);
     setTypeFilter('all');
     setSearchParams((params) => {
       params.delete('userId');
@@ -178,8 +194,8 @@ function AdminLedgerRouteInner(): React.JSX.Element {
       'admin-ledger',
       userIdFilter ?? null,
       typeFilter,
-      referenceTypeParam ?? null,
-      referenceIdParam ?? null,
+      referencePairComplete ? referenceTypeParam : null,
+      referencePairComplete ? referenceIdParam : null,
       sinceParam ?? null,
       before ?? null,
     ],
@@ -188,8 +204,13 @@ function AdminLedgerRouteInner(): React.JSX.Element {
         limit: PAGE_SIZE,
         ...(userIdFilter !== undefined ? { userId: userIdFilter } : {}),
         ...(typeFilter !== 'all' ? { type: typeFilter } : {}),
-        ...(referenceTypeParam !== undefined ? { referenceType: referenceTypeParam } : {}),
-        ...(referenceIdParam !== undefined ? { referenceId: referenceIdParam } : {}),
+        // Only ever sent as a pair — see referencePairComplete above.
+        ...(referencePairComplete && referenceTypeParam !== undefined
+          ? { referenceType: referenceTypeParam }
+          : {}),
+        ...(referencePairComplete && referenceIdParam !== undefined
+          ? { referenceId: referenceIdParam }
+          : {}),
         ...(sinceParam !== undefined ? { since: sinceParam } : {}),
         ...(before !== undefined ? { before } : {}),
       }),
@@ -209,8 +230,8 @@ function AdminLedgerRouteInner(): React.JSX.Element {
     });
   };
 
-  const anyUrlFilterActive =
-    referenceIdParam !== undefined || (userIdParam !== undefined && userIdFilter === undefined);
+  const malformedUserId = userIdParam !== undefined && userIdFilter === undefined;
+  const anyUrlFilterActive = referencePairComplete || referencePairIncomplete || malformedUserId;
 
   return (
     <main className="max-w-6xl mx-auto px-6 py-12 space-y-6">
@@ -223,22 +244,24 @@ function AdminLedgerRouteInner(): React.JSX.Element {
         </p>
       </header>
 
-      {/* Deep-link banner (ADR 018): a reference-id drill-in from an
-          order/payout detail page, or a malformed userId in the URL. */}
+      {/* Deep-link banner (ADR 018): a reference drill-in from an
+          order/payout detail page, an incomplete reference pair, or a
+          malformed userId in the URL. */}
       {anyUrlFilterActive ? (
         <div
           role="status"
           className="flex items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200"
         >
           <span>
-            {referenceIdParam !== undefined ? (
+            {referencePairComplete ? (
               <>
                 Filtered to reference{' '}
                 <code className="font-mono text-xs">
-                  {referenceTypeParam !== undefined ? `${referenceTypeParam}:` : ''}
-                  {referenceIdParam}
+                  {referenceTypeParam}:{referenceIdParam}
                 </code>
               </>
+            ) : referencePairIncomplete ? (
+              'This link only sets one of referenceType/referenceId — both are required together, so neither was applied.'
             ) : (
               'The userId in this link is not a valid UUID — ignored.'
             )}
@@ -345,9 +368,9 @@ function AdminLedgerRouteInner(): React.JSX.Element {
             Clear filters
           </button>
         </div>
-        {userIdError !== null ? (
+        {filterError !== null ? (
           <p role="alert" className="text-xs text-red-600 dark:text-red-400">
-            {userIdError}
+            {filterError}
           </p>
         ) : null}
       </form>

@@ -182,6 +182,78 @@ describe('AdminLedgerRoute — filters', () => {
       ),
     );
   });
+
+  // Money-review finding (PR #1620): the backend requires
+  // referenceType + referenceId together (either alone isn't
+  // index-selective) — the form mirrors that instead of round-tripping
+  // a 400.
+  it('rejects a reference type with no reference id', async () => {
+    renderPage();
+    await waitFor(() => expect(adminMock.listAdminLedger).toHaveBeenCalled());
+    adminMock.listAdminLedger.mockClear();
+
+    const input = screen.getByLabelText(/filter by reference type/i);
+    fireEvent.change(input, { target: { value: 'order' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+    });
+
+    expect(
+      await screen.findByText(/reference type and reference id must be provided together/i),
+    ).toBeDefined();
+    expect(adminMock.listAdminLedger).not.toHaveBeenCalled();
+  });
+
+  it('rejects a reference id with no reference type', async () => {
+    renderPage();
+    await waitFor(() => expect(adminMock.listAdminLedger).toHaveBeenCalled());
+    adminMock.listAdminLedger.mockClear();
+
+    const input = screen.getByLabelText(/filter by reference id/i);
+    fireEvent.change(input, { target: { value: 'o-1' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+    });
+
+    expect(
+      await screen.findByText(/reference type and reference id must be provided together/i),
+    ).toBeDefined();
+    expect(adminMock.listAdminLedger).not.toHaveBeenCalled();
+  });
+
+  it('applies a valid referenceType + referenceId pair', async () => {
+    renderPage();
+    await waitFor(() => expect(adminMock.listAdminLedger).toHaveBeenCalled());
+    adminMock.listAdminLedger.mockClear();
+
+    fireEvent.change(screen.getByLabelText(/filter by reference type/i), {
+      target: { value: 'order' },
+    });
+    fireEvent.change(screen.getByLabelText(/filter by reference id/i), {
+      target: { value: 'o-1' },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+    });
+
+    await waitFor(() =>
+      expect(adminMock.listAdminLedger).toHaveBeenCalledWith(
+        expect.objectContaining({ referenceType: 'order', referenceId: 'o-1' }),
+      ),
+    );
+  });
+});
+
+describe('AdminLedgerRoute — incomplete reference pair from a deep link', () => {
+  it('drops both params and shows a banner instead of calling the endpoint with just one', async () => {
+    renderPage('/admin/ledger?referenceId=o-1');
+    await screen.findByText(/only sets one of referenceType\/referenceId/i);
+    await waitFor(() =>
+      expect(adminMock.listAdminLedger).toHaveBeenCalledWith(
+        expect.not.objectContaining({ referenceId: expect.anything() }),
+      ),
+    );
+  });
 });
 
 describe('AdminLedgerRoute — pagination (keyset, not OFFSET)', () => {
