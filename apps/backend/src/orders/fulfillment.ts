@@ -24,6 +24,7 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { orders, creditTransactions, userCredits, users, pendingPayouts } from '../db/schema.js';
+import { env } from '../env.js';
 import { logger } from '../logger.js';
 import { isHomeCurrency } from '@loop/shared';
 import { buildPayoutIntent } from '../credits/payout-builder.js';
@@ -133,6 +134,14 @@ export async function markOrderFulfilled(
       // edge case stays on the well-tested classic path).
       let vaultClaimed = false;
       if (
+        // P2-5 (money-review #1647): structural Phase-1 gate. The
+        // vault cashback surface must be inert in Phase 1 by
+        // CONSTRUCTION, not incidentally (Phase-1 orders already carry
+        // userCashbackMinor=0 via orders/repo.ts, so this block is
+        // reached with a >0 cashback only outside Phase 1 — but pin it
+        // explicitly, mirroring the loop_asset spend gates in
+        // orders/loop-handler.ts + orders/redeem.ts).
+        !env.LOOP_PHASE_1_ONLY &&
         vaultsEnabled() &&
         userRow !== undefined &&
         isHomeCurrency(userRow.homeCurrency) &&

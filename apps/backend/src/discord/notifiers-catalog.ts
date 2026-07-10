@@ -212,6 +212,18 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
       'Fires when one or more `pending_payouts` rows exceed the watchdog age window. Complements the admin `/stuck-payouts` page with a proactive page instead of requiring manual polling.',
   },
   {
+    name: 'notifyVaultEmissionFailed',
+    channel: 'monitoring',
+    description:
+      "ADR 031 V3: fires inline when a vault cashback emission reaches terminal `failed` (VAULT_EMISSION_MAX_ATTEMPTS step failures). Per-row — the on-chain share transfer and/or off-chain mirror credit is incomplete and the row is NOT auto-retried; ops reconciles against the row's last_error + tx hashes (admin re-drive endpoint is a follow-up).",
+  },
+  {
+    name: 'notifyVaultEmissionsStuck',
+    channel: 'monitoring',
+    description:
+      "ADR 031 V3: fires once per incident when vault emissions sit in an in-flight state (`depositing`/`deposited`/`transferred`) past the watchdog window — the sweep isn't advancing them. Fire-once/re-arm dedup in `watchdog_alert_state`, at-least-once fleet-wide. Complements notifyVaultEmissionFailed (terminal) by catching rows stuck WITHOUT exhausting attempts.",
+  },
+  {
     name: 'notifyPaymentWatcherStuck',
     channel: 'monitoring',
     description:

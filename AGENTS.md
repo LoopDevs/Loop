@@ -481,16 +481,20 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # LOOP_WORKERS_ENABLED=true
 
 # ADR 031 §Detailed design D9: vault-subsystem master switch for the
-# LOOPUSD/LOOPEUR DeFindex-vault path. V1 shipped the schema + read
-# layer; V2 (ADR 049) adds the Soroban deposit/withdraw/transfer
-# client (credits/vaults/vault-client.ts) — mock-tested only, NOT yet
-# wired into any emission/withdraw flow (§D5/§D6 are later PRs).
-# Distinct from LOOP_PHASE_1_ONLY, which gates the user-facing
-# cashback/wallet surface generally — this flag gates the vault
-# subsystem specifically; every vault-client function checks it first
-# regardless of table contents. Default false: an empty registry
-# table + this flag off is byte-identical to pre-migration. REQUIRES
-# LOOP_SOROBAN_RPC_URL to also be set — boot fails otherwise.
+# LOOPUSD/LOOPEUR DeFindex-vault path. V1 = schema + read layer; V2
+# (ADR 049) = the Soroban deposit/withdraw/transfer client; V3 (§D5) =
+# the cashback-EMISSION flow (orders/fulfillment.ts's gated fork +
+# credits/vaults/vault-emissions.ts's state machine + sweep). Distinct
+# from LOOP_PHASE_1_ONLY, which gates the user-facing cashback/wallet
+# surface generally — this flag gates the vault subsystem specifically;
+# every vault function checks it first regardless of table contents,
+# and fulfillment.ts's fork additionally requires !LOOP_PHASE_1_ONLY.
+# Default false: an empty registry table + this flag off is
+# byte-identical to pre-migration. Boot fails unless (a)
+# LOOP_SOROBAN_RPC_URL is also set (any env), and (b) in PRODUCTION,
+# LOOP_WORKERS_ENABLED=true too — the vault-emission sweep that drains
+# a claimed vault_emissions row only runs under LOOP_WORKERS_ENABLED,
+# so vaults-on/workers-off would strand every vault cashback.
 # LOOP_VAULTS_ENABLED=true
 
 # ADR 031 §Detailed design D2/D9, V2 (ADR 049). Soroban RPC endpoint

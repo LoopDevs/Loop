@@ -6,19 +6,26 @@
 --
 --   1. Adds `vault_emissions` — the durable idempotency + state-
 --      machine table for one order's vault-path cashback emission
---      (`pending → deposited → transferred → mirrored`, + `failed`).
---      See `db/schema/vaults.ts`'s doc comment on the table for the
---      full state-machine contract.
+--      (`pending → depositing → deposited → transferred → mirrored`,
+--      + `failed`). The `depositing` state is the cross-machine
+--      double-deposit guard (money-review #1647 P1): a sweep CASes
+--      `pending → depositing` and commits BEFORE the deposit's
+--      network call, so the advisory-lock degradation on a pooler
+--      URL can't let two machines both deposit. See
+--      `db/schema/vaults.ts`'s doc comment for the full contract.
 --   2. Widens `pending_payouts.asset_code` / `.asset_issuer` CHECKs to
 --      admit LOOPUSD/LOOPEUR rows (Soroban contract-id issuers) — the
 --      vault-emission flow writes an already-`confirmed`,
 --      never-worker-submitted `kind='emission'` AUDIT row here purely
 --      so the pre-existing `assert_emission_conservation` trigger
 --      also guards vault mints (INV-V1, docs/invariants.md).
---   3. `CREATE OR REPLACE`s `assert_emission_conservation()` to map
---      the two new asset codes to their mirror currency. Every
---      previously-tracked fragment (`check-money-invariants.mjs`)
---      survives unchanged; this only ADDS two `WHEN` branches.
+--   3. Adds `loop_asset_mirror_currency(text)` — the ONE source of
+--      truth for the asset-code → mirror-currency mapping (P2-3) — and
+--      `CREATE OR REPLACE`s `assert_emission_conservation()` to route
+--      BOTH its currency mappings through it AND to scope the
+--      minted/burned aggregation by mirror CURRENCY, not bare
+--      asset_code (closing the cross-asset 2x-mint hole now that
+--      USDLOOP + LOOPUSD share a USD mirror balance).
 --
 -- Gated end-to-end: `LOOP_VAULTS_ENABLED=false` (default) means
 -- `orders/fulfillment.ts`'s gated fork never claims a `vault_emissions`
@@ -49,12 +56,13 @@ CREATE TABLE IF NOT EXISTS "vault_emissions" (
   "failed_at" timestamp with time zone,
   CONSTRAINT "vault_emissions_asset_code_known" CHECK ("asset_code" IN ('LOOPUSD', 'LOOPEUR')),
   CONSTRAINT "vault_emissions_network_known" CHECK ("network" IN ('testnet', 'mainnet')),
-  CONSTRAINT "vault_emissions_state_known" CHECK ("state" IN ('pending', 'deposited', 'transferred', 'mirrored', 'failed')),
+  CONSTRAINT "vault_emissions_state_known" CHECK ("state" IN ('pending', 'depositing', 'deposited', 'transferred', 'mirrored', 'failed')),
   CONSTRAINT "vault_emissions_cashback_positive" CHECK ("cashback_minor" > 0),
   CONSTRAINT "vault_emissions_attempts_non_negative" CHECK ("attempts" >= 0),
   CONSTRAINT "vault_emissions_to_address_format" CHECK ("to_address" ~ '^G[A-Z2-7]{55}$'),
   CONSTRAINT "vault_emissions_state_shape" CHECK (
     ("state" = 'pending')
+    OR ("state" = 'depositing')
     OR ("state" = 'deposited' AND "deposit_tx_hash" IS NOT NULL AND "shares_minted" IS NOT NULL)
     OR ("state" = 'transferred' AND "deposit_tx_hash" IS NOT NULL AND "shares_minted" IS NOT NULL AND "transfer_tx_hash" IS NOT NULL)
     OR ("state" = 'mirrored' AND "deposit_tx_hash" IS NOT NULL AND "shares_minted" IS NOT NULL AND "transfer_tx_hash" IS NOT NULL AND "mirrored_at" IS NOT NULL)
@@ -109,25 +117,49 @@ ALTER TABLE "pending_payouts" ADD CONSTRAINT "pending_payouts_asset_issuer_forma
   CHECK ("asset_issuer" ~ '^[GC][A-Z2-7]{55}$');
 --> statement-breakpoint
 
+-- ONE source of truth for the LOOP asset-code → mirror-currency
+-- mapping (P2-3, money-review #1647). Previously this CASE was
+-- duplicated across the two sites in `assert_emission_conservation`
+-- below (the `NEW.asset_code` → currency assignment AND the
+-- per-`pp.asset_code` aggregation scope). A future asset code added
+-- to `pending_payouts_asset_code_known` but to only ONE of those two
+-- CASEs would silently under-count the aggregation — reopening the
+-- cross-asset 2x-mint hole this migration exists to close. Both sites
+-- now call THIS function, so a new asset code is a single-line change
+-- here. IMMUTABLE + a plain SQL body so the planner can inline it.
+-- `check-money-invariants.mjs` pins the full mapping's presence.
+CREATE OR REPLACE FUNCTION loop_asset_mirror_currency(asset_code text) RETURNS text AS $$
+  SELECT CASE asset_code
+    WHEN 'USDLOOP' THEN 'USD'
+    WHEN 'GBPLOOP' THEN 'GBP'
+    WHEN 'EURLOOP' THEN 'EUR'
+    WHEN 'LOOPUSD' THEN 'USD'
+    WHEN 'LOOPEUR' THEN 'EUR'
+    ELSE NULL
+  END
+$$ LANGUAGE sql IMMUTABLE;
+--> statement-breakpoint
+
 -- CREATE OR REPLACE `assert_emission_conservation()` (migration
--- 0044) — the `mirror_currency` CASE gains two branches so a
--- `kind='emission'` LOOPUSD/LOOPEUR row (the vault-emission audit
--- trail write, see the migration header) is checked against the SAME
--- (user, USD|EUR) mirror balance a classic USDLOOP/EURLOOP emission
--- would be. Every fragment `check-money-invariants.mjs` tracks for
--- this function survives unchanged.
+-- 0044) — both currency mappings now route through
+-- `loop_asset_mirror_currency` (above) so a `kind='emission'`
+-- LOOPUSD/LOOPEUR row (the vault-emission audit trail write, see the
+-- migration header) is checked against the SAME (user, USD|EUR)
+-- mirror balance a classic USDLOOP/EURLOOP emission would be. Every
+-- fragment `check-money-invariants.mjs` tracks for this function
+-- survives.
 --
--- SECOND, LOAD-BEARING change: the minted/burned aggregation used to
--- scope `WHERE pp.asset_code = NEW.asset_code` — correct back when
--- exactly one asset code mapped to each mirror currency. Now that
--- USDLOOP *and* LOOPUSD both mirror into 'USD' (EURLOOP/LOOPEUR into
--- 'EUR'), scoping by the bare asset code would let a user accumulate
--- a classic USDLOOP emission AND a LOOPUSD emission that EACH pass
--- the check individually against the SAME shared USD balance —
--- jointly minting up to 2x the mirror liability (an unbacked-mint
--- hole, exactly the class of bug INV-3 exists to close). The
--- aggregation now sums over every asset code that shares
--- NEW.asset_code's mirror currency, not just NEW.asset_code itself.
+-- LOAD-BEARING change: the minted/burned aggregation used to scope
+-- `WHERE pp.asset_code = NEW.asset_code` — correct back when exactly
+-- one asset code mapped to each mirror currency. Now that USDLOOP
+-- *and* LOOPUSD both mirror into 'USD' (EURLOOP/LOOPEUR into 'EUR'),
+-- scoping by the bare asset code would let a user accumulate a
+-- classic USDLOOP emission AND a LOOPUSD emission that EACH pass the
+-- check individually against the SAME shared USD balance — jointly
+-- minting up to 2x the mirror liability (an unbacked-mint hole,
+-- exactly the class of bug INV-3 exists to close). The aggregation
+-- now sums over every asset code that shares NEW.asset_code's mirror
+-- currency.
 CREATE OR REPLACE FUNCTION assert_emission_conservation() RETURNS trigger AS $$
 DECLARE
   mirror_currency text;
@@ -152,14 +184,7 @@ BEGIN
     ) THEN 0
     ELSE NEW.amount_stroops
   END INTO new_amount_stroops;
-  mirror_currency := CASE NEW.asset_code
-    WHEN 'USDLOOP' THEN 'USD'
-    WHEN 'GBPLOOP' THEN 'GBP'
-    WHEN 'EURLOOP' THEN 'EUR'
-    WHEN 'LOOPUSD' THEN 'USD'
-    WHEN 'LOOPEUR' THEN 'EUR'
-    ELSE NULL
-  END;
+  mirror_currency := loop_asset_mirror_currency(NEW.asset_code);
   IF mirror_currency IS NULL THEN
     RAISE EXCEPTION 'emission_conservation: unknown LOOP asset code % — no mirror currency to check against', NEW.asset_code
       USING ERRCODE = 'check_violation';
@@ -192,14 +217,7 @@ BEGIN
   INTO minted_stroops, burned_stroops
   FROM pending_payouts pp
   WHERE pp.user_id = NEW.user_id
-    AND CASE pp.asset_code
-      WHEN 'USDLOOP' THEN 'USD'
-      WHEN 'GBPLOOP' THEN 'GBP'
-      WHEN 'EURLOOP' THEN 'EUR'
-      WHEN 'LOOPUSD' THEN 'USD'
-      WHEN 'LOOPEUR' THEN 'EUR'
-      ELSE NULL
-    END = mirror_currency;
+    AND loop_asset_mirror_currency(pp.asset_code) = mirror_currency;
 
   net_stroops := GREATEST(minted_stroops - burned_stroops, 0);
   IF net_stroops + new_amount_stroops > balance_minor_val * 100000 THEN

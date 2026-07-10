@@ -216,6 +216,32 @@ export function parseEnv(source: NodeJS.ProcessEnv): Env {
     );
   }
 
+  // ADR 031 V3 (money-review #1647 P2-4): the vault-emission SWEEP —
+  // the only thing that drains a claimed `vault_emissions` row through
+  // deposit → transfer → mirror — runs ONLY under LOOP_WORKERS_ENABLED
+  // (index.ts). With vaults on but workers off, `orders/fulfillment.ts`
+  // would claim a `vault_emissions` row and NOTHING would ever advance
+  // it: the user gets neither an on-chain emission NOR a mirror credit.
+  // Fail boot in production (mirrors the LOOP_ADMIN_STEP_UP /
+  // LOOP_STELLAR_USDC_ISSUER precedent for "runtime-worker-dependent
+  // config that only bites a live deployment" — NOT the unconditional
+  // LOOP_WALLET_PROVIDER=privy config-completeness shape). Scoped to
+  // production so tests/dev can enable vaults to drive the sweep
+  // directly (the integration suite does exactly this); staging runs
+  // NODE_ENV=production, so it's covered too.
+  if (
+    parsed.data.NODE_ENV === 'production' &&
+    parsed.data.LOOP_VAULTS_ENABLED &&
+    !parsed.data.LOOP_WORKERS_ENABLED
+  ) {
+    throw new Error(
+      'Invalid environment variables — LOOP_VAULTS_ENABLED=true requires LOOP_WORKERS_ENABLED=true in ' +
+        'production (ADR 031 V3): the vault-emission sweep that drains claimed vault_emissions rows only ' +
+        'runs under LOOP_WORKERS_ENABLED, so vaults-on/workers-off would strand every vault cashback ' +
+        '(no on-chain emission AND no mirror credit). Enable the workers or unset LOOP_VAULTS_ENABLED.',
+    );
+  }
+
   // ADR 031 / ADR 036 Phase D: issuer-secret ↔ issuer-address pinning.
   // A `LOOP_STELLAR_<ASSET>_ISSUER_SECRET` whose derived public key
   // doesn't match the configured `LOOP_STELLAR_<ASSET>_ISSUER` would

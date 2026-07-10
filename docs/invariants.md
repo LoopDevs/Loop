@@ -290,22 +290,53 @@ SAME emission's own `vault.deposit` call actually minted.
   trigger genuinely rejects an over-limit insert, and the cross-asset
   regression above).
 
-### INV-V2 — Idempotency claim precedes any on-chain action
+### INV-V2 — Idempotency claim + per-row deposit claim precede any on-chain action
 
-A `vault_emissions` row is claimed (durable, local, no network I/O)
-BEFORE any Soroban call, keyed on the SAME `order_id` the classic
-path's own `pending_payouts_order_unique` uses.
+A `vault_emissions` row is (a) claimed at fulfillment (durable, local,
+no network I/O) keyed on the SAME `order_id` the classic path's own
+`pending_payouts_order_unique` uses, and (b) claimed AGAIN by the
+sweep — `pending → depositing` — before any deposit, so at most one
+machine ever deposits.
 
 - **DB**: `vault_emissions_order_unique` — one emission row per order,
   ever.
-- **runtime**: `orders/fulfillment.ts` calls `claimVaultEmission`
-  inside the SAME transaction as the order's `fulfilled` transition —
-  a crash after that commit always has a resumable claim row.
-  Each on-chain step (`deposit`/`transfer`) persists its tx hash via
-  CF-18 `onSigned` BEFORE submit, so a resumed row passes
-  `priorTxHash` rather than re-submitting.
-- **test**: both suites above cover claim-replay (no second row) and
-  resume-from-`deposited`/`transferred` (no re-deposit / re-transfer).
+- **runtime (fulfillment claim)**: `orders/fulfillment.ts` calls
+  `claimVaultEmission` inside the SAME transaction as the order's
+  `fulfilled` transition — a crash after that commit always has a
+  resumable claim row.
+- **runtime (cross-machine deposit claim, money-review #1647 P1)**:
+  the sweep selects candidate rows `FOR UPDATE SKIP LOCKED` and
+  `driveOneVaultEmission` CASes `pending → depositing`
+  (`claimEmissionForDeposit`) — an atomic guarded UPDATE committed
+  BEFORE `depositToVault`'s network call — so only ONE machine
+  deposits even when the fleet-wide sweep advisory lock has degraded
+  on a transaction-pooler `DATABASE_URL`. Exactly the classic payout
+  worker's `SELECT … FOR UPDATE SKIP LOCKED` + `pending → submitted`
+  CAS shape (INV-9). Each on-chain step persists its tx hash via
+  CF-18 `onSigned` BEFORE submit, so a resumed `depositing`/`deposited`/
+  `transferred` row passes `priorTxHash` rather than re-submitting.
+- **test**: the mocked suite covers claim-replay, the CAS claim-loss
+  path, and resume-from-`depositing`/`deposited`/`transferred`; the
+  real-postgres suite races two concurrent drives over one `pending`
+  row and asserts exactly one deposits (the real CAS).
+
+### Vault-emission observability (money-review #1647 P1-2)
+
+A stranded vault emission must never be silent:
+
+- **watcher (terminal)**: `recordStepFailure` pages Discord
+  (`notifyVaultEmissionFailed`, monitoring) the moment a row reaches
+  terminal `failed`, and the sweep tick marks
+  `markWorkerTickFailure('vault_emission_sweep')` on any tick that
+  produced a terminal failure or unexpected drive error (so /health
+  reflects it, not a silent success).
+- **watcher (stuck-but-not-terminal)**: `runVaultEmissionStuckWatchdog`
+  pages once per incident (`notifyVaultEmissionsStuck`) when a row
+  sits in `depositing`/`deposited`/`transferred` past the threshold —
+  single-flighted fleet-wide (`pg_try_advisory_xact_lock`), fire-once/
+  re-arm state in `watchdog_alert_state`, confirmed-delivery
+  (at-least-once), mirroring `stuck-payout-watchdog.ts`.
+- The admin re-drive ENDPOINT for a `failed` row is deferred (V5).
 
 ### Known residual (accepted, V3)
 
@@ -313,11 +344,14 @@ path's own `pending_payouts_order_unique` uses.
 `LOOP_STELLAR_OPERATOR_SECRET` the classic payout-submit worker uses.
 The vault sweep and the classic payout worker are NOT coordinated
 against each other's operator-account sequence number (only the vault
-sweep's OWN rows are serialised, via its own fleet-wide advisory
-lock). A concurrent-tick sequence collision surfaces as a retryable
-Soroban/Horizon submit error on one side, not a fund-loss event — but
-this is a real gap, not yet closed. See `credits/vaults/
-vault-emissions.ts`'s module header.
+sweep's OWN rows are serialised, via its own fleet-wide advisory lock
+
+- the `pending → depositing` CAS above). A concurrent-tick sequence
+  collision _across the two worker types_ surfaces as a retryable
+  Soroban/Horizon submit error on one side, not a fund-loss event — but
+  this is a real gap, not yet closed (a shared sequence lock or ADR-044
+  channel accounts). See `credits/vaults/vault-emissions.ts`'s module
+  header.
 
 ---
 

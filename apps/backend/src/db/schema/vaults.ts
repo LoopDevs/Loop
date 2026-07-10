@@ -131,18 +131,34 @@ export const vaultSharePriceSnapshots = pgTable(
  * rather than claiming twice.
  *
  * State machine (§D5): `pending` (claimed, no on-chain action yet)
- * → `deposited` (operator `vault.deposit` landed, shares minted to
- * the operator) → `transferred` (operator → user share transfer
- * landed) → `mirrored` (off-chain `user_credits` liability credited
- * + the `pending_payouts kind='emission'` conservation-trigger audit
- * row written, in one DB transaction). `failed` is a terminal,
- * NON-auto-retried state a row moves to only after
- * `VAULT_EMISSION_MAX_ATTEMPTS` consecutive step failures — it needs
- * an operator look (a re-drive hook is a follow-up; see that
- * module's header for the current gap). Every step advance is
- * idempotent / resumable: `deposit_tx_hash` and `transfer_tx_hash`
- * are persisted (CF-18 `onSigned`) BEFORE each network submit, so a
- * crash mid-step resumes via `priorTxHash` rather than re-submitting.
+ * → `depositing` (a sweep has CLAIMED this row for its deposit via
+ * an atomic `pending → depositing` state-CAS, committed BEFORE the
+ * Soroban deposit's network call — mirrors the payout worker's
+ * `pending → submitted` claim) → `deposited` (operator
+ * `vault.deposit` landed, shares minted to the operator) →
+ * `transferred` (operator → user share transfer landed) → `mirrored`
+ * (off-chain `user_credits` liability credited + the `pending_payouts
+ * kind='emission'` conservation-trigger audit row written, in one DB
+ * transaction). `failed` is a terminal, NON-auto-retried state a row
+ * moves to only after `VAULT_EMISSION_MAX_ATTEMPTS` consecutive step
+ * failures — it needs an operator look (a Discord page fires the
+ * moment a row reaches it; the re-drive ENDPOINT is a follow-up, see
+ * that module's header). Every step advance is idempotent /
+ * resumable: `deposit_tx_hash` and `transfer_tx_hash` are persisted
+ * (CF-18 `onSigned`) BEFORE each network submit, so a crash mid-step
+ * resumes via `priorTxHash` rather than re-submitting.
+ *
+ * The `depositing` state is the load-bearing cross-machine guard: the
+ * fleet-wide sweep advisory lock DEGRADES to un-serialized on a
+ * transaction-pooler `DATABASE_URL` (`db/client.ts`), so two machines
+ * could otherwise both submit a deposit for the same `pending` row (a
+ * DOUBLE-deposit / operator-fund leak). The `pending → depositing`
+ * CAS (only one machine wins the guarded UPDATE) + the CF-18 hash
+ * fence together survive that degradation, exactly as the classic
+ * payout worker's `SELECT … FOR UPDATE SKIP LOCKED` + `pending →
+ * submitted` CAS + CF-18 do (INV-9). `depositing` allows NULL
+ * `shares_minted` (like `pending`) — shares aren't known until the
+ * deposit returns.
  */
 export const vaultEmissions = pgTable(
   'vault_emissions',
@@ -204,7 +220,7 @@ export const vaultEmissions = pgTable(
     check('vault_emissions_network_known', sql`${t.network} IN ('testnet', 'mainnet')`),
     check(
       'vault_emissions_state_known',
-      sql`${t.state} IN ('pending', 'deposited', 'transferred', 'mirrored', 'failed')`,
+      sql`${t.state} IN ('pending', 'depositing', 'deposited', 'transferred', 'mirrored', 'failed')`,
     ),
     check('vault_emissions_cashback_positive', sql`${t.cashbackMinor} > 0`),
     check('vault_emissions_attempts_non_negative', sql`${t.attempts} >= 0`),
@@ -212,10 +228,15 @@ export const vaultEmissions = pgTable(
     // Shape-per-state: a row cannot claim to be further along the
     // pipeline than the fields it actually populated. Mirrors
     // `pending_payouts_kind_shape`'s per-discriminator pattern.
+    // `depositing` allows NULL shares_minted (like pending) — the
+    // deposit's `onSigned` may have persisted a `deposit_tx_hash`
+    // before the crash, but shares aren't known until the call
+    // returns and the row advances to `deposited`.
     check(
       'vault_emissions_state_shape',
       sql`
         (${t.state} = 'pending')
+        OR (${t.state} = 'depositing')
         OR (${t.state} = 'deposited' AND ${t.depositTxHash} IS NOT NULL AND ${t.sharesMinted} IS NOT NULL)
         OR (${t.state} = 'transferred' AND ${t.depositTxHash} IS NOT NULL AND ${t.sharesMinted} IS NOT NULL AND ${t.transferTxHash} IS NOT NULL)
         OR (${t.state} = 'mirrored' AND ${t.depositTxHash} IS NOT NULL AND ${t.sharesMinted} IS NOT NULL AND ${t.transferTxHash} IS NOT NULL AND ${t.mirroredAt} IS NOT NULL)

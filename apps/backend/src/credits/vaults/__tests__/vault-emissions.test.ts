@@ -142,17 +142,37 @@ const { state } = vi.hoisted(() => {
   return { state: s };
 });
 
-function extractEqValue(condition: unknown): string {
-  const chunks = (condition as { queryChunks?: unknown[] }).queryChunks;
-  if (!Array.isArray(chunks)) throw new Error('extractEqValue: not an eq() condition');
-  // `eq(col, value)` shape: [StringChunk, Column, StringChunk, Param, StringChunk] —
-  // the compared value is wrapped in a drizzle `Param` (`.value`), not a bare string.
-  const raw = chunks[3] as { value?: unknown } | string | undefined;
-  const value = typeof raw === 'string' ? raw : raw?.value;
-  if (typeof value !== 'string') {
-    throw new Error('extractEqValue: unexpected condition shape');
+const VAULT_STATE_SET = new Set([
+  'pending',
+  'depositing',
+  'deposited',
+  'transferred',
+  'mirrored',
+  'failed',
+]);
+
+/**
+ * Recursively collects every drizzle `Param` string value in a
+ * condition. Handles both a bare `eq(col, x)` and an `and(eq(id, x),
+ * eq(state, 'pending'))` (the deposit-claim CAS) — a drizzle `and`
+ * wraps sub-SQL objects, each with its own `queryChunks` carrying a
+ * `Param` (`{ value, encoder }`). One value is the row id (a key in
+ * the rows map); a state-guard value (in VAULT_STATE_SET) is present
+ * only on the CAS.
+ */
+function collectStringParams(node: unknown): string[] {
+  const out: string[] = [];
+  if (node === null || typeof node !== 'object') return out;
+  const asParam = node as { value?: unknown; encoder?: unknown };
+  if ('value' in asParam && 'encoder' in asParam && typeof asParam.value === 'string') {
+    out.push(asParam.value);
+    return out;
   }
-  return value;
+  const chunks = (node as { queryChunks?: unknown[] }).queryChunks;
+  if (Array.isArray(chunks)) {
+    for (const c of chunks) out.push(...collectStringParams(c));
+  }
+  return out;
 }
 
 function buildDbMock(): Record<string, unknown> {
@@ -160,9 +180,16 @@ function buildDbMock(): Record<string, unknown> {
     patch: Record<string, unknown>,
     condition: unknown,
   ): unknown[] {
-    const id = extractEqValue(condition);
+    const params = collectStringParams(condition);
+    const id = params.find((p) => state.vaultEmissionRows.has(p));
+    const stateGuard = params.find((p) => VAULT_STATE_SET.has(p));
+    if (id === undefined) return [];
     const existing = state.vaultEmissionRows.get(id);
     if (existing === undefined) return [];
+    // CAS: a state-guard param (e.g. the `pending → depositing`
+    // claim's `state='pending'`) only applies when the row's current
+    // state matches — otherwise the claim was lost (return []).
+    if (stateGuard !== undefined && existing.state !== stateGuard) return [];
     const updated = { ...existing, ...patch };
     state.vaultEmissionRows.set(id, updated);
     return [updated];
@@ -218,17 +245,24 @@ function buildDbMock(): Record<string, unknown> {
       return chain;
     };
     chain['where'] = () => ({
+      // The userCredits FOR UPDATE lock read in mirrorStep: `.where().for('update')`.
       for: () => ({
         then: (resolve: (v: unknown) => unknown) => resolve([]),
       }),
       orderBy: () => ({
-        limit: async () => {
+        // Sweep candidate read: `.orderBy().limit().for('update', {skipLocked})`.
+        // `.limit()` returns a thenable that ALSO exposes `.for()` so
+        // both the awaited and the `.for()`-terminated chains resolve
+        // to the same rows.
+        limit: () => {
           if (table !== 'vaultEmissions') throw new Error(`unexpected sweep select on ${table}`);
-          return [...state.vaultEmissionRows.values()]
-            .filter(
-              (r) => r.state === 'pending' || r.state === 'deposited' || r.state === 'transferred',
-            )
+          const rows = [...state.vaultEmissionRows.values()]
+            .filter((r) => ['pending', 'depositing', 'deposited', 'transferred'].includes(r.state))
             .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+          return {
+            for: async () => rows,
+            then: (resolve: (v: unknown) => unknown) => resolve(rows),
+          };
         },
       }),
       then: (resolve: (v: unknown) => unknown) => resolve([]),
@@ -344,11 +378,30 @@ vi.mock('../../payout-builder.js', () => ({
   generatePayoutMemo: () => 'MEMOMEMOMEMOMEMOMEMO',
 }));
 
+const { runtimeHealthMocks } = vi.hoisted(() => ({
+  runtimeHealthMocks: {
+    markWorkerStarted: vi.fn(),
+    markWorkerStopped: vi.fn(),
+    markWorkerTickSuccess: vi.fn(),
+    markWorkerTickFailure: vi.fn(),
+  },
+}));
 vi.mock('../../../runtime-health.js', () => ({
-  markWorkerStarted: vi.fn(),
-  markWorkerStopped: vi.fn(),
-  markWorkerTickSuccess: vi.fn(),
-  markWorkerTickFailure: vi.fn(),
+  markWorkerStarted: (...a: unknown[]) => runtimeHealthMocks.markWorkerStarted(...a),
+  markWorkerStopped: (...a: unknown[]) => runtimeHealthMocks.markWorkerStopped(...a),
+  markWorkerTickSuccess: (...a: unknown[]) => runtimeHealthMocks.markWorkerTickSuccess(...a),
+  markWorkerTickFailure: (...a: unknown[]) => runtimeHealthMocks.markWorkerTickFailure(...a),
+}));
+
+const { discordMocks } = vi.hoisted(() => ({
+  discordMocks: {
+    notifyVaultEmissionFailed: vi.fn((..._a: unknown[]) => undefined),
+    notifyVaultEmissionsStuck: vi.fn(async (..._a: unknown[]) => true),
+  },
+}));
+vi.mock('../../../discord.js', () => ({
+  notifyVaultEmissionFailed: (...a: unknown[]) => discordMocks.notifyVaultEmissionFailed(...a),
+  notifyVaultEmissionsStuck: (...a: unknown[]) => discordMocks.notifyVaultEmissionsStuck(...a),
 }));
 
 import { getTableName, type Table } from 'drizzle-orm';
@@ -398,6 +451,11 @@ beforeEach(() => {
   });
   vaultClientMocks.resolveOperatorPublicKey.mockReset();
   vaultClientMocks.resolveOperatorPublicKey.mockReturnValue(OPERATOR_PUBLIC);
+  discordMocks.notifyVaultEmissionFailed.mockReset();
+  discordMocks.notifyVaultEmissionsStuck.mockReset();
+  discordMocks.notifyVaultEmissionsStuck.mockResolvedValue(true);
+  runtimeHealthMocks.markWorkerTickFailure.mockReset();
+  runtimeHealthMocks.markWorkerTickSuccess.mockReset();
 });
 
 describe('vaultAssetForCurrency / isVaultEligibleCurrency', () => {
@@ -599,7 +657,7 @@ describe('driveOneVaultEmission — resume behavior (CF-18 / crash recovery)', (
     expect(state.creditTransactionInserts).toHaveLength(0);
   });
 
-  it('passes priorTxHash through to depositToVault when a deposit hash was persisted but the row is still pending (crash between onSigned and the state update)', async () => {
+  it('resumes a depositing row with the persisted deposit hash as priorTxHash (crash between onSigned and the deposited state update)', async () => {
     vaultClientMocks.depositToVault.mockResolvedValue({
       txHash: 'deposit-tx-resumed',
       sharesMinted: 490n,
@@ -608,11 +666,16 @@ describe('driveOneVaultEmission — resume behavior (CF-18 / crash recovery)', (
     });
     vaultClientMocks.transferShares.mockResolvedValue({ txHash: 't1', deduped: false });
 
+    // onSigned fires only AFTER the pending → depositing CAS, so a
+    // crash before the `deposited` update leaves the row `depositing`
+    // with a persisted deposit_tx_hash. The next tick re-drives from
+    // `depositing` (no re-claim) and threads the hash as priorTxHash
+    // so CF-18 dedups the on-chain tx.
     const row = state.seedRow({
       orderId: ORDER_ID,
       userId: USER_ID,
       cashbackMinor: 500n,
-      state: 'pending',
+      state: 'depositing',
       depositTxHash: 'deposit-tx-signed-but-not-advanced',
     });
     await driveOneVaultEmission(row as unknown as VaultEmissionRow);
@@ -624,26 +687,32 @@ describe('driveOneVaultEmission — resume behavior (CF-18 / crash recovery)', (
 });
 
 describe('driveOneVaultEmission — failure handling', () => {
-  it('a deposit failure leaves the row pending with attempts incremented (not yet failed)', async () => {
+  it('a deposit failure leaves the row depositing (claimed) with attempts incremented (not yet failed)', async () => {
     vaultClientMocks.depositToVault.mockRejectedValue(new Error('Soroban RPC timeout'));
     const row = state.seedRow({ orderId: ORDER_ID, userId: USER_ID, cashbackMinor: 500n });
     const outcome = await driveOneVaultEmission(row as unknown as VaultEmissionRow);
 
-    expect(outcome).toBe('pending');
+    // The pending → depositing CAS committed; the deposit then failed
+    // non-terminally, so the row rests in `depositing` for the next
+    // tick to re-drive (with the persisted deposit hash, if any).
+    expect(outcome).toBe('depositing');
     const finalRow = state.vaultEmissionRows.get(row.id);
     expect(finalRow?.attempts).toBe(1);
-    expect(finalRow?.state).toBe('pending');
+    expect(finalRow?.state).toBe('depositing');
     expect(finalRow?.lastError).toContain('Soroban RPC timeout');
+    expect(discordMocks.notifyVaultEmissionFailed).not.toHaveBeenCalled();
   });
 
-  it('moves to failed after VAULT_EMISSION_MAX_ATTEMPTS consecutive failures', async () => {
+  it('moves to failed after VAULT_EMISSION_MAX_ATTEMPTS consecutive failures and pages Discord once', async () => {
     vaultClientMocks.depositToVault.mockRejectedValue(new Error('persistent failure'));
     let row = state.seedRow({ orderId: ORDER_ID, userId: USER_ID, cashbackMinor: 500n });
     for (let i = 0; i < 5; i++) {
       const outcome = await driveOneVaultEmission(row as unknown as VaultEmissionRow);
       row = state.vaultEmissionRows.get(row.id)!;
       if (i < 4) {
-        expect(outcome).toBe('pending');
+        // After the first drive claims pending → depositing, every
+        // subsequent drive re-attempts from `depositing`.
+        expect(outcome).toBe('depositing');
       } else {
         expect(outcome).toBe('failed');
       }
@@ -651,6 +720,11 @@ describe('driveOneVaultEmission — failure handling', () => {
     expect(row.state).toBe('failed');
     expect(row.attempts).toBe(5);
     expect(row.failedAt).not.toBeNull();
+    // P1-2a: the terminal transition pages exactly once.
+    expect(discordMocks.notifyVaultEmissionFailed).toHaveBeenCalledTimes(1);
+    expect(discordMocks.notifyVaultEmissionFailed).toHaveBeenCalledWith(
+      expect.objectContaining({ orderId: ORDER_ID, attempts: 5, assetCode: 'LOOPUSD' }),
+    );
   });
 
   it('no active vault registered returns no_vault without touching the row', async () => {
@@ -660,6 +734,39 @@ describe('driveOneVaultEmission — failure handling', () => {
     expect(outcome).toBe('no_vault');
     expect(vaultClientMocks.depositToVault).not.toHaveBeenCalled();
     expect(state.vaultEmissionRows.get(row.id)?.state).toBe('pending');
+  });
+});
+
+describe('driveOneVaultEmission — cross-machine deposit claim (P1)', () => {
+  it('a second drive over a row another machine already claimed returns claimed_elsewhere and does NOT re-deposit', async () => {
+    vaultClientMocks.depositToVault.mockResolvedValue({
+      txHash: 'd',
+      sharesMinted: 480n,
+      amountsUsed: [],
+      deduped: false,
+    });
+    vaultClientMocks.transferShares.mockResolvedValue({ txHash: 't', deduped: false });
+
+    const row = state.seedRow({ orderId: ORDER_ID, userId: USER_ID, cashbackMinor: 500n });
+    // A STALE `pending` snapshot of the same row (what a second
+    // machine's sweep would hold after selecting it just before the
+    // first machine claimed it).
+    const stalePendingSnapshot = { ...state.vaultEmissionRows.get(row.id)! };
+
+    // First machine drives it to completion.
+    const firstOutcome = await driveOneVaultEmission(row as unknown as VaultEmissionRow);
+    expect(firstOutcome).toBe('mirrored');
+
+    // Second machine drives the STALE pending snapshot: the CAS finds
+    // the row is no longer `pending` → claim lost, no second deposit.
+    const secondOutcome = await driveOneVaultEmission(
+      stalePendingSnapshot as unknown as VaultEmissionRow,
+    );
+    expect(secondOutcome).toBe('claimed_elsewhere');
+    expect(vaultClientMocks.depositToVault).toHaveBeenCalledTimes(1);
+    // Mirror credited exactly once — no double-credit.
+    expect(state.userCreditsBalances.get(`${USER_ID}:USD`)).toBe(500n);
+    expect(state.creditTransactionInserts).toHaveLength(1);
   });
 });
 

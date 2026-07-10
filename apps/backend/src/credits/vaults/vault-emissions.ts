@@ -28,9 +28,14 @@
  * fulfillment time.
  *
  * ── State machine (§D5) ─────────────────────────────────────────────
- *   pending → deposited → transferred → mirrored   (+ failed)
+ *   pending → depositing → deposited → transferred → mirrored  (+ failed)
  *
  *   1. pending      claimed (`claimVaultEmission`), nothing on-chain yet.
+ *   1b. depositing  a sweep CLAIMED this row for its deposit via an
+ *                   atomic `pending → depositing` state-CAS
+ *                   (`claimEmissionForDeposit`), committed BEFORE the
+ *                   deposit's network call — the cross-machine
+ *                   double-deposit guard (see below).
  *   2. deposited    `vault.deposit([X], [minShares], operator, true)`
  *                   landed → operator holds `sharesMinted` LOOPUSD/
  *                   LOOPEUR shares. `depositTxHash` persisted via
@@ -72,9 +77,28 @@
  * Every step's on-chain call threads CF-18 (`priorTxHash` /
  * `onSigned`, `vault-client.ts`) so a crash between "tx signed" and
  * "row updated" resumes via the persisted hash rather than
- * re-submitting. Resuming from `deposited` or `transferred` does NOT
- * re-run the earlier step at all — the state machine only ever
- * advances forward from `row.state`.
+ * re-submitting. Resuming from `depositing`, `deposited`, or
+ * `transferred` does NOT re-run any earlier step — the state machine
+ * only ever advances forward from `row.state`.
+ *
+ * ── Cross-machine double-deposit guard (money-review #1647 P1) ──────
+ * The sweep's fleet-wide `withAdvisoryLock` DEGRADES to un-serialized
+ * when `DATABASE_URL` is a transaction pooler (`db/client.ts`). If it
+ * degrades, two machines could both drive the SAME `pending` row and
+ * both submit a deposit — a double-mint / operator-fund leak. The
+ * defense mirrors the classic payout worker exactly (INV-9):
+ *   (a) the sweep selects candidate rows `FOR UPDATE SKIP LOCKED`, so
+ *       concurrent sweeps pull disjoint sets in the common case; and
+ *   (b) `driveOneVaultEmission` claims `pending → depositing` via an
+ *       atomic state-CAS UPDATE (`claimEmissionForDeposit`) that
+ *       COMMITS before `depositToVault`'s network call — only one
+ *       machine wins the guarded UPDATE, the loser no-ops.
+ * A crash after the CAS leaves the row `depositing`; the next tick
+ * re-drives it, re-attempting the deposit with the persisted
+ * `deposit_tx_hash` so CF-18 dedups the on-chain tx. The CAS + CF-18
+ * together survive the advisory-lock degradation; the advisory lock
+ * and SKIP LOCKED are throughput layers on top, not the correctness
+ * guarantee.
  *
  * ── Known cross-worker risk (NOT solved in V3) ─────────────────────
  * `depositToVault` / `transferShares` sign with the SAME
@@ -101,6 +125,7 @@ import {
   creditTransactions,
   userCredits,
   pendingPayouts,
+  watchdogAlertState,
   type LoopVaultAssetCode,
   type LoopVaultNetwork,
 } from '../../db/schema.js';
@@ -114,6 +139,7 @@ import {
   markWorkerTickFailure,
   markWorkerTickSuccess,
 } from '../../runtime-health.js';
+import { notifyVaultEmissionFailed, notifyVaultEmissionsStuck } from '../../discord.js';
 import {
   getActiveVault,
   vaultsEnabled,
@@ -222,6 +248,27 @@ export async function claimVaultEmission(tx: Tx, args: ClaimVaultEmissionArgs): 
   return inserted.length > 0;
 }
 
+/**
+ * Cross-machine deposit claim (money-review #1647 P1). Atomic state-CAS
+ * `pending → depositing`, COMMITTED before any Soroban call — the exact
+ * shape of the payout worker's `markPayoutSubmitted` (`pending →
+ * submitted`). Two machines racing the same `pending` row: only one
+ * wins this guarded UPDATE (the `state='pending'` predicate), the loser
+ * gets `null` and skips — so at most one machine ever deposits, even
+ * when the fleet-wide sweep advisory lock has degraded on a pooler URL.
+ *
+ * Returns the claimed row (now `depositing`) on success, or `null` when
+ * another machine already advanced it out of `pending`.
+ */
+async function claimEmissionForDeposit(id: string): Promise<VaultEmissionRow | null> {
+  const [row] = await db
+    .update(vaultEmissions)
+    .set({ state: 'depositing' })
+    .where(and(eq(vaultEmissions.id, id), eq(vaultEmissions.state, 'pending')))
+    .returning();
+  return row ?? null;
+}
+
 function underlyingAmountStroopsFor(row: VaultEmissionRow): bigint {
   return row.cashbackMinor * STROOPS_PER_MINOR;
 }
@@ -278,6 +325,20 @@ async function recordStepFailure(row: VaultEmissionRow, err: unknown): Promise<V
   );
   if (updated === undefined) {
     throw new Error(`vault_emissions update returned no row (id=${row.id})`);
+  }
+  // P1-2a: a terminal `failed` row is NOT auto-retried and would
+  // otherwise be invisible to ops (log-only). Page the moment it goes
+  // terminal so the stuck cashback is surfaced for reconciliation.
+  if (terminal) {
+    notifyVaultEmissionFailed({
+      vaultEmissionId: updated.id,
+      orderId: updated.orderId,
+      userId: updated.userId,
+      assetCode: updated.assetCode,
+      cashbackMinor: updated.cashbackMinor.toString(),
+      attempts,
+      lastError,
+    });
   }
   return updated;
 }
@@ -480,12 +541,14 @@ async function mirrorStep(row: VaultEmissionRow, vault: LoopVaultRow): Promise<V
 }
 
 export type VaultEmissionDriveOutcome =
-  | 'pending'
+  | 'depositing'
   | 'deposited'
   | 'transferred'
   | 'mirrored'
   | 'failed'
-  | 'no_vault';
+  | 'no_vault'
+  /** The `pending → depositing` claim was lost to another machine — this call did nothing (money-review #1647 P1). */
+  | 'claimed_elsewhere';
 
 /**
  * Advances one `vault_emissions` row as far as it will go THIS call —
@@ -493,6 +556,13 @@ export type VaultEmissionDriveOutcome =
  * internally catches its own errors (`recordStepFailure`), so this
  * never throws for an ordinary on-chain/DB failure; it only throws
  * for a genuine programming-invariant violation.
+ *
+ * A `pending` row is first CLAIMED via the `pending → depositing`
+ * state-CAS (`claimEmissionForDeposit`) — committed before any Soroban
+ * call — so a concurrent sweep on another machine (possible when the
+ * fleet-wide advisory lock has degraded on a pooler URL) that lost the
+ * CAS returns `claimed_elsewhere` and never deposits. See the module
+ * header's cross-machine guard note.
  */
 export async function driveOneVaultEmission(
   row: VaultEmissionRow,
@@ -516,6 +586,13 @@ export async function driveOneVaultEmission(
 
   let current = row;
   if (current.state === 'pending') {
+    // Cross-machine claim: CAS pending → depositing, committed before
+    // the deposit's network call. Loser of a race no-ops.
+    const claimed = await claimEmissionForDeposit(current.id);
+    if (claimed === null) return 'claimed_elsewhere';
+    current = claimed;
+  }
+  if (current.state === 'depositing') {
     current = await depositStep(current, vault);
   }
   if (current.state === 'deposited') {
@@ -529,7 +606,9 @@ export async function driveOneVaultEmission(
 
 // ─── Sweep (crash-recovery + primary driver — mirrors credits/interest-mint.ts) ────
 
-const SWEEP_STATES = ['pending', 'deposited', 'transferred'] as const;
+// Non-terminal states the sweep picks up. `depositing` is included so
+// a row claimed-but-crashed before its deposit landed gets re-driven.
+const SWEEP_STATES = ['pending', 'depositing', 'deposited', 'transferred'] as const;
 
 function vaultEmissionSweepLockKey(): bigint {
   const digest = createHash('sha256').update('loop:vault-emission-sweep').digest();
@@ -553,6 +632,8 @@ export interface VaultEmissionSweepResult {
   advanced: number;
   failed: number;
   noVault: number;
+  /** Rows whose `pending → depositing` claim was lost to a concurrent sweep (money-review #1647 P1). Benign. */
+  claimedElsewhere: number;
   /** `driveOneVaultEmission` threw unexpectedly — should not happen (see its doc comment). */
   errors: number;
 }
@@ -579,6 +660,7 @@ export async function runVaultEmissionSweepTick(args?: {
       advanced: 0,
       failed: 0,
       noVault: 0,
+      claimedElsewhere: 0,
       errors: 0,
     };
   }
@@ -595,6 +677,7 @@ async function runVaultEmissionSweepLocked(args?: {
     advanced: 0,
     failed: 0,
     noVault: 0,
+    claimedElsewhere: 0,
     errors: 0,
   };
   if (!vaultsEnabled()) return result;
@@ -605,7 +688,13 @@ async function runVaultEmissionSweepLocked(args?: {
     .from(vaultEmissions)
     .where(inArray(vaultEmissions.state, [...SWEEP_STATES]))
     .orderBy(vaultEmissions.createdAt)
-    .limit(batchSize);
+    .limit(batchSize)
+    // money-review #1647 P1: skip rows another machine's sweep is
+    // mid-claim on, so concurrent sweeps pull disjoint candidate sets
+    // (throughput layer; the per-row `pending → depositing` CAS in
+    // `driveOneVaultEmission` is the durable correctness guarantee).
+    // Mirrors `listClaimablePayouts`'s `.for('update', { skipLocked })`.
+    .for('update', { skipLocked: true });
   result.considered = rows.length;
 
   // Sequential, deliberately — see the module header's cross-worker
@@ -623,7 +712,10 @@ async function runVaultEmissionSweepLocked(args?: {
         case 'no_vault':
           result.noVault++;
           break;
-        case 'pending':
+        case 'claimed_elsewhere':
+          result.claimedElsewhere++;
+          break;
+        case 'depositing':
         case 'deposited':
         case 'transferred':
           // Made it further than before (or stayed on the same
@@ -643,10 +735,145 @@ async function runVaultEmissionSweepLocked(args?: {
   return result;
 }
 
+// ─── Stuck-emission watchdog (money-review #1647 P1-2b) ────────────────────
+//
+// The `failed`-row page (recordStepFailure) only fires for rows that
+// EXHAUSTED their attempts. A row STUCK in an in-flight state without
+// exhausting attempts — the sweep worker is down, Soroban RPC is
+// unreachable, or the operator account is sequence-contended so every
+// deposit/transfer transiently fails — would never reach `failed` and
+// would otherwise be invisible. This watchdog pages once per incident
+// when any row has sat in `depositing`/`deposited`/`transferred` past
+// the threshold, mirroring `stuck-payout-watchdog.ts` exactly:
+// single-flighted fleet-wide via `pg_try_advisory_xact_lock`, fire-
+// once/re-arm state persisted in `watchdog_alert_state`, confirmed-
+// delivery (persist active=true only after the send resolves).
+
+const VAULT_EMISSION_STUCK_STATES = ['depositing', 'deposited', 'transferred'] as const;
+
+/** `watchdog_alert_state` row key for the stuck-vault-emission watchdog. */
+const VAULT_EMISSION_STUCK_ALERT_NAME = 'vault-emission-stuck-watchdog';
+
+export const VAULT_EMISSION_STUCK_WATCHDOG_INTERVAL_MS = 60 * 1000;
+
+function vaultEmissionStuckWatchdogLockKey(): bigint {
+  const digest = createHash('sha256').update('loop:vault-emission-stuck-watchdog').digest();
+  const raw =
+    (BigInt(digest[0]!) << 56n) |
+    (BigInt(digest[1]!) << 48n) |
+    (BigInt(digest[2]!) << 40n) |
+    (BigInt(digest[3]!) << 32n) |
+    (BigInt(digest[4]!) << 24n) |
+    (BigInt(digest[5]!) << 16n) |
+    (BigInt(digest[6]!) << 8n) |
+    BigInt(digest[7]!);
+  return BigInt.asIntN(64, raw);
+}
+
+export interface VaultEmissionStuckWatchdogResult {
+  skippedLocked: boolean;
+  notified: boolean;
+}
+
+/**
+ * Single-flighted stuck-emission probe. Same shape + at-least-once
+ * confirmed-delivery contract as `runStuckPayoutWatchdog`.
+ */
+export async function runVaultEmissionStuckWatchdog(args?: {
+  thresholdMinutes?: number;
+  limit?: number;
+}): Promise<VaultEmissionStuckWatchdogResult> {
+  const thresholdMinutes = args?.thresholdMinutes ?? 15;
+  const limit = args?.limit ?? 20;
+  if (!vaultsEnabled()) return { skippedLocked: false, notified: false };
+  return await db.transaction(async (tx) => {
+    const lockResult = await tx.execute<{ locked: boolean }>(
+      sql`SELECT pg_try_advisory_xact_lock(${vaultEmissionStuckWatchdogLockKey()}) AS locked`,
+    );
+    const lockRows = Array.isArray(lockResult)
+      ? (lockResult as Array<{ locked: boolean }>)
+      : ((lockResult as { rows?: Array<{ locked: boolean }> }).rows ?? []);
+    if (lockRows[0]?.locked !== true) {
+      return { skippedLocked: true, notified: false };
+    }
+
+    const [alertRow] = await tx
+      .select({ alertActive: watchdogAlertState.alertActive })
+      .from(watchdogAlertState)
+      .where(eq(watchdogAlertState.watchdogName, VAULT_EMISSION_STUCK_ALERT_NAME));
+    const alertActive = alertRow?.alertActive ?? false;
+
+    const rows = await tx
+      .select({
+        id: vaultEmissions.id,
+        state: vaultEmissions.state,
+        assetCode: vaultEmissions.assetCode,
+        createdAt: vaultEmissions.createdAt,
+      })
+      .from(vaultEmissions)
+      .where(
+        and(
+          inArray(vaultEmissions.state, [...VAULT_EMISSION_STUCK_STATES]),
+          sql`${vaultEmissions.createdAt} < NOW() - make_interval(mins => ${thresholdMinutes})`,
+        ),
+      )
+      .orderBy(vaultEmissions.createdAt)
+      .limit(limit);
+
+    if (rows.length === 0) {
+      if (alertActive) {
+        await tx
+          .insert(watchdogAlertState)
+          .values({ watchdogName: VAULT_EMISSION_STUCK_ALERT_NAME, alertActive: false })
+          .onConflictDoUpdate({
+            target: watchdogAlertState.watchdogName,
+            set: { alertActive: false, updatedAt: sql`NOW()` },
+          });
+      }
+      return { skippedLocked: false, notified: false };
+    }
+    if (alertActive) return { skippedLocked: false, notified: false };
+
+    const oldest = rows.reduce((max, row) => {
+      const ageMin = Math.round((Date.now() - row.createdAt.getTime()) / 60_000);
+      return ageMin > max ? ageMin : max;
+    }, 0);
+    const uniqueStates = [...new Set(rows.map((r) => r.state))].sort().join(', ');
+    const first = rows[0] ?? null;
+
+    const delivered = await notifyVaultEmissionsStuck({
+      rowCount: rows.length,
+      thresholdMinutes,
+      oldestAgeMinutes: oldest,
+      states: uniqueStates,
+      vaultEmissionId: first?.id ?? null,
+      assetCode: first?.assetCode ?? null,
+    });
+    if (!delivered) return { skippedLocked: false, notified: false };
+    await tx
+      .insert(watchdogAlertState)
+      .values({ watchdogName: VAULT_EMISSION_STUCK_ALERT_NAME, alertActive: true })
+      .onConflictDoUpdate({
+        target: watchdogAlertState.watchdogName,
+        set: { alertActive: true, updatedAt: sql`NOW()` },
+      });
+    return { skippedLocked: false, notified: true };
+  });
+}
+
+async function tickVaultEmissionStuckWatchdog(): Promise<void> {
+  try {
+    await runVaultEmissionStuckWatchdog();
+  } catch (err) {
+    log.error({ err }, 'Vault-emission stuck watchdog tick failed');
+  }
+}
+
 /** Tick cadence — mirrors `LOOP_PAYOUT_WORKER_INTERVAL_SECONDS`'s default pacing (a Soroban submit + ledger-close is comparable latency to a classic Stellar payout). */
 export const VAULT_EMISSION_SWEEP_TICK_INTERVAL_MS = 30_000;
 
 let sweepTimer: ReturnType<typeof setInterval> | null = null;
+let stuckWatchdogTimer: ReturnType<typeof setInterval> | null = null;
 let tickInFlight = false;
 
 export async function tickVaultEmissionSweep(): Promise<void> {
@@ -665,12 +892,30 @@ export async function tickVaultEmissionSweep(): Promise<void> {
           advanced: r.advanced,
           failed: r.failed,
           noVault: r.noVault,
+          claimedElsewhere: r.claimedElsewhere,
           errors: r.errors,
         },
         'Vault-emission sweep tick complete',
       );
     }
-    markWorkerTickSuccess('vault_emission_sweep');
+    // P1-2c: a terminal `failed` row (or an unexpected drive error)
+    // this tick must NOT read as a silently-healthy tick. Surface it
+    // through `markWorkerTickFailure` so the worker-stale/degraded
+    // signal on /health fires and the Discord failed-emission page
+    // (recordStepFailure) isn't the only trace. `failed` counts rows
+    // that went terminal THIS tick (terminal rows leave SWEEP_STATES,
+    // so they aren't re-counted) — a discrete event, not a standing
+    // state, so subsequent clean ticks re-mark success.
+    if (r.failed > 0 || r.errors > 0) {
+      markWorkerTickFailure(
+        'vault_emission_sweep',
+        new Error(
+          `vault-emission sweep: ${r.failed} row(s) went terminal-failed, ${r.errors} unexpected drive error(s) this tick`,
+        ),
+      );
+    } else {
+      markWorkerTickSuccess('vault_emission_sweep');
+    }
   } catch (err) {
     markWorkerTickFailure('vault_emission_sweep', err);
     log.error({ err }, 'Vault-emission sweep tick failed');
@@ -686,7 +931,10 @@ export async function tickVaultEmissionSweep(): Promise<void> {
  * `vault_emissions` row in the first place, so an unstarted sweep
  * here is consistent, not merely inert.
  */
-export function startVaultEmissionSweep(args?: { intervalMs?: number }): void {
+export function startVaultEmissionSweep(args?: {
+  intervalMs?: number;
+  stuckWatchdogIntervalMs?: number;
+}): void {
   stopVaultEmissionSweep();
   const intervalMs = args?.intervalMs ?? VAULT_EMISSION_SWEEP_TICK_INTERVAL_MS;
   markWorkerStarted('vault_emission_sweep', { staleAfterMs: Math.max(intervalMs * 3, 60_000) });
@@ -698,12 +946,26 @@ export function startVaultEmissionSweep(args?: { intervalMs?: number }): void {
     void tickVaultEmissionSweep();
   }, intervalMs);
   sweepTimer.unref();
+
+  // P1-2b: the stuck-emission watchdog runs on its own (slower)
+  // cadence, single-flighted fleet-wide, sharing the sweep worker's
+  // lifecycle like `stuck-payout-watchdog` shares the payout worker's.
+  const watchdogIntervalMs =
+    args?.stuckWatchdogIntervalMs ?? VAULT_EMISSION_STUCK_WATCHDOG_INTERVAL_MS;
+  stuckWatchdogTimer = setInterval(() => {
+    void tickVaultEmissionStuckWatchdog();
+  }, watchdogIntervalMs);
+  stuckWatchdogTimer.unref();
 }
 
 export function stopVaultEmissionSweep(): void {
   if (sweepTimer !== null) {
     clearInterval(sweepTimer);
     sweepTimer = null;
+  }
+  if (stuckWatchdogTimer !== null) {
+    clearInterval(stuckWatchdogTimer);
+    stuckWatchdogTimer = null;
   }
   markWorkerStopped('vault_emission_sweep');
 }

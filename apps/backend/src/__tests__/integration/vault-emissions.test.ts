@@ -96,6 +96,7 @@ import {
   pendingPayouts,
   userCredits,
   creditTransactions,
+  watchdogAlertState,
 } from '../../db/schema.js';
 import { findOrCreateUserByEmail } from '../../db/users.js';
 import { ensureMigrated, truncateAllTables } from './db-test-setup.js';
@@ -104,6 +105,7 @@ import { generatePayoutMemo } from '../../credits/payout-builder.js';
 import {
   claimVaultEmission,
   driveOneVaultEmission,
+  runVaultEmissionStuckWatchdog,
   type VaultEmissionRow,
 } from '../../credits/vaults/vault-emissions.js';
 
@@ -417,5 +419,100 @@ describeIf('vault-emissions integration — real postgres (ADR 031 V3)', () => {
     expect(vaultClientMocks.transferShares).toHaveBeenCalledWith(
       expect.objectContaining({ amount: 290n }),
     );
+  });
+
+  it('two concurrent drives over one pending row: exactly one deposits (real CAS, P1)', async () => {
+    const user = await seedUser();
+    const orderId = await seedOrder({ userId: user.id, cashbackMinor: 500n });
+    await claimVaultEmission(db as never, {
+      orderId,
+      userId: user.id,
+      assetCode: 'LOOPUSD',
+      network: 'testnet',
+      cashbackMinor: 500n,
+      toAddress: user.walletAddress,
+    });
+    const [row] = await db.select().from(vaultEmissions).where(eq(vaultEmissions.orderId, orderId));
+
+    vaultClientState.depositResult = { txHash: 'dep-race', sharesMinted: 480n };
+    vaultClientState.transferResult = { txHash: 'xfer-race' };
+
+    // Race the SAME `pending` row from two "machines" — the real
+    // `pending → depositing` state-CAS in postgres must let exactly
+    // ONE win the deposit; the loser returns `claimed_elsewhere`.
+    const [a, b] = await Promise.all([
+      driveOneVaultEmission(row as unknown as VaultEmissionRow),
+      driveOneVaultEmission(row as unknown as VaultEmissionRow),
+    ]);
+
+    const outcomes = [a, b].sort();
+    expect(outcomes).toContain('claimed_elsewhere');
+    // The winner drove all the way to mirrored.
+    expect(outcomes).toContain('mirrored');
+    // Deposit happened exactly once — no double-deposit / fund leak.
+    expect(vaultClientMocks.depositToVault).toHaveBeenCalledTimes(1);
+
+    const [balance] = await db
+      .select()
+      .from(userCredits)
+      .where(and(eq(userCredits.userId, user.id), eq(userCredits.currency, 'USD')));
+    expect(balance?.balanceMinor).toBe(500n);
+  });
+
+  it('the stuck-emission watchdog pages once per incident and re-arms when cleared (P1-2b, real advisory lock + watchdog_alert_state)', async () => {
+    const user = await seedUser();
+    const orderId = await seedOrder({ userId: user.id, cashbackMinor: 400n });
+    await claimVaultEmission(db as never, {
+      orderId,
+      userId: user.id,
+      assetCode: 'LOOPUSD',
+      network: 'testnet',
+      cashbackMinor: 400n,
+      toAddress: user.walletAddress,
+    });
+    // Make it a STUCK in-flight row: state='deposited', created 30 min
+    // ago (older than the 15-min threshold below). No DISCORD webhook
+    // is configured in the integration env, so notifyVaultEmissionsStuck
+    // → sendWebhook(undefined) → resolves `true` (delivery confirmed).
+    await db
+      .update(vaultEmissions)
+      .set({
+        state: 'deposited',
+        depositTxHash: 'dep-stuck',
+        sharesMinted: 380n,
+        depositedAt: new Date(),
+        createdAt: new Date(Date.now() - 30 * 60_000),
+      })
+      .where(eq(vaultEmissions.orderId, orderId));
+
+    // First run: pages + persists alert_active=true.
+    const first = await runVaultEmissionStuckWatchdog({ thresholdMinutes: 15 });
+    expect(first.notified).toBe(true);
+    const [alert1] = await db
+      .select()
+      .from(watchdogAlertState)
+      .where(eq(watchdogAlertState.watchdogName, 'vault-emission-stuck-watchdog'));
+    expect(alert1?.alertActive).toBe(true);
+
+    // Second run while the incident persists: no duplicate page.
+    const second = await runVaultEmissionStuckWatchdog({ thresholdMinutes: 15 });
+    expect(second.notified).toBe(false);
+
+    // Clear the incident (row advances out of the stuck set) → re-arm.
+    await db
+      .update(vaultEmissions)
+      .set({
+        state: 'mirrored',
+        transferTxHash: 'xfer-stuck',
+        mirroredAt: new Date(),
+      })
+      .where(eq(vaultEmissions.orderId, orderId));
+    const third = await runVaultEmissionStuckWatchdog({ thresholdMinutes: 15 });
+    expect(third.notified).toBe(false);
+    const [alert3] = await db
+      .select()
+      .from(watchdogAlertState)
+      .where(eq(watchdogAlertState.watchdogName, 'vault-emission-stuck-watchdog'));
+    expect(alert3?.alertActive).toBe(false);
   });
 });

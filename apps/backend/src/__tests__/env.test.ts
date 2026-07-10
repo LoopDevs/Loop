@@ -789,6 +789,56 @@ describe('parseEnv', () => {
       expect(() => parseEnv({ ...base, PRIVY_APP_SECRET: 'sec456' })).not.toThrow();
     });
   });
+
+  describe('ADR 031 V3: LOOP_VAULTS_ENABLED cross-field requirements', () => {
+    const RPC = 'https://soroban-testnet.stellar.org';
+    // A production config that passes every OTHER production boot guard,
+    // so a test can isolate the vaults↔workers check.
+    const prodBase = {
+      ...base,
+      NODE_ENV: 'production',
+      IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
+      LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
+      LOOP_AUTH_NATIVE_ENABLED: 'true',
+      LOOP_JWT_SIGNING_KEY: JWT_KEY,
+      LOOP_STELLAR_USDC_ISSUER: USDC_ISSUER,
+    };
+
+    it('LOOP_VAULTS_ENABLED=true requires LOOP_SOROBAN_RPC_URL (any env)', () => {
+      expect(() => parseEnv({ ...base, LOOP_VAULTS_ENABLED: 'true' })).toThrow(
+        /LOOP_SOROBAN_RPC_URL/,
+      );
+    });
+
+    it('P2-4: LOOP_VAULTS_ENABLED=true requires LOOP_WORKERS_ENABLED=true in production', () => {
+      expect(() =>
+        parseEnv({ ...prodBase, LOOP_VAULTS_ENABLED: 'true', LOOP_SOROBAN_RPC_URL: RPC }),
+      ).toThrow(/LOOP_WORKERS_ENABLED/);
+    });
+
+    it('P2-4: production vaults+workers both on is accepted', () => {
+      const env = parseEnv({
+        ...prodBase,
+        LOOP_VAULTS_ENABLED: 'true',
+        LOOP_SOROBAN_RPC_URL: RPC,
+        LOOP_WORKERS_ENABLED: 'true',
+      });
+      expect(env.LOOP_VAULTS_ENABLED).toBe(true);
+      expect(env.LOOP_WORKERS_ENABLED).toBe(true);
+    });
+
+    it('P2-4: outside production, vaults on with workers off is allowed (tests/dev drive the sweep directly)', () => {
+      expect(() =>
+        parseEnv({
+          ...base,
+          NODE_ENV: 'test',
+          LOOP_VAULTS_ENABLED: 'true',
+          LOOP_SOROBAN_RPC_URL: RPC,
+          LOOP_WORKERS_ENABLED: 'false',
+        }),
+      ).not.toThrow();
+    });
+  });
 });
 
 // ADR 030 Phase A: the RS256 signing keys are PEM-validated at boot —

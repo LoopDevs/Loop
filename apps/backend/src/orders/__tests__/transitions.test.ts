@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type * as EnvModule from '../../env.js';
 
 /**
  * Transitions exercise `UPDATE ... WHERE state = <expected> RETURNING`
@@ -284,6 +285,24 @@ vi.mock('../../credits/vaults/vault-emissions.js', () => ({
   isVaultEligibleCurrency: (currency: string) => currency === 'USD' || currency === 'EUR',
 }));
 
+// ADR 031 V3 P2-5 — `fulfillment.ts` reads `env.LOOP_PHASE_1_ONLY` to
+// structurally gate the vault fork. Mock env by SPREADING the real
+// parsed env (so every other field transitions.ts reads stays real)
+// and overriding only LOOP_PHASE_1_ONLY via a mutable hoisted ref.
+const { phaseOneOnlyRef } = vi.hoisted(() => ({ phaseOneOnlyRef: { value: false } }));
+vi.mock('../../env.js', async () => {
+  const actual = await vi.importActual<typeof EnvModule>('../../env.js');
+  return {
+    ...actual,
+    env: {
+      ...actual.env,
+      get LOOP_PHASE_1_ONLY() {
+        return phaseOneOnlyRef.value;
+      },
+    },
+  };
+});
+
 import {
   markOrderPaid,
   markOrderProcuring,
@@ -312,6 +331,7 @@ beforeEach(() => {
   vaultRegistryMock.activeVault = null;
   vaultEmissionMock.claimCalls = [];
   vaultEmissionMock.claimResult = true;
+  phaseOneOnlyRef.value = false;
   for (const fn of Object.values(dbMock)) {
     if (typeof fn === 'function' && 'mockClear' in fn) {
       (fn as unknown as { mockClear: () => void }).mockClear();
@@ -606,6 +626,22 @@ describe('markOrderFulfilled', () => {
       // path skips the payout (no_address) but still writes the mirror.
       expect(state.insertCreditCalls).toHaveLength(1);
       expect(state.insertPendingPayoutCalls).toHaveLength(0);
+    });
+
+    it('P2-5: LOOP_PHASE_1_ONLY=true structurally blocks the fork even with everything else eligible', async () => {
+      phaseOneOnlyRef.value = true;
+      vaultRegistryMock.enabled = true;
+      vaultRegistryMock.activeVault = { id: 'vault-1' };
+      state.returningRows = [usdOrder];
+      state.userLookupRows = [activatedUsdUser];
+
+      await markOrderFulfilled('o-1', { ctxOrderId: 'ctx-abc' });
+
+      // No vault claim; the classic path runs (defense-in-depth even
+      // though Phase-1 orders normally carry userCashbackMinor=0).
+      expect(vaultEmissionMock.claimCalls).toHaveLength(0);
+      expect(state.insertCreditCalls).toHaveLength(1);
+      expect(state.insertPendingPayoutCalls).toHaveLength(1);
     });
 
     it('flag on + peg-break (chargeCurrency != home currency): vault fork does not apply even if both are vault-eligible', async () => {

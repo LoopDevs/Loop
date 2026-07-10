@@ -95,18 +95,26 @@ src/
 │       │                   RPC, no real testnet vault call has validated the exact
 │       │                   on-chain return shapes (see ADR 049 §Negative)
 │       └── vault-emissions.ts ← V3 (ADR 031 §D5, migration 0061): the cashback-EMISSION
-│                           state machine — pending → deposited → transferred → mirrored
-│                           (+ failed). Claimed (durable, no network I/O) from
-│                           `orders/fulfillment.ts`'s gated fork inside the SAME txn as
+│                           state machine — pending → depositing → deposited →
+│                           transferred → mirrored (+ failed). Claimed (durable, no
+│                           network I/O) from `orders/fulfillment.ts`'s gated fork
+│                           (gated on !LOOP_PHASE_1_ONLY too) inside the SAME txn as
 │                           the order's `fulfilled` transition; driven forward by the
 │                           interval-based `startVaultEmissionSweep` worker (gated on
-│                           LOOP_WORKERS_ENABLED + LOOP_VAULTS_ENABLED). Mirror step
-│                           writes credit_transactions + user_credits AND a
-│                           `pending_payouts kind='emission'` audit row already
-│                           `state='confirmed'` — routes the write through the SAME
+│                           LOOP_WORKERS_ENABLED + LOOP_VAULTS_ENABLED). The sweep
+│                           SELECTs FOR UPDATE SKIP LOCKED and CASes pending →
+│                           depositing before any deposit — the cross-machine
+│                           double-deposit guard (mirrors the payout worker's claim;
+│                           money-review #1647 P1). Mirror step writes
+│                           credit_transactions + user_credits AND a `pending_payouts
+│                           kind='emission'` audit row already `state='confirmed'` —
+│                           routes the write through the SAME
 │                           `assert_emission_conservation` trigger (migration 0044,
 │                           widened by 0061) admin emissions use, never a bespoke
-│                           user_credits UPDATE. docs/invariants.md INV-V1/INV-V2.
+│                           user_credits UPDATE. A terminal `failed` row pages Discord
+│                           (notifyVaultEmissionFailed); `runVaultEmissionStuckWatchdog`
+│                           pages once per incident for rows stuck in-flight.
+│                           docs/invariants.md INV-V1/INV-V2.
 ├── fraud/              ← ADR 045 (B-3) Phase-1 fraud/abuse controls
 │   ├── velocity.ts     ← Per-user order-create velocity gate (bounded/indexed
 │   │                     query, fail-closed) — called from orders/loop-handler.ts
