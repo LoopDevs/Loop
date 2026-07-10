@@ -71,6 +71,7 @@
 | `docs/adr/042-a11y-tooling.md`                              | Accessibility regression tooling (B-2) — `eslint-plugin-jsx-a11y` as a lint gate on `apps/web/app/**/*.tsx` + `jest-axe` runtime DOM smoke scans on key routes; both `apps/web`-only devDependencies, never shipped. CF-35/WUM-10 are the evidence manual-only a11y regresses.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `docs/adr/043-i18n-framework.md`                            | i18n framework (B-6) — i18next + react-i18next chosen over FormatJS/react-intl; route-driven locale (no browser detection), synchronous bundled-resources init (SSR + static-export safe), first customer-facing extraction tranche (home/auth/onboarding/footer/404). Supersedes the CF-22 "don't extract yet" scaffold (`i18n/t.ts`/`messages.ts`, deleted). Actual translations deferred to the 🧭 language-set decision — see `docs/i18n.md`.                                                                                                                                                                                                                                                                                                                                                                           |
 | `docs/adr/044-payout-throughput.md`                         | Stellar payout throughput (S4-1) — channel accounts (the standard Stellar scale pattern) lift the one-operator-account sequence-number ceiling; N pre-funded channels own the tx source (sequence + fee), the Payment op's `source` override keeps the operator/issuer as the actual funder, so N sequence streams submit concurrently with the fleet-wide leader lock (A8) unchanged. Phase 1 (code) shipped; N=0 (unset) is byte-identical to pre-ADR-044. Operator channel provisioning is a follow-up.                                                                                                                                                                                                                                                                                                                  |
+| `docs/adr/045-fraud-abuse-controls.md`                      | Fraud/abuse controls (B-3) — Phase-1 design + build: per-USER order-create velocity limits (count + value, rolling window, bounded/indexed query, fail-closed) in `POST /api/orders/loop`; duplicate-account detection via shared-funding-source signal (flag-only, `fraud_signals` table, Discord page on first occurrence, never auto-block); chargeback handling scoped as a documented Phase-2/T3 hook (no chargeback threat exists on Phase-1 crypto-only funding — the closest analog, disputed/failed settlement, is already covered by INV-6's refund paths).                                                                                                                                                                                                                                                       |
 
 ---
 
@@ -482,6 +483,17 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # refuses a SEP-7 payment amount above this many basis points of the
 # expected wholesale XLM quote. Default 12500 = 125%.
 # LOOP_CTX_PAYMENT_MAX_BPS_OF_EXPECTED=12500
+
+# ADR 045 (B-3): Phase-1 fraud/abuse velocity limits on order creation
+# (POST /api/orders/loop), per-USER — distinct from the per-IP rate
+# limiter, which an attacker routes around by rotating IPs. Two
+# independent dimensions (count + summed charge value per currency)
+# over a rolling window; `0` disables a dimension. Over-limit → 429
+# ORDER_VELOCITY_EXCEEDED; the check itself failing → 503
+# ORDER_VELOCITY_CHECK_UNAVAILABLE (fails closed, no order created).
+# LOOP_ORDER_VELOCITY_MAX_PER_WINDOW=20
+# LOOP_ORDER_VELOCITY_WINDOW_HOURS=24
+# LOOP_ORDER_VELOCITY_MAX_VALUE_MINOR=500000
 
 # Hardening A6: auto-refund late deposits (deposits landing after their
 # order expired). Default false → refunds are admin-triggered via

@@ -223,6 +223,17 @@ export const coreEnvFields = {
   // UTC day, across all admins; `0` disables the check.
   ADMIN_DAILY_WITHDRAWAL_CAP_MINOR: z.coerce.bigint().nonnegative().default(100_000_000n),
 
+  // ADR 045 (B-3): Phase-1 fraud/abuse velocity limits on order
+  // creation. Two independent dimensions, both per-user (not per-IP —
+  // see ADR 045 for why the existing per-IP rate limiter doesn't
+  // bound this threat). `0` disables a dimension (dev/test escape
+  // hatch, same convention as ADMIN_DAILY_ADJUSTMENT_CAP_MINOR).
+  // Defaults are generous — sized against the existing $50k single-
+  // order face-value ceiling, not against normal usage.
+  LOOP_ORDER_VELOCITY_MAX_PER_WINDOW: z.coerce.number().int().nonnegative().default(20),
+  LOOP_ORDER_VELOCITY_WINDOW_HOURS: z.coerce.number().int().positive().default(24),
+  LOOP_ORDER_VELOCITY_MAX_VALUE_MINOR: z.coerce.bigint().nonnegative().default(500_000n),
+
   // Discord webhooks (optional — for notifications)
   DISCORD_WEBHOOK_ORDERS: z.string().url().optional(),
   DISCORD_WEBHOOK_MONITORING: z.string().url().optional(),

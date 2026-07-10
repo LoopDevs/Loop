@@ -26,6 +26,18 @@ vi.mock('../../discord.js', () => ({
   notifyLoopAssetOverpayment: (args: unknown) => notifyOverpaymentMock(args),
 }));
 
+// ADR 045 (B-3) duplicate-account detection — fully mocked here so
+// this suite's existing db mock (shaped for the cursor read/write,
+// not a generic `orders` select) isn't exercised by the real module.
+// Its own bounded-query / fail-closed-vs-swallow behaviour is covered
+// by fraud/__tests__/duplicate-account-signals.test.ts.
+const { checkDuplicateFundingSourceMock } = vi.hoisted(() => ({
+  checkDuplicateFundingSourceMock: vi.fn(async (_args: unknown) => undefined),
+}));
+vi.mock('../../fraud/duplicate-account-signals.js', () => ({
+  checkDuplicateFundingSource: (args: unknown) => checkDuplicateFundingSourceMock(args),
+}));
+
 vi.mock('../horizon.js', async () => {
   const actual = await vi.importActual<typeof HorizonModule>('../horizon.js');
   return {
@@ -207,6 +219,8 @@ beforeEach(() => {
   findAnyOrderMock.mockReset();
   findAnyOrderMock.mockResolvedValue(null);
   markPaidMock.mockReset();
+  checkDuplicateFundingSourceMock.mockReset();
+  checkDuplicateFundingSourceMock.mockResolvedValue(undefined);
   recordSkipMock.mockReset();
   recordSkipMock.mockResolvedValue(undefined);
   retrySkipsMock.mockReset();
@@ -469,6 +483,40 @@ describe('runPaymentWatcherTick', () => {
       paymentReceivedPayment: expect.objectContaining({ id: 'id-pt-1' }),
     });
     expect(state.writtenCursors).toEqual(['pt-1']);
+  });
+
+  it('ADR 045 (B-3): a fresh paid transition triggers the duplicate-account check AFTER the transition, never before', async () => {
+    listPaymentsMock.mockResolvedValue({
+      records: [usdcPayment('MEMO-OK', '10.0000000', 'pt-1')],
+      nextCursor: null,
+    });
+    findOrderMock.mockResolvedValue({ ...makeOrder({ id: 'order-1' }), userId: 'user-1' });
+    markPaidMock.mockResolvedValue({ id: 'order-1', userId: 'user-1' });
+    await runPaymentWatcherTick({ account: ACCOUNT, usdcIssuer: 'GCENTRE' });
+    expect(checkDuplicateFundingSourceMock).toHaveBeenCalledTimes(1);
+    expect(checkDuplicateFundingSourceMock).toHaveBeenCalledWith({
+      userId: 'user-1',
+      orderId: 'order-1',
+      sourceAccount: 'GOTHER', // usdcPayment()'s fixture `from`
+    });
+    // Called after markOrderPaid resolved, not concurrently with it —
+    // the mock call order proves the transition committed first.
+    const markPaidOrder = markPaidMock.mock.invocationCallOrder[0] ?? -1;
+    const dupCheckOrder = checkDuplicateFundingSourceMock.mock.invocationCallOrder[0] ?? -2;
+    expect(markPaidOrder).toBeLessThan(dupCheckOrder);
+  });
+
+  it('ADR 045 (B-3): does NOT re-check on an already-paid (non-fresh) transition result', async () => {
+    listPaymentsMock.mockResolvedValue({
+      records: [usdcPayment('MEMO-OK', '10.0000000', 'pt-1')],
+      nextCursor: null,
+    });
+    findOrderMock.mockResolvedValue({ ...makeOrder({ id: 'order-1' }), userId: 'user-1' });
+    // markOrderPaid returns null — the WHERE state='pending_payment'
+    // guard found no row (already transitioned by a prior tick).
+    markPaidMock.mockResolvedValue(null);
+    await runPaymentWatcherTick({ account: ACCOUNT, usdcIssuer: 'GCENTRE' });
+    expect(checkDuplicateFundingSourceMock).not.toHaveBeenCalled();
   });
 
   it('unknown memo → unmatchedMemo++, cursor still advances', async () => {

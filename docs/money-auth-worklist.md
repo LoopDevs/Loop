@@ -372,7 +372,7 @@
       pre-funded sequence-owning accounts; op-level `source` override keeps
       the operator/issuer as the real funder) over operator/issuer account
       sharding or batching. `LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS` unset
-      (default) is byte-identical to pre-ADR-044 behaviour — the A8
+      (default) is byte-identical to pre-ADR-045 behaviour — the A8
       fleet-wide leader lock is unchanged, channels add parallelism WITHIN
       one leader's tick. **Still open (👤):** operator provisions + funds N
       channel accounts and confirms real throughput scaling.
@@ -402,9 +402,13 @@
 
 ## Phase 5 — Fraud / abuse controls (currently absent)
 
-- [ ] **B-3 · User-level fraud/abuse controls.** _L · 💰 + design/ADR._
-      No velocity limits, duplicate-account detection, or chargeback handling today
-      (`loop-create-checks.ts` only does a balance check). Needs a design pass first.
+- [x] **B-3 · User-level fraud/abuse controls.** _L · 💰 + design/ADR._
+      Phase 1 shipped 2026-07-10 (ADR 045, review-first PR open — not yet merged):
+      per-user order-create velocity limit (bounded/indexed, fail-closed) +
+      duplicate-account shared-funding-source detection (flag-only, never
+      auto-block). Chargeback handling scoped as a T3/Plaid-card hook (no
+      chargeback threat on Phase-1 crypto-only funding); device/IP dup-account
+      capture + an admin UI deferred — see readiness-backlog B-3 / ADR 045.
 
 ## P2 / follow-ups (lower severity, not blocking)
 

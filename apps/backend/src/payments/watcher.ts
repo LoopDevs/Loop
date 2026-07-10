@@ -38,6 +38,7 @@ import { isAmountSufficient, loopAssetOverpaymentStroops } from './amount-suffic
 import { notifyLoopAssetOverpayment } from '../discord.js';
 import { recordSkip, retrySkippedPayments, type RetryOutcome } from './skipped-payments.js';
 import { REFUND_MIN_STROOPS } from './deposit-refund.js';
+import { checkDuplicateFundingSource } from '../fraud/duplicate-account-signals.js';
 
 const log = logger.child({ area: 'payment-watcher' });
 
@@ -374,6 +375,19 @@ async function processPayment(
         chargeMinor: order.chargeMinor.toString(),
         chargeCurrency: order.chargeCurrency,
         excessStroops: overpaymentStroops.toString(),
+      });
+    }
+    // ADR 045 (B-3): duplicate-account funding-source-reuse check.
+    // Fire AFTER the transition has committed, never able to affect
+    // it — detection-only, best-effort (the function swallows its
+    // own errors; see its doc comment for why it must never throw
+    // here). `p.from` is optional on the Horizon payment schema; skip
+    // cleanly when a payment carries no source account.
+    if (p.from !== undefined) {
+      await checkDuplicateFundingSource({
+        userId: order.userId,
+        orderId: order.id,
+        sourceAccount: p.from,
       });
     }
     return { kind: 'paid', orderId: order.id, memo };

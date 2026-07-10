@@ -235,4 +235,10 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
     description:
       'Manual test ping from an admin — proves a channel is wired up after rotating the webhook env var. Sent on demand from /api/admin/discord/test; never fires automatically.',
   },
+  {
+    name: 'notifyDuplicateAccountSignal',
+    channel: 'monitoring',
+    description:
+      'ADR 045 (B-3): fires on a FRESH duplicate-account signal — the same on-chain funding source paid orders for two distinct Loop users. Flag only, never an automated account action; one page per user pair (re-occurrences of an already-known pair stay quiet).',
+  },
 ]);

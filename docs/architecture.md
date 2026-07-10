@@ -304,6 +304,39 @@ USDLOOP and EURLOOP **retire** in State 3 — users hold canonical vault shares 
 
 ---
 
+## Fraud / abuse controls (ADR 045, B-3)
+
+Phase-1 build, two controls, both in `apps/backend/src/fraud/`:
+
+- **Per-user order-create velocity limit** (`fraud/velocity.ts`). Called
+  from `orders/loop-handler.ts` before `createOrder` — a bounded,
+  indexed query (reuses the `orders_user_created` index) counts and
+  sums the user's own orders in a rolling window; over
+  `LOOP_ORDER_VELOCITY_MAX_PER_WINDOW` orders or
+  `LOOP_ORDER_VELOCITY_MAX_VALUE_MINOR` of charge value in one
+  currency within `LOOP_ORDER_VELOCITY_WINDOW_HOURS` hours rejects
+  with 429 `ORDER_VELOCITY_EXCEEDED` before any write. Per-USER, not
+  per-IP — bounds one account's blast radius independent of the
+  existing per-IP rate limiter. Fails CLOSED (503
+  `ORDER_VELOCITY_CHECK_UNAVAILABLE`) if the query itself errors.
+- **Duplicate-account detection** (`fraud/duplicate-account-signals.ts`).
+  Called from `payments/watcher.ts` AFTER a `pending_payment → paid`
+  transition commits (fire-and-forget, never inside the transition).
+  Looks for other users' paid orders funded from the same on-chain
+  source account (`orders.payment_received_payment->>'from'`,
+  expression-indexed via `orders_payment_source_account`); a match
+  writes one row to `fraud_signals` (migration 0059) and pages
+  `#loop-monitoring` on first occurrence. **Flag only — never
+  auto-blocks.**
+
+Both controls, the full design rationale (why per-currency not
+FX-converted, why the query is shaped the way it is, the fail-safe
+posture), and what's explicitly deferred (device/IP signup capture, a
+real chargeback state machine for the eventual card/Plaid rail) are in
+ADR 045.
+
+---
+
 ## Backend API endpoints
 
 ```
@@ -331,7 +364,7 @@ POST /api/auth/social/apple                 — ADR 014
 DELETE /api/auth/session
 DELETE /api/auth/session/all                             [authed — B4: sign out of all devices; revokes every live refresh token]
 POST /api/orders             [authenticated]
-POST /api/orders/loop        [authenticated — Loop-native flow, ADR 010 + Idempotency-Key, A2-2003; `credit` method is migration-window only — wallet-activated users get 400 CREDIT_METHOD_RETIRED and spend via token redemption, ADR 036 OQ3; `loop_asset` gets 400 LOOP_ASSET_UNAVAILABLE_PHASE_1 while LOOP_PHASE_1_ONLY=true (AUDIT-2 finding B)]
+POST /api/orders/loop        [authenticated — Loop-native flow, ADR 010 + Idempotency-Key, A2-2003; `credit` method is migration-window only — wallet-activated users get 400 CREDIT_METHOD_RETIRED and spend via token redemption, ADR 036 OQ3; `loop_asset` gets 400 LOOP_ASSET_UNAVAILABLE_PHASE_1 while LOOP_PHASE_1_ONLY=true (AUDIT-2 finding B); gated by the ADR 045 (B-3) per-user velocity check before creation — 429 ORDER_VELOCITY_EXCEEDED / 503 ORDER_VELOCITY_CHECK_UNAVAILABLE]
 GET  /api/orders/loop        [authenticated — Loop-native list, ADR 010]
 GET  /api/orders/loop/:id    [authenticated — Loop-native flow, ADR 010]
 POST /api/orders/loop/:id/redeem [authenticated — one-tap LOOP-asset redemption from the embedded wallet: user-signed inner payment + operator fee-bump; watcher settles downstream, ADR 030 C3 / ADR 036; 400 LOOP_ASSET_UNAVAILABLE_PHASE_1 while LOOP_PHASE_1_ONLY=true, fail-closed even for pre-existing orders (AUDIT-2 finding B)]

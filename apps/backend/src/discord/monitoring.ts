@@ -859,3 +859,47 @@ export {
   notifyCircuitBreaker,
   __resetCircuitNotifyDedupForTests,
 } from './monitoring-circuit-breaker.js';
+
+/**
+ * Notify: ADR 045 (B-3) duplicate-account signal — a fresh
+ * `fraud_signals` row (first occurrence of this user pair, never a
+ * re-page for an already-known pair; see
+ * `fraud/duplicate-account-signals.ts`). Flag only — this is ops
+ * visibility, not an automated account action; nothing about either
+ * user's ability to transact changes because of this page.
+ */
+export function notifyDuplicateAccountSignal(args: {
+  userId: string;
+  relatedUserId: string;
+  sourceAccount: string;
+  orderId: string;
+  relatedOrderId: string;
+}): void {
+  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+    title: '🟡 Duplicate-account signal — shared funding source',
+    description: truncate(
+      `The same on-chain funding account paid orders for two distinct Loop users. Flag only (ADR 045) — no account action was taken; review both accounts before deciding whether this is a shared household wallet or account-farming.`,
+      DESCRIPTION_MAX,
+    ),
+    color: ORANGE,
+    fields: [
+      { name: 'User', value: `\`${escapeMarkdown(args.userId.slice(0, 8))}…\``, inline: true },
+      {
+        name: 'Related user',
+        value: `\`${escapeMarkdown(args.relatedUserId.slice(0, 8))}…\``,
+        inline: true,
+      },
+      {
+        name: 'Funding account',
+        value: `\`${escapeMarkdown(args.sourceAccount.slice(0, 8))}…${escapeMarkdown(args.sourceAccount.slice(-4))}\``,
+        inline: true,
+      },
+      { name: 'Order', value: `\`${escapeMarkdown(args.orderId.slice(0, 8))}…\``, inline: true },
+      {
+        name: 'Related order',
+        value: `\`${escapeMarkdown(args.relatedOrderId.slice(0, 8))}…\``,
+        inline: true,
+      },
+    ],
+  });
+}

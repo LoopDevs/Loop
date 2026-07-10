@@ -254,6 +254,17 @@ export const ApiErrorCode = {
   ORDER_REFUND_CTX_ALREADY_PAID: 'ORDER_REFUND_CTX_ALREADY_PAID',
   ORDER_REFUND_UNSUPPORTED_PAYMENT_METHOD: 'ORDER_REFUND_UNSUPPORTED_PAYMENT_METHOD',
   ORDER_REFUND_SUBMIT_FAILED: 'ORDER_REFUND_SUBMIT_FAILED',
+  // ADR 045 (B-3): Phase-1 fraud/abuse velocity limit on
+  // `POST /api/orders/loop`. EXCEEDED (429): the user already has
+  // `LOOP_ORDER_VELOCITY_MAX_PER_WINDOW` orders, or
+  // `LOOP_ORDER_VELOCITY_MAX_VALUE_MINOR` of charge value in one
+  // currency, within the rolling `LOOP_ORDER_VELOCITY_WINDOW_HOURS`
+  // window — a per-USER cap, distinct from the per-IP rate limiter.
+  // CHECK_UNAVAILABLE (503): the bounded count/sum query itself
+  // failed — fails CLOSED (no order created), mirroring the A5-3
+  // OTP_LOCKOUT_CLEAR_RATE_CHECK_UNAVAILABLE shape.
+  ORDER_VELOCITY_EXCEEDED: 'ORDER_VELOCITY_EXCEEDED',
+  ORDER_VELOCITY_CHECK_UNAVAILABLE: 'ORDER_VELOCITY_CHECK_UNAVAILABLE',
 } as const;
 
 export type ApiErrorCodeValue = (typeof ApiErrorCode)[keyof typeof ApiErrorCode];
