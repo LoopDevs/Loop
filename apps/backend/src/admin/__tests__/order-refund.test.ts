@@ -43,7 +43,7 @@ const errors = vi.hoisted(() => {
 const state = vi.hoisted(() => ({
   orders: new Map<string, Record<string, unknown>>(),
   orderSequence: [] as Array<Record<string, unknown> | null>,
-  markFailedCalls: [] as Array<{ orderId: string; reason: string }>,
+  markFailedCalls: [] as Array<{ orderId: string; fromState: string; reason: string }>,
   markFailedReturnsNull: false,
   ctxPaid: false,
   applyAdminRefundCalls: [] as Array<Record<string, unknown>>,
@@ -63,8 +63,8 @@ vi.mock('../../orders/repo.js', () => ({
 }));
 
 vi.mock('../../orders/transitions.js', () => ({
-  markOrderFailed: vi.fn(async (orderId: string, reason: string) => {
-    state.markFailedCalls.push({ orderId, reason });
+  markOrderFailedFromState: vi.fn(async (orderId: string, fromState: string, reason: string) => {
+    state.markFailedCalls.push({ orderId, fromState, reason });
     if (state.markFailedReturnsNull) return null;
     const existing = state.orders.get(orderId) ?? {};
     const updated = { ...existing, id: orderId, state: 'failed', failureReason: reason };
@@ -158,7 +158,7 @@ vi.mock('../../logger.js', () => ({
 }));
 
 import { adminRefundOrderHandler } from '../order-refund.js';
-import { markOrderFailed } from '../../orders/transitions.js';
+import { markOrderFailedFromState } from '../../orders/transitions.js';
 import { applyAdminRefund, applyOrderAutoRefund } from '../../credits/refunds.js';
 
 const ORDER_ID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
@@ -227,7 +227,7 @@ beforeEach(() => {
   state.snapshotStored = false;
   state.priorSnapshot = null;
   state.discordCalls = [];
-  vi.mocked(markOrderFailed).mockClear();
+  vi.mocked(markOrderFailedFromState).mockClear();
   vi.mocked(applyAdminRefund).mockClear();
   vi.mocked(applyOrderAutoRefund).mockClear();
 });
@@ -249,6 +249,10 @@ describe('adminRefundOrderHandler — pre-fulfilment states dispatch by payment 
     });
     expect(state.markFailedCalls).toHaveLength(1);
     expect(state.markFailedCalls[0]?.orderId).toBe(ORDER_ID);
+    // Fence is pinned to the EXACT validated state (money review P2-1):
+    // a `paid`-read order is fenced `WHERE state='paid'`, never with the
+    // broad predicate that could fail a raced-into-`procuring` row.
+    expect(state.markFailedCalls[0]?.fromState).toBe('paid');
     expect(state.applyOrderAutoRefundCalls).toHaveLength(1);
     expect(state.applyOrderAutoRefundCalls[0]).toMatchObject({
       orderId: ORDER_ID,
@@ -442,13 +446,18 @@ describe('adminRefundOrderHandler — already-refunded / ineligible states', () 
     },
   );
 
-  it('409 when the fence races past us (order moved on between read and markOrderFailed)', async () => {
+  it('409 when the fence races past us (order moved on between read and the state-pinned fence)', async () => {
+    // Money review P2-1: a `paid`-read order that a worker claimed into
+    // `procuring` in the gap → the pinned `WHERE state='paid'` fence
+    // matches 0 rows → null → 409, refunding NOTHING (the worker goes on
+    // to pay CTX; a broad-predicate fence would have double-lost here).
     state.orders.set(ORDER_ID, makeOrder({ state: 'paid', paymentMethod: 'xlm' }));
     state.markFailedReturnsNull = true;
     const res = await refund();
     expect(res.status).toBe(409);
     expect(((await res.json()) as { code: string }).code).toBe('ORDER_NOT_REFUNDABLE');
     expect(state.applyOrderAutoRefundCalls).toHaveLength(0);
+    expect(state.applyAdminRefundCalls).toHaveLength(0);
     expect(state.snapshotStored).toBe(false); // never stored — retry-able with a fresh key
   });
 });

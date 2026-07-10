@@ -259,6 +259,7 @@ import {
   markOrderProcuring,
   markOrderFulfilled,
   markOrderFailed,
+  markOrderFailedFromState,
   LoopAssetMissingCreditRowError,
   LoopAssetBurnUnavailableError,
   sweepExpiredOrders,
@@ -682,6 +683,24 @@ describe('markOrderFailed', () => {
   it('returns null for already-terminal orders', async () => {
     state.returningRows = [];
     const result = await markOrderFailed('already-fulfilled', 'too late');
+    expect(result).toBeNull();
+  });
+});
+
+describe('markOrderFailedFromState (A5-4 state-pinned fence)', () => {
+  it('sets state=failed + failure_reason from the pinned source state', async () => {
+    state.returningRows = [{ id: 'o-1', state: 'failed', failureReason: 'admin-refund: x' }];
+    const result = await markOrderFailedFromState('o-1', 'paid', 'admin-refund: x');
+    expect(result?.state).toBe('failed');
+    expect(state.updateSet).toMatchObject({ state: 'failed', failureReason: 'admin-refund: x' });
+  });
+
+  it('returns null when the row is no longer in the expected source state (raced past)', async () => {
+    // The CAS is pinned to the EXACT source state — a `paid`-read order
+    // that a worker claimed into `procuring` matches 0 rows here, so the
+    // refund handler 409s and refunds nothing (money review P2-1).
+    state.returningRows = [];
+    const result = await markOrderFailedFromState('o-1', 'paid', 'admin-refund: x');
     expect(result).toBeNull();
   });
 });

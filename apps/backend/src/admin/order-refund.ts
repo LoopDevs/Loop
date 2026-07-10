@@ -89,7 +89,7 @@ import type { AdminOrderRefundResult } from '@loop/shared';
 import { UUID_RE } from '../uuid.js';
 import type { User } from '../db/users.js';
 import { getOrderById } from '../orders/repo.js';
-import { markOrderFailed } from '../orders/transitions.js';
+import { markOrderFailedFromState } from '../orders/transitions.js';
 import { loopPaidCtx } from '../orders/transitions-sweeps.js';
 import { PROCUREMENT_TIMEOUT_MS } from '../orders/procurement-constants.js';
 import {
@@ -260,17 +260,30 @@ export async function adminRefundOrderHandler(c: Context): Promise<Response> {
         // any money moves. `failed` is already terminal; `fulfilled`
         // keeps its state (no `refunded` order state exists — the
         // ledger record IS the refund, same as `applyOrderAutoRefund`).
+        //
+        // CRITICAL (money review 2026-07-10): the CAS is pinned to the
+        // EXACT state we validated (`markOrderFailedFromState`, not the
+        // broad `markOrderFailed`). If a worker transitioned the order
+        // `paid → procuring` in the gap since our read, the pinned
+        // `WHERE state='paid'` fence matches 0 rows → `null` → we refuse
+        // (state_changed) and refund NOTHING. The broad predicate would
+        // instead have fenced the now-`procuring` row while that worker
+        // goes on to pay CTX with no order-state re-check — a double-loss.
+        // For the `procuring` branch the same pin means an intervening
+        // `procuring → fulfilled` also converges to a clean 409.
         if (order.state === 'paid' || order.state === 'procuring') {
-          const fenced = await markOrderFailed(
+          const fenced = await markOrderFailedFromState(
             order.id,
+            order.state,
             `admin-refund (${actor.email}): ${reason}`.slice(0, 500),
           );
           if (fenced === null) {
-            // Raced past us since the read above (a live worker reached
-            // `fulfilled`, or the recovery sweep already failed it).
-            // Refuse cleanly rather than refund a state we no longer
-            // believe is accurate — the caller re-POSTs with a FRESH
-            // Idempotency-Key so the (now-current) state is re-validated.
+            // Raced past us since the read above (a worker claimed a
+            // `paid` order into `procuring`, reached `fulfilled`, or the
+            // recovery sweep already failed it). Refuse cleanly rather
+            // than refund a state we no longer believe is accurate — the
+            // caller re-POSTs with a FRESH Idempotency-Key so the
+            // (now-current) state is re-validated.
             throw new OrderRefundNotApplicableError('state_changed');
           }
         }
