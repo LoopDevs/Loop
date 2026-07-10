@@ -1,5 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { Keypair, Networks, nativeToScVal, xdr, Address } from '@stellar/stellar-sdk';
+import {
+  Account,
+  Asset,
+  Keypair,
+  Networks,
+  Operation,
+  TransactionBuilder,
+  nativeToScVal,
+  xdr,
+  Address,
+  type FeeBumpTransaction,
+  type Transaction,
+} from '@stellar/stellar-sdk';
 
 const OPERATOR_SECRET = Keypair.random().secret();
 const OPERATOR_PUBLIC = Keypair.fromSecret(OPERATOR_SECRET).publicKey();
@@ -7,16 +19,33 @@ const USER_ADDRESS = Keypair.random().publicKey();
 const VAULT_CONTRACT_ID = Address.contract(Buffer.alloc(32, 3)).toString();
 const SHARE_CONTRACT_ID = Address.contract(Buffer.alloc(32, 4)).toString();
 
-const { mutableEnv, vaultsEnabledMock, submitMock, simulateMock } = vi.hoisted(() => {
+const {
+  mutableEnv,
+  vaultsEnabledMock,
+  submitMock,
+  simulateMock,
+  checkPriorMock,
+  prepareMock,
+  attachSignatureMock,
+  submitPreSignedMock,
+} = vi.hoisted(() => {
   return {
-    mutableEnv: { LOOP_VAULTS_ENABLED: true } as {
+    mutableEnv: {
+      LOOP_VAULTS_ENABLED: true,
+      LOOP_STELLAR_HORIZON_URL: 'https://horizon-testnet.stellar.org',
+    } as {
       LOOP_VAULTS_ENABLED: boolean;
       LOOP_SOROBAN_RPC_URL?: string;
       LOOP_STELLAR_OPERATOR_SECRET?: string;
+      LOOP_STELLAR_HORIZON_URL: string;
     },
     vaultsEnabledMock: vi.fn(() => true),
     submitMock: vi.fn(),
     simulateMock: vi.fn(),
+    checkPriorMock: vi.fn(),
+    prepareMock: vi.fn(),
+    attachSignatureMock: vi.fn(async (_args: unknown) => {}),
+    submitPreSignedMock: vi.fn(),
   };
 });
 
@@ -25,6 +54,23 @@ vi.mock('../registry.js', () => ({ vaultsEnabled: vaultsEnabledMock }));
 vi.mock('../soroban-submit.js', () => ({
   submitSorobanInvocation: submitMock,
   simulateSorobanCall: simulateMock,
+  checkPriorSorobanTx: checkPriorMock,
+  prepareSorobanInvocationForExternalSigning: prepareMock,
+  DEFAULT_MAX_ASSEMBLED_FEE_STROOPS: 100_000_000n,
+}));
+// ADR 031 §D1 (V4) — the provider-signed `transferShares` branch reuses
+// `wallet/user-signer.ts` (attach the raw-signed signature) and
+// `payments/payout-submit.ts` (submit a pre-built, pre-signed
+// fee-bump envelope) rather than building its own signing/submit
+// plumbing. Both are fully mocked here — this suite's job is proving
+// `vault-client.ts` calls them with the right shape, not re-testing
+// their own internals (covered by `wallet/__tests__/user-signer.test.ts`
+// and `payments/__tests__/payout-submit.test.ts`).
+vi.mock('../../../wallet/user-signer.js', () => ({
+  attachUserWalletSignature: attachSignatureMock,
+}));
+vi.mock('../../../payments/payout-submit.js', () => ({
+  submitPreSignedTransaction: submitPreSignedMock,
 }));
 
 import {
@@ -35,13 +81,14 @@ import {
   VaultDisabledError,
   VaultSlippageError,
   VaultPostSubmitSlippageError,
-  VaultNotImplementedError,
+  VaultConfigError,
   type DepositToVaultArgs,
   type WithdrawFromVaultArgs,
   type TransferSharesArgs,
 } from '../vault-client.js';
 import { VaultResultParseError } from '../scval.js';
 import type { LoopVaultRow } from '../registry.js';
+import type { WalletProvider } from '../../../wallet/provider.js';
 
 /** `onSigned` is required on the money-submit path; a shared no-op keeps calls terse. */
 const noopOnSigned = (): void => {};
@@ -72,11 +119,32 @@ beforeEach(() => {
   mutableEnv.LOOP_VAULTS_ENABLED = true;
   mutableEnv.LOOP_SOROBAN_RPC_URL = 'https://rpc.example.test';
   mutableEnv.LOOP_STELLAR_OPERATOR_SECRET = OPERATOR_SECRET;
+  mutableEnv.LOOP_STELLAR_HORIZON_URL = 'https://horizon-testnet.stellar.org';
   vaultsEnabledMock.mockReset();
   vaultsEnabledMock.mockReturnValue(true);
   submitMock.mockReset();
   simulateMock.mockReset();
+  checkPriorMock.mockReset();
+  prepareMock.mockReset();
+  attachSignatureMock.mockReset();
+  attachSignatureMock.mockResolvedValue(undefined);
+  submitPreSignedMock.mockReset();
 });
+
+/** Builds a real (unsigned) Transaction with `sourcePublicKey` as its
+ * source — stands in for what `prepareSorobanInvocationForExternalSigning`
+ * (mocked) would hand back. Needs to be a genuine SDK `Transaction` so
+ * `TransactionBuilder.buildFeeBumpTransaction` (a real SDK call inside
+ * `transferSharesViaProvider`, not mocked) has something valid to wrap. */
+function buildPreparedTx(sourcePublicKey: string): Transaction {
+  const account = new Account(sourcePublicKey, '10');
+  return new TransactionBuilder(account, { fee: '1000', networkPassphrase: Networks.TESTNET })
+    .addOperation(
+      Operation.payment({ destination: OPERATOR_PUBLIC, asset: Asset.native(), amount: '1' }),
+    )
+    .setTimeout(30)
+    .build();
+}
 
 describe('vaultsEnabled gate', () => {
   it('depositToVault throws VaultDisabledError and never calls submit when the flag is off', async () => {
@@ -410,18 +478,151 @@ describe('transferShares', () => {
     );
   });
 
-  it("signWith='provider' throws VaultNotImplementedError (V4 stub) without calling submit", async () => {
-    await expect(
-      transferShares({
+  // ADR 031 §D1 (V4) — the ONE user-wallet-signed call in the whole
+  // vault system. `signWith: 'provider'` used to be a V2 stub that
+  // threw `VaultNotImplementedError`; this PR implements the real
+  // `transferSharesViaProvider` path (build -> CF-18 persist -> user
+  // signs via the wallet provider -> operator fee-bumps -> submit
+  // through the existing Horizon rails), mirroring
+  // `orders/redeem.ts`'s classic-asset redemption shape.
+  describe("signWith='provider' (transferSharesViaProvider)", () => {
+    it('throws VaultConfigError when userWallet is not supplied, without preparing/submitting anything', async () => {
+      await expect(
+        transferShares({
+          vault: VAULT,
+          from: USER_ADDRESS,
+          to: OPERATOR_PUBLIC,
+          amount: 1n,
+          signWith: 'provider',
+          onSigned: noopOnSigned,
+        }),
+      ).rejects.toThrow(VaultConfigError);
+      expect(prepareMock).not.toHaveBeenCalled();
+      expect(attachSignatureMock).not.toHaveBeenCalled();
+      expect(submitPreSignedMock).not.toHaveBeenCalled();
+    });
+
+    it('a landed priorTxHash short-circuits (CF-18 dedup) without preparing, signing, or submitting again', async () => {
+      checkPriorMock.mockResolvedValue({ landed: true, returnValue: null });
+      const fakeProvider: WalletProvider = {
+        name: 'privy',
+        createWallet: vi.fn(),
+        rawSign: vi.fn(),
+      };
+
+      const result = await transferShares({
+        vault: VAULT,
+        from: USER_ADDRESS,
+        to: OPERATOR_PUBLIC,
+        amount: 250_000n,
+        signWith: 'provider',
+        userWallet: { provider: fakeProvider, walletId: 'wallet-1' },
+        priorTxHash: 'prior-hash',
+        onSigned: noopOnSigned,
+      });
+
+      expect(result).toEqual({ txHash: 'prior-hash', deduped: true });
+      expect(checkPriorMock).toHaveBeenCalledWith('https://rpc.example.test', 'prior-hash');
+      expect(prepareMock).not.toHaveBeenCalled();
+      expect(attachSignatureMock).not.toHaveBeenCalled();
+      expect(submitPreSignedMock).not.toHaveBeenCalled();
+    });
+
+    it('a NOT-landed priorTxHash falls through to building a fresh transaction', async () => {
+      checkPriorMock.mockResolvedValue({ landed: false, returnValue: null });
+      const preparedTx = buildPreparedTx(USER_ADDRESS);
+      prepareMock.mockResolvedValue({ tx: preparedTx });
+      submitPreSignedMock.mockResolvedValue({ txHash: 'fresh-hash', ledger: 1 });
+      const fakeProvider: WalletProvider = {
+        name: 'privy',
+        createWallet: vi.fn(),
+        rawSign: vi.fn(),
+      };
+
+      const result = await transferShares({
         vault: VAULT,
         from: USER_ADDRESS,
         to: OPERATOR_PUBLIC,
         amount: 1n,
         signWith: 'provider',
+        userWallet: { provider: fakeProvider, walletId: 'wallet-1' },
+        priorTxHash: 'stale-hash',
         onSigned: noopOnSigned,
-      }),
-    ).rejects.toThrow(VaultNotImplementedError);
-    expect(submitMock).not.toHaveBeenCalled();
+      });
+
+      expect(result).toEqual({ txHash: 'fresh-hash', deduped: false });
+      expect(prepareMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('builds, persists the CF-18 hash via onSigned BEFORE requesting the user signature, signs, fee-bumps with the operator, and submits', async () => {
+      const preparedTx = buildPreparedTx(USER_ADDRESS);
+      prepareMock.mockResolvedValue({ tx: preparedTx });
+
+      const callOrder: string[] = [];
+      const onSigned = vi.fn(async () => {
+        callOrder.push('onSigned');
+      });
+      attachSignatureMock.mockImplementation(async () => {
+        callOrder.push('attach');
+      });
+      submitPreSignedMock.mockImplementation(async () => {
+        callOrder.push('submit');
+        return { txHash: 'landed-hash', ledger: 42 };
+      });
+      const fakeProvider: WalletProvider = {
+        name: 'privy',
+        createWallet: vi.fn(),
+        rawSign: vi.fn(),
+      };
+
+      const result = await transferShares({
+        vault: VAULT,
+        from: USER_ADDRESS,
+        to: OPERATOR_PUBLIC,
+        amount: 250_000n,
+        signWith: 'provider',
+        userWallet: { provider: fakeProvider, walletId: 'wallet-1' },
+        onSigned,
+      });
+
+      expect(result).toEqual({ txHash: 'landed-hash', deduped: false });
+      expect(callOrder).toEqual(['onSigned', 'attach', 'submit']);
+
+      // CF-18: onSigned received the tx's own deterministic hash —
+      // computed BEFORE signing, not after.
+      expect(onSigned).toHaveBeenCalledWith(preparedTx.hash().toString('hex'));
+
+      const prepareArgs = prepareMock.mock.calls[0]![0] as {
+        sourcePublicKey: string;
+        contractId: string;
+        functionName: string;
+      };
+      expect(prepareArgs.sourcePublicKey).toBe(USER_ADDRESS);
+      expect(prepareArgs.contractId).toBe(SHARE_CONTRACT_ID);
+      expect(prepareArgs.functionName).toBe('transfer');
+
+      const attachArgs = attachSignatureMock.mock.calls[0]![0] as {
+        provider: WalletProvider;
+        walletId: string;
+        address: string;
+        tx: Transaction;
+      };
+      expect(attachArgs.provider).toBe(fakeProvider);
+      expect(attachArgs.walletId).toBe('wallet-1');
+      expect(attachArgs.address).toBe(USER_ADDRESS);
+      expect(attachArgs.tx).toBe(preparedTx);
+
+      const submitArgs = submitPreSignedMock.mock.calls[0]![0] as {
+        horizonUrl: string;
+        tx: FeeBumpTransaction;
+      };
+      expect(submitArgs.horizonUrl).toBe('https://horizon-testnet.stellar.org');
+      // Fee-bumped by the OPERATOR, wrapping the EXACT prepared inner tx.
+      expect(submitArgs.tx.feeSource).toBe(OPERATOR_PUBLIC);
+      expect(submitArgs.tx.innerTransaction.hash().toString('hex')).toBe(
+        preparedTx.hash().toString('hex'),
+      );
+    });
   });
 
   it('refuses amount <= 0 without calling submit', async () => {

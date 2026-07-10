@@ -12,6 +12,7 @@ export type RuntimeWorkerName =
   | 'procurement_worker'
   | 'redemption_backfill'
   | 'vault_emission_sweep'
+  | 'vault_redemption_sweep'
   | 'wallet_provisioning';
 
 interface MutableWorkerState {

@@ -286,6 +286,99 @@ export function notifyVaultEmissionFailed(args: {
  * only persists `alert_active=true` after delivery confirms —
  * at-least-once per incident, fleet-wide.
  */
+/**
+ * ADR 031 V4 — the withdraw/redeem twin of `notifyVaultEmissionFailed`:
+ * a vault-share redemption (`credits/vaults/vault-redemptions.ts`)
+ * reached the terminal `failed` state. Either the user's shares were
+ * never collected, or they were collected but the payout/mirror never
+ * landed — ops must inspect the row's `last_error` + tx hashes and
+ * reconcile (no admin re-drive endpoint ships in V4, same known gap
+ * as the emission side).
+ */
+export function notifyVaultRedemptionFailed(args: {
+  vaultRedemptionId: string;
+  sourceType: string;
+  sourceId: string;
+  userId: string;
+  assetCode: string;
+  valueMinor: string;
+  attempts: number;
+  lastError: string | null;
+}): void {
+  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+    title: '🔴 Vault Redemption Failed (terminal)',
+    description: truncate(
+      `A vault-share redemption reached \`failed\` after ${args.attempts} attempts and will NOT be auto-retried. The share collect, payout, and/or mirror debit for this ${args.sourceType} is incomplete — inspect the row and reconcile.`,
+      DESCRIPTION_MAX,
+    ),
+    color: RED,
+    fields: [
+      {
+        name: 'Vault redemption',
+        value: `\`${escapeMarkdown(args.vaultRedemptionId)}\``,
+        inline: false,
+      },
+      { name: 'Source', value: `${args.sourceType} \`${args.sourceId.slice(-8)}\``, inline: true },
+      { name: 'User', value: `\`${args.userId.slice(-8)}\``, inline: true },
+      { name: 'Asset', value: escapeMarkdown(args.assetCode), inline: true },
+      { name: 'Value (minor)', value: escapeMarkdown(args.valueMinor), inline: true },
+      { name: 'Attempts', value: String(args.attempts), inline: true },
+      {
+        name: 'Last error',
+        value:
+          args.lastError === null
+            ? '_none_'
+            : truncate(`\`${escapeMarkdown(args.lastError)}\``, FIELD_VALUE_MAX),
+        inline: false,
+      },
+    ],
+  });
+}
+
+/**
+ * ADR 031 V4 — the withdraw/redeem twin of `notifyVaultEmissionsStuck`:
+ * one or more vault redemptions have sat in a non-terminal in-flight
+ * state (`collecting`/`redeemed`) past the watchdog window. PURE
+ * SENDER (same contract as its siblings) so the watchdog only persists
+ * `alert_active=true` after delivery confirms.
+ */
+export function notifyVaultRedemptionsStuck(args: {
+  rowCount: number;
+  thresholdMinutes: number;
+  oldestAgeMinutes: number;
+  states: string;
+  vaultRedemptionId: string | null;
+  assetCode: string | null;
+}): Promise<boolean> {
+  return sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+    title: '🔴 Stuck Vault Redemptions Detected',
+    description: truncate(
+      `One or more vault-share redemptions have sat in an in-flight state (\`collecting\`/\`redeemed\`) past the ${args.thresholdMinutes}-minute watchdog window. The sweep is not advancing them — check the vault-redemption sweep worker, Soroban RPC reachability, the wallet provider, and operator funding.`,
+      DESCRIPTION_MAX,
+    ),
+    color: RED,
+    fields: [
+      { name: 'Rows', value: String(args.rowCount), inline: true },
+      { name: 'States', value: escapeMarkdown(args.states), inline: true },
+      { name: 'Oldest age (min)', value: String(args.oldestAgeMinutes), inline: true },
+      { name: 'Threshold (min)', value: String(args.thresholdMinutes), inline: true },
+      {
+        name: 'Example redemption',
+        value:
+          args.vaultRedemptionId === null
+            ? '_none_'
+            : `\`${escapeMarkdown(args.vaultRedemptionId)}\``,
+        inline: true,
+      },
+      {
+        name: 'Example asset',
+        value: args.assetCode === null ? '_unknown_' : escapeMarkdown(args.assetCode),
+        inline: true,
+      },
+    ],
+  });
+}
+
 export function notifyVaultEmissionsStuck(args: {
   rowCount: number;
   thresholdMinutes: number;

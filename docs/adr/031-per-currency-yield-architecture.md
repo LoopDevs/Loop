@@ -243,13 +243,26 @@ The v6/v7 assumptions of a Loop-authored fee contract (5%/75% caps enforced in L
 
 **Step 2 progress (2026-07-10):** V1 (registry read layer, migration
 0060), V2 (`credits/vaults/vault-client.ts` — the Soroban deposit/
-withdraw/transfer client), and V3 (`credits/vaults/vault-emissions.ts`
-— the cashback-EMISSION flow + conservation mirror, migration 0061)
-shipped. Still open within step 2: the withdraw/spend redemption path
-(§D6) and the scheduled share-price snapshotter (§D8 — the
-`recordSharePriceSnapshot` helper exists and V3's mirror step calls it
-per-emission, but no periodic snapshotter runs independently of an
-emission). Step 3 (wallet-side share-token custody) is unstarted.
+withdraw/transfer client), V3 (`credits/vaults/vault-emissions.ts`
+— the cashback-EMISSION flow + conservation mirror, migration 0061),
+and V4 (`credits/vaults/vault-redemptions.ts` — the WITHDRAW/REDEEM
+flow: `pending -> collecting -> redeemed -> settled` (+`failed`),
+migration 0062, `orders/redeem.ts`'s gated fork of the `loop_asset`
+gift-card redemption path, and `treasury/hot-float.ts` — the
+per-currency hot-float ledger from §Liquidity safeguard, fast/slow
+payout paths, batched replenishment) shipped. §D1's user-wallet share
+transfer (`transferShares({ signWith: 'provider' })`) is implemented
+against the ADR 030 wallet-provider abstraction, reusing the SAME
+`attachUserWalletSignature` raw-hash-signing mechanism
+`orders/redeem.ts`'s classic-asset flow already uses — this is an
+ASSUMPTION flagged for operator DD (§D1 open question 1), not yet
+validated against a real Privy dev account. Still open: the scheduled
+share-price snapshotter (§D8 — the `recordSharePriceSnapshot` helper
+exists and V3's mirror step calls it per-emission, but no periodic
+snapshotter runs independently of an emission), the APY endpoint +
+display, and real-Privy-Soroban validation (the one remaining piece of
+step 3, wallet-side share-token custody — the narrow "hold + transfer"
+requirement is coded, unverified against a live provider).
 
 ### D10. Superseded by deploy-by-config
 

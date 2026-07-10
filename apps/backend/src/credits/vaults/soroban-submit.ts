@@ -166,6 +166,46 @@ export interface SorobanSubmitResult {
  * Throws `SorobanSubmitError` on any failure, classified via `.kind`
  * for the caller's retry policy.
  */
+export interface PriorSorobanTxCheck {
+  landed: boolean;
+  returnValue: xdr.ScVal | null;
+}
+
+/**
+ * CF-18 pre-check, factored out of `submitSorobanInvocation` (V4) so
+ * the provider-signed path (`prepareSorobanInvocationForExternalSigning`
+ * callers, `vault-client.ts`'s `transferShares({ signWith: 'provider'
+ * })`) can share the SAME fail-closed pre-check rather than
+ * reimplementing it. Semantics unchanged from the inline version this
+ * replaces: any RPC error refuses (throws `transient_rpc`) rather than
+ * risk treating an ambiguous check as "never landed".
+ */
+export async function checkPriorSorobanTx(
+  rpcUrl: string,
+  priorTxHash: string,
+): Promise<PriorSorobanTxCheck> {
+  const server = new rpc.Server(rpcUrl);
+  let prior: Awaited<ReturnType<typeof server.getTransaction>>;
+  try {
+    prior = await server.getTransaction(priorTxHash);
+  } catch (err) {
+    throw new SorobanSubmitError(
+      'transient_rpc',
+      err instanceof Error
+        ? `CF-18 pre-check getTransaction failed — refusing to submit (fail-closed): ${err.message}`
+        : 'CF-18 pre-check getTransaction failed — refusing to submit (fail-closed)',
+    );
+  }
+  if (prior.status === rpc.Api.GetTransactionStatus.SUCCESS) {
+    return { landed: true, returnValue: prior.returnValue ?? voidScVal() };
+  }
+  // NOT_FOUND (never landed) or FAILED (reverted all state, consumed
+  // its sequence, so a fresh higher-sequence submit won't collide):
+  // both are a definitive "the prior attempt is not a landed success".
+  // Only a THROWN error is ambiguous, and that path already bailed above.
+  return { landed: false, returnValue: null };
+}
+
 export async function submitSorobanInvocation(
   args: SubmitSorobanInvocationArgs,
 ): Promise<SorobanSubmitResult> {
@@ -174,38 +214,14 @@ export async function submitSorobanInvocation(
   // CF-18 pre-check: a prior attempt's hash, if the caller has one,
   // wins over building anything new.
   if (args.priorTxHash !== undefined) {
-    let prior: Awaited<ReturnType<typeof server.getTransaction>>;
-    try {
-      prior = await server.getTransaction(args.priorTxHash);
-    } catch (err) {
-      // FAIL CLOSED. An RPC error (network blip, index lag, retention-
-      // window expiry) is NOT proof the prior tx didn't land. If we
-      // swallowed it and fell through, `getAccount` below would load
-      // the sequence AS IT NOW STANDS — already advanced if the prior
-      // tx landed — and we'd build+submit a SECOND deposit/withdraw/
-      // transfer against a fresh sequence: a double-mint. Mirror the
-      // classic path (`payments/payout-worker-pay-one.ts`), whose whole
-      // idempotency pre-check is try/catch → retriedLater on ANY error:
-      // refuse to submit, let the caller retry.
-      throw new SorobanSubmitError(
-        'transient_rpc',
-        err instanceof Error
-          ? `CF-18 pre-check getTransaction failed — refusing to submit (fail-closed): ${err.message}`
-          : 'CF-18 pre-check getTransaction failed — refusing to submit (fail-closed)',
-      );
-    }
-    if (prior.status === rpc.Api.GetTransactionStatus.SUCCESS) {
+    const prior = await checkPriorSorobanTx(args.rpcUrl, args.priorTxHash);
+    if (prior.landed) {
       return {
         txHash: args.priorTxHash,
         returnValue: prior.returnValue ?? voidScVal(),
         deduped: true,
       };
     }
-    // NOT_FOUND (never landed) or FAILED (reverted all state, consumed
-    // its sequence, so a fresh higher-sequence submit won't collide):
-    // both are a definitive "the prior attempt is not a landed success",
-    // so falling through to a fresh build+submit is safe. Only a THROWN
-    // error is ambiguous, and that path already bailed above.
   }
 
   let keypair: Keypair;
@@ -458,6 +474,137 @@ export async function simulateSorobanCall(args: SimulateSorobanCallArgs): Promis
     throw new SorobanSubmitError('terminal_other', 'Simulation succeeded but returned no result');
   }
   return retval;
+}
+
+export interface PrepareSorobanInvocationArgs {
+  rpcUrl: string;
+  networkPassphrase: string;
+  /**
+   * The PUBLIC key that will invoke + pay for the transaction — for
+   * the provider-signed path (V4) this is the USER's embedded-wallet
+   * address, not the operator. No secret key is needed to prepare: the
+   * caller is expected to sign externally (`attachUserWalletSignature`)
+   * and typically fee-bump-wrap with the operator afterward, since the
+   * user holds no XLM by design (ADR 030 sponsored-reserves model,
+   * same as `orders/redeem.ts`'s classic redemption tx).
+   */
+  sourcePublicKey: string;
+  contractId: string;
+  functionName: string;
+  args: readonly xdr.ScVal[];
+  timeoutSeconds?: number;
+  /** Lens1-F3-style fee sanity cap — see `submitSorobanInvocation`'s twin field. */
+  maxFeeStroops?: bigint;
+}
+
+export interface PreparedSorobanInvocation {
+  /** Simulated + assembled (Soroban resource data attached) but NOT signed. */
+  tx: Transaction;
+}
+
+/**
+ * Builds, verifies, simulates, and assembles exactly one Soroban
+ * contract invocation — WITHOUT signing or submitting anything. The
+ * externally-signed twin of `submitSorobanInvocation`'s internal
+ * build/verify/simulate/assemble/verify/fee-cap sequence, extracted so
+ * a caller that needs an EXTERNAL signature (the ADR 031 §D1
+ * provider-signed user->operator share transfer, V4) gets the exact
+ * same verify-before-sign + fee-sanity discipline as the operator-
+ * signed path, rather than a parallel, potentially-drifting
+ * implementation.
+ *
+ * Deliberately does NOT do the CF-18 `priorTxHash` pre-check — callers
+ * that need it call `checkPriorSorobanTx` themselves BEFORE calling
+ * this (building a fresh tx is pointless if a prior attempt already
+ * landed), and the CF-18 `onSigned` persist happens in the caller's
+ * own signing flow, not here, since this function never has a
+ * "signed" moment to hook.
+ */
+export async function prepareSorobanInvocationForExternalSigning(
+  args: PrepareSorobanInvocationArgs,
+): Promise<PreparedSorobanInvocation> {
+  const server = new rpc.Server(args.rpcUrl);
+
+  let account;
+  try {
+    account = await server.getAccount(args.sourcePublicKey);
+  } catch (err) {
+    throw new SorobanSubmitError(
+      'transient_rpc',
+      err instanceof Error ? err.message : 'getAccount failed',
+    );
+  }
+
+  const expected: ExpectedInvocation = {
+    contractId: args.contractId,
+    functionName: args.functionName,
+    args: args.args,
+  };
+
+  let builtTx: Transaction;
+  try {
+    builtTx = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase: args.networkPassphrase,
+    })
+      .addOperation(buildInvocationOperation(args.contractId, args.functionName, args.args))
+      .setTimeout(args.timeoutSeconds ?? 60)
+      .build();
+  } catch (err) {
+    throw new SorobanSubmitError(
+      'terminal_other',
+      err instanceof Error ? err.message : 'TransactionBuilder failed',
+    );
+  }
+
+  // Verify-before-sign, pass 1 (see `submitSorobanInvocation`'s twin comment).
+  assertVerify(builtTx, expected);
+
+  let sim: Awaited<ReturnType<typeof server.simulateTransaction>>;
+  try {
+    sim = await server.simulateTransaction(builtTx);
+  } catch (err) {
+    throw new SorobanSubmitError(
+      'transient_rpc',
+      err instanceof Error ? err.message : 'simulateTransaction failed',
+    );
+  }
+  if (rpc.Api.isSimulationError(sim)) {
+    throw new SorobanSubmitError('terminal_contract_error', sim.error, sim);
+  }
+
+  let prepared: Transaction;
+  try {
+    prepared = rpc.assembleTransaction(builtTx, sim).build();
+  } catch (err) {
+    throw new SorobanSubmitError(
+      'terminal_other',
+      err instanceof Error ? err.message : 'assembleTransaction failed',
+    );
+  }
+
+  // Verify-before-sign, pass 2.
+  assertVerify(prepared, expected);
+
+  const feeCap = args.maxFeeStroops ?? DEFAULT_MAX_ASSEMBLED_FEE_STROOPS;
+  let assembledFee: bigint;
+  try {
+    assembledFee = BigInt(prepared.fee);
+  } catch {
+    throw new SorobanSubmitError(
+      'terminal_other',
+      `assembled fee "${prepared.fee}" is not an integer stroop value`,
+    );
+  }
+  if (assembledFee > feeCap) {
+    throw new SorobanSubmitError(
+      'terminal_fee_too_high',
+      `assembled fee ${assembledFee} stroops exceeds the sanity cap of ${feeCap} stroops — ` +
+        'refusing to hand this off for signing (a hostile/buggy Soroban RPC could otherwise drain funds)',
+    );
+  }
+
+  return { tx: prepared };
 }
 
 function assertVerify(tx: Transaction, expected: ExpectedInvocation): void {

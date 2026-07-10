@@ -224,6 +224,18 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
       "ADR 031 V3: fires once per incident when vault emissions sit in an in-flight state (`depositing`/`deposited`/`transferred`) past the watchdog window — the sweep isn't advancing them. Fire-once/re-arm dedup in `watchdog_alert_state`, at-least-once fleet-wide. Complements notifyVaultEmissionFailed (terminal) by catching rows stuck WITHOUT exhausting attempts.",
   },
   {
+    name: 'notifyVaultRedemptionFailed',
+    channel: 'monitoring',
+    description:
+      "ADR 031 V4: fires inline when a vault-share redemption (withdraw/spend) reaches terminal `failed` (VAULT_REDEMPTION_MAX_ATTEMPTS step failures). Per-row — the share collect, hot-float/vault payout, and/or mirror debit is incomplete and the row is NOT auto-retried; ops reconciles against the row's last_error + tx hashes (admin re-drive endpoint is a follow-up, same known gap as the emission side).",
+  },
+  {
+    name: 'notifyVaultRedemptionsStuck',
+    channel: 'monitoring',
+    description:
+      "ADR 031 V4: fires once per incident when vault redemptions sit in an in-flight state (`collecting`/`redeemed`) past the watchdog window — the sweep isn't advancing them. Fire-once/re-arm dedup in `watchdog_alert_state`, at-least-once fleet-wide. Complements notifyVaultRedemptionFailed (terminal) by catching rows stuck WITHOUT exhausting attempts.",
+  },
+  {
     name: 'notifyPaymentWatcherStuck',
     channel: 'monitoring',
     description:
