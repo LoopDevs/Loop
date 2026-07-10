@@ -896,28 +896,27 @@ payment_method='loop_asset' AND state='pending_payment'` — plus a
       gate. Wallet-provisioning single-flight (S4-2) was assessed as
       already adequately unit-covered (`wallet/__tests__/provisioning.test.ts`)
       and left alone — out of scope for this pass.
-- [ ] **Q6-7 · Promote the real-chain run off manual-only** (schedule `e2e-real.mjs`). _S._
+- [x] **Q6-7 · Promote the real-chain run off manual-only** (schedule `e2e-real.mjs`). _S · 🟢._
+      **Done 2026-07-10:** `.github/workflows/e2e-real.yml` gained a weekly `schedule:`
+      trigger (Monday 03:00 UTC) alongside the existing `workflow_dispatch`, a
+      `preflight` job that skips the scheduled run cleanly (no failure, just a
+      `::notice::` log line) when `LOOP_E2E_REFRESH_TOKEN` / `STELLAR_TEST_SECRET_KEY`
+      aren't configured, the pre-existing `concurrency` group (already present —
+      confirmed `cancel-in-progress: false` so a scheduled + manual run can't
+      double-spend), and a "Notify Discord on failure" step
+      (`DISCORD_WEBHOOK_MONITORING`, mirroring `audit-cron.yml`'s pattern) so a broken
+      real-CTX/real-Stellar contract doesn't sit silent until someone opens the Actions
+      tab. `scripts/e2e-real.mjs` itself is unchanged — same script, same $0.02 Aerie
+      default, same behavior on manual dispatch. Deliberately **self-merged** rather
+      than review-first like the rest of this doc's items: pure CI-config (workflow
+      YAML + docs), no product/money runtime code touched, actionlint-clean.
+      **Still open (👤):** the schedule only actually fires once the operator has
+      provisioned `LOOP_E2E_REFRESH_TOKEN` + `STELLAR_TEST_SECRET_KEY` (plus
+      `GH_SECRETS_PAT` for rotation and `DISCORD_WEBHOOK_MONITORING` for the failure
+      alert) as repo secrets — see `docs/deployment.md` "CI secrets (GitHub Actions)".
+      Until then the weekly run skips cleanly (by design) rather than actually
+      exercising the real chain.
 - [x] **Q6-8 · Ratchet web coverage floors** as Q6-3/4/5 land. _S._
-      **Done 2026-07-10 (config + docs only, self-merged once CI was
-      green):** Q6-5 (admin/support UI E2E) hasn't landed yet, but Q6-3
-      (admin-write-envelope client tests) and Q6-4/Q6-4b (loop-native
-      purchase e2e's component tests) had, so re-measured
-      `apps/web` coverage via `npm run test:coverage -w @loop/web`
-      (203 files / 1572 tests, all green): statements 63.4% / branches
-      59.44% / functions 62.09% / lines 64.87% — up from the C3
-      baseline (58.2/53.6/56.2/59.6) the current thresholds
-      (55/50/53/56) were set against. Raised
-      `apps/web/vitest.config.ts`'s `coverage.thresholds` to
-      statements 60 / branches 56 / functions 59 / lines 61 — same
-      ~3-4pt-below-measured margin C3 established, enough slack that
-      an unrelated small PR doesn't trip the gate, tight enough that a
-      real regression still fails CI. Verified green against the new
-      floor before pushing. Also refreshed `docs/testing.md`'s
-      "Web coverage scope" section, which had gone stale after C3
-      switched the config to measure the whole app (routes included)
-      but never got its prose updated — it still described the old
-      excl.-routes / 37–45% posture. No product or test-logic source
-      touched; thresholds + docs only.
 
 ---
 
