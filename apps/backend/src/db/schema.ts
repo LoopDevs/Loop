@@ -19,3 +19,4 @@ export * from './schema/payments.js';
 export * from './schema/admin.js';
 export * from './schema/reconciliation.js';
 export * from './schema/fraud.js';
+export * from './schema/vaults.js';
