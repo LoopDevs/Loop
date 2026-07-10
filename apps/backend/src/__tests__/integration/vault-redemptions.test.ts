@@ -399,4 +399,147 @@ describeIf('vault-redemptions integration — real postgres (ADR 031 V4)', () =>
       .where(eq(vaultRedemptions.sourceId, orderId));
     expect(rows).toHaveLength(1);
   });
+
+  it('P2-3: a redemption whose source order EXPIRED before the mirror debit fails closed to `failed` and NEVER debits user_credits (real postgres)', async () => {
+    const user = await seedUser();
+    await seedUserCreditsBalance(user.id, 'USD', 10_000n);
+    await seedHotFloat(5_000n); // covers the 500n redemption (fast payout path)
+    const orderId = await seedOrder({ userId: user.id, chargeMinor: 500n });
+
+    const row = await claimVaultRedemption({
+      sourceType: 'order_redeem',
+      sourceId: orderId,
+      userId: user.id,
+      assetCode: 'LOOPUSD',
+      network: 'testnet',
+      valueMinor: 500n,
+      fromAddress: user.walletAddress,
+    });
+
+    // The source order expires (e.g. sweepExpiredOrders ran) before the
+    // mirror debit — 'expired' is a valid orders.state per orders_state_known.
+    await db.update(orders).set({ state: 'expired' }).where(eq(orders.id, orderId));
+
+    const outcome = await driveOneVaultRedemption(row);
+    expect(outcome).toBe('failed');
+
+    // The order was NEVER flipped to paid.
+    const [freshOrder] = await db.select().from(orders).where(eq(orders.id, orderId));
+    expect(freshOrder?.state).toBe('expired');
+
+    // user_credits UNCHANGED — the P2-3 not-payable throw rolled the mirror back.
+    const [balance] = await db
+      .select()
+      .from(userCredits)
+      .where(and(eq(userCredits.userId, user.id), eq(userCredits.currency, 'USD')));
+    expect(balance?.balanceMinor).toBe(10_000n);
+
+    // No spend row and no burn row were written.
+    const spendRows = await db
+      .select()
+      .from(creditTransactions)
+      .where(
+        and(
+          eq(creditTransactions.userId, user.id),
+          eq(creditTransactions.type, 'spend'),
+          eq(creditTransactions.referenceId, orderId),
+        ),
+      );
+    expect(spendRows).toHaveLength(0);
+    const burnRows = await db
+      .select()
+      .from(pendingPayouts)
+      .where(and(eq(pendingPayouts.userId, user.id), eq(pendingPayouts.kind, 'burn')));
+    expect(burnRows).toHaveLength(0);
+
+    const [redemptionRow] = await db
+      .select()
+      .from(vaultRedemptions)
+      .where(eq(vaultRedemptions.sourceId, orderId));
+    expect(redemptionRow?.state).toBe('failed');
+    expect(redemptionRow?.lastError).toMatch(/not payable|refund/i);
+  });
+
+  it('P1-B: a fresh collect_claimed_at lease blocks a second collect — claimCollect matches zero rows, transferShares is NOT re-invoked (real CAS)', async () => {
+    const user = await seedUser();
+    const orderId = await seedOrder({ userId: user.id, chargeMinor: 500n });
+
+    const row = await claimVaultRedemption({
+      sourceType: 'order_redeem',
+      sourceId: orderId,
+      userId: user.id,
+      assetCode: 'LOOPUSD',
+      network: 'testnet',
+      valueMinor: 500n,
+      fromAddress: user.walletAddress,
+    });
+
+    // Simulate a collect already claimed by a still-running driver: state
+    // collecting, collect_claimed_at FRESH (NOW()), collected_at null.
+    await db
+      .update(vaultRedemptions)
+      .set({ state: 'collecting', collectClaimedAt: new Date(), sharesToRedeem: 500_000n })
+      .where(eq(vaultRedemptions.id, row.id));
+
+    const [fresh] = await db.select().from(vaultRedemptions).where(eq(vaultRedemptions.id, row.id));
+    const outcome = await driveOneVaultRedemption(fresh!);
+
+    // Lost the (fresh, non-stale) claim → no forward progress, no transfer.
+    expect(outcome).toBe('collecting');
+    expect(vaultClientMocks.transferShares).not.toHaveBeenCalled();
+
+    const [after] = await db.select().from(vaultRedemptions).where(eq(vaultRedemptions.id, row.id));
+    expect(after?.state).toBe('collecting');
+    expect(after?.collectedAt).toBeNull();
+  });
+
+  it('P1-B: two concurrent drives on the same collecting row collect AT MOST once, settle once, and debit exactly once (real CAS under Promise.all)', async () => {
+    const user = await seedUser();
+    await seedUserCreditsBalance(user.id, 'USD', 10_000n);
+    await seedHotFloat(5_000n);
+    const orderId = await seedOrder({ userId: user.id, chargeMinor: 500n });
+
+    const row = await claimVaultRedemption({
+      sourceType: 'order_redeem',
+      sourceId: orderId,
+      userId: user.id,
+      assetCode: 'LOOPUSD',
+      network: 'testnet',
+      valueMinor: 500n,
+      fromAddress: user.walletAddress,
+    });
+    // Move to collecting (UNclaimed) so both drivers genuinely race the
+    // per-step collect_claimed_at CAS.
+    await db
+      .update(vaultRedemptions)
+      .set({ state: 'collecting' })
+      .where(eq(vaultRedemptions.id, row.id));
+    const [fresh] = await db.select().from(vaultRedemptions).where(eq(vaultRedemptions.id, row.id));
+
+    await Promise.all([driveOneVaultRedemption(fresh!), driveOneVaultRedemption(fresh!)]);
+
+    // The collect CAS lets exactly one driver submit the user-signed transfer.
+    expect(vaultClientMocks.transferShares.mock.calls.length).toBeLessThanOrEqual(1);
+
+    const [after] = await db.select().from(vaultRedemptions).where(eq(vaultRedemptions.id, row.id));
+    expect(after?.state).toBe('settled');
+
+    // Debited exactly once — no double-collect/double-debit.
+    const [balance] = await db
+      .select()
+      .from(userCredits)
+      .where(and(eq(userCredits.userId, user.id), eq(userCredits.currency, 'USD')));
+    expect(balance?.balanceMinor).toBe(9_500n);
+    const spendRows = await db
+      .select()
+      .from(creditTransactions)
+      .where(
+        and(
+          eq(creditTransactions.userId, user.id),
+          eq(creditTransactions.type, 'spend'),
+          eq(creditTransactions.referenceId, orderId),
+        ),
+      );
+    expect(spendRows).toHaveLength(1);
+  });
 });

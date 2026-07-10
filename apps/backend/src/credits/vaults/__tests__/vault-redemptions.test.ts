@@ -155,6 +155,7 @@ const { state } = vi.hoisted(() => {
     state: string;
     sharesToRedeem: bigint | null;
     collectTxHash: string | null;
+    collectClaimedAt: Date | null;
     payoutPath: string | null;
     redeemTxHash: string | null;
     pendingPayoutId: string | null;
@@ -179,15 +180,31 @@ const { state } = vi.hoisted(() => {
   const s = {
     redemptionRows: new Map<string, VaultRedemptionRowLike>(),
     hotFloatRows: new Map<string, HotFloatRowLike>(), // key: `${assetCode}:${network}`
+    // Money-review P2-3: the mirror step now reads `orders FOR UPDATE`
+    // and couples the debit to `state='pending_payment'`. Keyed by order
+    // id; a fresh `order_redeem` redemption auto-seeds a `pending_payment`
+    // order here (see `seedRow`) so the happy path stays payable, and a
+    // test that needs an expired/paid order overrides the state directly.
+    orders: new Map<string, { state: string }>(), // key: order id
+    // Money-review P1-B: ordering + lost-claim controls for the per-step
+    // collect claim. `eventLog` records 'claim'/'transfer' so a test can
+    // assert the claim UPDATE precedes the network call; `blockCollectClaims`
+    // makes `claimCollect`'s guarded UPDATE match zero rows (a concurrent
+    // driver holds the lease) so the loser no-ops without transferring.
+    eventLog: [] as string[],
+    blockCollectClaims: false,
     nextId: 1,
     nextFloatId: 1,
-    userCreditsBalances: new Map<string, bigint>(), // key: `${userId}:${currency}`
+    userCreditsBalances: new Map<string, bigint>(), // key: `${userId}:${currency}`; presence == the mirror row exists (P2-4)
     creditTransactionInserts: [] as Array<Record<string, unknown>>,
     pendingPayoutInserts: [] as Array<Record<string, unknown>>,
     tableNameOf: (_t: unknown): string => '',
     reset(): void {
       s.redemptionRows.clear();
       s.hotFloatRows.clear();
+      s.orders.clear();
+      s.eventLog = [];
+      s.blockCollectClaims = false;
       s.nextId = 1;
       s.nextFloatId = 1;
       s.userCreditsBalances.clear();
@@ -214,6 +231,7 @@ const { state } = vi.hoisted(() => {
         state: row.state ?? 'pending',
         sharesToRedeem: row.sharesToRedeem ?? null,
         collectTxHash: row.collectTxHash ?? null,
+        collectClaimedAt: row.collectClaimedAt ?? null,
         payoutPath: row.payoutPath ?? null,
         redeemTxHash: row.redeemTxHash ?? null,
         pendingPayoutId: row.pendingPayoutId ?? null,
@@ -226,6 +244,20 @@ const { state } = vi.hoisted(() => {
         failedAt: row.failedAt ?? null,
       };
       s.redemptionRows.set(id, full);
+      // Auto-seed the mirror-step dependencies for an `order_redeem`
+      // redemption so the happy path settles without per-test ceremony:
+      // a payable (`pending_payment`) source order (P2-3) and a present
+      // `user_credits` mirror row (P2-4). Both default to existing/payable;
+      // tests that exercise the fail-closed branches override afterward
+      // (`state.orders.set(id, {state:'expired'})` / delete the credits key).
+      if (full.sourceType === 'order_redeem') {
+        if (!s.orders.has(full.sourceId)) s.orders.set(full.sourceId, { state: 'pending_payment' });
+        const currency = full.assetCode === 'LOOPUSD' ? 'USD' : 'EUR';
+        const creditsKey = `${full.userId}:${currency}`;
+        // Seed at 0n: the mock tracks the NET delta the mirror applies, so
+        // a 0n base keeps the existing `-valueMinor` balance assertions exact.
+        if (!s.userCreditsBalances.has(creditsKey)) s.userCreditsBalances.set(creditsKey, 0n);
+      }
       return full;
     },
     seedFloat(
@@ -304,6 +336,20 @@ function handleVaultRedemptionUpdate(
   // matching zero rows).
   const stateGuard = params.find((p) => VAULT_REDEMPTION_STATE_SET.has(p) && p !== id);
   if (stateGuard !== undefined && existing.state !== stateGuard) return [];
+  // Money-review P1-B: the per-step collect claim writes ONLY
+  // `{collectClaimedAt}` (`claimCollect`). Its real WHERE also carries
+  // `collected_at IS NULL` + the lease predicate, which don't surface as
+  // string params — so, per the task brief, the mock applies the claim
+  // whenever id + state='collecting' match (the JS-side `collectedAt !==
+  // null` guard already covers the collected case before this runs, and
+  // the lease isn't exercised single-threaded). `blockCollectClaims`
+  // deterministically simulates a lost claim (a concurrent driver holding
+  // the lease → the guarded UPDATE matches zero rows), and the eventLog
+  // record lets a test assert the claim precedes the network call.
+  if ('collectClaimedAt' in patch) {
+    if (state.blockCollectClaims) return [];
+    state.eventLog.push('claim');
+  }
   const updated = { ...existing, ...patch };
   state.redemptionRows.set(id, updated);
   return [updated];
@@ -354,18 +400,55 @@ function handleHotFloatUpdate(patch: Record<string, unknown>, condition: unknown
   state.hotFloatRows.set(key, next);
 }
 
-function handleUserCreditsUpdate(patch: Record<string, unknown>, condition: unknown): void {
+/** Resolves the `${userId}:${currency}` key from a `user_credits` WHERE clause. */
+function extractUserCreditsKey(condition: unknown): string {
   const params = collectStringParams(condition);
   const currency = params.find((p) => p === 'USD' || p === 'GBP' || p === 'EUR');
   const userId = params.find((p) => p !== currency);
   if (userId === undefined || currency === undefined) {
     throw new Error(
-      `handleUserCreditsUpdate: could not resolve (userId, currency) from condition params ${JSON.stringify(params)}`,
+      `extractUserCreditsKey: could not resolve (userId, currency) from condition params ${JSON.stringify(params)}`,
     );
   }
-  const key = `${userId}:${currency}`;
+  return `${userId}:${currency}`;
+}
+
+function handleUserCreditsUpdate(patch: Record<string, unknown>, condition: unknown): void {
+  const key = extractUserCreditsKey(condition);
   const prev = state.userCreditsBalances.get(key) ?? 0n;
   state.userCreditsBalances.set(key, prev + extractSqlDelta(patch['balanceMinor']));
+}
+
+/**
+ * Money-review P2-3: the mirror step's `orders FOR UPDATE` read. Returns
+ * `[{ state }]` for a seeded order id, or `[]` when the order is absent
+ * (which the production code treats as an invariant violation → throw).
+ */
+function filterOrders(condition: unknown): Array<{ state: string }> {
+  const params = collectStringParams(condition);
+  const id = params.find((p) => state.orders.has(p));
+  if (id === undefined) return [];
+  const order = state.orders.get(id);
+  return order ? [{ state: order.state }] : [];
+}
+
+/**
+ * Money-review P2-3: the mirror step's "did THIS redemption already
+ * mirror?" probe — `SELECT id FROM credit_transactions WHERE type='spend'
+ * AND reference_type='order' AND reference_id=<sourceId> LIMIT 1`. Matches
+ * against the recorded spend inserts (the condition params include the
+ * order's sourceId + 'spend').
+ */
+function filterSpendCreditTransactions(condition: unknown): Array<{ id: string }> {
+  const params = collectStringParams(condition);
+  return state.creditTransactionInserts
+    .filter(
+      (ct) =>
+        ct['type'] === 'spend' &&
+        typeof ct['referenceId'] === 'string' &&
+        params.includes(ct['referenceId'] as string),
+    )
+    .map((_ct, i) => ({ id: `ct-${i}` }));
 }
 
 function handleCreditTransactionInsert(v: Record<string, unknown>): void {
@@ -412,10 +495,37 @@ function buildDbMock(): Record<string, unknown> {
         };
       }
       if (table === 'userCredits') {
-        // mirrorStep's `FOR UPDATE` lock read — value unused (lock-then-write).
+        // mirrorStep's `FOR UPDATE` lock read. P2-4: presence is
+        // load-bearing — an absent row makes the mirror step throw + roll
+        // back (fail closed, no debit) rather than debit with no balancing
+        // row. Presence == the `${userId}:${currency}` key exists.
+        const readRow = (): unknown[] => {
+          const key = extractUserCreditsKey(condition);
+          if (!state.userCreditsBalances.has(key)) return [];
+          return [{ balanceMinor: state.userCreditsBalances.get(key)! }];
+        };
         return {
-          for: () => ({ then: (resolve: (v: unknown) => unknown) => resolve([]) }),
-          then: (resolve: (v: unknown) => unknown) => resolve([]),
+          for: async (..._args: unknown[]) => readRow(),
+          then: (resolve: (v: unknown) => unknown) => resolve(readRow()),
+        };
+      }
+      if (table === 'orders') {
+        // P2-3: the mirror step re-reads the order FOR UPDATE and couples
+        // the debit to `state='pending_payment'`.
+        const rows = filterOrders(condition);
+        return {
+          for: async (..._args: unknown[]) => rows,
+          then: (resolve: (v: unknown) => unknown) => resolve(rows),
+        };
+      }
+      if (table === 'creditTransactions') {
+        // P2-3: the "already mirrored by THIS redemption?" idempotency probe.
+        const rows = filterSpendCreditTransactions(condition);
+        return {
+          limit: (_n: number) => ({
+            then: (resolve: (v: unknown) => unknown) => resolve(rows),
+          }),
+          then: (resolve: (v: unknown) => unknown) => resolve(rows),
         };
       }
       throw new Error(`unexpected select on ${table}`);
@@ -606,6 +716,7 @@ import {
   creditTransactions,
   userCredits,
   pendingPayouts,
+  orders,
 } from '../../../db/schema.js';
 
 state.tableNameOf = (t: unknown) => {
@@ -614,6 +725,7 @@ state.tableNameOf = (t: unknown) => {
   if (t === creditTransactions) return 'creditTransactions';
   if (t === userCredits) return 'userCredits';
   if (t === pendingPayouts) return 'pendingPayouts';
+  if (t === orders) return 'orders';
   return getTableName(t as Table);
 };
 
@@ -651,10 +763,14 @@ beforeEach(() => {
   walletMocks.getWalletProvider.mockReset();
   walletMocks.getWalletProvider.mockReturnValue(FAKE_PROVIDER);
   userMocks.getUserById.mockReset();
+  // P2-5: collectSharesStep now rechecks `walletProvisioning === 'activated'`
+  // (not just wallet presence), so the default user MUST be activated or
+  // every collect throws at the entry guard.
   userMocks.getUserById.mockImplementation(async (id: string) => ({
     id,
     walletId: 'wallet-xyz',
     walletAddress: USER_WALLET,
+    walletProvisioning: 'activated',
   }));
   transitionsMocks.markOrderPaidViaVaultRedemption.mockReset();
   transitionsMocks.markOrderPaidViaVaultRedemption.mockImplementation(
@@ -871,7 +987,13 @@ describe('driveOneVaultRedemption — replay / idempotency', () => {
 });
 
 describe('driveOneVaultRedemption — resume behavior (CF-18 / crash recovery)', () => {
-  it('a row already collecting with collectTxHash set resumes at pay, does NOT re-collect', async () => {
+  // Money-review P1-A: a persisted `collect_tx_hash` is NOT proof the
+  // transfer LANDED (`onSigned` persists it BEFORE the submit round-trip,
+  // which can throw). So a `collecting` row with `collect_tx_hash` set but
+  // `collected_at` STILL NULL must RE-INVOKE transferShares with
+  // `priorTxHash` (verify-or-resubmit) — never blindly advance on the hash
+  // — and set `collected_at` only after that call confirms success.
+  it('P1-A verify-on-resume: collect_tx_hash set + collected_at null re-invokes transferShares with priorTxHash; a deduped (already-landed) result advances to collected and settles with no second transfer', async () => {
     state.seedFloat('LOOPUSD', 'testnet', 10_000n, 0n);
     const row = state.seedRow({
       sourceType: 'order_redeem',
@@ -882,15 +1004,62 @@ describe('driveOneVaultRedemption — resume behavior (CF-18 / crash recovery)',
       state: 'collecting',
       sharesToRedeem: 199_000n,
       collectTxHash: 'collect-tx-prior-4',
-      collectedAt: new Date(),
+      collectedAt: null, // hash persisted, but landing UNCONFIRMED
+    });
+
+    const calls: Array<Record<string, unknown>> = [];
+    vaultClientMocks.transferShares.mockImplementation(async (args: Record<string, unknown>) => {
+      calls.push(args);
+      // deduped:true simulates CF-18's checkPriorSorobanTx VERIFYING the
+      // prior tx already landed — same hash back, no fresh submit.
+      return { txHash: 'collect-tx-prior-4', deduped: true };
     });
 
     const outcome = await driveOneVaultRedemption(row as unknown as VaultRedemptionRow);
 
     expect(outcome).toBe('settled');
-    expect(vaultClientMocks.transferShares).not.toHaveBeenCalled();
+    // Re-invoked exactly once, carrying the persisted hash to verify landing.
+    expect(vaultClientMocks.transferShares).toHaveBeenCalledTimes(1);
+    expect(calls[0]?.['priorTxHash']).toBe('collect-tx-prior-4');
+    const final = state.redemptionRows.get(row.id)!;
+    // collected_at set ONLY after the (deduped) transfer confirmed landed.
+    expect(final.collectedAt).not.toBeNull();
+    expect(final.collectTxHash).toBe('collect-tx-prior-4');
+    expect(final.state).toBe('settled');
     const float = state.hotFloatRows.get('LOOPUSD:testnet')!;
     expect(float.balanceMinor).toBe(10_000n - 200n);
+  });
+
+  it('P1-A resubmit-on-resume: when the prior tx is NOT deduped (re-submitted), collected_at is set with the NEW hash', async () => {
+    state.seedFloat('LOOPUSD', 'testnet', 10_000n, 0n);
+    const row = state.seedRow({
+      sourceType: 'order_redeem',
+      sourceId: 'order-4b',
+      userId: USER_ID,
+      valueMinor: 200n,
+      fromAddress: USER_WALLET,
+      state: 'collecting',
+      sharesToRedeem: 199_000n,
+      collectTxHash: 'collect-tx-stale-4b',
+      collectedAt: null,
+    });
+
+    const calls: Array<Record<string, unknown>> = [];
+    vaultClientMocks.transferShares.mockImplementation(async (args: Record<string, unknown>) => {
+      calls.push(args);
+      // deduped:false → the prior tx was NOT confirmed landed; a fresh
+      // transfer was submitted and returned a new hash.
+      return { txHash: 'collect-tx-fresh-4b', deduped: false };
+    });
+
+    const outcome = await driveOneVaultRedemption(row as unknown as VaultRedemptionRow);
+
+    expect(outcome).toBe('settled');
+    expect(calls[0]?.['priorTxHash']).toBe('collect-tx-stale-4b');
+    const final = state.redemptionRows.get(row.id)!;
+    expect(final.collectTxHash).toBe('collect-tx-fresh-4b'); // re-submitted hash pinned
+    expect(final.collectedAt).not.toBeNull();
+    expect(final.state).toBe('settled');
   });
 
   it('a row already redeemed(fast) resumes at mirror only — no re-collect, no re-pay, float untouched', async () => {
@@ -921,6 +1090,202 @@ describe('driveOneVaultRedemption — resume behavior (CF-18 / crash recovery)',
     expect(transitionsMocks.markOrderPaidViaVaultRedemption).toHaveBeenCalledTimes(1);
     const final = state.redemptionRows.get(row.id)!;
     expect(final.state).toBe('settled');
+  });
+});
+
+describe('collectSharesStep — P1-B per-step collect claim (double-collect exclusion)', () => {
+  it('issues the collect_claimed_at CAS (guarded state=collecting) BEFORE the transferShares network call', async () => {
+    state.seedFloat('LOOPUSD', 'testnet', 10_000n, 0n);
+    // Record the interleaving: the mock's collect-claim UPDATE pushes
+    // 'claim' to eventLog; the transferShares mock pushes 'transfer'.
+    vaultClientMocks.transferShares.mockImplementation(async () => {
+      state.eventLog.push('transfer');
+      return { txHash: 'collect-tx-p1b', deduped: false };
+    });
+
+    const row = await claimVaultRedemption({
+      sourceType: 'order_redeem',
+      sourceId: 'order-p1b',
+      userId: USER_ID,
+      assetCode: 'LOOPUSD',
+      network: 'testnet',
+      valueMinor: 500n,
+      fromAddress: USER_WALLET,
+    });
+    const outcome = await driveOneVaultRedemption(row);
+
+    expect(outcome).toBe('settled');
+    // The exclusive claim is committed before the user-signed transfer's
+    // network call — a second driver that misses the claim can't race an
+    // in-flight transfer.
+    const claimIdx = state.eventLog.indexOf('claim');
+    const transferIdx = state.eventLog.indexOf('transfer');
+    expect(claimIdx).toBeGreaterThanOrEqual(0);
+    expect(transferIdx).toBeGreaterThanOrEqual(0);
+    expect(claimIdx).toBeLessThan(transferIdx);
+  });
+
+  it('when claimCollect returns no row (a concurrent driver holds the lease), collectSharesStep no-ops: no transfer, no step failure, row unchanged', async () => {
+    // A collecting row whose per-step claim is lost — the guarded
+    // collect_claimed_at UPDATE matches zero rows (simulated deterministically).
+    const row = state.seedRow({
+      sourceType: 'order_redeem',
+      sourceId: 'order-p1b-lost',
+      userId: USER_ID,
+      valueMinor: 500n,
+      fromAddress: USER_WALLET,
+      state: 'collecting',
+      collectedAt: null,
+    });
+    state.blockCollectClaims = true;
+
+    const outcome = await driveOneVaultRedemption(row as unknown as VaultRedemptionRow);
+
+    // Lost the claim → no forward progress this pass; the sweep/owner finishes it.
+    expect(outcome).toBe('collecting');
+    expect(vaultClientMocks.transferShares).not.toHaveBeenCalled();
+    const final = state.redemptionRows.get(row.id)!;
+    expect(final.state).toBe('collecting');
+    expect(final.collectedAt).toBeNull();
+    expect(final.collectClaimedAt).toBeNull(); // the claim never applied
+    expect(final.attempts).toBe(0); // a lost claim is a clean no-op, NOT a step failure
+    expect(state.eventLog).not.toContain('claim');
+  });
+});
+
+describe('mirrorStep — P2-3 order-payability coupling (expired → refund, no debit)', () => {
+  it('a redeemed row whose source order became non-payable (expired) with NO prior spend row → fails closed to refund-needed, NEVER debits', async () => {
+    const row = state.seedRow({
+      sourceType: 'order_redeem',
+      sourceId: 'order-p23-expired',
+      userId: USER_ID,
+      valueMinor: 500n,
+      fromAddress: USER_WALLET,
+      state: 'redeemed',
+      sharesToRedeem: 500_000n,
+      collectTxHash: 'collect-tx-p23',
+      collectedAt: new Date(),
+      payoutPath: 'fast',
+      redeemedAt: new Date(),
+    });
+    // The source order expired before the mirror debit (e.g. sweepExpiredOrders).
+    state.orders.set('order-p23-expired', { state: 'expired' });
+
+    const outcome = await driveOneVaultRedemption(row as unknown as VaultRedemptionRow);
+
+    expect(outcome).toBe('failed');
+    // NO debit happened — the txn rolled back on the not-payable throw.
+    expect(state.creditTransactionInserts).toHaveLength(0);
+    expect(state.pendingPayoutInserts).toHaveLength(0);
+    expect(state.userCreditsBalances.get(`${USER_ID}:USD`)).toBe(0n); // untouched
+    expect(transitionsMocks.markOrderPaidViaVaultRedemption).not.toHaveBeenCalled();
+    const final = state.redemptionRows.get(row.id)!;
+    expect(final.state).toBe('failed');
+    expect(final.lastError).toMatch(/not payable|refund/i);
+    // Ops paged so the collected shares can be manually refunded.
+    expect(discordMocks.notifyVaultRedemptionFailed).toHaveBeenCalledTimes(1);
+  });
+
+  it('idempotent re-drive: order already non-pending (paid) BUT a prior spend row for THIS order exists → advances to settled, no second debit, no refund', async () => {
+    const row = state.seedRow({
+      sourceType: 'order_redeem',
+      sourceId: 'order-p23-redrive',
+      userId: USER_ID,
+      valueMinor: 500n,
+      fromAddress: USER_WALLET,
+      state: 'redeemed',
+      sharesToRedeem: 500_000n,
+      collectTxHash: 'collect-tx-p23b',
+      collectedAt: new Date(),
+      payoutPath: 'fast',
+      redeemedAt: new Date(),
+    });
+    // The order is already paid (BY this redemption on a prior drive) and a
+    // matching spend row already exists — the legitimate idempotent re-drive.
+    state.orders.set('order-p23-redrive', { state: 'paid' });
+    state.creditTransactionInserts.push({
+      type: 'spend',
+      referenceType: 'order',
+      referenceId: 'order-p23-redrive',
+      amountMinor: -500n,
+      currency: 'USD',
+    });
+
+    const outcome = await driveOneVaultRedemption(row as unknown as VaultRedemptionRow);
+
+    expect(outcome).toBe('settled');
+    // No SECOND debit and no refund/failure.
+    expect(state.creditTransactionInserts).toHaveLength(1); // only the pre-existing one
+    expect(transitionsMocks.markOrderPaidViaVaultRedemption).not.toHaveBeenCalled();
+    expect(discordMocks.notifyVaultRedemptionFailed).not.toHaveBeenCalled();
+    const final = state.redemptionRows.get(row.id)!;
+    expect(final.state).toBe('settled');
+  });
+});
+
+describe('mirrorStep — P2-4 missing user_credits row fails closed (no silent desync debit)', () => {
+  it('a payable (pending_payment) order but NO user_credits mirror row → the txn rolls back, nothing persists, row is a step failure (not settled)', async () => {
+    const row = state.seedRow({
+      sourceType: 'order_redeem',
+      sourceId: 'order-p24',
+      userId: USER_ID,
+      valueMinor: 500n,
+      fromAddress: USER_WALLET,
+      state: 'redeemed',
+      sharesToRedeem: 500_000n,
+      collectTxHash: 'collect-tx-p24',
+      collectedAt: new Date(),
+      payoutPath: 'fast',
+      redeemedAt: new Date(),
+    });
+    // Order stays payable, but the mirror row is ABSENT — state corruption
+    // the mirror step must refuse to debit against.
+    state.userCreditsBalances.delete(`${USER_ID}:USD`);
+
+    const outcome = await driveOneVaultRedemption(row as unknown as VaultRedemptionRow);
+
+    // Non-terminal step failure, NOT settled — no debit, no burn, order not paid.
+    expect(outcome).toBe('redeemed');
+    expect(state.creditTransactionInserts).toHaveLength(0);
+    expect(state.pendingPayoutInserts).toHaveLength(0);
+    expect(state.userCreditsBalances.has(`${USER_ID}:USD`)).toBe(false);
+    expect(transitionsMocks.markOrderPaidViaVaultRedemption).not.toHaveBeenCalled();
+    const final = state.redemptionRows.get(row.id)!;
+    expect(final.state).toBe('redeemed');
+    expect(final.attempts).toBe(1);
+    expect(final.lastError).toMatch(/user_credits|refusing to debit|corruption/i);
+  });
+});
+
+describe('collectSharesStep — P2-5 wallet-not-activated blocks collect', () => {
+  it('getUserById reporting a non-activated wallet throws a step failure; transferShares is never called, the row never advances to collected', async () => {
+    // P2-5: recheck walletProvisioning === 'activated', not just presence.
+    userMocks.getUserById.mockImplementation(async (id: string) => ({
+      id,
+      walletId: 'wallet-xyz',
+      walletAddress: USER_WALLET,
+      walletProvisioning: 'provisioning', // wallet present but NOT activated
+    }));
+
+    const row = state.seedRow({
+      sourceType: 'order_redeem',
+      sourceId: 'order-p25',
+      userId: USER_ID,
+      valueMinor: 500n,
+      fromAddress: USER_WALLET,
+      state: 'collecting',
+      collectedAt: null,
+    });
+
+    const outcome = await driveOneVaultRedemption(row as unknown as VaultRedemptionRow);
+
+    expect(outcome).toBe('collecting'); // never reached collected
+    expect(vaultClientMocks.transferShares).not.toHaveBeenCalled();
+    const final = state.redemptionRows.get(row.id)!;
+    expect(final.state).toBe('collecting');
+    expect(final.collectedAt).toBeNull();
+    expect(final.attempts).toBe(1); // recorded as a step failure
+    expect(final.lastError).toMatch(/activated embedded wallet/i);
   });
 });
 

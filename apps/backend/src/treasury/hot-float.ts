@@ -215,17 +215,23 @@ export async function runHotFloatReplenishTick(
     return { replenished: false };
   }
 
-  // KNOWN GAP (accepted for V4): unlike `vault_redemptions`/
+  // KNOWN GAP (accepted for V4, money-review): unlike `vault_redemptions`/
   // `vault_emissions`, there is no durable row to persist this
   // withdraw's CF-18 hash into — a crash between signing and this
   // function returning loses the hash, so a retry builds a FRESH
-  // withdraw for the same pending shares rather than resuming the
-  // prior one. Self-correcting, not silently wrong: DeFindex cannot
-  // burn shares the operator no longer holds, so a genuine double-
-  // attempt fails on-chain (a wasted tx + a retry), matching the
-  // module header's documented residual-race posture. A durable
-  // `hot_float_replenish_attempts` row (mirroring the redemption/
-  // emission pattern) would close this — deferred as a V5 tightening.
+  // withdraw for the same pending shares. This is NOT self-correcting:
+  // if a genuine double-attempt (retry, or two concurrent replenish
+  // ticks) both LAND — the operator may hold enough shares from other
+  // rows for the second not to fail on-chain — the vault burns MORE
+  // shares than one tick's proceeds crediting back the float, leaving
+  // UNTRACKED float/pool drift. It fails CLOSED to that drift (never a
+  // double-credit of the float — each landed withdraw's proceeds are
+  // credited by AT MOST the tick that observed them), and the
+  // vault-aware R3-1 operator-float reconciliation must catch and
+  // reconcile it (a prerequisite before `LOOP_VAULTS_ENABLED` is
+  // flipped on). A durable `hot_float_replenish_attempts` row
+  // (mirroring the redemption/emission CF-18 pattern) would close the
+  // gap — deferred as a V5 tightening.
   const result = await withdrawFromVault({
     vault,
     shares,

@@ -21,9 +21,10 @@
  * `GET /api/orders/loop/:id` the same way it already does for the
  * classic on-chain-payment path.
  */
+import { createHash } from 'node:crypto';
 import type { Context } from 'hono';
 import { eq } from 'drizzle-orm';
-import { db } from '../db/client.js';
+import { db, withAdvisoryLock } from '../db/client.js';
 import { orders } from '../db/schema.js';
 import { logger } from '../logger.js';
 import { getUserById } from '../db/users.js';
@@ -37,6 +38,38 @@ import {
 import type { Order } from './repo.js';
 
 const log = logger.child({ handler: 'redeem-vault' });
+
+/**
+ * Request-level in-flight fence (money-review P1-B), the same two-belt
+ * shape the classic `orders/redeem.ts` path uses: an in-process Set
+ * (same-machine double-tap; survives a pooled DATABASE_URL where the
+ * advisory lock degrades to a no-op) plus a fleet-wide advisory lock
+ * keyed by order id (cross-machine). This is defence-in-depth ON TOP of
+ * the per-step collect CAS in `vault-redemptions.ts` (which is the
+ * durable correctness guarantee): it just stops two concurrent taps
+ * from each doing redundant claim+drive work and returns a clean
+ * PAYMENT_IN_FLIGHT to the loser.
+ */
+const inFlightOrders = new Set<string>();
+
+/** Test seam. */
+export function __resetVaultRedeemFenceForTests(): void {
+  inFlightOrders.clear();
+}
+
+function vaultRedeemFenceLockKey(orderId: string): bigint {
+  const digest = createHash('sha256').update(`loop:vault-redeem:${orderId}`).digest();
+  const raw =
+    (BigInt(digest[0]!) << 56n) |
+    (BigInt(digest[1]!) << 48n) |
+    (BigInt(digest[2]!) << 40n) |
+    (BigInt(digest[3]!) << 32n) |
+    (BigInt(digest[4]!) << 24n) |
+    (BigInt(digest[5]!) << 16n) |
+    (BigInt(digest[6]!) << 8n) |
+    BigInt(digest[7]!);
+  return BigInt.asIntN(64, raw);
+}
 
 export async function redeemLoopOrderViaVault(
   c: Context,
@@ -75,46 +108,71 @@ export async function redeemLoopOrderViaVault(
 
   const assetCode = vaultAssetForCurrency(order.chargeCurrency);
   const network = currentVaultNetwork();
+  const walletAddress = user.walletAddress;
 
-  let row;
+  // Request-level in-flight fence (P1-B) — in-process Set first (same-
+  // machine, survives a degraded advisory lock), then the fleet-wide
+  // advisory lock.
+  if (inFlightOrders.has(order.id)) {
+    return c.json(
+      { code: 'PAYMENT_IN_FLIGHT', message: 'A payment for this order is already in flight' },
+      400,
+    );
+  }
+  inFlightOrders.add(order.id);
+  let fenced;
   try {
-    row = await claimVaultRedemption({
-      sourceType: 'order_redeem',
-      sourceId: order.id,
-      userId,
-      assetCode,
-      network,
-      valueMinor: order.chargeMinor,
-      fromAddress: user.walletAddress,
+    fenced = await withAdvisoryLock(vaultRedeemFenceLockKey(order.id), async () => {
+      let row;
+      try {
+        row = await claimVaultRedemption({
+          sourceType: 'order_redeem',
+          sourceId: order.id,
+          userId,
+          assetCode,
+          network,
+          valueMinor: order.chargeMinor,
+          fromAddress: walletAddress,
+        });
+      } catch (err) {
+        log.error({ err, orderId: order.id }, 'vault redemption claim failed');
+        return c.json(
+          { code: 'SERVICE_UNAVAILABLE', message: 'Redemption temporarily unavailable' },
+          503,
+        );
+      }
+
+      const settled = await driveVaultRedemptionToCompletion(row);
+
+      if (settled.state === 'failed') {
+        // Terminal, not auto-retried (module header, mirrors V3's same
+        // known gap) — the order stays `pending_payment`; ops must
+        // reconcile via the row's `last_error` (paged to Discord already
+        // by `recordStepFailure`). No admin re-drive endpoint ships in V4.
+        log.error(
+          { orderId: order.id, vaultRedemptionId: settled.id },
+          'vault redemption reached terminal failed state',
+        );
+        return c.json(
+          {
+            code: 'INTERNAL_ERROR',
+            message: 'Redemption could not be completed — please contact support',
+          },
+          500,
+        );
+      }
+
+      const fresh = await db.query.orders.findFirst({ where: eq(orders.id, order.id) });
+      return c.json({ state: fresh?.state ?? order.state });
     });
-  } catch (err) {
-    log.error({ err, orderId: order.id }, 'vault redemption claim failed');
+  } finally {
+    inFlightOrders.delete(order.id);
+  }
+  if (!fenced.ran) {
     return c.json(
-      { code: 'SERVICE_UNAVAILABLE', message: 'Redemption temporarily unavailable' },
-      503,
+      { code: 'PAYMENT_IN_FLIGHT', message: 'A payment for this order is already in flight' },
+      400,
     );
   }
-
-  const settled = await driveVaultRedemptionToCompletion(row);
-
-  if (settled.state === 'failed') {
-    // Terminal, not auto-retried (module header, mirrors V3's same
-    // known gap) — the order stays `pending_payment`; ops must
-    // reconcile via the row's `last_error` (paged to Discord already
-    // by `recordStepFailure`). No admin re-drive endpoint ships in V4.
-    log.error(
-      { orderId: order.id, vaultRedemptionId: settled.id },
-      'vault redemption reached terminal failed state',
-    );
-    return c.json(
-      {
-        code: 'INTERNAL_ERROR',
-        message: 'Redemption could not be completed — please contact support',
-      },
-      500,
-    );
-  }
-
-  const fresh = await db.query.orders.findFirst({ where: eq(orders.id, order.id) });
-  return c.json({ state: fresh?.state ?? order.state });
+  return fenced.value;
 }

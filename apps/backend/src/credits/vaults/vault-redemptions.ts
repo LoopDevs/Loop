@@ -97,25 +97,49 @@
  * workers — see `vault-emissions.ts`'s module header for the full
  * note, which applies identically here.
  *
- * ── Known residual race (accepted, self-correcting) ─────────────────
+ * ── Concurrency: two drivers, three guards ──────────────────────────
  * `driveOneVaultRedemption` is deliberately callable from BOTH
- * `orders/redeem.ts`'s inline drive AND this module's sweep — the
- * `pending -> collecting` CAS makes that safe for the collect step,
- * and `payoutStep`'s guarded `WHERE state='collecting'` UPDATE (rolled
- * back together with its float write via `PayoutAlreadyLandedError`
- * when the guard misses) makes a LANDED payout safe against double-
- * crediting the float. What is NOT fully serialized: if two drivers
- * both read the row at `redeemTxHash === null` and BOTH independently
- * fail the fast-path draw (float insufficient for both), both can
- * proceed to build a REAL on-chain `withdrawFromVault` for the SAME
- * `sharesToRedeem` before either commits. DeFindex's vault contract
- * cannot burn more shares than the operator holds, so the LOSER's
- * on-chain call fails (a `terminal_contract_error`-shaped failure,
- * `recordStepFailure`'s normal retry path) rather than double-paying —
- * a wasted Soroban tx + a retry, not a fund-loss or a double-pay. A
- * per-row advisory lock around the WHOLE payout step (not just the
- * float write) would close this fully; deferred as a V5 tightening,
- * flagged explicitly for money-review.
+ * `orders/redeem.ts`'s inline drive AND this module's sweep, so every
+ * money-moving step is individually claim/CAS-guarded — the sweep's
+ * fleet-wide advisory lock is a throughput layer, NOT the correctness
+ * guarantee (unlike V3, whose sole driver is the single-flighted sweep):
+ *   - COLLECT (money-review P1-B): the `pending -> collecting` CAS only
+ *     guards the state TRANSITION, not OPERATING on a `collecting` row.
+ *     A separate per-step lease claim (`collectClaimedAt`, CAS-committed
+ *     BEFORE the user-signed transfer's network call) serializes the
+ *     collect itself — exactly one driver submits `transfer(user ->
+ *     operator)`; the loser no-ops. On resume, the transfer is
+ *     RE-INVOKED with `priorTxHash: collectTxHash` so its CF-18
+ *     `checkPriorSorobanTx` VERIFIES the prior tx landed (or re-submits)
+ *     before `collectedAt` is set — a persisted `collect_tx_hash` is
+ *     NOT proof of landing (money-review P1-A: `onSigned` persists it
+ *     BEFORE submit, which can throw).
+ *   - PAYOUT: `payoutStep`'s guarded `WHERE state='collecting'` UPDATE,
+ *     rolled back together with its float write via
+ *     `PayoutAlreadyLandedError` when the guard misses, makes a LANDED
+ *     payout safe against double-crediting/double-drawing the float.
+ *   - MIRROR: coupled STRICTLY to order payability — the order is
+ *     re-read `FOR UPDATE` and required `pending_payment` BEFORE the
+ *     debit (money-review P2-3, like classic `markOrderPaid`); the
+ *     `credit_transactions_reference_unique` fence dedups a re-drive.
+ *
+ * ── Known residual (NOT self-correcting — needs drift reconcile) ─────
+ * PAYOUT slow path: if two drivers both read the row at
+ * `redeemTxHash === null` and BOTH fail the fast-path draw (float
+ * insufficient for both), both can build a REAL on-chain
+ * `withdrawFromVault` for the SAME `sharesToRedeem` before either
+ * commits. The vault contract can't burn more shares than the operator
+ * holds, so the loser's on-chain call typically fails — BUT if a rare
+ * interleaving lets both land (e.g. the operator holds enough shares
+ * from other rows), the result is an OVER-withdraw: shares burned and
+ * proceeds received with only one `vault_redemptions` row crediting the
+ * float, leaving UNTRACKED float/pool drift (NOT self-correcting) that
+ * the vault-aware R3-1 operator-float reconciliation must catch and
+ * reconcile. That reconciliation being vault-aware is a prerequisite
+ * before `LOOP_VAULTS_ENABLED` is flipped on (a V5 item). Fully closing
+ * the race needs a per-row advisory lock around the WHOLE payout step
+ * (beyond the CAS) — deferred as a V5 tightening; flagged for
+ * money-review.
  */
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { createHash } from 'node:crypto';
@@ -126,6 +150,7 @@ import {
   userCredits,
   pendingPayouts,
   watchdogAlertState,
+  orders,
   type LoopVaultAssetCode,
   type LoopVaultNetwork,
   type VaultRedemptionSourceType,
@@ -173,6 +198,20 @@ export const VAULT_REDEMPTION_MAX_ATTEMPTS = 5;
 
 /** Buffer added to the computed share count so a small adverse share-price move between quote and collect still covers `value_minor` (ADR 031 §D6 step 2). */
 const REDEMPTION_SHARE_BUFFER_BPS = 50n; // 0.5%
+
+/**
+ * Money-review P1-B: the COLLECT claim lease. A `collect_claimed_at`
+ * older than this is treated as abandoned (a crashed collector) and
+ * the collect is re-acquirable. MUST exceed the collect transfer's
+ * worst-case wall-clock so a still-running collector's claim is never
+ * stolen mid-flight (which would let a second driver re-submit against
+ * the in-flight tx). The transfer's inner tx carries a 60s timebound
+ * (`prepareSorobanInvocationForExternalSigning` default) so any signed
+ * tx is permanently dead after ~60s; 3 min comfortably covers the
+ * getAccount + simulate + provider-sign + Horizon-submit chain plus
+ * margin, and stays under the 15-min stuck-watchdog.
+ */
+const COLLECT_CLAIM_LEASE_MS = 3 * 60 * 1000;
 
 // Re-export the V3 helpers this module shares (same currency <-> asset mapping, no drift risk).
 export { isVaultEligibleCurrency, vaultAssetForCurrency, currentVaultNetwork };
@@ -307,55 +346,84 @@ async function computeSharesToRedeem(vault: LoopVaultRow, valueMinor: bigint): P
   return sharesToRedeem;
 }
 
-async function computeSharesStep(
-  row: VaultRedemptionRow,
-  vault: LoopVaultRow,
-): Promise<VaultRedemptionRow> {
-  try {
-    const sharesToRedeem = await computeSharesToRedeem(vault, row.valueMinor);
-    const [updated] = await db
-      .update(vaultRedemptions)
-      .set({ sharesToRedeem })
-      .where(eq(vaultRedemptions.id, row.id))
-      .returning();
-    if (updated === undefined) {
-      throw new Error(
-        `vault_redemptions update returned no row (id=${row.id}, compute-shares step)`,
-      );
-    }
-    return updated;
-  } catch (err) {
-    return recordStepFailure(row, err);
-  }
+/**
+ * Money-review P1-B: the per-step COLLECT claim. An atomic state-CAS on
+ * `collect_claimed_at` committed BEFORE any network call — mirrors V3's
+ * `claimEmissionForDeposit` (`pending -> depositing`), but adapted to
+ * the fact that V4 has TWO concurrent drivers (the HTTP inline drive +
+ * the sweep), so the `pending -> collecting` transition-CAS alone does
+ * NOT serialize operating on a `collecting` row. Only one driver wins
+ * this guarded UPDATE at a time; the loser gets `null` and no-ops.
+ *
+ * Re-acquirable once the claim is older than `COLLECT_CLAIM_LEASE_MS`
+ * (a crashed collector) — and only while `collected_at IS NULL` (once
+ * the collect has confirmed-landed there is nothing left to claim).
+ */
+async function claimCollect(id: string): Promise<VaultRedemptionRow | null> {
+  const leaseSeconds = Math.floor(COLLECT_CLAIM_LEASE_MS / 1000);
+  const [row] = await db
+    .update(vaultRedemptions)
+    .set({ collectClaimedAt: new Date() })
+    .where(
+      and(
+        eq(vaultRedemptions.id, id),
+        eq(vaultRedemptions.state, 'collecting'),
+        sql`${vaultRedemptions.collectedAt} IS NULL`,
+        sql`(${vaultRedemptions.collectClaimedAt} IS NULL OR ${vaultRedemptions.collectClaimedAt} < NOW() - make_interval(secs => ${leaseSeconds}))`,
+      ),
+    )
+    .returning();
+  return row ?? null;
 }
 
 /**
- * ADR 031 §D1 — the ONE user-wallet signature. Resumable via its own
- * `collectTxHash` marker (checked first — a resume never re-signs).
+ * ADR 031 §D1 — the ONE user-wallet signature (`transfer(user ->
+ * operator)`), plus the money-review P1-A/P1-B/P2-5 fixes:
+ *
+ *   - P1-B: claims the collect exclusively (`claimCollect`) before any
+ *     network call, so exactly one driver submits the transfer.
+ *   - P1-A: a persisted `collect_tx_hash` is NOT proof the transfer
+ *     landed (`transferSharesViaProvider` persists it via `onSigned`
+ *     BEFORE `attachUserWalletSignature` + submit, either of which can
+ *     throw). So the transfer is always (re-)invoked with `priorTxHash:
+ *     collectTxHash` — its CF-18 `checkPriorSorobanTx` VERIFIES the
+ *     prior tx landed (dedupes) or re-submits — and `collected_at` is
+ *     set ONLY after the call returns success (= landed). A crash after
+ *     `onSigned` but before landing therefore resumes as a VERIFY, not
+ *     a blind advance (the exact bug V3's `transferStep` avoids the
+ *     same way).
+ *   - P2-5: rechecks `walletProvisioning === 'activated'`, not just
+ *     wallet presence — parity with the entry guard in `redeem-vault.ts`.
+ *
+ * `sharesToRedeem` is computed ONCE, inside the claim (so two drivers
+ * can't compute divergent counts), and pinned thereafter — required for
+ * the CF-18 hash-dedup to ever match across retries.
  */
 async function collectSharesStep(
   row: VaultRedemptionRow,
   vault: LoopVaultRow,
 ): Promise<VaultRedemptionRow> {
-  if (row.collectTxHash !== null) {
-    if (row.collectedAt !== null) return row;
-    const [updated] = await db
-      .update(vaultRedemptions)
-      .set({ collectedAt: new Date() })
-      .where(eq(vaultRedemptions.id, row.id))
-      .returning();
-    return updated ?? row;
-  }
+  // Already collected + confirmed-landed — nothing to do.
+  if (row.collectedAt !== null) return row;
+
+  // P1-B: exclusive claim before any network call. Loser no-ops
+  // (returns the row unchanged → the caller sees no forward progress).
+  const claimed = await claimCollect(row.id);
+  if (claimed === null) return row;
+  let current = claimed;
+  const id = current.id;
+
   try {
-    if (row.sharesToRedeem === null) {
+    // P2-5: require an ACTIVATED wallet (not just present).
+    const user = await getUserById(current.userId);
+    if (
+      user === null ||
+      user.walletProvisioning !== 'activated' ||
+      user.walletId === null ||
+      user.walletAddress === null
+    ) {
       throw new Error(
-        `invariant: vault redemption ${row.id} has no sharesToRedeem at collect step`,
-      );
-    }
-    const user = await getUserById(row.userId);
-    if (user === null || user.walletId === null || user.walletAddress === null) {
-      throw new Error(
-        `vault redemption ${row.id}: user ${row.userId} has no activated embedded wallet`,
+        `vault redemption ${id}: user ${current.userId} has no activated embedded wallet`,
       );
     }
     const provider = getWalletProvider();
@@ -364,32 +432,57 @@ async function collectSharesStep(
         'vault redemption collect step: wallet provider is not configured (LOOP_WALLET_PROVIDER unset)',
       );
     }
+
+    // Compute the share count ONCE (inside the claim), pin it.
+    if (current.sharesToRedeem === null) {
+      const shares = await computeSharesToRedeem(vault, current.valueMinor);
+      const [withShares] = await db
+        .update(vaultRedemptions)
+        .set({ sharesToRedeem: shares })
+        .where(eq(vaultRedemptions.id, id))
+        .returning();
+      if (withShares === undefined) {
+        throw new Error(`vault_redemptions update returned no row (id=${id}, compute-shares)`);
+      }
+      current = withShares;
+    }
+    if (current.sharesToRedeem === null) {
+      throw new Error(`invariant: vault redemption ${id} has no sharesToRedeem at collect step`);
+    }
+
+    // P1-A: verify-or-submit. `priorTxHash` makes the transfer confirm
+    // the prior attempt landed (or re-submit) rather than blindly
+    // advancing on a hash that may never have landed.
+    const walletId = user.walletId;
     const result = await transferShares({
       vault,
-      from: row.fromAddress,
+      from: current.fromAddress,
       to: resolveOperatorPublicKey(),
-      amount: row.sharesToRedeem,
+      amount: current.sharesToRedeem,
       signWith: 'provider',
-      userWallet: { provider, walletId: user.walletId },
+      userWallet: { provider, walletId },
+      ...(current.collectTxHash !== null ? { priorTxHash: current.collectTxHash } : {}),
       onSigned: async (txHash) => {
         // CF-18: persist BEFORE the user-sign + submit round trip.
         await db
           .update(vaultRedemptions)
           .set({ collectTxHash: txHash })
-          .where(eq(vaultRedemptions.id, row.id));
+          .where(eq(vaultRedemptions.id, id));
       },
     });
+    // Success here means the transfer LANDED (Horizon `submitTransaction`
+    // returns on inclusion; the deduped path confirmed a prior SUCCESS).
     const [updated] = await db
       .update(vaultRedemptions)
       .set({ collectTxHash: result.txHash, collectedAt: new Date() })
-      .where(eq(vaultRedemptions.id, row.id))
+      .where(eq(vaultRedemptions.id, id))
       .returning();
     if (updated === undefined) {
-      throw new Error(`vault_redemptions update returned no row (id=${row.id}, collect step)`);
+      throw new Error(`vault_redemptions update returned no row (id=${id}, collect step)`);
     }
     return updated;
   } catch (err) {
-    return recordStepFailure(row, err);
+    return recordStepFailure(current, err);
   }
 }
 
@@ -552,12 +645,82 @@ async function payoutStep(
 }
 
 /**
+ * Money-review P2-3: thrown INSIDE the mirror transaction when the
+ * source order is no longer payable (e.g. `sweepExpiredOrders` flipped
+ * it to `expired`) AND this redemption never debited the mirror. Forces
+ * a rollback (no debit) — caught in `mirrorStep`, which routes the row
+ * to a terminal refund-needed state instead of debiting the user for an
+ * order that delivers no card.
+ */
+class VaultRedemptionOrderNotPayableError extends Error {
+  constructor(
+    readonly orderId: string,
+    readonly orderState: string,
+  ) {
+    super(`order ${orderId} is ${orderState}, no longer payable`);
+    this.name = 'VaultRedemptionOrderNotPayableError';
+  }
+}
+
+/**
+ * Money-review P2-3: the terminal disposition when a redemption's
+ * source order became non-payable before the mirror debit. Fails CLOSED
+ * — mirror NOT debited (rolled back), row `-> failed` with a precise
+ * error, and pages ops (the collected shares are with the operator and
+ * need a manual refund; the auto-refund flow is a documented V5
+ * follow-up, consistent with V4's "ops reconciles failed rows"
+ * posture). Bypasses the attempts counter (retrying can't make an
+ * expired order payable).
+ */
+async function markRedemptionNeedsRefund(
+  row: VaultRedemptionRow,
+  reason: string,
+): Promise<VaultRedemptionRow> {
+  const lastError =
+    `order not payable at mirror time (${reason}) — mirror NOT debited; collected shares require a manual refund`.slice(
+      0,
+      1000,
+    );
+  const [updated] = await db
+    .update(vaultRedemptions)
+    .set({ state: 'failed', failedAt: new Date(), lastError })
+    .where(eq(vaultRedemptions.id, row.id))
+    .returning();
+  if (updated === undefined) {
+    throw new Error(`vault_redemptions update returned no row (id=${row.id}, needs-refund)`);
+  }
+  log.error(
+    { vaultRedemptionId: row.id, sourceId: row.sourceId, reason },
+    'vault redemption: source order not payable at mirror time — mirror not debited; collected shares need a manual refund',
+  );
+  notifyVaultRedemptionFailed({
+    vaultRedemptionId: updated.id,
+    sourceType: updated.sourceType,
+    sourceId: updated.sourceId,
+    userId: updated.userId,
+    assetCode: updated.assetCode,
+    valueMinor: updated.valueMinor.toString(),
+    attempts: updated.attempts,
+    lastError,
+  });
+  return updated;
+}
+
+/**
  * ADR 036 — extinguish both halves. Debits `user_credits` by
  * `value_minor` and writes a `pending_payouts kind='burn'` audit row
  * — the EXISTING primitive `orders/transitions.ts` writes for classic
  * redemptions, reused verbatim (no new payout kind). For
  * `source_type='order_redeem'`, transitions the source order
  * `pending_payment -> paid` in the SAME transaction.
+ *
+ * Money-review hardening: the debit is coupled STRICTLY to order
+ * payability (P2-3 — the order is re-read `FOR UPDATE` and required
+ * `pending_payment` BEFORE any debit, exactly like classic
+ * `markOrderPaid`'s `if (paid === undefined) return null`) and to the
+ * mirror row's existence (P2-4 — a missing `user_credits` row throws +
+ * rolls back rather than inserting a `credit_transactions` debit with
+ * no balancing balance mutation).
  */
 async function mirrorStep(
   row: VaultRedemptionRow,
@@ -572,16 +735,68 @@ async function mirrorStep(
     const currency = vault.assetCode === 'LOOPUSD' ? 'USD' : 'EUR';
 
     let pendingPayoutId: string | null = null;
-    let orderTransitioned = true;
+    // `true` when the txn committed a no-op because THIS redemption
+    // already mirrored (idempotent re-drive) — advance to settled.
+    let alreadyMirrored = false;
     try {
       await db.transaction(async (tx) => {
-        // Lock-then-write (INV-2) — the SAME discipline every other
-        // `credits/` primitive uses.
-        await tx
-          .select()
+        // P2-3: couple the debit to order payability. Re-read the order
+        // FOR UPDATE and require `pending_payment` BEFORE debiting —
+        // exactly like classic `markOrderPaid`'s state guard.
+        if (row.sourceType === 'order_redeem') {
+          const [order] = await tx
+            .select({ state: orders.state })
+            .from(orders)
+            .where(eq(orders.id, row.sourceId))
+            .for('update');
+          if (order === undefined) {
+            throw new Error(
+              `vault redemption ${row.id}: source order ${row.sourceId} not found at mirror step`,
+            );
+          }
+          if (order.state !== 'pending_payment') {
+            // Distinguish "already mirrored by THIS redemption" (a
+            // legitimate idempotent re-drive — the order is now paid
+            // BECAUSE we paid it) from "order became non-payable
+            // (expired) before we ever debited".
+            const already = await tx
+              .select({ id: creditTransactions.id })
+              .from(creditTransactions)
+              .where(
+                and(
+                  eq(creditTransactions.type, 'spend'),
+                  eq(creditTransactions.referenceType, 'order'),
+                  eq(creditTransactions.referenceId, row.sourceId),
+                ),
+              )
+              .limit(1);
+            if (already.length > 0) {
+              alreadyMirrored = true;
+              return; // commit no-op; advance to settled outside.
+            }
+            // Never debited AND order not payable → REFUND path. Roll
+            // back (no debit) and route to needs-refund outside.
+            throw new VaultRedemptionOrderNotPayableError(row.sourceId, order.state);
+          }
+        }
+
+        // Lock-then-write (INV-2). P2-4: the mirror row MUST exist — a
+        // user redeeming vault shares acquired them via a cashback
+        // emission that wrote this row. An absent row is state
+        // corruption; throw + roll back rather than insert a
+        // `credit_transactions` debit whose balancing UPDATE matches 0
+        // rows (a silent INV-1 desync — the exact fail-open the classic
+        // `markOrderPaid` closes with `LoopAssetMissingCreditRowError`).
+        const [existing] = await tx
+          .select({ balanceMinor: userCredits.balanceMinor })
           .from(userCredits)
           .where(and(eq(userCredits.userId, row.userId), eq(userCredits.currency, currency)))
           .for('update');
+        if (existing === undefined) {
+          throw new Error(
+            `vault redemption ${row.id}: user ${row.userId} has no ${currency} user_credits row at mirror step — state corruption, refusing to debit`,
+          );
+        }
 
         await tx.insert(creditTransactions).values({
           userId: row.userId,
@@ -626,26 +841,35 @@ async function mirrorStep(
         pendingPayoutId = payout?.id ?? null;
 
         if (row.sourceType === 'order_redeem') {
+          // We hold the order FOR UPDATE and verified pending_payment
+          // above, so this MUST transition — a null return is an
+          // invariant violation (roll back, don't silently proceed).
           const paid = await markOrderPaidViaVaultRedemption(tx, row.sourceId);
-          orderTransitioned = paid !== null;
+          if (paid === null) {
+            throw new Error(
+              `vault redemption ${row.id}: markOrderPaidViaVaultRedemption returned null despite a held pending_payment lock on order ${row.sourceId}`,
+            );
+          }
         }
       });
     } catch (err) {
+      if (err instanceof VaultRedemptionOrderNotPayableError) {
+        // P2-3: fail closed to a manual-refund terminal state. No debit
+        // happened (the txn rolled back).
+        return await markRedemptionNeedsRefund(row, err.message);
+      }
       if (isUniqueViolation(err, 'credit_transactions_reference_unique')) {
+        // Idempotent backstop: a prior mirror attempt already committed
+        // the debit (rare — the order-state branch above catches the
+        // common re-drive first). Advance without double-crediting.
         log.warn(
           { vaultRedemptionId: row.id, sourceId: row.sourceId },
           'vault redemption mirror step: credit_transactions row already exists — treating as already-mirrored',
         );
+        alreadyMirrored = true;
       } else {
         throw err;
       }
-    }
-
-    if (!orderTransitioned) {
-      log.warn(
-        { vaultRedemptionId: row.id, sourceId: row.sourceId },
-        'vault redemption mirror step: source order was not in pending_payment at transition time (already paid, or a state mismatch) — mirror still recorded',
-      );
     }
 
     const [updated] = await db
@@ -659,6 +883,12 @@ async function mirrorStep(
       .returning();
     if (updated === undefined) {
       throw new Error(`vault_redemptions update returned no row (id=${row.id}, mirror step)`);
+    }
+    if (alreadyMirrored) {
+      log.info(
+        { vaultRedemptionId: row.id, sourceId: row.sourceId },
+        'vault redemption mirror step: already mirrored by this redemption — advanced to settled (idempotent)',
+      );
     }
     return updated;
   } catch (err) {
@@ -705,13 +935,13 @@ export async function driveOneVaultRedemption(
     current = claimed;
   }
   if (current.state === 'collecting') {
-    if (current.sharesToRedeem === null) {
-      current = await computeSharesStep(current, vault);
-    }
-    if (current.state === 'collecting' && current.sharesToRedeem !== null) {
-      current = await collectSharesStep(current, vault);
-    }
-    if (current.state === 'collecting' && current.collectTxHash !== null) {
+    // collectSharesStep folds in compute + the P1-B claim + the P1-A
+    // verify-or-submit; it advances `collected_at` only once the
+    // transfer has CONFIRMED landed.
+    current = await collectSharesStep(current, vault);
+    // Gate payout on collected_at (landed), NOT collect_tx_hash — a
+    // persisted hash is not proof of landing (money-review P1-A).
+    if (current.state === 'collecting' && current.collectedAt !== null) {
       current = await payoutStep(current, vault);
     }
   }
@@ -757,10 +987,23 @@ export async function driveVaultRedemptionToCompletion(
     if (fresh === undefined) break;
     const noForwardProgress = fresh.state === current.state && fresh.attempts === current.attempts;
     current = fresh;
-    if (outcome === 'settled' || outcome === 'failed' || outcome === 'no_vault') break;
+    // Money-review P1-B: `claimed_elsewhere` (lost the `pending ->
+    // collecting` CAS) must STOP the inline loop, not re-enter — another
+    // driver owns this row. Re-looping would re-drive a `collecting` row
+    // concurrently with its owner (the exact double-collect vector the
+    // per-step claim guards, but there's no reason to spin on it here).
+    if (
+      outcome === 'settled' ||
+      outcome === 'failed' ||
+      outcome === 'no_vault' ||
+      outcome === 'claimed_elsewhere'
+    ) {
+      break;
+    }
     if (noForwardProgress) {
-      // No forward progress this pass (e.g. lost the CAS to a
-      // concurrent sweep) — stop spinning inline, let the sweep finish it.
+      // No forward progress this pass (e.g. lost the per-step collect
+      // claim to a concurrent driver) — stop spinning inline, let the
+      // sweep finish it.
       break;
     }
   }

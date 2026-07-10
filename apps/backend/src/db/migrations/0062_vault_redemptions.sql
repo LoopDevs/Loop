@@ -57,6 +57,15 @@ CREATE TABLE IF NOT EXISTS "vault_redemptions" (
   "from_address" text NOT NULL,
   "state" text NOT NULL DEFAULT 'pending',
   "shares_to_redeem" bigint,
+  -- Money-review P1-B: per-step COLLECT claim lease. A driver stamps
+  -- this (an atomic state-CAS committed BEFORE the user-signed share
+  -- transfer's network call) so exactly one driver submits the collect
+  -- even though `state='collecting'` alone does not serialize
+  -- processing (the HTTP inline drive + the sweep can both reach a
+  -- `collecting` row). Re-acquirable once stale (past the lease) so a
+  -- crashed collector doesn't wedge the row. Mirrors V3's
+  -- `pending->depositing` deposit CAS, adapted to the extra HTTP driver.
+  "collect_claimed_at" timestamp with time zone,
   "collect_tx_hash" text,
   "payout_path" text,
   "redeem_tx_hash" text,

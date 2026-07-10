@@ -334,6 +334,14 @@ export const vaultRedemptions = pgTable(
     state: text('state').notNull().default('pending'),
 
     sharesToRedeem: bigint('shares_to_redeem', { mode: 'bigint' }),
+    // Money-review P1-B: per-step COLLECT claim lease — an atomic
+    // state-CAS a driver stamps BEFORE the user-signed share transfer,
+    // so exactly one driver submits the collect even though
+    // `state='collecting'` alone doesn't serialize processing (the HTTP
+    // inline drive + the sweep can both reach a `collecting` row).
+    // Re-acquirable once past the lease so a crashed collector doesn't
+    // wedge the row. See `collectSharesStep`.
+    collectClaimedAt: timestamp('collect_claimed_at', { withTimezone: true }),
     collectTxHash: text('collect_tx_hash'),
     payoutPath: text('payout_path').$type<VaultRedemptionPayoutPath | null>(),
     // Only set when payoutPath='slow' (a synchronous vault.withdraw
