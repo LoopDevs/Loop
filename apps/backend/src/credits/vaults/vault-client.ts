@@ -47,11 +47,35 @@ export class VaultDisabledError extends Error {
   }
 }
 
-/** Thrown when a mandatory slippage floor is missing/zero, or the chain-returned amount violates it. */
+/**
+ * Thrown for a PRE-FLIGHT slippage/amount violation — a missing/zero/
+ * non-bigint floor or amount caught BEFORE any transaction is built.
+ * Nothing moved on-chain; the caller can fix the args and retry safely.
+ */
 export class VaultSlippageError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'VaultSlippageError';
+  }
+}
+
+/**
+ * Thrown when the slippage floor is violated by the CHAIN-RETURNED
+ * result — i.e. AFTER the transaction has already landed on-chain.
+ * Distinct from `VaultSlippageError` because the semantics for the
+ * caller are opposite: a `VaultSlippageError` means "nothing happened,
+ * retry"; a `VaultPostSubmitSlippageError` means "the tx DID land
+ * (shares were minted / burned) but returned less than the floor —
+ * do NOT retry or refund blindly; reconcile against `txHash` first".
+ * Carries the landed `txHash` so a V3 caller can look up what actually
+ * happened.
+ */
+export class VaultPostSubmitSlippageError extends Error {
+  readonly txHash: string;
+  constructor(message: string, txHash: string) {
+    super(message);
+    this.name = 'VaultPostSubmitSlippageError';
+    this.txHash = txHash;
   }
 }
 
@@ -73,6 +97,29 @@ export class VaultNotImplementedError extends Error {
 
 function requireVaultsEnabled(): void {
   if (!vaultsEnabled()) throw new VaultDisabledError();
+}
+
+/**
+ * Refuses any amount / slippage floor that is not a positive bigint.
+ * The `typeof` guard is load-bearing: a plain `x <= 0n` comparison
+ * does NOT fire for `undefined` (`undefined <= 0n` is `false`), and an
+ * `undefined` amount would then reach `nativeToScVal(undefined, {type:
+ * 'i128'})` — which encodes as `scvVoid`, i.e. an UNBOUNDED slippage
+ * floor / a void amount silently reaching the contract. So every
+ * caller-supplied amount and floor must pass THIS, not a bare
+ * comparison. TypeScript types these as `bigint`, but a JS caller (or
+ * a value that widened through `any`/`unknown` upstream) can still
+ * pass `undefined`/a number, so the runtime check is mandatory on a
+ * money path.
+ */
+function assertPositiveBigint(value: unknown, label: string): asserts value is bigint {
+  if (typeof value !== 'bigint' || value <= 0n) {
+    throw new VaultSlippageError(
+      `${label} must be a positive bigint (a missing/zero/non-bigint amount or slippage floor is refused before building any tx — ADR 031), got ${
+        typeof value === 'bigint' ? value.toString() : `${typeof value} (${String(value)})`
+      }`,
+    );
+  }
 }
 
 function networkPassphraseFor(network: LoopVaultRow['network']): string {
@@ -100,20 +147,22 @@ function resolveOperatorSecret(): string {
 }
 
 /**
- * `exactOptionalPropertyTypes` (repo-wide tsconfig setting) means an
- * explicit `{ priorTxHash: undefined }` is a type error against a
- * `priorTxHash?: string` field — the key must be OMITTED, not merely
- * `undefined`-valued. Every `submitSorobanInvocation` call site below
- * shares this same "pass CF-18 fields through only when the caller
- * supplied them" spread.
+ * Threads the CF-18 fields into a `submitSorobanInvocation` call.
+ * `onSigned` is REQUIRED on the money-submit path (see
+ * `SubmitSorobanInvocationArgs`), so it's always passed. `priorTxHash`
+ * is genuinely optional (only present on a retry), and under
+ * `exactOptionalPropertyTypes` (repo-wide tsconfig) an explicit
+ * `{ priorTxHash: undefined }` is a type error against a
+ * `priorTxHash?: string` field — the key must be OMITTED, hence the
+ * conditional spread.
  */
 function cf18Fields(
   priorTxHash: string | undefined,
-  onSigned: ((txHash: string) => Promise<void> | void) | undefined,
-): { priorTxHash?: string; onSigned?: (txHash: string) => Promise<void> | void } {
+  onSigned: (txHash: string) => Promise<void> | void,
+): { priorTxHash?: string; onSigned: (txHash: string) => Promise<void> | void } {
   return {
+    onSigned,
     ...(priorTxHash !== undefined ? { priorTxHash } : {}),
-    ...(onSigned !== undefined ? { onSigned } : {}),
   };
 }
 
@@ -141,8 +190,13 @@ export interface DepositToVaultArgs {
   minShares: bigint;
   /** CF-18: a hash persisted from a prior attempt, if any — see `soroban-submit.ts`. */
   priorTxHash?: string;
-  /** CF-18: fired with the deterministic tx hash after sign, before submit. */
-  onSigned?: (txHash: string) => Promise<void> | void;
+  /**
+   * CF-18: fired with the deterministic tx hash after sign, before
+   * submit — persist it durably so a retry can pass it back as
+   * `priorTxHash`. REQUIRED (see `soroban-submit.ts`): at-most-once on
+   * a money path depends on it, so it is not optional.
+   */
+  onSigned: (txHash: string) => Promise<void> | void;
 }
 
 export interface DepositToVaultResult {
@@ -156,14 +210,8 @@ export interface DepositToVaultResult {
 /** `deposit(amounts_desired=[underlyingAmount], amounts_min=[minShares], from=operator, invest=true)`. */
 export async function depositToVault(args: DepositToVaultArgs): Promise<DepositToVaultResult> {
   requireVaultsEnabled();
-  if (args.underlyingAmount <= 0n) {
-    throw new VaultSlippageError('depositToVault: underlyingAmount must be > 0');
-  }
-  if (args.minShares <= 0n) {
-    throw new VaultSlippageError(
-      'depositToVault: minShares must be > 0 — an absent/zero slippage floor is refused (ADR 031)',
-    );
-  }
+  assertPositiveBigint(args.underlyingAmount, 'depositToVault: underlyingAmount');
+  assertPositiveBigint(args.minShares, 'depositToVault: minShares (slippage floor)');
 
   const operatorSecret = resolveOperatorSecret();
   const operatorPublicKey = Keypair.fromSecret(operatorSecret).publicKey();
@@ -186,8 +234,13 @@ export async function depositToVault(args: DepositToVaultArgs): Promise<DepositT
   const { amountsUsed, sharesMinted } = parseDepositReturn(result.returnValue);
 
   if (sharesMinted < args.minShares) {
-    throw new VaultSlippageError(
-      `depositToVault: chain returned ${sharesMinted} shares, below the caller's minShares floor of ${args.minShares}`,
+    // POST-submit: the deposit ALREADY landed (shares were minted to
+    // the operator) but returned fewer than the floor. This is NOT a
+    // pre-flight refusal — do not retry blindly. Distinct error type
+    // carries the landed txHash for reconciliation (P2-7).
+    throw new VaultPostSubmitSlippageError(
+      `depositToVault: chain returned ${sharesMinted} shares, below the caller's minShares floor of ${args.minShares} — the tx LANDED (reconcile against txHash, do not blindly retry)`,
+      result.txHash,
     );
   }
 
@@ -226,7 +279,8 @@ export interface WithdrawFromVaultArgs {
   /** Slippage floor on the underlying returned — MANDATORY, must be > 0. */
   minAmountsOut: bigint;
   priorTxHash?: string;
-  onSigned?: (txHash: string) => Promise<void> | void;
+  /** CF-18: required — persist durably, pass back as `priorTxHash` on retry (see `soroban-submit.ts`). */
+  onSigned: (txHash: string) => Promise<void> | void;
 }
 
 export interface WithdrawFromVaultResult {
@@ -240,14 +294,8 @@ export async function withdrawFromVault(
   args: WithdrawFromVaultArgs,
 ): Promise<WithdrawFromVaultResult> {
   requireVaultsEnabled();
-  if (args.shares <= 0n) {
-    throw new VaultSlippageError('withdrawFromVault: shares must be > 0');
-  }
-  if (args.minAmountsOut <= 0n) {
-    throw new VaultSlippageError(
-      'withdrawFromVault: minAmountsOut must be > 0 — an absent/zero slippage floor is refused (ADR 031)',
-    );
-  }
+  assertPositiveBigint(args.shares, 'withdrawFromVault: shares');
+  assertPositiveBigint(args.minAmountsOut, 'withdrawFromVault: minAmountsOut (slippage floor)');
 
   const operatorSecret = resolveOperatorSecret();
   const operatorPublicKey = Keypair.fromSecret(operatorSecret).publicKey();
@@ -266,12 +314,18 @@ export async function withdrawFromVault(
     ...cf18Fields(args.priorTxHash, args.onSigned),
   });
 
+  // `parseWithdrawReturn` throws `VaultResultParseError` on an empty
+  // return BEFORE this point (P2-2), so `amountsOut` is guaranteed
+  // non-empty here — the slippage loop below can never be silently
+  // skipped over a zero-length result.
   const { amountsOut } = parseWithdrawReturn(result.returnValue);
 
   for (const amount of amountsOut) {
     if (amount < args.minAmountsOut) {
-      throw new VaultSlippageError(
-        `withdrawFromVault: chain returned ${amount}, below the caller's minAmountsOut floor of ${args.minAmountsOut}`,
+      // POST-submit: shares already burned. Distinct error + txHash (P2-7).
+      throw new VaultPostSubmitSlippageError(
+        `withdrawFromVault: chain returned ${amount}, below the caller's minAmountsOut floor of ${args.minAmountsOut} — the tx LANDED (reconcile against txHash, do not blindly retry)`,
+        result.txHash,
       );
     }
   }
@@ -286,14 +340,28 @@ export async function withdrawFromVault(
  * outer Vec's first element is itself a Vec, treat the outer value as
  * a tuple and unwrap; otherwise treat the outer value directly as the
  * amounts-out vec.
+ *
+ * Requires at least one amount (the vaults are single-asset, so a real
+ * `withdraw` always releases exactly one underlying amount). An empty
+ * result — from an unexpected return shape, an index-lagged read, or a
+ * partial decode — throws `VaultResultParseError` rather than being
+ * mistaken for "released nothing, but succeeded": returning
+ * `amountsOut: []` past a caller that burned shares is a mirror-desync
+ * vector (P2-2), so it fails CLOSED here.
  */
 function parseWithdrawReturn(retval: xdr.ScVal): { amountsOut: bigint[] } {
   const elements = decodeVecElements(retval);
   const first = elements[0];
-  if (first !== undefined && first.switch().name === 'scvVec') {
-    return { amountsOut: decodeI128Vec(first) };
+  const amountsOut =
+    first !== undefined && first.switch().name === 'scvVec'
+      ? decodeI128Vec(first)
+      : decodeI128Vec(retval);
+  if (amountsOut.length === 0) {
+    throw new VaultResultParseError(
+      'withdraw returned an empty amounts-out vec — refusing to treat a shares-burning withdraw as having released nothing (single-asset vault must release ≥1 amount)',
+    );
   }
-  return { amountsOut: decodeI128Vec(retval) };
+  return { amountsOut };
 }
 
 // ---------------------------------------------------------------------------
@@ -317,7 +385,8 @@ export interface TransferSharesArgs {
    */
   signWith: 'operator' | 'provider';
   priorTxHash?: string;
-  onSigned?: (txHash: string) => Promise<void> | void;
+  /** CF-18: required — persist durably, pass back as `priorTxHash` on retry (see `soroban-submit.ts`). */
+  onSigned: (txHash: string) => Promise<void> | void;
 }
 
 export interface TransferSharesResult {
@@ -334,9 +403,7 @@ export interface TransferSharesResult {
  */
 export async function transferShares(args: TransferSharesArgs): Promise<TransferSharesResult> {
   requireVaultsEnabled();
-  if (args.amount <= 0n) {
-    throw new VaultSlippageError('transferShares: amount must be > 0');
-  }
+  assertPositiveBigint(args.amount, 'transferShares: amount');
 
   if (args.signWith === 'provider') {
     // TODO(ADR 031 §D6, V4): user-wallet-signed share transfer via the
@@ -429,6 +496,18 @@ export async function readVaultState(args: ReadVaultStateArgs): Promise<VaultSta
 function parseTotalManagedFunds(retval: xdr.ScVal): bigint {
   const native = scValToNative(retval);
   const entries: unknown[] = Array.isArray(native) ? native : [native];
+  // An empty vec must THROW, not sum to 0n. A wrongly-NAMED field
+  // already throws (via `coerceBigInt`), but an empty array would
+  // silently yield 0 → `sharePricePpm` collapses to 0 against a real
+  // `totalSupply` (the `totalSupply === 0n` guard in `readVaultState`
+  // does NOT cover a populated supply with a zero-length managed-funds
+  // read). Closing that asymmetry: unreadable managed funds fail
+  // CLOSED (P1-3).
+  if (entries.length === 0) {
+    throw new VaultResultParseError(
+      'fetch_total_managed_funds returned an empty vec — refusing to treat unreadable managed funds as 0 (would collapse sharePricePpm to 0 against a real total_supply)',
+    );
+  }
   let total = 0n;
   for (const entry of entries) {
     total += extractTotalAmount(entry);

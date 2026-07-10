@@ -152,13 +152,28 @@ export function assertExpectedInvocation(tx: Transaction, expected: ExpectedInvo
     );
   }
   if (op.auth !== undefined && op.auth.length > 0) {
-    // The operator/issuer signs as the transaction source and never
-    // needs Soroban auth entries for these calls (deposit/withdraw/
-    // transfer are all invoked BY the signer, not authorizing a THIRD
-    // party's invocation) — a populated auth list here means the
-    // built tx is asking for authorization we never intended to grant.
+    // Reject any Soroban auth entry. In V2 (mock-tested, never run
+    // against a real vault) the operator signs as the transaction
+    // source and these mock calls carry no auth, so rejecting is
+    // correct and fail-closed.
+    //
+    // ⚠️ TIGHTEN, NEVER RELAX, when wiring against a REAL vault. A real
+    // DeFindex `deposit` sub-invokes the underlying token's `transfer`,
+    // which does `require_auth(from)` — so `assembleTransaction` WILL
+    // attach a source-account authorization entry, and this blanket
+    // reject would then block a legitimate deposit. The fix at that
+    // point is NOT to relax this to "allow auth" (that reopens the
+    // injected-sub-invocation attack: a hostile RPC could return a
+    // simulation whose auth tree authorizes an UNEXPECTED transfer to
+    // an attacker). It is to TIGHTEN: verify each auth entry's
+    // credential is the operator's own source-account credential AND
+    // that its authorized invocation tree targets only the expected
+    // contract/function/args (the same expected-invocation assertion
+    // applied recursively to the sub-invocations). Until that stricter
+    // check exists, keep rejecting.
     throw new VaultVerifyError(
-      `verify-before-sign: expected no Soroban auth entries, got ${op.auth.length}`,
+      `verify-before-sign: expected no Soroban auth entries, got ${op.auth.length} ` +
+        '(V2 rejects all auth; this must be TIGHTENED — not relaxed — before real-vault wiring, see comment)',
     );
   }
 

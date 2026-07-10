@@ -34,10 +34,17 @@ import {
   readVaultState,
   VaultDisabledError,
   VaultSlippageError,
+  VaultPostSubmitSlippageError,
   VaultNotImplementedError,
   type DepositToVaultArgs,
+  type WithdrawFromVaultArgs,
+  type TransferSharesArgs,
 } from '../vault-client.js';
+import { VaultResultParseError } from '../scval.js';
 import type { LoopVaultRow } from '../registry.js';
+
+/** `onSigned` is required on the money-submit path; a shared no-op keeps calls terse. */
+const noopOnSigned = (): void => {};
 
 const VAULT: LoopVaultRow = {
   id: 'vault-1',
@@ -75,7 +82,12 @@ describe('vaultsEnabled gate', () => {
   it('depositToVault throws VaultDisabledError and never calls submit when the flag is off', async () => {
     vaultsEnabledMock.mockReturnValue(false);
     await expect(
-      depositToVault({ vault: VAULT, underlyingAmount: 100n, minShares: 1n }),
+      depositToVault({
+        vault: VAULT,
+        underlyingAmount: 100n,
+        minShares: 1n,
+        onSigned: noopOnSigned,
+      }),
     ).rejects.toThrow(VaultDisabledError);
     expect(submitMock).not.toHaveBeenCalled();
   });
@@ -83,7 +95,7 @@ describe('vaultsEnabled gate', () => {
   it('withdrawFromVault throws VaultDisabledError when the flag is off', async () => {
     vaultsEnabledMock.mockReturnValue(false);
     await expect(
-      withdrawFromVault({ vault: VAULT, shares: 100n, minAmountsOut: 1n }),
+      withdrawFromVault({ vault: VAULT, shares: 100n, minAmountsOut: 1n, onSigned: noopOnSigned }),
     ).rejects.toThrow(VaultDisabledError);
     expect(submitMock).not.toHaveBeenCalled();
   });
@@ -97,6 +109,7 @@ describe('vaultsEnabled gate', () => {
         to: USER_ADDRESS,
         amount: 1n,
         signWith: 'operator',
+        onSigned: noopOnSigned,
       }),
     ).rejects.toThrow(VaultDisabledError);
     expect(submitMock).not.toHaveBeenCalled();
@@ -121,6 +134,7 @@ describe('depositToVault', () => {
       vault: VAULT,
       underlyingAmount: 5_000_000n,
       minShares: 4_000_000n,
+      onSigned: noopOnSigned,
     });
 
     expect(result).toEqual({
@@ -150,29 +164,88 @@ describe('depositToVault', () => {
 
   it('refuses underlyingAmount <= 0 without calling submit', async () => {
     await expect(
-      depositToVault({ vault: VAULT, underlyingAmount: 0n, minShares: 1n }),
+      depositToVault({ vault: VAULT, underlyingAmount: 0n, minShares: 1n, onSigned: noopOnSigned }),
     ).rejects.toThrow(VaultSlippageError);
     await expect(
-      depositToVault({ vault: VAULT, underlyingAmount: -1n, minShares: 1n }),
+      depositToVault({
+        vault: VAULT,
+        underlyingAmount: -1n,
+        minShares: 1n,
+        onSigned: noopOnSigned,
+      }),
     ).rejects.toThrow(VaultSlippageError);
     expect(submitMock).not.toHaveBeenCalled();
   });
 
   it('refuses an absent/zero minShares slippage floor without calling submit', async () => {
-    const noFloor = { vault: VAULT, underlyingAmount: 100n, minShares: 0n } as DepositToVaultArgs;
+    const noFloor: DepositToVaultArgs = {
+      vault: VAULT,
+      underlyingAmount: 100n,
+      minShares: 0n,
+      onSigned: noopOnSigned,
+    };
     await expect(depositToVault(noFloor)).rejects.toThrow(VaultSlippageError);
     expect(submitMock).not.toHaveBeenCalled();
   });
 
-  it('refuses when the chain-returned shares fall below the caller-supplied minShares floor', async () => {
+  // P1-1: the `typeof x !== 'bigint'` guard — a bare `x <= 0n` does NOT
+  // fire for `undefined` (`undefined <= 0n` is false), and an undefined
+  // amount would reach `nativeToScVal(undefined, {type:'i128'})` →
+  // scvVoid → unbounded slippage / void amount silently on-chain. A JS
+  // caller (or a value widened through any/unknown) can pass undefined
+  // or a number despite the TS types, so the runtime guard is mandatory.
+  it('refuses undefined / non-bigint underlyingAmount BEFORE building the tx', async () => {
+    await expect(
+      depositToVault({
+        vault: VAULT,
+        minShares: 1n,
+        onSigned: noopOnSigned,
+      } as unknown as DepositToVaultArgs),
+    ).rejects.toThrow(VaultSlippageError); // underlyingAmount undefined
+    await expect(
+      depositToVault({
+        vault: VAULT,
+        underlyingAmount: 100 as unknown as bigint, // a JS number, not bigint
+        minShares: 1n,
+        onSigned: noopOnSigned,
+      }),
+    ).rejects.toThrow(VaultSlippageError);
+    expect(submitMock).not.toHaveBeenCalled();
+  });
+
+  it('refuses undefined / non-bigint minShares floor BEFORE building the tx', async () => {
+    await expect(
+      depositToVault({
+        vault: VAULT,
+        underlyingAmount: 100n,
+        onSigned: noopOnSigned,
+      } as unknown as DepositToVaultArgs),
+    ).rejects.toThrow(VaultSlippageError); // minShares undefined
+    await expect(
+      depositToVault({
+        vault: VAULT,
+        underlyingAmount: 100n,
+        minShares: 1 as unknown as bigint,
+        onSigned: noopOnSigned,
+      }),
+    ).rejects.toThrow(VaultSlippageError);
+    expect(submitMock).not.toHaveBeenCalled();
+  });
+
+  it('POST-submit: chain-returned shares below the floor throw VaultPostSubmitSlippageError carrying the landed txHash', async () => {
     submitMock.mockResolvedValue({
-      txHash: 'dep-hash',
+      txHash: 'landed-dep-hash',
       returnValue: depositReturn([5_000_000n], 999n), // way below the floor
       deduped: false,
     });
-    await expect(
-      depositToVault({ vault: VAULT, underlyingAmount: 5_000_000n, minShares: 4_000_000n }),
-    ).rejects.toThrow(VaultSlippageError);
+    const err = await depositToVault({
+      vault: VAULT,
+      underlyingAmount: 5_000_000n,
+      minShares: 4_000_000n,
+      onSigned: noopOnSigned,
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(VaultPostSubmitSlippageError);
+    expect((err as VaultPostSubmitSlippageError).txHash).toBe('landed-dep-hash');
   });
 
   it('propagates CF-18 fields through to submitSorobanInvocation', async () => {
@@ -207,6 +280,7 @@ describe('withdrawFromVault', () => {
       vault: VAULT,
       shares: 1_000_000n,
       minAmountsOut: 1_500_000n,
+      onSigned: noopOnSigned,
     });
 
     expect(result).toEqual({ txHash: 'wd-hash', amountsOut: [2_000_000n], deduped: false });
@@ -232,29 +306,80 @@ describe('withdrawFromVault', () => {
       ]),
       deduped: false,
     });
-    const result = await withdrawFromVault({ vault: VAULT, shares: 1n, minAmountsOut: 1n });
+    const result = await withdrawFromVault({
+      vault: VAULT,
+      shares: 1n,
+      minAmountsOut: 1n,
+      onSigned: noopOnSigned,
+    });
     expect(result.amountsOut).toEqual([3_000_000n]);
+  });
+
+  // P1-2: an empty amounts-out vec must THROW (VaultResultParseError),
+  // not be treated as "released nothing but succeeded" — that would run
+  // the slippage loop zero times and desync the mirror against burned
+  // shares.
+  it('throws VaultResultParseError on an empty amounts-out return (never silent success)', async () => {
+    submitMock.mockResolvedValue({
+      txHash: 'wd-hash',
+      returnValue: xdr.ScVal.scvVec([]), // empty
+      deduped: false,
+    });
+    await expect(
+      withdrawFromVault({ vault: VAULT, shares: 1n, minAmountsOut: 1n, onSigned: noopOnSigned }),
+    ).rejects.toThrow(VaultResultParseError);
   });
 
   it('refuses shares <= 0 or an absent/zero minAmountsOut floor without calling submit', async () => {
     await expect(
-      withdrawFromVault({ vault: VAULT, shares: 0n, minAmountsOut: 1n }),
+      withdrawFromVault({ vault: VAULT, shares: 0n, minAmountsOut: 1n, onSigned: noopOnSigned }),
     ).rejects.toThrow(VaultSlippageError);
     await expect(
-      withdrawFromVault({ vault: VAULT, shares: 1n, minAmountsOut: 0n }),
+      withdrawFromVault({ vault: VAULT, shares: 1n, minAmountsOut: 0n, onSigned: noopOnSigned }),
     ).rejects.toThrow(VaultSlippageError);
     expect(submitMock).not.toHaveBeenCalled();
   });
 
-  it('refuses when the chain-returned amount falls below minAmountsOut', async () => {
+  it('refuses undefined / non-bigint shares or minAmountsOut BEFORE building the tx (P1-1)', async () => {
+    await expect(
+      withdrawFromVault({
+        vault: VAULT,
+        minAmountsOut: 1n,
+        onSigned: noopOnSigned,
+      } as unknown as WithdrawFromVaultArgs),
+    ).rejects.toThrow(VaultSlippageError); // shares undefined
+    await expect(
+      withdrawFromVault({
+        vault: VAULT,
+        shares: 1n,
+        onSigned: noopOnSigned,
+      } as unknown as WithdrawFromVaultArgs),
+    ).rejects.toThrow(VaultSlippageError); // minAmountsOut undefined
+    await expect(
+      withdrawFromVault({
+        vault: VAULT,
+        shares: 1n,
+        minAmountsOut: 100 as unknown as bigint, // number, not bigint
+        onSigned: noopOnSigned,
+      }),
+    ).rejects.toThrow(VaultSlippageError);
+    expect(submitMock).not.toHaveBeenCalled();
+  });
+
+  it('POST-submit: a chain-returned amount below the floor throws VaultPostSubmitSlippageError carrying the landed txHash', async () => {
     submitMock.mockResolvedValue({
-      txHash: 'wd-hash',
+      txHash: 'landed-wd-hash',
       returnValue: xdr.ScVal.scvVec([nativeToScVal(1n, { type: 'i128' })]),
       deduped: false,
     });
-    await expect(
-      withdrawFromVault({ vault: VAULT, shares: 1n, minAmountsOut: 1_000_000n }),
-    ).rejects.toThrow(VaultSlippageError);
+    const err = await withdrawFromVault({
+      vault: VAULT,
+      shares: 1n,
+      minAmountsOut: 1_000_000n,
+      onSigned: noopOnSigned,
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(VaultPostSubmitSlippageError);
+    expect((err as VaultPostSubmitSlippageError).txHash).toBe('landed-wd-hash');
   });
 });
 
@@ -268,6 +393,7 @@ describe('transferShares', () => {
       to: USER_ADDRESS,
       amount: 250_000n,
       signWith: 'operator',
+      onSigned: noopOnSigned,
     });
 
     expect(result).toEqual({ txHash: 'tr-hash', deduped: false });
@@ -292,6 +418,7 @@ describe('transferShares', () => {
         to: OPERATOR_PUBLIC,
         amount: 1n,
         signWith: 'provider',
+        onSigned: noopOnSigned,
       }),
     ).rejects.toThrow(VaultNotImplementedError);
     expect(submitMock).not.toHaveBeenCalled();
@@ -305,6 +432,30 @@ describe('transferShares', () => {
         to: USER_ADDRESS,
         amount: 0n,
         signWith: 'operator',
+        onSigned: noopOnSigned,
+      }),
+    ).rejects.toThrow(VaultSlippageError);
+    expect(submitMock).not.toHaveBeenCalled();
+  });
+
+  it('refuses undefined / non-bigint amount BEFORE building the tx (P1-1)', async () => {
+    await expect(
+      transferShares({
+        vault: VAULT,
+        from: OPERATOR_PUBLIC,
+        to: USER_ADDRESS,
+        signWith: 'operator',
+        onSigned: noopOnSigned,
+      } as unknown as TransferSharesArgs),
+    ).rejects.toThrow(VaultSlippageError); // amount undefined
+    await expect(
+      transferShares({
+        vault: VAULT,
+        from: OPERATOR_PUBLIC,
+        to: USER_ADDRESS,
+        amount: 250 as unknown as bigint, // number, not bigint
+        signWith: 'operator',
+        onSigned: noopOnSigned,
       }),
     ).rejects.toThrow(VaultSlippageError);
     expect(submitMock).not.toHaveBeenCalled();
@@ -353,5 +504,18 @@ describe('readVaultState', () => {
     const state = await readVaultState({ vault: VAULT });
     expect(state.totalManaged).toBe(1_100_000n);
     expect(state.sharePricePpm).toBe(1_100_000n);
+  });
+
+  // P1-3: an empty managed-funds vec must THROW, not sum to 0n — with a
+  // real total_supply that would collapse sharePricePpm to 0 (the
+  // `totalSupply === 0n` fast-path does NOT cover a populated supply +
+  // empty managed-funds read). Closes the asymmetry where a wrongly-
+  // NAMED field already threw but an empty vec silently yielded 0.
+  it('throws VaultResultParseError when fetch_total_managed_funds returns an empty vec', async () => {
+    simulateMock.mockImplementation(async (args: { functionName: string }) => {
+      if (args.functionName === 'total_supply') return nativeToScVal(2_000_000n, { type: 'i128' });
+      return nativeToScVal([]); // empty managed-funds
+    });
+    await expect(readVaultState({ vault: VAULT })).rejects.toThrow(VaultResultParseError);
   });
 });

@@ -171,6 +171,9 @@ beforeEach(() => {
   };
 });
 
+// `onSigned` is REQUIRED on the money-submit path; a no-op default
+// lets tests that don't assert on it stay terse (those that do
+// override it).
 const baseArgs = {
   rpcUrl: 'https://rpc.example.test',
   networkPassphrase: 'Test SDF Network ; September 2015',
@@ -178,6 +181,7 @@ const baseArgs = {
   contractId: CONTRACT_ID,
   functionName: 'deposit',
   args: SC_ARGS,
+  onSigned: () => {},
 };
 
 describe('submitSorobanInvocation — happy path', () => {
@@ -271,6 +275,77 @@ describe('submitSorobanInvocation — CF-18 at-most-once fence', () => {
       SorobanSubmitError,
     );
     expect(rpcState.calls.sendTransaction).toHaveLength(0);
+  });
+
+  it('FAILS CLOSED: an RPC error on the priorTxHash pre-check refuses to submit (no double-mint)', async () => {
+    // P1-4: a transient getTransaction error must NOT be swallowed as
+    // "not confirmed" and fall through to a fresh submit — that would
+    // double-mint if the prior tx actually landed. It must bail.
+    rpcState.getTransactionThrow = new Error('RPC 502 / index lag');
+
+    const err = await submitSorobanInvocation({
+      ...baseArgs,
+      priorTxHash: 'maybe-landed-hash',
+    }).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(SorobanSubmitError);
+    expect((err as SorobanSubmitError).kind).toBe('transient_rpc');
+    // The critical assertions: NOTHING was built or submitted — it
+    // bailed at the pre-check, before even loading the account.
+    expect(rpcState.calls.getTransaction).toEqual(['maybe-landed-hash']);
+    expect(rpcState.calls.getAccount).toHaveLength(0);
+    expect(rpcState.calls.simulateTransaction).toHaveLength(0);
+    expect(rpcState.calls.sendTransaction).toHaveLength(0);
+  });
+
+  it('a FAILED prior tx (reverted) falls through to a fresh submit', async () => {
+    rpcState.simulateResult = successSim(xdr.ScVal.scvVoid());
+    rpcState.pollResult = successTx('fresh-hash', xdr.ScVal.scvVoid());
+    rpcState.getTransactionResults.set('failed-prior', {
+      status: rpc.Api.GetTransactionStatus.FAILED,
+      txHash: 'failed-prior',
+    });
+
+    const result = await submitSorobanInvocation({ ...baseArgs, priorTxHash: 'failed-prior' });
+
+    expect(result.deduped).toBe(false);
+    expect(rpcState.calls.sendTransaction).toHaveLength(1);
+  });
+});
+
+describe('submitSorobanInvocation — fee sanity cap (Lens1-F3)', () => {
+  it('refuses to sign when the assembled fee exceeds the default cap', async () => {
+    rpcState.simulateResult = successSim(xdr.ScVal.scvVoid());
+    // The assembleTransaction mock is a pass-through, so the built tx's
+    // fee IS the assembled fee — driving `feeStroops` above the 10-XLM
+    // default cap simulates a hostile RPC-supplied resource fee.
+    const err = await submitSorobanInvocation({
+      ...baseArgs,
+      feeStroops: '200000000', // 20 XLM — over the 10-XLM default cap
+    }).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(SorobanSubmitError);
+    expect((err as SorobanSubmitError).kind).toBe('terminal_fee_too_high');
+    // Refused BEFORE signing → nothing submitted.
+    expect(rpcState.calls.sendTransaction).toHaveLength(0);
+  });
+
+  it('a caller can TIGHTEN the cap via maxFeeStroops', async () => {
+    rpcState.simulateResult = successSim(xdr.ScVal.scvVoid());
+    // Default BASE_FEE (100) is well under the default cap, but a
+    // caller-supplied tighter cap of 50 rejects it.
+    await expect(
+      submitSorobanInvocation({ ...baseArgs, maxFeeStroops: 50n }),
+    ).rejects.toMatchObject({ kind: 'terminal_fee_too_high' });
+    expect(rpcState.calls.sendTransaction).toHaveLength(0);
+  });
+
+  it('a normal fee under the cap signs and submits', async () => {
+    rpcState.simulateResult = successSim(xdr.ScVal.scvVoid());
+    rpcState.pollResult = successTx('ok', xdr.ScVal.scvVoid());
+    const result = await submitSorobanInvocation(baseArgs);
+    expect(result.deduped).toBe(false);
+    expect(rpcState.calls.sendTransaction).toHaveLength(1);
   });
 });
 

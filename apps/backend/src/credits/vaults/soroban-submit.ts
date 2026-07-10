@@ -2,20 +2,45 @@
  * Low-level Soroban contract-invocation submit pipeline (ADR 031
  * §Detailed design D2, V2). One function, `submitSorobanInvocation`,
  * that builds → verifies (before signing) → simulates → assembles →
- * verifies again → signs → sends → polls exactly one
+ * verifies again → bounds the fee → signs → sends → polls exactly one
  * `invokeHostFunction` call, mirroring `payments/payout-submit.ts`'s
  * shape (ADR 016) for the Soroban side of the world.
  *
- * CF-18 at-most-once fence: the same discipline as
- * `payments/payout-submit.ts`'s `onSigned` hook, PLUS an explicit
- * `priorTxHash` pre-check (mirroring the CF-18 pre-check in
- * `payments/payout-worker-pay-one.ts`, which has no separate worker
- * yet on the vault side — V2 ships the client library only, not a
- * worker/table, so the pre-check lives here instead of a caller-side
- * DB row lookup). A caller that persists the hash `onSigned` returns
- * and passes it back in as `priorTxHash` on a retry gets the SAME
- * confirmed result without a second submission — never a second
- * deposit/withdraw/transfer.
+ * ## CF-18 at-most-once fence — what this DOES and does NOT guarantee
+ *
+ * Two mechanisms, both required, and NEITHER sufficient alone:
+ *
+ * 1. `onSigned(txHash)` — REQUIRED on this path (the field is
+ *    non-optional). Fires with the deterministic hash after signing,
+ *    before submit, so the caller can persist it. A caller that
+ *    persists it and passes it back as `priorTxHash` on a retry gets
+ *    the SAME landed tx, not a second submission.
+ * 2. `priorTxHash` pre-check — on a retry, asks the RPC "did THIS hash
+ *    already land?" and short-circuits if so. It fails CLOSED: any RPC
+ *    error on the pre-check refuses to submit (see below) rather than
+ *    risk a double-submit.
+ *
+ * **The guarantee is bounded.** Unlike the classic payout path
+ * (`payments/payout-worker-pay-one.ts`), which has a SECOND idempotency
+ * backstop — a memo scan of the operator's outbound payments — a
+ * Soroban `InvokeHostFunction` tx carries no memo, so there is no
+ * equivalent "find my prior attempt by content" fallback here. The
+ * hash pre-check is the ONLY fence, and it only works if the caller
+ * actually persisted the hash between attempts. If the process crashes
+ * AFTER `onSigned` resolves but BEFORE the persisted hash is durably
+ * committed, or the caller never re-supplies it, a retry WILL build a
+ * fresh tx.
+ *
+ * // TODO(V3, ADR 031 §D5): before this is wired into a real emission
+ * // flow, V3 MUST add a durable idempotency layer keyed on the
+ * // emission event id — a dedup row CLAIMED (inserted) BEFORE the
+ * // build, exactly like the payout worker's `pending_payouts` row
+ * // claim. The claim row, not this hash pre-check, is what makes the
+ * // fence complete: it survives a crash between attempts and does not
+ * // depend on the caller remembering to thread `priorTxHash` back in.
+ * // The hash pre-check remains as the fast in-flight de-dup; the claim
+ * // row is the authoritative at-most-once guarantee. Do NOT wire an
+ * // emission against this module until that layer exists.
  */
 import {
   Keypair,
@@ -48,6 +73,8 @@ export type SorobanSubmitErrorKind =
   | 'terminal_not_found'
   /** Verify-before-sign refused to sign the built transaction. */
   | 'terminal_verify_failed'
+  /** The assembled fee (from the RPC-supplied `minResourceFee`) exceeded the sanity cap — refused BEFORE signing (Lens1-F3). */
+  | 'terminal_fee_too_high'
   /** Anything else / a thrown error we can't classify. */
   | 'terminal_other';
 
@@ -63,6 +90,21 @@ export class SorobanSubmitError extends Error {
   }
 }
 
+/**
+ * Lens1-F3 fee sanity cap. `rpc.assembleTransaction` sets the total
+ * transaction fee from `simulation.minResourceFee` — a value the
+ * Soroban RPC endpoint supplies. A hostile or buggy RPC could return
+ * an absurd resource fee and get the operator to sign a tx that drains
+ * its XLM balance. We bound the assembled fee below this ceiling and
+ * refuse to sign above it. 10 XLM (100_000_000 stroops) is far above
+ * any legitimate single-invocation Soroban fee (even a Blend-strategy
+ * deposit under congestion is well under 1 XLM) while still catching
+ * an obviously-hostile fee. Callers can tighten it via
+ * `maxFeeStroops`; they cannot disable it (an unset arg uses this
+ * default, never "no cap").
+ */
+export const DEFAULT_MAX_ASSEMBLED_FEE_STROOPS = 100_000_000n;
+
 export interface SubmitSorobanInvocationArgs {
   /** Soroban RPC base URL (`env.LOOP_SOROBAN_RPC_URL`). */
   rpcUrl: string;
@@ -76,10 +118,20 @@ export interface SubmitSorobanInvocationArgs {
   timeoutSeconds?: number;
   feeStroops?: string;
   /**
+   * Lens1-F3 fee sanity cap (stroops). The assembled fee — set by
+   * `assembleTransaction` from the RPC-supplied `minResourceFee` — is
+   * refused if it exceeds this, BEFORE signing. Optional only to let a
+   * caller TIGHTEN it; unset uses `DEFAULT_MAX_ASSEMBLED_FEE_STROOPS`,
+   * never "no cap".
+   */
+  maxFeeStroops?: bigint;
+  /**
    * CF-18: a tx hash persisted from a prior attempt (if any). Checked
    * BEFORE building a new transaction — if it already landed
    * successfully, the result is returned directly with `deduped:
-   * true` and NOTHING is built, signed, or submitted.
+   * true` and NOTHING is built, signed, or submitted. Fails CLOSED: an
+   * RPC error on this pre-check refuses to submit rather than risk a
+   * double-submit.
    */
   priorTxHash?: string;
   /**
@@ -87,8 +139,16 @@ export interface SubmitSorobanInvocationArgs {
    * before submission, so the caller can persist it. Awaited; a
    * thrown/rejected hook aborts the submit fail-closed (mirrors
    * `payments/payout-submit.ts`).
+   *
+   * REQUIRED (non-optional) on this money-submit path: at-most-once
+   * depends on the caller persisting this hash, so making it optional
+   * would let a caller silently opt out of the only dedup mechanism
+   * and guarantee a double-submit on any retry. The classic payout
+   * path always wires its equivalent; so must this. The read-only
+   * `simulateSorobanCall` path (which never signs or submits) does NOT
+   * take this — it's specific to the submit path.
    */
-  onSigned?: (txHash: string) => Promise<void> | void;
+  onSigned: (txHash: string) => Promise<void> | void;
   /** Polling budget (attempt count) for the post-submit `getTransaction` wait via `pollTransaction`. */
   pollAttempts?: number;
 }
@@ -112,17 +172,40 @@ export async function submitSorobanInvocation(
   const server = new rpc.Server(args.rpcUrl);
 
   // CF-18 pre-check: a prior attempt's hash, if the caller has one,
-  // wins over building anything new. This is the "retry re-submits
-  // the same hash, never a second deposit" guarantee.
+  // wins over building anything new.
   if (args.priorTxHash !== undefined) {
-    const prior = await server.getTransaction(args.priorTxHash).catch(() => null);
-    if (prior !== null && prior.status === rpc.Api.GetTransactionStatus.SUCCESS) {
+    let prior: Awaited<ReturnType<typeof server.getTransaction>>;
+    try {
+      prior = await server.getTransaction(args.priorTxHash);
+    } catch (err) {
+      // FAIL CLOSED. An RPC error (network blip, index lag, retention-
+      // window expiry) is NOT proof the prior tx didn't land. If we
+      // swallowed it and fell through, `getAccount` below would load
+      // the sequence AS IT NOW STANDS — already advanced if the prior
+      // tx landed — and we'd build+submit a SECOND deposit/withdraw/
+      // transfer against a fresh sequence: a double-mint. Mirror the
+      // classic path (`payments/payout-worker-pay-one.ts`), whose whole
+      // idempotency pre-check is try/catch → retriedLater on ANY error:
+      // refuse to submit, let the caller retry.
+      throw new SorobanSubmitError(
+        'transient_rpc',
+        err instanceof Error
+          ? `CF-18 pre-check getTransaction failed — refusing to submit (fail-closed): ${err.message}`
+          : 'CF-18 pre-check getTransaction failed — refusing to submit (fail-closed)',
+      );
+    }
+    if (prior.status === rpc.Api.GetTransactionStatus.SUCCESS) {
       return {
         txHash: args.priorTxHash,
         returnValue: prior.returnValue ?? voidScVal(),
         deduped: true,
       };
     }
+    // NOT_FOUND (never landed) or FAILED (reverted all state, consumed
+    // its sequence, so a fresh higher-sequence submit won't collide):
+    // both are a definitive "the prior attempt is not a landed success",
+    // so falling through to a fresh build+submit is safe. Only a THROWN
+    // error is ambiguous, and that path already bailed above.
   }
 
   let keypair: Keypair;
@@ -202,6 +285,28 @@ export async function submitSorobanInvocation(
   // operation between build and sign.
   assertVerify(prepared, expected);
 
+  // Lens1-F3 fee sanity cap: `assembleTransaction` set the fee from the
+  // RPC-supplied `minResourceFee`. Bound it BEFORE signing so a hostile
+  // / buggy RPC can't get the operator to sign a tx with a fee that
+  // drains its XLM. Refuse above the cap rather than sign it.
+  const feeCap = args.maxFeeStroops ?? DEFAULT_MAX_ASSEMBLED_FEE_STROOPS;
+  let assembledFee: bigint;
+  try {
+    assembledFee = BigInt(prepared.fee);
+  } catch {
+    throw new SorobanSubmitError(
+      'terminal_other',
+      `assembled fee "${prepared.fee}" is not an integer stroop value`,
+    );
+  }
+  if (assembledFee > feeCap) {
+    throw new SorobanSubmitError(
+      'terminal_fee_too_high',
+      `assembled fee ${assembledFee} stroops exceeds the sanity cap of ${feeCap} stroops — ` +
+        'refusing to sign (a hostile/buggy Soroban RPC could otherwise drain operator XLM)',
+    );
+  }
+
   try {
     prepared.sign(keypair);
   } catch (err) {
@@ -215,19 +320,16 @@ export async function submitSorobanInvocation(
   // seq + ops + soroban data + fee), so we know it without contacting
   // the network. Persist BEFORE submitting; abort fail-closed if the
   // persist itself fails (better to retry than to submit without
-  // having recorded the hash).
+  // having recorded the hash). `onSigned` is required on this path
+  // (see `SubmitSorobanInvocationArgs`), so this always runs.
   const signedHash = prepared.hash().toString('hex');
-  if (args.onSigned !== undefined) {
-    try {
-      await args.onSigned(signedHash);
-    } catch (err) {
-      throw new SorobanSubmitError(
-        'terminal_other',
-        err instanceof Error
-          ? `onSigned persist failed: ${err.message}`
-          : 'onSigned persist failed',
-      );
-    }
+  try {
+    await args.onSigned(signedHash);
+  } catch (err) {
+    throw new SorobanSubmitError(
+      'terminal_other',
+      err instanceof Error ? `onSigned persist failed: ${err.message}` : 'onSigned persist failed',
+    );
   }
 
   let sendRes: Awaited<ReturnType<typeof server.sendTransaction>>;
