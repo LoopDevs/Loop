@@ -1,8 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+// Stable, single handle (not a fresh object per `.child()` call) so
+// tests can assert on `log.error`/`log.warn` calls — notably the S4-1
+// follow-up shard-failure-isolation test below, which asserts a
+// rejecting shard is logged rather than silently swallowed.
+const { logMock } = vi.hoisted(() => ({
+  logMock: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
 vi.mock('../../logger.js', () => ({
   logger: {
-    child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+    child: () => logMock,
   },
 }));
 
@@ -279,6 +286,10 @@ function makeRow(overrides: Record<string, unknown> = {}): Record<string, unknow
 
 beforeEach(() => {
   __resetPayoutWorkerForTests();
+  logMock.info.mockClear();
+  logMock.warn.mockClear();
+  logMock.error.mockClear();
+  logMock.debug.mockClear();
   advisoryLockState.acquired = true;
   repoMocks.listClaimablePayouts.mockReset();
   repoMocks.markPayoutSubmitted.mockReset();
@@ -1313,6 +1324,127 @@ describe('ADR 044 / S4-1 — payout channel accounts (sharding)', () => {
     expect(
       (sdkMock.submitPayout.mock.calls[0]?.[0] as { channelSecret?: string }).channelSecret,
     ).toBe('SCHAN1');
+  });
+
+  describe('S4-1 follow-up: a rejecting shard is isolated (Promise.allSettled, not Promise.all)', () => {
+    it('one shard throwing mid-tick does not prevent sibling shards from completing + reporting normally, and the rejection is logged (not silently swallowed)', async () => {
+      const channels = [
+        { secret: 'SCHAN1', account: 'GCHAN1' },
+        { secret: 'SCHAN2', account: 'GCHAN2' },
+      ];
+      // Round-robin by claim order: p-1/p-3 → shard 0 (channel 1),
+      // p-2/p-4 → shard 1 (channel 2).
+      repoMocks.listClaimablePayouts.mockResolvedValue([
+        makeRow({ id: 'p-1', memoText: 'm1' }),
+        makeRow({ id: 'p-2', memoText: 'm2' }),
+        makeRow({ id: 'p-3', memoText: 'm3' }),
+        makeRow({ id: 'p-4', memoText: 'm4' }),
+      ]);
+      // Simulate an unexpected DB-layer throw on the row-claim step for
+      // p-1 — this is one of the few `payOne` call sites NOT fenced in
+      // try/catch (unlike the idempotency pre-check and submit paths),
+      // so it is a realistic way for a shard's `runShard` loop to
+      // reject rather than resolve to a `PayOutcome`.
+      repoMocks.markPayoutSubmitted.mockImplementation(async (id: string) => {
+        if (id === 'p-1') {
+          throw new Error('simulated DB connection drop during claim');
+        }
+        return { id };
+      });
+
+      const r = await runPayoutTick({ ...BASE_ARGS, channels });
+
+      // Shard 0 died on its first row (p-1) and never reached p-3.
+      // Shard 1 (p-2, p-4) ran to completion and is reflected in the
+      // tick's reported counts — proving isolation, not just "the
+      // process didn't crash."
+      expect(r.confirmed).toBe(2);
+      const submittedMemos = sdkMock.submitPayout.mock.calls.map(
+        (call) => (call[0] as { intent: { memoText: string } }).intent.memoText,
+      );
+      expect(submittedMemos.sort()).toEqual(['m2', 'm4']);
+
+      // The rejection is surfaced via a structured log.error, not
+      // swallowed — with enough context (shard index, channel account,
+      // the row IDs owned by the dead shard) to diagnose which rows
+      // need re-picking.
+      expect(logMock.error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          shardIndex: 0,
+          shardChannelAccount: 'GCHAN1',
+          shardRowIds: ['p-1', 'p-3'],
+          err: expect.any(Error),
+        }),
+        expect.stringContaining('Payout channel shard threw'),
+      );
+
+      // Health/reporting posture: the tick as a whole still "succeeds"
+      // (sibling shards completed) — this is what `Promise.allSettled`
+      // buys over `Promise.all`, which would have rejected the whole
+      // tick and lost the successful shard's counts.
+    });
+
+    it('the A8 leader lock is not released until every shard — including the rejecting one — has settled', async () => {
+      // Regression guard for the bug this follow-up closes: with
+      // `Promise.all`, the tick body's promise would reject (and
+      // `withAdvisoryLock` would release the lock) as soon as the
+      // FIRST shard rejects, even while a sibling shard's submit is
+      // still in flight. `runPayoutTick`'s return only resolves once
+      // `withAdvisoryLock`'s callback has fully settled, so asserting
+      // that `runPayoutTick` doesn't resolve until the slow sibling
+      // shard's in-flight submit completes is an end-to-end proof that
+      // the lock-holding window now covers the full tick.
+      const channels = [
+        { secret: 'SCHAN1', account: 'GCHAN1' },
+        { secret: 'SCHAN2', account: 'GCHAN2' },
+      ];
+      repoMocks.listClaimablePayouts.mockResolvedValue([
+        makeRow({ id: 'p-1', memoText: 'm1' }),
+        makeRow({ id: 'p-2', memoText: 'm2' }),
+      ]);
+      repoMocks.markPayoutSubmitted.mockImplementation(async (id: string) => {
+        if (id === 'p-1') {
+          throw new Error('simulated claim failure');
+        }
+        return { id };
+      });
+      let resolveSlowSubmit: (() => void) | undefined;
+      sdkMock.submitPayout.mockImplementation(async (args: unknown) => {
+        const a = args as {
+          intent: { memoText: string };
+          onSigned?: (h: string) => Promise<void> | void;
+        };
+        if (a.intent.memoText === 'm2') {
+          await new Promise<void>((resolve) => {
+            resolveSlowSubmit = resolve;
+          });
+        }
+        await a.onSigned?.(`tx-${a.intent.memoText}`);
+        return { txHash: `tx-${a.intent.memoText}`, ledger: 1 };
+      });
+
+      const tickPromise = runPayoutTick({ ...BASE_ARGS, channels });
+
+      // Give the rejecting shard (p-1) every opportunity to reject and
+      // the tick promise every opportunity to resolve prematurely
+      // before the still-in-flight sibling submit (m2) completes.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      await vi.waitFor(() => {
+        if (resolveSlowSubmit === undefined) {
+          throw new Error('sibling shard has not reached its submit yet');
+        }
+      });
+      let settled = false;
+      void tickPromise.then(() => {
+        settled = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(settled).toBe(false);
+
+      resolveSlowSubmit?.();
+      const r = await tickPromise;
+      expect(r.confirmed).toBe(1);
+    });
   });
 });
 

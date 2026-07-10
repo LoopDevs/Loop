@@ -136,7 +136,10 @@ rows exactly as before, then:
    processed by its own sequential loop (a shard's own rows still await
    each other — a channel's sequence number is exactly as serial
    internally as the operator's is today), and the N shards run
-   concurrently via `Promise.all`. Each row in shard `k` is submitted
+   concurrently via `Promise.allSettled` (S4-1 follow-up hardening — one
+   shard throwing does not abort the sibling shards mid-submit or
+   release the A8 lock early; see "S4-1 follow-up: shard failure
+   isolation" below). Each row in shard `k` is submitted
    with `channelSecret = channels[k].secret`, which `submitPayout` uses
    as the transaction source (see "Submit-primitive changes" below).
 
@@ -164,6 +167,43 @@ queues."
 This is purely additive to the function signature; every existing caller
 (pay-CTX forwarding via `submitNativePayment`, wallet fee-bump via
 `submitPreSignedTransaction`) is untouched.
+
+### S4-1 follow-up: shard failure isolation
+
+Phase 1 originally dispatched the N shards with `Promise.all`. `payOne`
+fences almost everything it does in try/catch and resolves to a
+`PayOutcome` rather than throwing (the idempotency pre-check, the submit
+
+- classify-and-fail path) — but the row-claim call (`markPayoutSubmitted`
+  / `reclaimSubmittedPayout`) and a couple of `handleSubmitError`'s own DB
+  writes are not fenced, so an unexpected throw there (a DB blip, a
+  programmer error) can still reject `payOne`, and with it a shard's
+  `runShard` loop.
+
+With `Promise.all`, one rejecting shard rejected the whole tick
+immediately — worse than losing a row: sibling shards were **not**
+cancelled by the rejection (JS doesn't cancel in-flight promises), so
+they kept submitting Stellar transactions in the background, but
+`withAdvisoryLock` releases the A8 lock as soon as `runPayoutTickLocked`'s
+returned promise settles — immediately on the first shard's rejection,
+while sibling shards were still mid-submit. A second machine could then
+acquire the lock and submit through the **same configured channel
+accounts** concurrently with the still-in-flight orphaned shard from the
+first tick — reopening exactly the sequence-number collision
+(`tx_bad_seq` churn) A8 exists to prevent. So a shard rejection was not
+just a lost-reporting nit; it could reopen the cross-machine race A8
+closed.
+
+The fix: dispatch shards with `Promise.allSettled` instead. It waits for
+every shard to finish (success or failure) before `runPayoutTickLocked`
+returns, so the A8 lock is held for the shards' full duration regardless
+of any one shard's outcome. A rejected shard is logged (`log.error` with
+the shard index, channel account, and the row IDs it owned) rather than
+silently swallowed, and its unprocessed rows simply stay in their prior
+DB state to be re-picked on a later tick — the same "leave it for the
+next tick" posture the rest of this worker already uses for transient
+failures. Per-row correctness (CAS + CF-18) is unaffected either way;
+this only changes the tick's failure blast radius.
 
 ### Why keep the fleet-wide leader lock (A8) for Phase 1 of this ADR
 
@@ -307,14 +347,18 @@ interleave mid-operation).
 - `payout-worker-pay-one.ts` threads an optional `channelSecret` through
   `payOne` → `submitPayout`.
 - `payout-worker.ts` shards a claimed batch across configured channels
-  and runs shards concurrently via `Promise.all`; zero channels (default)
-  is the exact pre-ADR-044 code path.
+  and runs shards concurrently via `Promise.allSettled` (S4-1 follow-up
+  hardening — see "S4-1 follow-up: shard failure isolation" above; a
+  rejecting shard is isolated + logged instead of aborting the tick and
+  releasing the A8 lock early); zero channels (default) is the exact
+  pre-ADR-044 code path.
 - Pino redaction, `.env.example`, `docs/development.md`,
   `docs/threat-model.md`, `docs/invariants.md` (INV-9 note).
 - Unit coverage: per-channel sequence isolation + dual-signature shape
   (`payout-submit.test.ts`), shard partitioning + within-shard
-  seriality + cross-shard concurrency + N=0 exact-passthrough
-  (`payout-worker.test.ts`), env boot-validation (`env.test.ts`),
+  seriality + cross-shard concurrency + N=0 exact-passthrough + (S4-1
+  follow-up) a rejecting shard isolated from + not blocking sibling
+  shards (`payout-worker.test.ts`), env boot-validation (`env.test.ts`),
   channel resolution (`channel-accounts.test.ts`), redaction
   (`logger.test.ts`).
 - The CF-14 `FOR UPDATE SKIP LOCKED` disjoint-claim proof this ADR
