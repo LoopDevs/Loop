@@ -83,6 +83,12 @@ export const STEP_UP_SCOPES = [
   // submit a real outbound Stellar payment to CTX (`payCtxOrder`) — a
   // captured bearer alone must not be able to trigger that.
   'order-redrive',
+  // A5-4: the order-bound admin refund can submit a real outbound
+  // Stellar refund-to-sender (xlm/usdc) or credit a mirror balance —
+  // and, for a FULFILLED order, is the compensating control for the
+  // operator-accepted code-unused-attestation double-spend risk. A
+  // captured bearer alone must not be able to trigger either.
+  'order-refund',
 ] as const;
 export type AdminStepUpScope = (typeof STEP_UP_SCOPES)[number];
 

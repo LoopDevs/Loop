@@ -497,6 +497,7 @@ export {
   getAdminOrder,
   listAdminOrders,
   redriveOrder,
+  refundOrder,
 } from './admin-orders';
 
 // A2-1165 (slice 26): merchant-flows lifetime cashback table

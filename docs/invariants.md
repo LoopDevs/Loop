@@ -186,6 +186,18 @@ No order is refunded twice; no order's cashback is credited twice.
   never-paid order whose unlinked deposit was A6-refunded relies on the
   admin not also crediting an order that never debited anything (both
   actions are step-up-gated and audited).
+- **runtime (A5-4 order-bound refund, 2026-07-10)**: the admin refund
+  endpoint (`POST /api/admin/orders/:orderId/refund`,
+  `admin/order-refund.ts`) adds NO new uniqueness logic — it dispatches
+  to the SAME primitives (`applyOrderAutoRefund` for xlm/usdc → on-chain,
+  `applyAdminRefund` for credit) and therefore rides the exact guards
+  above. A second refund attempt for an already-refunded order surfaces
+  `RefundAlreadyIssuedError` → 409 `ORDER_ALREADY_REFUNDED`. Fulfilled-
+  order refunds (behind the code-unused attestation, see
+  `docs/threat-model.md`) are still just an order refund on this axis —
+  single-issue holds; the accepted risk is the external code's
+  usability, not a ledger double-issue. `loop_asset` refunds fail closed
+  (matching the R3-2 posture) rather than open a mirror-only path.
 
 ---
 

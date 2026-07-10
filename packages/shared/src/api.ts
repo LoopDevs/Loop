@@ -235,6 +235,25 @@ export const ApiErrorCode = {
   // the recovery sweep instead.
   ORDER_NOT_REDRIVABLE: 'ORDER_NOT_REDRIVABLE',
   ORDER_REDRIVE_IN_PROGRESS: 'ORDER_REDRIVE_IN_PROGRESS',
+  // A5-4 — order-bound admin refund. NOT_REFUNDABLE (400): the order is
+  // `pending_payment` / `expired` — nothing was ever charged, or it
+  // already lapsed with nothing to reverse. ATTESTATION_REQUIRED (400):
+  // the order is `fulfilled` and the request didn't carry the required
+  // code-unused attestation. ALREADY_REFUNDED (409): a refund already
+  // exists for this order (INV-8). CTX_ALREADY_PAID (409): the order is
+  // `procuring` and Loop has already paid CTX for it — refunding now
+  // would double-lose money; escalate instead of refunding blind.
+  // UNSUPPORTED_PAYMENT_METHOD (409): `loop_asset` — matches the
+  // existing R3-2 fail-closed posture, not a new gap. SUBMIT_FAILED
+  // (502): the on-chain refund-to-sender attempt failed or the order
+  // predates the payment-snapshot columns (pre-migration order — refund
+  // manually).
+  ORDER_NOT_REFUNDABLE: 'ORDER_NOT_REFUNDABLE',
+  ORDER_REFUND_ATTESTATION_REQUIRED: 'ORDER_REFUND_ATTESTATION_REQUIRED',
+  ORDER_ALREADY_REFUNDED: 'ORDER_ALREADY_REFUNDED',
+  ORDER_REFUND_CTX_ALREADY_PAID: 'ORDER_REFUND_CTX_ALREADY_PAID',
+  ORDER_REFUND_UNSUPPORTED_PAYMENT_METHOD: 'ORDER_REFUND_UNSUPPORTED_PAYMENT_METHOD',
+  ORDER_REFUND_SUBMIT_FAILED: 'ORDER_REFUND_SUBMIT_FAILED',
 } as const;
 
 export type ApiErrorCodeValue = (typeof ApiErrorCode)[keyof typeof ApiErrorCode];

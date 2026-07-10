@@ -6,17 +6,18 @@
  * that back the order-drill surfaces — same routes the openapi
  * spec splits into `./openapi/admin-order-cluster.ts` (#1177), plus
  * `POST /orders/:orderId/redrive` (A5-1, its own openapi slice
- * `./openapi/admin-order-redrive.ts`).
+ * `./openapi/admin-order-redrive.ts`) and `POST /orders/:orderId/refund`
+ * (A5-4, its own openapi slice `./openapi/admin-order-refund.ts`).
  *
  * Mount-order discipline preserved verbatim — the literal-suffix
  * routes (`/orders/activity`, `/orders/payment-method-share`,
  * `/orders/payment-method-activity`) MUST register BEFORE the
  * param-only `/orders/:orderId`, otherwise Hono\'s URL-template
  * tree captures the literal as a `:orderId` value. `/orders/:orderId/redrive`
- * is a longer, distinctly-shaped template (3 segments vs 2) so it
- * doesn't collide with `/orders/:orderId` regardless of registration
- * order, but it's mounted after it for readability (GETs before the
- * one write).
+ * and `/orders/:orderId/refund` are longer, distinctly-shaped templates
+ * (3 segments vs 2) so neither collides with `/orders/:orderId`
+ * regardless of registration order, but both are mounted after it for
+ * readability (GETs before the writes).
  *
  * Mount-order semantics shared with `mountAdminRoutes`: this
  * factory MUST be called AFTER the 4-piece middleware stack
@@ -33,6 +34,7 @@ import { adminPaymentMethodShareHandler } from '../admin/payment-method-share.js
 import { adminPaymentMethodActivityHandler } from '../admin/payment-method-activity.js';
 import { adminOrdersCsvHandler } from '../admin/orders-csv.js';
 import { adminRedriveOrderHandler } from '../admin/order-redrive.js';
+import { adminRefundOrderHandler } from '../admin/order-refund.js';
 
 /**
  * Mounts the order-drill `/api/admin/orders/*` routes on the
@@ -94,6 +96,21 @@ export function mountAdminOrderDrillRoutes(app: Hono): void {
     requireStaff('admin'),
     requireAdminStepUp('order-redrive'),
     adminRedriveOrderHandler,
+  );
+  // POST /api/admin/orders/:orderId/refund — A5-4 order-bound refund.
+  // Admin-tier + step-up (`order-refund` scope): reuses the SAME
+  // primitives the existing auto-refund path uses per payment method
+  // (on-chain refund-to-sender for xlm/usdc, mirror credit for
+  // `credit`, fail-closed for `loop_asset` per R3-2); a `fulfilled`
+  // order additionally requires a code-unused attestation in the body.
+  // 10/min — matches redrive's cadence (can submit a real outbound
+  // Stellar payment / touch Horizon for the ctxPaid disambiguation).
+  app.post(
+    '/api/admin/orders/:orderId/refund',
+    rateLimit('POST /api/admin/orders/:orderId/refund', 10, 60_000),
+    requireStaff('admin'),
+    requireAdminStepUp('order-refund'),
+    adminRefundOrderHandler,
   );
   // Finance-ready CSV export of Loop-native orders. Same rate-limit
   // cadence as other Tier-3 exports — ops runs it manually at month-end,

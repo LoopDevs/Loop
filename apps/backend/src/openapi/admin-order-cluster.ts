@@ -32,6 +32,7 @@ import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 import { registerAdminOrderClusterDrillsOpenApi } from './admin-order-cluster-drills.js';
 import { registerAdminOrderRedriveOpenApi } from './admin-order-redrive.js';
+import { registerAdminOrderRefundOpenApi } from './admin-order-refund.js';
 
 /**
  * Registers the order-cluster paths + their locally-scoped
@@ -182,4 +183,9 @@ export function registerAdminOrderClusterOpenApi(
   // read/write files. `adminWriteAudit` is threaded through for the
   // `{ result, audit }` envelope.
   registerAdminOrderRedriveOpenApi(registry, errorResponse, adminWriteAudit);
+
+  // A5-4: the order-bound refund write (incl. fulfilled-order-via-
+  // attestation) lives in its own file (`./admin-order-refund.ts`) —
+  // same split as the redrive write above.
+  registerAdminOrderRefundOpenApi(registry, errorResponse, adminWriteAudit);
 }

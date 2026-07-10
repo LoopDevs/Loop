@@ -58,6 +58,18 @@ balanceSumMinor` for a `(user_id, currency)` pair.
 
 ## Resolution
 
+> **Drift-correction is the EXISTING admin credit-adjust — there is no
+> separate "drift-write" primitive (A5-9 decision, 2026-07-10).** A safe,
+> audited correction is `POST /api/admin/users/:userId/credit-adjustments`
+> (admin + step-up + required `reason`), which is already guarded by the
+> conservation trigger (`assert_emission_conservation`, INV-3) and the
+> daily admin-write cap (INV-5). Locate the drift with the fleet-wide
+> ledger browser (`/admin/ledger`, A5-8) and the reconciliation surface
+> (`/api/admin/reconciliation` / operator-float, R3-1), then write ONE
+> corrective adjustment citing this runbook. Deliberately NOT a bespoke
+> unguarded write — that would demote the conservation invariant to
+> convention (see `docs/invariants.md`).
+
 After tracing the cause:
 
 - **Money flow bug**: write the fix, deploy, re-run reconciliation. If

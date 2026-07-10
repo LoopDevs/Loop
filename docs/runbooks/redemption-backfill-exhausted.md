@@ -66,8 +66,16 @@ on-call business-hours window (`docs/oncall.md`).
    - **CTX unpaid + NO matching on-chain payment** → the order was never paid
      (pre-#1366 strand, or a regression). There is nothing to double-spend, so
      the "don't refund" rule above does **not** apply. The order was never
-     truly fulfilled: mark it `failed` with a reason, and if it's a real
-     customer, refund their inbound payment via the admin credit path (ADR 017).
+     truly fulfilled: refund it via the **A5-4 order-bound refund**
+     (`POST /api/admin/orders/:orderId/refund`) — since the order is
+     `fulfilled` (with null redeem fields), supply the required code-unused
+     attestation (`{ codeUnused: true, attestationNote }`) affirming no usable
+     code was delivered. That path reuses the correct refund primitive for the
+     order's payment method (on-chain refund-to-sender for xlm/usdc, mirror
+     credit for a credit-funded order) and is INV-8-idempotent. **This is the
+     R3-4 policy** (2026-07-10, operator decision): exhaustion is NOT
+     auto-refunded — it pages here, and the human decides, refunding through
+     this attested path when warranted.
    - **CTX unpaid but a matching on-chain payment exists** → we paid but CTX
      couldn't reconcile (memo / amount / memo-type mismatch). Open a CTX ticket,
      do **not** re-pay, and recover via the ticket before any refund.

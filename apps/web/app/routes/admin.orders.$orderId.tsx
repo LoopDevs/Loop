@@ -13,6 +13,7 @@ import {
 import { AdminNav } from '~/components/features/admin/AdminNav';
 import { OrderDeliveryPanel } from '~/components/features/admin/OrderDeliveryPanel';
 import { OrderRedrivePanel } from '~/components/features/admin/OrderRedrivePanel';
+import { RefundOrderPanel } from '~/components/features/admin/RefundOrderPanel';
 import { RequireStaff } from '~/components/features/admin/RequireAdmin';
 import { CopyButton } from '~/components/features/admin/CopyButton';
 import { Spinner } from '~/components/ui/Spinner';
@@ -120,6 +121,13 @@ function AdminOrderDetailRouteInner(): React.JSX.Element {
               "unstick this" affordance. */}
           {orderId !== undefined ? (
             <OrderRedrivePanel orderId={orderId} orderState={query.data.state} />
+          ) : null}
+          {/* A5-4: order-bound refund — admin-tier money write.
+              Self-hides for non-admin staff and for non-refundable
+              states (pending_payment / expired). For a `fulfilled`
+              order the dialog demands a code-unused attestation. */}
+          {orderId !== undefined ? (
+            <RefundOrderPanel orderId={orderId} orderState={query.data.state} />
           ) : null}
           {/* ADR 037 §3: delivery panel — redemption status + the
               support-allowed refetch re-drive. Self-hides for

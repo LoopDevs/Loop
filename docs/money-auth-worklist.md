@@ -282,7 +282,8 @@
       `LOOP_STELLAR_DEPOSIT_ADDRESS`, both `xlm` and `usdc`) via
       `POST /api/admin/operator-float/baselines` per the runbook, and
       money review signs off.
-- [ ] **R3-4 · Auto-refund on redemption-null exhaustion (+ policy).** _M · 💰 + policy decision._
+- [x] **R3-4 · Auto-refund on redemption-null exhaustion (+ policy).** _M · 💰 + policy decision._
+      **RESOLVED 2026-07-10 (operator decision):** NO auto-refund. The existing `notifyRedemptionBackfillExhausted` Discord page + a manual operator decision IS the policy (auto-refunding is unsafe — a fulfilled-but-no-code order may have been genuinely paid to CTX). A manual refund of such an order now flows through the A5-4 fulfilled-order-refund-with-attestation path (`POST /api/admin/orders/:orderId/refund`). Linkage documented in `docs/runbooks/redemption-backfill-exhausted.md`.
 - [x] **R3-6 · Page the drift channel on money-path contract drift.** _S · 💰._
 
 ## Phase 2 — Auth / security (fail-open or bypass risk)
@@ -380,9 +381,11 @@
       order (INV-6) and narrowly double-pay (INV-7); stuck procuring orders are auto-recovered by
       the sweep, and safe manual re-procure needs a liveness signal + bounded Horizon I/O (follow-up).
       No new money logic — reuses `procureOne` / `ctx_settlements`. Cancel-and-refund deferred to A5-4.
-- [ ] **A5-4 · Order-bound refund UI + fulfilled-order policy.** _M · 💰 + policy._
+- [x] **A5-4 · Order-bound refund UI + fulfilled-order policy.** _M · 💰 + policy._
+      **Done 2026-07-10 (review-first PR open, not yet merged):** new `POST /api/admin/orders/:orderId/refund`, admin-tier + step-up (`order-refund` scope), ADR-017 envelope. Operator-decided policy: paid/procuring/failed refund directly; **fulfilled** refundable ONLY behind a required code-unused attestation (`{codeUnused,attestationNote}`). No new money path — dispatches to the EXISTING primitives per `payment_method`: xlm/usdc → `applyOrderAutoRefund`→A6 `refundDeposit` (on-chain to sender); credit → `applyAdminRefund` (mirror); **loop_asset fails closed** (R3-2 posture). paid/procuring fenced to `failed` first; procuring-with-CTX-paid refused (`loopPaidCtx`). INV-8-idempotent (rides the migration-0013 index + deposit-refund claim guard — no new uniqueness logic). Web `RefundOrderPanel` with the fulfilled-order warning + attestation checkbox. Double-spend risk operator-accepted (attestation + audit) — `docs/threat-model.md`.
 - [ ] **A5-6 · Make stuck-orders / stuck-payouts support-visible.** _M · 💰._
-- [ ] **A5-9 · Bulk actions + drift-correction action.** _M · 💰._
+- [x] **A5-9 · Bulk actions + drift-correction action.** _M · 💰._
+      **Drift-correction RESOLVED 2026-07-10 (operator decision):** NO new drift-write primitive. Drift is corrected via the EXISTING per-user credit-adjust (`POST /api/admin/users/:userId/credit-adjustments`, step-up + reason + audit, already conservation-trigger + INV-5-cap guarded), driven by the A5-8 ledger browser + R3-1 reconciliation tools. Procedure documented in `docs/runbooks/ledger-drift.md` + `operator-float-drift.md`. Bulk selection (UX-only over already-guarded single writes) deferred.
 - [ ] **A5-8 · Fleet-wide ledger browser.** _M · 💰._
 - [ ] **A5-7 · Per-subject audit view.** _M._
 - [ ] **A5-2 · Admin session-revocation UI.** _S–M · 🔐._
