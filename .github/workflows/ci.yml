@@ -987,7 +987,10 @@ jobs:
   test-e2e-flywheel:
     name: E2E tests (loop-native flywheel)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 15 -> 20 (Q6-5): a third Playwright suite (admin/support
+    # dashboard smoke) now runs sequentially in this job alongside the
+    # flywheel walk and the loop-purchase suite.
+    timeout-minutes: 20
     # A2-1705 phase A.3 closure — separate config / port range from
     # the mocked-e2e suite because LOOP_AUTH_NATIVE_ENABLED=true
     # changes the home page's SSR branch and would break the legacy
@@ -1083,6 +1086,20 @@ jobs:
         with:
           name: playwright-report-loop-purchase
           path: playwright-report-loop-purchase/
+          retention-days: 7
+      # Q6-5 (docs/money-auth-worklist.md): admin/support dashboard
+      # E2E smoke. Runs as a third step in this SAME job (own
+      # config/port range/webServer — see
+      # playwright.admin.config.ts's header comment) rather than a
+      # new CI job, reusing the postgres service above.
+      - name: Run admin/support dashboard e2e tests
+        run: npm run test:e2e:admin
+      - name: Upload Playwright report (admin)
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: playwright-report-admin
+          path: playwright-report-admin/
           retention-days: 7
 
   notify:

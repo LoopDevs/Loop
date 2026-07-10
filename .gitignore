@@ -50,6 +50,7 @@ coverage/
 
 # Playwright
 playwright-report/
+playwright-report-admin/
 test-results/
 
 # k6 load-test run output (tools/load-test/run-local.sh) — regenerated per
