@@ -14,9 +14,15 @@
  * credit row) is real-Postgres-only behavior, so the race lives here.
  */
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { db } from '../../db/client.js';
-import { creditTransactions, orders, paymentWatcherSkips, users } from '../../db/schema.js';
+import {
+  creditTransactions,
+  orders,
+  paymentWatcherSkips,
+  userCredits,
+  users,
+} from '../../db/schema.js';
 import { findOrCreateUserByEmail } from '../../db/users.js';
 import { ensureMigrated, truncateAllTables } from './db-test-setup.js';
 import { claimForRefund } from '../../payments/deposit-refund.js';
@@ -185,5 +191,64 @@ describe('claimForRefund — INV-8 credit-refund exclusion (real FOR UPDATE)', (
     expect([adminWon, claimWon].filter(Boolean)).toHaveLength(1);
     if (adminWon) expect(claimOutcome).toBe('credit_refunded');
     if (claimWon) expect(adminOutcome).toBe('blocked');
+  });
+});
+
+describe('applyAdminRefund — same-path concurrency (A5-4 P2)', () => {
+  it('two concurrent applyAdminRefund calls for the SAME order: exactly one succeeds, the other is blocked', async () => {
+    // A5-4 money-review P2: the order-refund handler's own race test
+    // (order-refund.test.ts) only simulates the CAS-miss outcome
+    // against a mocked DB. The real guard is two-layered — the
+    // `orders` row FOR UPDATE lock inside applyAdminRefund serializes
+    // concurrent callers for the same order, and whichever loses the
+    // lock then hits migration 0013's partial unique index
+    // (`credit_transactions_reference_unique`) on its own INSERT,
+    // mapped to RefundAlreadyIssuedError via `isUniqueViolation`. Only
+    // a real Postgres proves the lock + unique index actually
+    // serialize two genuinely-concurrent admin-refund callers (e.g.
+    // two operators double-clicking, or a retried request racing the
+    // original) rather than double-crediting the user.
+    const { userId, orderId } = await seedFailedOrder(null);
+
+    const refundOnce = (): Promise<'refunded' | 'blocked'> =>
+      applyAdminRefund({
+        userId,
+        currency: 'USD',
+        amountMinor: 2500n,
+        orderId,
+        adminUserId: 'admin-race-test',
+      }).then(
+        () => 'refunded' as const,
+        (err: unknown) => {
+          if (err instanceof RefundAlreadyIssuedError) return 'blocked' as const;
+          throw err;
+        },
+      );
+
+    const [a, b] = await Promise.all([refundOnce(), refundOnce()]);
+
+    expect([a, b].filter((r) => r === 'refunded')).toHaveLength(1);
+    expect([a, b].filter((r) => r === 'blocked')).toHaveLength(1);
+
+    // The ledger carries exactly one refund row for this order, for
+    // exactly the charged amount — never a double-credit.
+    const refundRows = await db
+      .select({ amountMinor: creditTransactions.amountMinor })
+      .from(creditTransactions)
+      .where(
+        and(
+          eq(creditTransactions.type, 'refund'),
+          eq(creditTransactions.referenceType, 'order'),
+          eq(creditTransactions.referenceId, orderId),
+        ),
+      );
+    expect(refundRows).toHaveLength(1);
+    expect(refundRows[0]?.amountMinor).toBe(2500n);
+
+    const [balance] = await db
+      .select({ balanceMinor: userCredits.balanceMinor })
+      .from(userCredits)
+      .where(and(eq(userCredits.userId, userId), eq(userCredits.currency, 'USD')));
+    expect(balance?.balanceMinor).toBe(2500n);
   });
 });
