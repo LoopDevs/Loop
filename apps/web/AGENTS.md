@@ -35,17 +35,22 @@ app/
 │   │   ├── purchase/ ← amount → payment → complete / redeem state machine
 │   │   │               (incl. PayWithLoopBalance — ADR 030 one-tap pay)
 │   │   ├── wallet/   ← Stellar trustline status / setup cards, WalletCard
-│   │   │               (ADR 030 embedded-wallet balance surface)
+│   │   │               (ADR 030 embedded-wallet balance surface), VaultApyRow
+│   │   │               (ADR 031 V6 — past-30d APY + disclaimer + one-tap
+│   │   │               90d-range detail per LOOP-branded balance row, dark
+│   │   │               behind LOOP_PHASE_1_ONLY)
 │   │   └── top-level: Navbar, Footer, MerchantCard, MerchantGroupCard, ClusterMap, MapBottomSheet,
 │   │                  NativeTabBar, NativeBackButton, FixedSearchButton
 │   └── ui/           ← Primitives (Button, Input, LazyImage, OfflineBanner,
 │                       Skeleton, Spinner, ToastContainer)
 ├── hooks/            ← TanStack Query wrappers + lifecycle (use-auth, use-merchants,
-│                       use-orders, use-wallet, use-native-platform,
+│                       use-orders, use-wallet, use-vault-apy (ADR 031 V6 —
+│                       double-gated on auth AND !phase1Only), use-native-platform,
 │                       use-session-restore, query-retry,
 │                       use-staff-role — ADR 037 staffRole resolver over the ['me'] line)
 ├── services/         ← Typed API client (api-client, auth, clusters, merchants,
-│                       orders, orders-loop, wallet, config, admin (+ per-surface admin-*
+│                       orders, orders-loop, wallet, vault-apy (ADR 031 V6), config,
+│                       admin (+ per-surface admin-*
 │                       slices incl. ADR 037 admin-staff / admin-watcher-skips /
 │                       admin-user-wallet / admin-lookup / admin-order-redemption /
 │                       admin-user-auth-state — A5-3 login/OTP support state),

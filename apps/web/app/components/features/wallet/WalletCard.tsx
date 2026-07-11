@@ -1,6 +1,7 @@
 import { isLoopAssetCode, currencyForLoopAsset } from '@loop/shared';
 import { useWallet } from '~/hooks/use-wallet';
 import { formatCurrency, useLocaleTag } from '~/i18n/format';
+import { VaultApyRow } from './VaultApyRow';
 
 /**
  * Formats a Horizon decimal balance string (`"42.5000000"`) for a
@@ -85,16 +86,23 @@ export function WalletCard(): React.JSX.Element | null {
       ) : (
         <>
           {loopRows.map((row, i) => (
-            <p
-              key={row.assetCode}
-              className={
-                i === 0
-                  ? 'mt-1 text-2xl font-semibold tabular-nums text-gray-900 dark:text-white'
-                  : 'mt-0.5 text-base font-semibold tabular-nums text-gray-700 dark:text-gray-300'
-              }
-            >
-              {fmtLoopBalance(row.balance, row.assetCode, locale)}
-            </p>
+            <div key={row.assetCode}>
+              <p
+                className={
+                  i === 0
+                    ? 'mt-1 text-2xl font-semibold tabular-nums text-gray-900 dark:text-white'
+                    : 'mt-0.5 text-base font-semibold tabular-nums text-gray-700 dark:text-gray-300'
+                }
+              >
+                {fmtLoopBalance(row.balance, row.assetCode, locale)}
+              </p>
+              {/* ADR 031 §User-facing display, V6: past-30-day APY +
+                  disclaimer for whichever LOOP-branded balances this
+                  deployment can currently pay yield on. Self-gating —
+                  renders nothing outside its own conditions (dark
+                  behind LOOP_PHASE_1_ONLY, no history yet, etc). */}
+              <VaultApyRow assetCode={row.assetCode} />
+            </div>
           ))}
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
             Spend it on any gift card, one tap at checkout.

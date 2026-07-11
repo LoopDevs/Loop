@@ -48,6 +48,7 @@ import mobileHome from './locales/en/mobileHome.json';
 import brand from './locales/en/brand.json';
 import map from './locales/en/map.json';
 import cashback from './locales/en/cashback.json';
+import wallet from './locales/en/wallet.json';
 
 // Only `en` ships (`SUPPORTED_LANGS` in `@loop/shared`) — this resources map
 // is intentionally single-language. Adding a locale is a resources-map + JSON
@@ -72,6 +73,7 @@ void i18next.use(initReactI18next).init({
     'brand',
     'map',
     'cashback',
+    'wallet',
   ],
   defaultNS,
   resources: {
@@ -89,6 +91,7 @@ void i18next.use(initReactI18next).init({
       brand,
       map,
       cashback,
+      wallet,
     },
   },
   // React already escapes interpolated values (JSX text nodes are never

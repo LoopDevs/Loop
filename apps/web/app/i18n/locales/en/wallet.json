@@ -1,0 +1,10 @@
+{
+  "apy": {
+    "headline": "Past 30 days: {{apy}}% APY*",
+    "disclaimer": "*Past performance doesn't guarantee future returns.",
+    "showDetails": "Show details",
+    "hideDetails": "Hide details",
+    "detailWithRange": "Loop pays variable yield based on market conditions. Past 30 days: {{apy}}%. Range over past 90 days: {{min}}% – {{max}}%. Withdraw anytime, funds settle in seconds.",
+    "detailNoRange": "Loop pays variable yield based on market conditions. Past 30 days: {{apy}}%. Withdraw anytime, funds settle in seconds."
+  }
+}
