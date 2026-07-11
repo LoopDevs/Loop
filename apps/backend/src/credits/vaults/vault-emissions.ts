@@ -116,6 +116,24 @@
  * event. A real fix (a shared sequence lock across worker types, or
  * per-worker channel accounts per ADR 044) is follow-up work — flag
  * this explicitly in money-review.
+ *
+ * ── Single-driver-per-row (V7 re-drive shares the sweep lock) ───────
+ * This is a DIFFERENT and STRONGER guarantee than the sequence-number
+ * residual above (which is two DIFFERENT operations racing one
+ * account): for a GIVEN `vault_emissions` row, exactly ONE driver ever
+ * executes a step at a time. The sweep is fleet-wide single-flighted
+ * via `withAdvisoryLock(vaultEmissionSweepLockKey())`, and the only
+ * per-step CAS (`claimEmissionForDeposit`, `pending → depositing`)
+ * guards just the FIRST transition. The admin re-drive
+ * (`admin/vault-emission-redrive.ts`, V7) resumes a `failed` row to
+ * `depositing`/`deposited`/`transferred` — SKIPPING that CAS — so it
+ * would otherwise be an un-serialized SECOND driver of the same step
+ * as a concurrent sweep tick (a genuine double-deposit/double-transfer
+ * vector, NOT the accepted sequence-number residual). It is therefore
+ * required to acquire the SAME `vaultEmissionSweepLockKey()` before it
+ * drives; the two are mutually exclusive fleet-wide (whoever holds the
+ * lock runs; the other skips/409s). Do NOT add a third driver of these
+ * rows without the same lock.
  */
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { createHash } from 'node:crypto';
@@ -725,7 +743,27 @@ export async function reclaimFailedVaultEmissionForRedrive(
 // a row claimed-but-crashed before its deposit landed gets re-driven.
 const SWEEP_STATES = ['pending', 'depositing', 'deposited', 'transferred'] as const;
 
-function vaultEmissionSweepLockKey(): bigint {
+/**
+ * Fleet-wide single-flight key for the emission sweep. Exported (V7,
+ * money-review #1652 P1) so the admin re-drive
+ * (`admin/vault-emission-redrive.ts`) can acquire the SAME lock before
+ * it drives a reclaimed row. V3 is single-driver-designed: the only
+ * per-step CAS is `pending → depositing`, and the admin re-drive
+ * resumes a `failed` row to `depositing`/`deposited`/`transferred`
+ * (never `pending`), so that CAS is SKIPPED and the reclaimed state is
+ * in `SWEEP_STATES` — a concurrent sweep tick would otherwise
+ * `SELECT … FOR UPDATE SKIP LOCKED` the same row and drive the same
+ * un-CAS'd step, and if the two Soroban submits STAGGER (rather than
+ * collide on the operator sequence number) BOTH could land → a
+ * double-deposit / double-transfer of value (the DB-fenced mirror step
+ * prevents a double mirror-credit, so the exposure is on-chain
+ * share/USDC drift, caught post-hoc by the V5 watchers — hence P1 not
+ * P0). Serialising the re-drive under this lock restores V3's
+ * single-driver guarantee: while the re-drive holds it the sweep's
+ * `withAdvisoryLock` returns `{ ran: false }` and skips entirely, and
+ * vice-versa (the re-drive 409s "sweep in progress").
+ */
+export function vaultEmissionSweepLockKey(): bigint {
   const digest = createHash('sha256').update('loop:vault-emission-sweep').digest();
   const raw =
     (BigInt(digest[0]!) << 56n) |

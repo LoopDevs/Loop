@@ -30,9 +30,28 @@ const state = vi.hoisted(() => ({
   snapshotStored: false,
   priorSnapshot: null as null | { status: number; body: Record<string, unknown> },
   discordCalls: [] as Array<Record<string, unknown>>,
+  // money-review #1652 P1: when true, the emission sweep is holding the
+  // fleet-wide advisory lock — the re-drive's own `withAdvisoryLock`
+  // returns `{ ran: false }` and the handler must refuse rather than
+  // drive un-serialised.
+  sweepLockHeld: false,
+  advisoryLockCalls: [] as bigint[],
+}));
+
+vi.mock('../../db/client.js', () => ({
+  // Mirrors the real `withAdvisoryLock` contract (db/client.ts): runs
+  // `fn` and returns `{ ran: true, value }` when the lock is free, or
+  // `{ ran: false }` (without running `fn`) when another holder — here
+  // the sweep — has it.
+  withAdvisoryLock: vi.fn(async (key: bigint, fn: () => Promise<unknown>) => {
+    state.advisoryLockCalls.push(key);
+    if (state.sweepLockHeld) return { ran: false as const };
+    return { ran: true as const, value: await fn() };
+  }),
 }));
 
 vi.mock('../../credits/vaults/vault-emissions.js', () => ({
+  vaultEmissionSweepLockKey: vi.fn(() => 424242n),
   getVaultEmissionById: vi.fn(async (id: string) => state.rows.get(id) ?? null),
   reclaimFailedVaultEmissionForRedrive: vi.fn(async (id: string) => {
     if (state.reclaimResult !== null) return state.reclaimResult;
@@ -141,6 +160,8 @@ beforeEach(() => {
   state.snapshotStored = false;
   state.priorSnapshot = null;
   state.discordCalls = [];
+  state.sweepLockHeld = false;
+  state.advisoryLockCalls = [];
 });
 
 describe('adminRedriveVaultEmissionHandler — failed rows', () => {
@@ -174,6 +195,43 @@ describe('adminRedriveVaultEmissionHandler — failed rows', () => {
     expect(((await res.json()) as { code: string }).code).toBe('VAULT_EMISSION_REDRIVE_RACE');
     expect(state.driveCalls).toEqual([]);
     expect(state.snapshotStored).toBe(false);
+  });
+});
+
+describe('adminRedriveVaultEmissionHandler — serialised against the emission sweep (money-review #1652 P1)', () => {
+  it('acquires the emission sweep advisory lock before driving', async () => {
+    const res = await redrive();
+    expect(res.status).toBe(200);
+    // The drive ran INSIDE the advisory lock — exactly one lock
+    // acquisition, keyed by the exported sweep lock key.
+    expect(state.advisoryLockCalls).toEqual([424242n]);
+    expect(state.driveCalls).toHaveLength(1);
+  });
+
+  it('409 VAULT_EMISSION_REDRIVE_SWEEP_IN_PROGRESS when the sweep holds the lock — NEVER drives, stores no snapshot', async () => {
+    state.sweepLockHeld = true;
+    const res = await redrive();
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code: string }).code).toBe(
+      'VAULT_EMISSION_REDRIVE_SWEEP_IN_PROGRESS',
+    );
+    // The lock was attempted, but because it was held the fn never ran:
+    // no drive, no reclaim mutation, no stored idempotency snapshot (a
+    // retry re-attempts once the sweep releases).
+    expect(state.advisoryLockCalls).toEqual([424242n]);
+    expect(state.driveCalls).toEqual([]);
+    expect(state.snapshotStored).toBe(false);
+  });
+
+  it('also refuses an operator-confirmed-stuck (non-failed) row when the sweep holds the lock', async () => {
+    state.rows.set(ID, makeRow({ state: 'transferred', attempts: 1 }));
+    state.sweepLockHeld = true;
+    const res = await redrive();
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code: string }).code).toBe(
+      'VAULT_EMISSION_REDRIVE_SWEEP_IN_PROGRESS',
+    );
+    expect(state.driveCalls).toEqual([]);
   });
 });
 

@@ -64,7 +64,7 @@ export function registerAdminVaultRecoveryOpenApi(
     path: '/api/admin/vault-emissions/{id}/redrive',
     summary: 'Re-drive a failed/stuck vault-emission row (ADR 031 V7).',
     description:
-      "Re-enters the row's EXISTING drive (`driveOneVaultEmission`) — never a hand-rolled flow. For a `failed` row, the resume state is inferred from persisted on-chain LANDING markers (`depositedAt`/`transferredAt`, set only once a step's on-chain action + DB commit both succeeded), never blindly reset to `pending` — so a completed deposit/transfer is verified via the existing CF-18 `priorTxHash` contract, never re-submitted. A row that is not `failed` but sitting in a live state (operator-confirmed-stuck, e.g. the sweep has been down) is driven as-is with no state mutation. Refuses (409) an already-`mirrored` row. Admin-tier + step-up (`vault-redrive` scope) — like order-redrive, this can submit a real outbound Soroban call. ADR 017 compliant: `Idempotency-Key` header + `reason` body required; a repeat call returns the stored snapshot with `audit.replayed: true`.",
+      "Re-enters the row's EXISTING drive (`driveOneVaultEmission`) — never a hand-rolled flow. For a `failed` row, the resume state is inferred from persisted on-chain LANDING markers (`depositedAt`/`transferredAt`, set only once a step's on-chain action + DB commit both succeeded), never blindly reset to `pending` — so a completed deposit/transfer is verified via the existing CF-18 `priorTxHash` contract, never re-submitted. A row that is not `failed` but sitting in a live state (operator-confirmed-stuck, e.g. the sweep has been down) is driven as-is with no state mutation. Serialised against the emission sweep via its fleet-wide advisory lock (money-review #1652 P1): a reclaimed row skips the `pending→depositing` CAS, so an un-serialised re-drive racing the sweep on the same step would be a double-deposit/double-transfer vector — the re-drive acquires the SAME lock and 409s `VAULT_EMISSION_REDRIVE_SWEEP_IN_PROGRESS` when the sweep holds it. Refuses (409) an already-`mirrored` row. Admin-tier + step-up (`vault-redrive` scope) — like order-redrive, this can submit a real outbound Soroban call. ADR 017 compliant: `Idempotency-Key` header + `reason` body required; a repeat call returns the stored snapshot with `audit.replayed: true`.",
     tags: ['Admin'],
     security: [{ bearerAuth: [] }],
     request: {
@@ -101,7 +101,7 @@ export function registerAdminVaultRecoveryOpenApi(
       },
       409: {
         description:
-          'Vault emission already `mirrored` (`VAULT_EMISSION_ALREADY_MIRRORED`), or changed state mid-redrive (`VAULT_EMISSION_REDRIVE_RACE`, likely a concurrent redrive)',
+          'Vault emission already `mirrored` (`VAULT_EMISSION_ALREADY_MIRRORED`), changed state mid-redrive (`VAULT_EMISSION_REDRIVE_RACE`, likely a concurrent redrive), or the emission sweep currently holds the single-flight lock the re-drive must serialise against (`VAULT_EMISSION_REDRIVE_SWEEP_IN_PROGRESS` — retry once the sweep releases)',
         content: { 'application/json': { schema: errorResponse } },
       },
       429: {

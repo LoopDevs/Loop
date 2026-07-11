@@ -87,7 +87,7 @@ vi.mock('../../credits/vaults/vault-client.js', () => ({
   resolveOperatorPublicKey: () => vaultClientMocks.resolveOperatorPublicKey(),
 }));
 
-import { db } from '../../db/client.js';
+import { db, withAdvisoryLock } from '../../db/client.js';
 import {
   users,
   orders,
@@ -106,6 +106,7 @@ import {
   claimVaultEmission,
   driveOneVaultEmission,
   runVaultEmissionStuckWatchdog,
+  vaultEmissionSweepLockKey,
   type VaultEmissionRow,
 } from '../../credits/vaults/vault-emissions.js';
 
@@ -582,5 +583,52 @@ describeIf('vault-emissions integration — real postgres (ADR 031 V3)', () => {
       .from(userCredits)
       .where(and(eq(userCredits.userId, user.id), eq(userCredits.currency, 'USD')));
     expect(balance?.balanceMinor).toBe(500n);
+  });
+
+  it('V7 P1: the admin re-drive and the sweep are mutually exclusive — a second acquisition of vaultEmissionSweepLockKey() is refused while the first holds it (real postgres advisory lock)', async () => {
+    // The fix's load-bearing claim: the admin re-drive acquires the
+    // SAME fleet-wide lock the sweep single-flights on, so the two can
+    // never drive the same row's un-CAS'd step concurrently. Prove it
+    // against a real Postgres advisory lock (a DIRECT connection, so
+    // withAdvisoryLock does NOT take its pooler-degradation branch):
+    // while one holder (standing in for a running sweep tick) holds the
+    // lock, a second acquisition of the SAME key (standing in for the
+    // re-drive) returns `{ ran: false }` and never runs its fn.
+    let releaseFirst!: () => void;
+    const firstReleased = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let firstAcquired!: () => void;
+    const firstHasLock = new Promise<void>((resolve) => {
+      firstAcquired = resolve;
+    });
+
+    const firstHolder = withAdvisoryLock(vaultEmissionSweepLockKey(), async () => {
+      firstAcquired();
+      await firstReleased; // hold the lock until the assertion below runs
+      return 'sweep-ran';
+    });
+
+    // Wait until the first holder actually owns the lock before racing.
+    await firstHasLock;
+
+    let secondFnRan = false;
+    const second = await withAdvisoryLock(vaultEmissionSweepLockKey(), async () => {
+      secondFnRan = true;
+      return 'redrive-ran';
+    });
+    // The second acquisition (the re-drive) is refused — the handler
+    // maps this to 409 VAULT_EMISSION_REDRIVE_SWEEP_IN_PROGRESS.
+    expect(second.ran).toBe(false);
+    expect(secondFnRan).toBe(false);
+
+    // Release the first holder; it ran to completion under the lock.
+    releaseFirst();
+    const firstResult = await firstHolder;
+    expect(firstResult).toEqual({ ran: true, value: 'sweep-ran' });
+
+    // And once released, the key is free again — a fresh acquisition succeeds.
+    const third = await withAdvisoryLock(vaultEmissionSweepLockKey(), async () => 'ok');
+    expect(third).toEqual({ ran: true, value: 'ok' });
   });
 });

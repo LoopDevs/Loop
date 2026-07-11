@@ -276,8 +276,17 @@ export const ApiErrorCode = {
   // deliberately never applied and the collected shares need a MANUAL
   // refund; re-driving would just hit the same non-payable order again,
   // so it's refused rather than silently re-attempting a payout.
+  // EMISSION_REDRIVE_SWEEP_IN_PROGRESS (409, emission only, money-review
+  // #1652 P1): the fleet-wide emission sweep currently holds the
+  // single-flight lock the re-drive must also acquire (V3 is
+  // single-driver-designed; a reclaimed row skips the pending→depositing
+  // CAS, so an un-serialised re-drive racing the sweep on the same step
+  // is a double-deposit/double-transfer vector) — retry once the sweep
+  // releases. There is no redemption equivalent: V4 is designed for
+  // concurrent drivers.
   VAULT_EMISSION_ALREADY_MIRRORED: 'VAULT_EMISSION_ALREADY_MIRRORED',
   VAULT_EMISSION_REDRIVE_RACE: 'VAULT_EMISSION_REDRIVE_RACE',
+  VAULT_EMISSION_REDRIVE_SWEEP_IN_PROGRESS: 'VAULT_EMISSION_REDRIVE_SWEEP_IN_PROGRESS',
   VAULT_REDEMPTION_ALREADY_SETTLED: 'VAULT_REDEMPTION_ALREADY_SETTLED',
   VAULT_REDEMPTION_NEEDS_REFUND: 'VAULT_REDEMPTION_NEEDS_REFUND',
   VAULT_REDEMPTION_REDRIVE_RACE: 'VAULT_REDEMPTION_REDRIVE_RACE',

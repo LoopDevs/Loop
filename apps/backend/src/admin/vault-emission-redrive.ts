@@ -32,25 +32,34 @@
  * watchdog threshold) is driven AS-IS with no state mutation — exactly
  * what the next sweep tick would have done.
  *
- * ── Residual risk (flag explicitly for money-review) ────────────────
- * Unlike `vault-redemptions.ts` (V4, explicitly designed for two
- * concurrent drivers — see its module header's "Concurrency: two
- * drivers, three guards"), V3's `vault-emissions.ts` was designed
- * assuming the sweep is the ONLY driver for `depositing`/`deposited`/
- * `transferred` rows. This endpoint becomes an occasional SECOND
- * driver for those states. The reasoning this is still safe: every
- * on-chain call in `depositStep`/`transferStep` is a Stellar
- * transaction against the operator's account sequence number — if
- * this handler's drive and a concurrent sweep tick both attempt the
- * SAME step, at most one of their competing transactions can ever
- * land (Horizon rejects the loser's stale-sequence submission), so a
- * double-deposit / double-transfer of value cannot actually happen —
- * the loser's attempt fails as an ordinary retryable error, exactly
- * the SAME class of risk `vault-emissions.ts`'s module header already
- * documents + accepts for the sweep-vs-classic-payout-worker
- * cross-race. This endpoint does not introduce a NEW class of risk,
- * only a new (rate-limited, step-up-gated, human-triggered) occasion
- * for the SAME accepted one.
+ * ── Serialised against the sweep (money-review #1652 P1) ────────────
+ * V3's `vault-emissions.ts` is single-driver-designed: the sweep is
+ * fleet-wide single-flighted via `withAdvisoryLock(
+ * vaultEmissionSweepLockKey())`, and the only per-step CAS
+ * (`claimEmissionForDeposit`) guards just the `pending → depositing`
+ * transition. Because a reclaimed `failed` row resumes at
+ * `depositing`/`deposited`/`transferred` — SKIPPING that CAS — while
+ * sitting in `SWEEP_STATES`, an un-serialised drive here would be a
+ * genuine SECOND driver of the same step as a concurrent sweep tick:
+ * if the two Soroban submits STAGGER (rather than collide on the
+ * operator sequence number and have one bounce), BOTH could land →
+ * double-deposit (operator-float leak) or a second `sharesMinted`
+ * transfer to the user (INV-V1 on-chain drift). This is NOT the
+ * accepted sweep-vs-classic-payout sequence-number residual (that is
+ * two DIFFERENT operations racing one account); it is a
+ * double-execution-of-the-SAME-step class, and it is CLOSED here by
+ * acquiring the SAME `vaultEmissionSweepLockKey()` before driving:
+ * whoever holds the lock runs, the other skips — so the re-drive and
+ * the sweep are mutually exclusive fleet-wide and the reclaimed row
+ * has exactly one driver. When the sweep already holds the lock, the
+ * re-drive does NOT drive un-serialised; it returns 409
+ * `VAULT_EMISSION_REDRIVE_SWEEP_IN_PROGRESS` (retry once the sweep
+ * releases). NB: under a transaction-pooler `DATABASE_URL`,
+ * `withAdvisoryLock` degrades to un-serialised — the same documented
+ * degradation the sweep itself accepts (production uses the direct
+ * Postgres port; see `db/client.ts`). The DB-fenced mirror step
+ * (`credit_transactions_reference_unique`) still prevents any
+ * double mirror-credit / unbacked-LOOP mint regardless.
  *
  * Admin-tier + step-up (`'vault-redrive'` scope) — this can submit a
  * real outbound Soroban deposit/transfer call.
@@ -59,10 +68,12 @@ import type { Context } from 'hono';
 import type { AdminVaultEmissionRedriveResult } from '@loop/shared';
 import { UUID_RE } from '../uuid.js';
 import type { User } from '../db/users.js';
+import { withAdvisoryLock } from '../db/client.js';
 import {
   getVaultEmissionById,
   reclaimFailedVaultEmissionForRedrive,
   driveOneVaultEmission,
+  vaultEmissionSweepLockKey,
   type VaultEmissionRow,
 } from '../credits/vaults/vault-emissions.js';
 import { notifyAdminAudit } from '../discord.js';
@@ -84,7 +95,9 @@ const log = logger.child({ handler: 'admin-vault-emission-redrive' });
  * has moved on).
  */
 class RedriveNotApplicableError extends Error {
-  constructor(readonly kind: 'not_found' | 'already_mirrored' | 'race_changed') {
+  constructor(
+    readonly kind: 'not_found' | 'already_mirrored' | 'race_changed' | 'sweep_in_progress',
+  ) {
     super(`vault emission redrive not applicable: ${kind}`);
     this.name = 'RedriveNotApplicableError';
   }
@@ -131,62 +144,83 @@ export async function adminRedriveVaultEmissionHandler(c: Context): Promise<Resp
         path: `/api/admin/vault-emissions/${id}/redrive`,
       },
       async () => {
-        const existing = await getVaultEmissionById(id);
-        if (existing === null) {
-          throw new RedriveNotApplicableError('not_found');
-        }
-        if (existing.state === 'mirrored') {
-          throw new RedriveNotApplicableError('already_mirrored');
-        }
-
-        const priorState = existing.state;
-        let toDrive: VaultEmissionRow;
-        let resumedFromState: string;
-        if (existing.state === 'failed') {
-          const reclaimed = await reclaimFailedVaultEmissionForRedrive(id);
-          if (reclaimed.kind !== 'reclaimed') {
-            // Raced a concurrent redrive between our read above and the
-            // reclaim's own locked re-read — the row moved out of
-            // 'failed' in between. Not applicable any more; the caller
-            // should re-check the row's current state.
-            throw new RedriveNotApplicableError('race_changed');
+        // money-review #1652 P1: hold the fleet-wide emission-sweep lock
+        // across the WHOLE reclaim + drive so the re-drive and a
+        // concurrent sweep tick are mutually exclusive on this row (see
+        // the module header). The reclaim + drive touch the row on
+        // pooled connections, not this reserved lock connection — the
+        // lock only needs to be HELD to make the sweep's own
+        // `withAdvisoryLock` miss. On `{ ran: false }` (sweep is the
+        // current holder) we refuse rather than drive un-serialised.
+        const locked = await withAdvisoryLock(vaultEmissionSweepLockKey(), async () => {
+          const existing = await getVaultEmissionById(id);
+          if (existing === null) {
+            throw new RedriveNotApplicableError('not_found');
           }
-          toDrive = reclaimed.row;
-          resumedFromState = reclaimed.row.state;
-        } else {
-          // Operator-confirmed-stuck: a live non-terminal state
-          // (pending/depositing/deposited/transferred) the sweep hasn't
-          // finished draining — drive as-is, no state mutation. This is
-          // exactly what the next sweep tick would do.
-          toDrive = existing;
-          resumedFromState = existing.state;
-        }
+          if (existing.state === 'mirrored') {
+            throw new RedriveNotApplicableError('already_mirrored');
+          }
 
-        const outcome = await driveOneVaultEmission(toDrive);
+          const priorState = existing.state;
+          let toDrive: VaultEmissionRow;
+          let resumedFromState: string;
+          if (existing.state === 'failed') {
+            const reclaimed = await reclaimFailedVaultEmissionForRedrive(id);
+            if (reclaimed.kind !== 'reclaimed') {
+              // Raced a concurrent redrive between our read above and the
+              // reclaim's own locked re-read — the row moved out of
+              // 'failed' in between. Not applicable any more; the caller
+              // should re-check the row's current state.
+              throw new RedriveNotApplicableError('race_changed');
+            }
+            toDrive = reclaimed.row;
+            resumedFromState = reclaimed.row.state;
+          } else {
+            // Operator-confirmed-stuck: a live non-terminal state
+            // (pending/depositing/deposited/transferred) the sweep hasn't
+            // finished draining — drive as-is, no state mutation. This is
+            // exactly what the next sweep tick would do.
+            toDrive = existing;
+            resumedFromState = existing.state;
+          }
 
-        const finalRow = await getVaultEmissionById(id);
-        const result: AdminVaultEmissionRedriveResult = {
-          vaultEmissionId: id,
-          orderId: existing.orderId,
-          priorState,
-          resumedFromState,
-          outcome,
-          state: finalRow?.state ?? toDrive.state,
-          attempts: finalRow?.attempts ?? toDrive.attempts,
-        };
-        log.info(
-          {
+          const outcome = await driveOneVaultEmission(toDrive);
+
+          const finalRow = await getVaultEmissionById(id);
+          const result: AdminVaultEmissionRedriveResult = {
             vaultEmissionId: id,
-            adminUserId: actor.id,
+            orderId: existing.orderId,
             priorState,
             resumedFromState,
             outcome,
-            finalState: result.state,
-          },
-          'Admin vault emission redrive applied',
-        );
+            state: finalRow?.state ?? toDrive.state,
+            attempts: finalRow?.attempts ?? toDrive.attempts,
+          };
+          log.info(
+            {
+              vaultEmissionId: id,
+              adminUserId: actor.id,
+              priorState,
+              resumedFromState,
+              outcome,
+              finalState: result.state,
+            },
+            'Admin vault emission redrive applied',
+          );
+          return result;
+        });
+
+        if (!locked.ran) {
+          // The emission sweep currently holds the lock — do NOT drive
+          // un-serialised (that's the exact double-execution vector this
+          // lock closes). Thrown from inside the guard so no idempotency
+          // snapshot is stored: a retry re-attempts once the sweep
+          // releases, rather than replaying a transient "busy".
+          throw new RedriveNotApplicableError('sweep_in_progress');
+        }
+
         const envelope: AdminAuditEnvelope<AdminVaultEmissionRedriveResult> = buildAuditEnvelope({
-          result,
+          result: locked.value,
           actor,
           idempotencyKey,
           appliedAt: new Date(),
@@ -205,6 +239,16 @@ export async function adminRedriveVaultEmissionHandler(c: Context): Promise<Resp
           {
             code: 'VAULT_EMISSION_ALREADY_MIRRORED',
             message: 'Vault emission has already mirrored — nothing to redrive.',
+          },
+          409,
+        );
+      }
+      if (err.kind === 'sweep_in_progress') {
+        return c.json(
+          {
+            code: 'VAULT_EMISSION_REDRIVE_SWEEP_IN_PROGRESS',
+            message:
+              'The vault-emission sweep is currently running — the re-drive is serialised against it to avoid a double-deposit/double-transfer. Retry in a few seconds.',
           },
           409,
         );
