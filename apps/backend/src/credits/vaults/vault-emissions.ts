@@ -619,6 +619,106 @@ export async function driveOneVaultEmission(
   return current.state as VaultEmissionDriveOutcome;
 }
 
+// ─── Admin re-drive support (V7 — the recovery complement to the V5a stuck-watchdog page) ──
+//
+// `failed` is deliberately NOT auto-retried by the sweep (see the
+// module header) — an operator has to look. The three functions below
+// are the primitives `admin/vault-emission-redrive.ts` composes; they
+// do NOT introduce a new state-machine flow (the task ADR 031 V7 was
+// scoped against: "do NOT hand-roll a new flow") — they only (a) read
+// a row by id, (b) work out which state a `failed` row should resume
+// FROM, and (c) CAS it back into that state so `driveOneVaultEmission`
+// (unchanged, above) can re-enter its normal step chain.
+
+/** By id — the admin handler's only "does this row exist" read. */
+export async function getVaultEmissionById(id: string): Promise<VaultEmissionRow | null> {
+  const [row] = await db.select().from(vaultEmissions).where(eq(vaultEmissions.id, id));
+  return row ?? null;
+}
+
+export type VaultEmissionRedriveResumeState = 'depositing' | 'deposited' | 'transferred';
+
+/**
+ * Infers the correct resume state for a `failed` row from its
+ * persisted *_At landing markers — NEVER from `depositTxHash` /
+ * `transferTxHash` alone, because those are persisted by `onSigned`
+ * BEFORE submit (CF-18) and so can be set even when the step never
+ * landed. `depositedAt` / `transferredAt` are set ONLY in the same
+ * UPDATE that advances `state` past that step, so they are proof the
+ * step's on-chain action + DB commit both landed:
+ *
+ *   - `transferredAt` set  → the transfer landed, only the mirror is
+ *     outstanding. Resume at `'transferred'` (drive re-enters at
+ *     `mirrorStep`; `transferStep` is never called again).
+ *   - `depositedAt` set (transferredAt not) → the deposit landed, the
+ *     transfer is outstanding (it may have been attempted —
+ *     `transferTxHash` may already be non-null — or not). Resume at
+ *     `'deposited'` (drive re-enters at `transferStep`, which
+ *     verify-or-resubmits via `priorTxHash: row.transferTxHash` per
+ *     CF-18 — it never blindly re-signs a fresh transfer for an
+ *     already-landed one).
+ *   - neither set → nothing has landed (the row may still have a
+ *     `depositTxHash` from an aborted attempt). Resume at
+ *     `'depositing'` (drive re-enters at `depositStep`, same
+ *     verify-or-resubmit contract via `priorTxHash: row.depositTxHash`).
+ *
+ * A `failed` row can never have been claimed straight out of
+ * `'pending'` — `claimEmissionForDeposit`'s CAS is a direct UPDATE,
+ * not a `recordStepFailure` caller — so `'pending'` is never a valid
+ * resume target here; every `failed` row was already at least
+ * `'depositing'` when it exhausted its attempts.
+ */
+export function inferVaultEmissionResumeState(
+  row: VaultEmissionRow,
+): VaultEmissionRedriveResumeState {
+  if (row.transferredAt !== null) return 'transferred';
+  if (row.depositedAt !== null) return 'deposited';
+  return 'depositing';
+}
+
+export type VaultEmissionReclaimResult =
+  | { kind: 'not_found' }
+  /** Row exists but was not `'failed'` at claim time (already redriven by a concurrent call, or moved on its own). */
+  | { kind: 'not_failed'; row: VaultEmissionRow }
+  | { kind: 'reclaimed'; row: VaultEmissionRow };
+
+/**
+ * Atomically reclaims a `failed` vault-emission row for re-drive: locks
+ * the row (`FOR UPDATE`, so a concurrent redrive call serializes
+ * behind this one rather than racing it), verifies it is still
+ * `'failed'`, computes its resume target from the SAME locked row via
+ * `inferVaultEmissionResumeState`, and CAS-updates
+ * `state → resumeState, attempts → 0, lastError → null, failedAt →
+ * null`. The `WHERE state = 'failed'` on the UPDATE is a second,
+ * redundant guard against the row lock alone (defence in depth, same
+ * belt-and-suspenders posture as every other CAS in this module).
+ *
+ * Does NOT drive the row — the caller (the admin handler) does that
+ * via the ordinary `driveOneVaultEmission(row)`, exactly once, using
+ * the row this function returns.
+ */
+export async function reclaimFailedVaultEmissionForRedrive(
+  id: string,
+): Promise<VaultEmissionReclaimResult> {
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .select()
+      .from(vaultEmissions)
+      .where(eq(vaultEmissions.id, id))
+      .for('update');
+    if (row === undefined) return { kind: 'not_found' };
+    if (row.state !== 'failed') return { kind: 'not_failed', row };
+    const resumeState = inferVaultEmissionResumeState(row);
+    const [updated] = await tx
+      .update(vaultEmissions)
+      .set({ state: resumeState, attempts: 0, lastError: null, failedAt: null })
+      .where(and(eq(vaultEmissions.id, id), eq(vaultEmissions.state, 'failed')))
+      .returning();
+    if (updated === undefined) return { kind: 'not_failed', row };
+    return { kind: 'reclaimed', row: updated };
+  });
+}
+
 // ─── Sweep (crash-recovery + primary driver — mirrors credits/interest-mint.ts) ────
 
 // Non-terminal states the sweep picks up. `depositing` is included so

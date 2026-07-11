@@ -265,6 +265,22 @@ export const ApiErrorCode = {
   // OTP_LOCKOUT_CLEAR_RATE_CHECK_UNAVAILABLE shape.
   ORDER_VELOCITY_EXCEEDED: 'ORDER_VELOCITY_EXCEEDED',
   ORDER_VELOCITY_CHECK_UNAVAILABLE: 'ORDER_VELOCITY_CHECK_UNAVAILABLE',
+  // ADR 031 V7 — admin vault-emission / vault-redemption re-drive.
+  // ALREADY_MIRRORED / ALREADY_SETTLED (409): the row already reached
+  // its terminal success state — nothing to redrive. REDRIVE_RACE
+  // (409): the row changed state between this call's initial read and
+  // its locked reclaim (almost always a concurrent redrive) — re-check
+  // the row's current state before retrying. NEEDS_REFUND (409,
+  // redemption only): the row's payout already landed but its source
+  // order was no longer payable at mirror time — the mirror debit was
+  // deliberately never applied and the collected shares need a MANUAL
+  // refund; re-driving would just hit the same non-payable order again,
+  // so it's refused rather than silently re-attempting a payout.
+  VAULT_EMISSION_ALREADY_MIRRORED: 'VAULT_EMISSION_ALREADY_MIRRORED',
+  VAULT_EMISSION_REDRIVE_RACE: 'VAULT_EMISSION_REDRIVE_RACE',
+  VAULT_REDEMPTION_ALREADY_SETTLED: 'VAULT_REDEMPTION_ALREADY_SETTLED',
+  VAULT_REDEMPTION_NEEDS_REFUND: 'VAULT_REDEMPTION_NEEDS_REFUND',
+  VAULT_REDEMPTION_REDRIVE_RACE: 'VAULT_REDEMPTION_REDRIVE_RACE',
 } as const;
 
 export type ApiErrorCodeValue = (typeof ApiErrorCode)[keyof typeof ApiErrorCode];

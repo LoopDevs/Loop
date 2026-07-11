@@ -9,6 +9,7 @@ export * from './admin-staff.js';
 export * from './admin-supplier-spend.js';
 export * from './admin-support-ops.js';
 export * from './admin-treasury.js';
+export * from './admin-vault-redrive.js';
 export * from './api.js';
 export * from './assert-never.js';
 export * from './cashback-realization.js';

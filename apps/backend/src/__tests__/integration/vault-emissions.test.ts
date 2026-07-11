@@ -515,4 +515,72 @@ describeIf('vault-emissions integration — real postgres (ADR 031 V3)', () => {
       .where(eq(watchdogAlertState.watchdogName, 'vault-emission-stuck-watchdog'));
     expect(alert3?.alertActive).toBe(false);
   });
+
+  // ─── ADR 031 V7 — admin re-drive support ────────────────────────────────
+
+  it('V7: reclaims + redrives a failed-after-deposit emission to resume at transfer WITHOUT re-depositing (real postgres CAS + FOR UPDATE lock)', async () => {
+    const user = await seedUser();
+    const orderId = await seedOrder({ userId: user.id, cashbackMinor: 500n });
+
+    const claimed = await claimVaultEmission(db as never, {
+      orderId,
+      userId: user.id,
+      assetCode: 'LOOPUSD',
+      network: 'testnet',
+      cashbackMinor: 500n,
+      toAddress: user.walletAddress,
+    });
+    expect(claimed).toBe(true);
+    const [row] = await db.select().from(vaultEmissions).where(eq(vaultEmissions.orderId, orderId));
+
+    // Simulate a row that reached 'failed' AFTER a real deposit landed
+    // (depositedAt set) but before the transfer did — same shape the
+    // real `recordStepFailure`/terminal-attempts path produces; the
+    // unit suite already proves that retry-counting path, so this
+    // integration test's focus is the real-DB reclaim + resume.
+    await db
+      .update(vaultEmissions)
+      .set({
+        state: 'failed',
+        depositTxHash: 'dep-v7',
+        sharesMinted: 480n,
+        depositedAt: new Date(),
+        attempts: 5,
+        lastError: 'Soroban RPC timeout',
+        failedAt: new Date(),
+      })
+      .where(eq(vaultEmissions.id, row!.id));
+
+    const { reclaimFailedVaultEmissionForRedrive } =
+      await import('../../credits/vaults/vault-emissions.js');
+    const reclaimed = await reclaimFailedVaultEmissionForRedrive(row!.id);
+    expect(reclaimed.kind).toBe('reclaimed');
+    if (reclaimed.kind !== 'reclaimed') throw new Error('unreachable');
+    // Real-DB proof of the resume-state inference: depositedAt was set
+    // (deposit landed) but transferredAt was not, so it resumes at
+    // 'deposited' — never back to 'pending'/'depositing'.
+    expect(reclaimed.row.state).toBe('deposited');
+    expect(reclaimed.row.attempts).toBe(0);
+    expect(reclaimed.row.lastError).toBeNull();
+    expect(reclaimed.row.failedAt).toBeNull();
+
+    vaultClientState.transferResult = { txHash: 'transfer-tx-v7' };
+    const outcome = await driveOneVaultEmission(reclaimed.row);
+
+    expect(outcome).toBe('mirrored');
+    // The deposit client was NEVER invoked across this whole test — the
+    // resume skipped straight to the transfer step.
+    expect(vaultClientMocks.depositToVault).not.toHaveBeenCalled();
+
+    const [finalRow] = await db.select().from(vaultEmissions).where(eq(vaultEmissions.id, row!.id));
+    expect(finalRow?.state).toBe('mirrored');
+    expect(finalRow?.transferTxHash).toBe('transfer-tx-v7');
+    expect(finalRow?.depositTxHash).toBe('dep-v7'); // untouched from the original deposit
+
+    const [balance] = await db
+      .select()
+      .from(userCredits)
+      .where(and(eq(userCredits.userId, user.id), eq(userCredits.currency, 'USD')));
+    expect(balance?.balanceMinor).toBe(500n);
+  });
 });

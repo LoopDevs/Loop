@@ -542,4 +542,127 @@ describeIf('vault-redemptions integration — real postgres (ADR 031 V4)', () =>
       );
     expect(spendRows).toHaveLength(1);
   });
+
+  // ─── ADR 031 V7 — admin re-drive support ────────────────────────────────
+
+  it('V7: reclaims + redrives a failed-after-collect redemption to resume at payout WITHOUT re-collecting (real postgres CAS + FOR UPDATE lock)', async () => {
+    const user = await seedUser();
+    await seedUserCreditsBalance(user.id, 'USD', 10_000n);
+    await seedHotFloat(0n); // insufficient — forces the SLOW path so payout can be made to fail independently of collect
+    const orderId = await seedOrder({ userId: user.id, chargeMinor: 500n });
+    vaultClientState.transferResult = { txHash: 'collect-tx-v7' };
+    vaultClientMocks.withdrawFromVault.mockRejectedValueOnce(new Error('forced slow-path failure'));
+
+    const claimed = await claimVaultRedemption({
+      sourceType: 'order_redeem',
+      sourceId: orderId,
+      userId: user.id,
+      assetCode: 'LOOPUSD',
+      network: 'testnet',
+      valueMinor: 500n,
+      fromAddress: user.walletAddress,
+    });
+
+    // Drive once: the collect transfer LANDS (real collectedAt marker
+    // set), the slow-path withdraw then fails — the row rests in
+    // 'collecting' with attempts incremented, not yet terminal.
+    const afterFirstDrive = await driveOneVaultRedemption(claimed);
+    expect(afterFirstDrive).toBe('collecting');
+    expect(vaultClientMocks.transferShares).toHaveBeenCalledTimes(1);
+    const [midRow] = await db
+      .select()
+      .from(vaultRedemptions)
+      .where(eq(vaultRedemptions.id, claimed.id));
+    expect(midRow?.collectedAt).not.toBeNull();
+    expect(midRow?.redeemedAt).toBeNull();
+
+    // Simulate the row having exhausted VAULT_REDEMPTION_MAX_ATTEMPTS
+    // (the unit suite already proves the real retry-counting path;
+    // this integration test's focus is the real-DB reclaim + resume,
+    // not re-driving 5 real attempts) — a genuinely `failed` row with
+    // `collectedAt` set and `redeemedAt` still null.
+    await db
+      .update(vaultRedemptions)
+      .set({ state: 'failed', attempts: 5, failedAt: new Date() })
+      .where(eq(vaultRedemptions.id, claimed.id));
+
+    const { reclaimFailedVaultRedemptionForRedrive } =
+      await import('../../credits/vaults/vault-redemptions.js');
+    const reclaimed = await reclaimFailedVaultRedemptionForRedrive(claimed.id);
+    expect(reclaimed.kind).toBe('reclaimed');
+    if (reclaimed.kind !== 'reclaimed') throw new Error('unreachable');
+    // Real-DB proof of the resume-state inference: redeemedAt is still
+    // null, so it resumes at 'collecting' (not blindly reset further
+    // back) — the drive below then skips the already-landed collect.
+    expect(reclaimed.row.state).toBe('collecting');
+    expect(reclaimed.row.attempts).toBe(0);
+    expect(reclaimed.row.collectClaimedAt).toBeNull();
+
+    // The slow-path withdraw now succeeds (falls through the one-shot
+    // rejection into the default resolved value).
+    vaultClientState.withdrawResult = {
+      txHash: 'withdraw-tx-v7',
+      amountsOut: [500n * 100_000n],
+    };
+    vaultClientMocks.transferShares.mockClear();
+
+    const finalOutcome = await driveOneVaultRedemption(reclaimed.row);
+
+    expect(finalOutcome).toBe('settled');
+    // The collect transfer was NEVER re-invoked on this resumed drive —
+    // only the payout (+ mirror) steps ran.
+    expect(vaultClientMocks.transferShares).not.toHaveBeenCalled();
+
+    const [finalRow] = await db
+      .select()
+      .from(vaultRedemptions)
+      .where(eq(vaultRedemptions.id, claimed.id));
+    expect(finalRow?.state).toBe('settled');
+    expect(finalRow?.payoutPath).toBe('slow');
+    expect(finalRow?.collectTxHash).toBe('collect-tx-v7'); // untouched from the original collect
+
+    const [finalOrder] = await db.select().from(orders).where(eq(orders.id, orderId));
+    expect(finalOrder?.state).toBe('paid');
+  });
+
+  it('V7: isVaultRedemptionNeedsRefund detects a REAL needs-refund row (P2-3 path) and reclaimFailedVaultRedemptionForRedrive refuses it without mutating', async () => {
+    const user = await seedUser();
+    await seedUserCreditsBalance(user.id, 'USD', 10_000n);
+    await seedHotFloat(5_000n);
+    const orderId = await seedOrder({ userId: user.id, chargeMinor: 500n });
+
+    const row = await claimVaultRedemption({
+      sourceType: 'order_redeem',
+      sourceId: orderId,
+      userId: user.id,
+      assetCode: 'LOOPUSD',
+      network: 'testnet',
+      valueMinor: 500n,
+      fromAddress: user.walletAddress,
+    });
+    await db.update(orders).set({ state: 'expired' }).where(eq(orders.id, orderId));
+
+    const outcome = await driveOneVaultRedemption(row);
+    expect(outcome).toBe('failed'); // markRedemptionNeedsRefund's real terminal write
+
+    const { isVaultRedemptionNeedsRefund, reclaimFailedVaultRedemptionForRedrive } =
+      await import('../../credits/vaults/vault-redemptions.js');
+    const [needsRefundRow] = await db
+      .select()
+      .from(vaultRedemptions)
+      .where(eq(vaultRedemptions.id, row.id));
+    expect(isVaultRedemptionNeedsRefund(needsRefundRow!)).toBe(true);
+
+    const reclaimed = await reclaimFailedVaultRedemptionForRedrive(row.id);
+    expect(reclaimed.kind).toBe('needs_refund');
+
+    // Untouched — still failed, same attempts/lastError, never routed
+    // toward a re-drive that would just fail identically again.
+    const [unchanged] = await db
+      .select()
+      .from(vaultRedemptions)
+      .where(eq(vaultRedemptions.id, row.id));
+    expect(unchanged?.state).toBe('failed');
+    expect(unchanged?.lastError).toBe(needsRefundRow?.lastError);
+  });
 });

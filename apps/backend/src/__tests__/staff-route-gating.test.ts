@@ -209,6 +209,8 @@ const ADMIN_ONLY_PROBES: Array<[string, string]> = [
   ['POST', '/api/admin/payouts/00000000-0000-4000-8000-00000000aaaa/compensate'],
   ['POST', `/api/admin/orders/${NOBODY_ID}/redrive`],
   ['POST', `/api/admin/orders/${NOBODY_ID}/refund`],
+  ['POST', `/api/admin/vault-emissions/${NOBODY_ID}/redrive`],
+  ['POST', `/api/admin/vault-redemptions/${NOBODY_ID}/redrive`],
   ['PUT', '/api/admin/merchant-cashback-configs/some-merchant'],
   ['POST', '/api/admin/merchants/resync'],
   ['POST', '/api/admin/step-up'],
@@ -417,15 +419,16 @@ describe('ADR 037 mount inventory (default-deny)', () => {
       (g) => !g.gates.includes('requireStaff(admin)') && g.gates.includes('requireStaff(support)'),
     );
     const riders = groups.length - adminTier.length - supportExplicit.length;
-    // 40 = 23 CSV exports + 11 non-CSV admin writes (3 credit writes,
+    // 42 = 23 CSV exports + 11 non-CSV admin writes (3 credit writes,
     //      home-currency, cashback-config PUT, merchants/resync,
     //      B4 revoke-sessions, A5-3 clear-otp-lockout, A6 deposit-refund,
     //      R3-1 operator-float baseline/manual explanations) + payout
     //      retry/compensate + A5-1 order redrive + A5-4 order refund
+    //      + ADR 031 V7 vault-emissions/vault-redemptions redrive (2)
     //      + 3 Discord surfaces + step-up mint... see the mount-by-mount
     //      table in the PR; the exact membership is pinned by the
     //      matrix test above and the money-write list below.
-    expect(adminTier).toHaveLength(40);
+    expect(adminTier).toHaveLength(42);
     // 10 = lookup, watcher-skips ×3, wallet ×2, refetch-redemption,
     //      ledger (A5-8 fleet-wide ledger browser), audit timeline
     //      (A5-7 per-subject audit timeline), auth-state (A5-3
@@ -444,6 +447,8 @@ describe('ADR 037 mount inventory (default-deny)', () => {
       'POST /api/admin/payouts/:id/compensate',
       'POST /api/admin/orders/:orderId/redrive',
       'POST /api/admin/orders/:orderId/refund',
+      'POST /api/admin/vault-emissions/:id/redrive',
+      'POST /api/admin/vault-redemptions/:id/redrive',
       'PUT /api/admin/merchant-cashback-configs/:merchantId',
       'POST /api/admin/operator-float/baselines',
       'POST /api/admin/operator-float/manual-movements',
@@ -480,6 +485,10 @@ describe('ADR 037 mount inventory (default-deny)', () => {
       // refund-to-sender, and is the compensating control for the
       // fulfilled-order code-unused-attestation accepted risk.
       'POST /api/admin/orders/:orderId/refund': 'requireAdminStepUp(order-refund)',
+      // ADR 031 V7: re-driving a failed/stuck vault emission or
+      // redemption row can submit a real outbound Soroban call.
+      'POST /api/admin/vault-emissions/:id/redrive': 'requireAdminStepUp(vault-redrive)',
+      'POST /api/admin/vault-redemptions/:id/redrive': 'requireAdminStepUp(vault-redrive)',
       'PUT /api/admin/staff/:userId/role': 'requireAdminStepUp(staff-role-grant)',
       'DELETE /api/admin/staff/:userId/role': 'requireAdminStepUp(staff-role-revoke)',
       // Sets future emission rates — see the route mount's comment.

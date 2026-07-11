@@ -45,6 +45,8 @@
  *   activity, activity CSV.
  * - **Orders (~7)** — list, drill, CSV, activity, payment-method
  *   share + activity, redrive (A5-1) (ADR 011 / 015).
+ * - **Vault recovery (2)** — vault-emissions/:id/redrive,
+ *   vault-redemptions/:id/redrive (ADR 031 V7).
  * - **Stuck triage (2)** — stuck orders, stuck payouts.
  * - **Cashback realization + activity + monthly (~8)** — fleet-
  *   wide cashback metrics + finance CSVs (ADR 009 / 015).
@@ -103,6 +105,7 @@ import { mountAdminTreasuryRoutes } from './admin-treasury.js';
 import { mountAdminUserClusterRoutes } from './admin-user-cluster.js';
 import { mountAdminStaffRoutes } from './admin-staff.js';
 import { mountAdminSupportOpsRoutes } from './admin-support-ops.js';
+import { mountAdminVaultRecoveryRoutes } from './admin-vault-recovery.js';
 
 /** Mounts all `/api/admin/*` routes on the supplied Hono app. */
 export function mountAdminRoutes(app: Hono): void {
@@ -249,6 +252,13 @@ export function mountAdminRoutes(app: Hono): void {
   // Lifted into ./admin-order-drill.ts; mount-order discipline preserved
   // (literal-suffix routes register before param-only /:orderId).
   mountAdminOrderDrillRoutes(app);
+
+  // Vault-recovery pair — vault-emissions/:id/redrive +
+  // vault-redemptions/:id/redrive (ADR 031 V7). Lifted into
+  // ./admin-vault-recovery.ts; both routes are single-segment `:id`
+  // params under their own distinct path prefixes, no literal-vs-param
+  // ordering concern.
+  mountAdminVaultRecoveryRoutes(app);
 
   // Dashboard cluster — stuck-orders / stuck-payouts /
   // cashback-activity (+ .csv) / cashback-realization (+ /daily +

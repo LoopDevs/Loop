@@ -52,7 +52,8 @@ const STEP_UP_ISSUER = 'loop-api';
  * narrower scope (`'credit-adjustment'` / `'refund'` / `'withdrawal'`
  * / `'emission'` / `'payout-retry'` / `'payout-compensation'` /
  * `'home-currency'` / `'operator-float'` / `'staff-role-grant'` /
- * `'staff-role-revoke'` / `'order-redrive'`)
+ * `'staff-role-revoke'` / `'order-redrive'` / `'order-refund'` /
+ * `'vault-redrive'`)
  * is opt-in and binds the token to that single class — the gate
  * middleware rejects it on any other class with `STEP_UP_PURPOSE_MISMATCH`.
  */
@@ -89,6 +90,13 @@ export const STEP_UP_SCOPES = [
   // operator-accepted code-unused-attestation double-spend risk. A
   // captured bearer alone must not be able to trigger either.
   'order-refund',
+  // ADR 031 V7: re-driving a failed/stuck vault emission or redemption
+  // row re-enters a state machine that can submit real outbound
+  // Soroban deposit/transfer/withdraw calls (vault-emissions.ts /
+  // vault-redemptions.ts) — the same class of risk as order-redrive
+  // and payout-retry. A captured bearer alone must not be able to
+  // trigger either.
+  'vault-redrive',
 ] as const;
 export type AdminStepUpScope = (typeof STEP_UP_SCOPES)[number];
 
