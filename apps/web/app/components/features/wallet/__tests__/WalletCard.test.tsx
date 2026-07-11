@@ -4,13 +4,25 @@ import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { UserWalletResponse } from '~/services/wallet';
+import type { VaultApyResponse } from '~/services/vault-apy';
 import { WalletCard, fmtLoopBalance, fmtApyBps } from '../WalletCard';
 
 afterEach(cleanup);
 
-const { walletMock, authMock } = vi.hoisted(() => ({
+const { walletMock, authMock, vaultApyMock } = vi.hoisted(() => ({
   walletMock: { getMyWallet: vi.fn() },
   authMock: { isAuthenticated: true },
+  // ADR 031 V6: WalletCard renders <VaultApyRow> per row, which reads
+  // this hook directly — mocked at the hook boundary (same seam
+  // VaultApyRow.test.tsx uses) so these balance-focused tests don't
+  // also need to drive the query/auth/phase1Only gating chain.
+  // Undefined vaultApy → VaultApyRow renders nothing, preserving every
+  // pre-existing assertion below untouched.
+  vaultApyMock: {
+    vaultApy: undefined as VaultApyResponse | undefined,
+    isLoading: false,
+    isError: false,
+  },
 }));
 
 vi.mock('~/services/wallet', () => ({
@@ -23,9 +35,16 @@ vi.mock('~/hooks/use-auth', () => ({
 
 vi.mock('~/hooks/query-retry', () => ({ shouldRetry: () => false }));
 
+vi.mock('~/hooks/use-vault-apy', () => ({
+  useVaultApy: () => vaultApyMock,
+}));
+
 beforeEach(() => {
   walletMock.getMyWallet.mockReset();
   authMock.isAuthenticated = true;
+  vaultApyMock.vaultApy = undefined;
+  vaultApyMock.isLoading = false;
+  vaultApyMock.isError = false;
 });
 
 function renderCard(): HTMLElement {
@@ -155,5 +174,43 @@ describe('<WalletCard />', () => {
     const container = renderCard();
     expect(walletMock.getMyWallet).not.toHaveBeenCalled();
     expect(container.textContent).toBe('');
+  });
+});
+
+describe('<WalletCard /> vault-APY composition (ADR 031 V6)', () => {
+  it('shows the past-30-day APY + disclaimer under the matching balance row', async () => {
+    walletMock.getMyWallet.mockResolvedValue(wallet());
+    vaultApyMock.vaultApy = {
+      assets: [
+        {
+          assetCode: 'GBPLOOP',
+          past30dApy: 0.0312,
+          past90dRange: { minApy: 0.028, maxApy: 0.035 },
+        },
+      ],
+      disclaimerKey: 'wallet.apyDisclaimer',
+    };
+    renderCard();
+    await waitFor(() => {
+      expect(screen.getByText(/42\.50/)).toBeDefined();
+    });
+    expect(screen.getByText(/Past 30 days: 3\.12% APY/)).toBeDefined();
+    expect(screen.getByText(/Past performance doesn't guarantee future returns/)).toBeDefined();
+    // The asset code never reaches the user, even with APY shown.
+    expect(screen.queryByText(/GBPLOOP/)).toBeNull();
+    // Never the yield mechanism.
+    expect(document.body.textContent).not.toMatch(/defindex|blend|soroban|strategy/i);
+  });
+
+  it('omits the APY line (Phase-1-gated / no data) without breaking the balance display', async () => {
+    walletMock.getMyWallet.mockResolvedValue(wallet());
+    // vaultApyMock.vaultApy stays undefined — same shape `useVaultApy`
+    // returns while LOOP_PHASE_1_ONLY is on (its own gate disables the
+    // query entirely, so data never arrives).
+    renderCard();
+    await waitFor(() => {
+      expect(screen.getByText(/42\.50/)).toBeDefined();
+    });
+    expect(screen.queryByText(/APY/)).toBeNull();
   });
 });
