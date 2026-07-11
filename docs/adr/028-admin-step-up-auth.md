@@ -76,6 +76,17 @@
     credit-adjust, refund, withdrawal, payout-retry, payout-compensation,
     home-currency, cashback-config, staff role grant/revoke, deposit-refund,
     operator-float, order-redrive, order-refund.
+- **2026-07-11** ADR 031 V7: the vault-recovery pair
+  (`POST /api/admin/vault-emissions/:id/redrive` and
+  `POST /api/admin/vault-redemptions/:id/redrive`) joins the gated set with
+  a shared scope, `vault-redrive` — re-driving a `failed`/stuck vault
+  emission or redemption row re-enters the row's existing drive
+  (`driveOneVaultEmission` / `driveOneVaultRedemption`), which can submit a
+  real outbound Soroban deposit/transfer/collect/withdraw call — the same
+  class of risk as `order-redrive`/`payout-retry`. The step-up-gated set is
+  now: credit-adjust, refund, withdrawal, payout-retry, payout-compensation,
+  home-currency, cashback-config, staff role grant/revoke, deposit-refund,
+  operator-float, order-redrive, order-refund, vault-redrive.
 
 ### Activation gate / deploy ordering
 
@@ -116,6 +127,8 @@ The current step-up surface is:
 - staff role grant / revoke
 - abandoned-deposit refund
 - order re-drive (A5-1)
+- order-bound refund (A5-4)
+- vault-emission / vault-redemption re-drive (ADR 031 V7)
 
 **Excluded** from the current surface:
 

@@ -41,6 +41,7 @@ import { registerAdminOpsTailOpenApi } from './admin-ops-tail.js';
 import { registerAdminOperatorFleetOpenApi } from './admin-operator-fleet.js';
 import { registerAdminOperatorMixOpenApi } from './admin-operator-mix.js';
 import { registerAdminOrderClusterOpenApi } from './admin-order-cluster.js';
+import { registerAdminVaultRecoveryOpenApi } from './admin-vault-recovery.js';
 import { registerAdminPayoutsClusterOpenApi } from './admin-payouts-cluster.js';
 import { registerAdminPerMerchantDrillOpenApi } from './admin-per-merchant-drill.js';
 import { registerAdminPerUserDrillOpenApi } from './admin-per-user-drill.js';
@@ -353,6 +354,13 @@ export function registerAdminOpenApi(
   // sites; `AdminWriteAudit` too (the redrive write's envelope);
   // both threaded as parameters to the slice.
   registerAdminOrderClusterOpenApi(registry, errorResponse, AdminPayoutView, AdminWriteAudit);
+
+  // ─── Admin — vault recovery (ADR 031 V7) ────────────────────────────────────
+  //
+  // The two vault-recovery writes (vault-emissions/{id}/redrive,
+  // vault-redemptions/{id}/redrive) plus their locally-scoped schemas
+  // live in ./admin-vault-recovery.ts.
+  registerAdminVaultRecoveryOpenApi(registry, errorResponse, AdminWriteAudit);
 
   // ─── Admin — cashback-config schemas (ADR 011) ──────────────────────────────
   //

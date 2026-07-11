@@ -473,6 +473,9 @@ function buildDbMock(): Record<string, unknown> {
       if (table === 'vaultRedemptions') {
         return {
           then: (resolve: (v: unknown) => unknown) => resolve(filterVaultRedemptions(condition)),
+          // ADR 031 V7: `reclaimFailedVaultRedemptionForRedrive`'s
+          // locked by-id read (`.where().for('update')`).
+          for: async (..._args: unknown[]) => filterVaultRedemptions(condition),
           orderBy: () => ({
             limit: (_n: number) => {
               const rows = sweepCandidateRows();
@@ -735,6 +738,11 @@ import {
   driveVaultRedemptionToCompletion,
   runVaultRedemptionSweepTick,
   VAULT_REDEMPTION_MAX_ATTEMPTS,
+  getVaultRedemptionById,
+  isVaultRedemptionNeedsRefund,
+  inferVaultRedemptionResumeState,
+  reclaimFailedVaultRedemptionForRedrive,
+  VAULT_REDEMPTION_NEEDS_REFUND_ERROR_PREFIX,
   type VaultRedemptionRow,
 } from '../vault-redemptions.js';
 
@@ -1563,5 +1571,205 @@ describe('runVaultRedemptionSweepTick', () => {
     const rowCFinal = [...state.redemptionRows.values()].find((r) => r.sourceId === 'order-c')!;
     expect(rowCFinal.state).toBe('failed');
     expect(rowCFinal.attempts).toBe(VAULT_REDEMPTION_MAX_ATTEMPTS);
+  });
+});
+
+// ─── ADR 031 V7 — admin re-drive support ───────────────────────────────────
+
+describe('isVaultRedemptionNeedsRefund', () => {
+  it('true only for a failed row whose lastError carries the markRedemptionNeedsRefund signature', () => {
+    const needsRefund = state.seedRow({
+      sourceType: 'order_redeem',
+      sourceId: 'order-nr',
+      userId: USER_ID,
+      state: 'failed',
+      redeemedAt: new Date(),
+      lastError: `${VAULT_REDEMPTION_NEEDS_REFUND_ERROR_PREFIX} (order order-nr is expired, no longer payable) — mirror NOT debited; collected shares require a manual refund`,
+    });
+    expect(isVaultRedemptionNeedsRefund(needsRefund as unknown as VaultRedemptionRow)).toBe(true);
+
+    const ordinaryFailure = state.seedRow({
+      sourceType: 'order_redeem',
+      sourceId: 'order-of',
+      userId: USER_ID,
+      state: 'failed',
+      lastError: 'Soroban RPC timeout',
+    });
+    expect(isVaultRedemptionNeedsRefund(ordinaryFailure as unknown as VaultRedemptionRow)).toBe(
+      false,
+    );
+
+    const notFailed = state.seedRow({
+      sourceType: 'order_redeem',
+      sourceId: 'order-nf',
+      userId: USER_ID,
+      state: 'collecting',
+      lastError: VAULT_REDEMPTION_NEEDS_REFUND_ERROR_PREFIX,
+    });
+    expect(isVaultRedemptionNeedsRefund(notFailed as unknown as VaultRedemptionRow)).toBe(false);
+  });
+});
+
+describe('inferVaultRedemptionResumeState', () => {
+  it('resumes at redeemed when redeemedAt is set (only the mirror is outstanding)', () => {
+    const row = state.seedRow({
+      sourceType: 'order_redeem',
+      sourceId: 'order-1',
+      userId: USER_ID,
+      state: 'failed',
+      collectTxHash: 'c1',
+      collectedAt: new Date(),
+      payoutPath: 'fast',
+      redeemedAt: new Date(),
+    });
+    expect(inferVaultRedemptionResumeState(row as unknown as VaultRedemptionRow)).toBe('redeemed');
+  });
+
+  it('resumes at collecting when redeemedAt is not set, even if a collect landed', () => {
+    const row = state.seedRow({
+      sourceType: 'order_redeem',
+      sourceId: 'order-1',
+      userId: USER_ID,
+      state: 'failed',
+      collectTxHash: 'c1',
+      collectedAt: new Date(),
+      redeemedAt: null,
+    });
+    expect(inferVaultRedemptionResumeState(row as unknown as VaultRedemptionRow)).toBe(
+      'collecting',
+    );
+  });
+
+  it('resumes at collecting when nothing landed at all', () => {
+    const row = state.seedRow({
+      sourceType: 'order_redeem',
+      sourceId: 'order-1',
+      userId: USER_ID,
+      state: 'failed',
+    });
+    expect(inferVaultRedemptionResumeState(row as unknown as VaultRedemptionRow)).toBe(
+      'collecting',
+    );
+  });
+});
+
+describe('getVaultRedemptionById', () => {
+  it('returns the row for a known id, null for an unknown one', async () => {
+    const row = state.seedRow({ sourceType: 'order_redeem', sourceId: 'order-1', userId: USER_ID });
+    expect(await getVaultRedemptionById(row.id)).toMatchObject({ id: row.id });
+    expect(await getVaultRedemptionById('nonexistent-id')).toBeNull();
+  });
+});
+
+describe('reclaimFailedVaultRedemptionForRedrive', () => {
+  it('not_found for a missing id', async () => {
+    const result = await reclaimFailedVaultRedemptionForRedrive('nonexistent-id');
+    expect(result.kind).toBe('not_found');
+  });
+
+  it('not_failed when the row is not currently failed', async () => {
+    const row = state.seedRow({
+      sourceType: 'order_redeem',
+      sourceId: 'order-1',
+      userId: USER_ID,
+      state: 'collecting',
+    });
+    const result = await reclaimFailedVaultRedemptionForRedrive(row.id);
+    expect(result.kind).toBe('not_failed');
+  });
+
+  it('needs_refund short-circuits WITHOUT mutating the row', async () => {
+    const row = state.seedRow({
+      sourceType: 'order_redeem',
+      sourceId: 'order-1',
+      userId: USER_ID,
+      state: 'failed',
+      collectTxHash: 'c1',
+      collectedAt: new Date(),
+      payoutPath: 'fast',
+      redeemedAt: new Date(),
+      lastError: `${VAULT_REDEMPTION_NEEDS_REFUND_ERROR_PREFIX} (order order-1 is expired, no longer payable) — mirror NOT debited; collected shares require a manual refund`,
+      attempts: 0,
+    });
+    const result = await reclaimFailedVaultRedemptionForRedrive(row.id);
+    expect(result.kind).toBe('needs_refund');
+    // Untouched — still failed, same attempts/lastError.
+    expect(state.redemptionRows.get(row.id)?.state).toBe('failed');
+    expect(state.redemptionRows.get(row.id)?.lastError).toContain(
+      VAULT_REDEMPTION_NEEDS_REFUND_ERROR_PREFIX,
+    );
+  });
+
+  it('reclaims a failed-after-collect row to collecting, resetting attempts/lastError/failedAt/collectClaimedAt', async () => {
+    const row = state.seedRow({
+      sourceType: 'order_redeem',
+      sourceId: 'order-1',
+      userId: USER_ID,
+      state: 'failed',
+      collectTxHash: 'c1',
+      collectedAt: new Date(),
+      collectClaimedAt: new Date(),
+      attempts: 5,
+      lastError: 'payout step Soroban timeout',
+      failedAt: new Date(),
+    });
+    const result = await reclaimFailedVaultRedemptionForRedrive(row.id);
+    expect(result.kind).toBe('reclaimed');
+    if (result.kind !== 'reclaimed') throw new Error('unreachable');
+    expect(result.row.state).toBe('collecting');
+    expect(result.row.attempts).toBe(0);
+    expect(result.row.lastError).toBeNull();
+    expect(result.row.failedAt).toBeNull();
+    expect(result.row.collectClaimedAt).toBeNull();
+    // Landed markers untouched.
+    expect(result.row.collectTxHash).toBe('c1');
+    expect(result.row.collectedAt).not.toBeNull();
+  });
+
+  it('reclaims a failed-after-payout row to redeemed (never back to collecting)', async () => {
+    const row = state.seedRow({
+      sourceType: 'order_redeem',
+      sourceId: 'order-1',
+      userId: USER_ID,
+      state: 'failed',
+      collectTxHash: 'c1',
+      collectedAt: new Date(),
+      payoutPath: 'fast',
+      redeemedAt: new Date(),
+      attempts: 5,
+      failedAt: new Date(),
+    });
+    const result = await reclaimFailedVaultRedemptionForRedrive(row.id);
+    expect(result.kind).toBe('reclaimed');
+    if (result.kind !== 'reclaimed') throw new Error('unreachable');
+    expect(result.row.state).toBe('redeemed');
+  });
+
+  it('driving a reclaimed failed-after-collect row resumes at payout and does NOT re-collect (end-to-end through the real drive function)', async () => {
+    state.seedFloat('LOOPUSD', 'testnet', 10_000n, 0n);
+    const row = state.seedRow({
+      sourceType: 'order_redeem',
+      sourceId: 'order-1',
+      userId: USER_ID,
+      valueMinor: 500n,
+      state: 'failed',
+      sharesToRedeem: 480n,
+      collectTxHash: 'c1',
+      collectedAt: new Date(),
+      attempts: 5,
+      failedAt: new Date(),
+    });
+    const reclaimed = await reclaimFailedVaultRedemptionForRedrive(row.id);
+    expect(reclaimed.kind).toBe('reclaimed');
+    if (reclaimed.kind !== 'reclaimed') throw new Error('unreachable');
+
+    const outcome = await driveOneVaultRedemption(reclaimed.row);
+
+    expect(outcome).toBe('settled');
+    // The collect transfer was never re-invoked for this already-landed row.
+    expect(vaultClientMocks.transferShares).not.toHaveBeenCalled();
+    const final = state.redemptionRows.get(row.id)!;
+    expect(final.state).toBe('settled');
+    expect(final.payoutPath).toBe('fast');
   });
 });

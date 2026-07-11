@@ -972,6 +972,142 @@ export async function driveOneVaultRedemption(
   return current.state as VaultRedemptionDriveOutcome;
 }
 
+// ─── Admin re-drive support (V7 — the recovery complement to the V5a stuck-watchdog page) ──
+//
+// Mirrors `vault-emissions.ts`'s equivalent section. `driveOneVaultRedemption`
+// above is unchanged and does NOT handle `state === 'failed'` at all (it
+// falls through every branch and returns `'failed'` verbatim) — these
+// primitives exist to move a `failed` row back into a resumable state
+// (or detect it should NOT be moved at all) before the admin handler
+// calls the unmodified drive function exactly once.
+
+/** By id — the admin handler's only "does this row exist" read. */
+export async function getVaultRedemptionById(id: string): Promise<VaultRedemptionRow | null> {
+  const [row] = await db.select().from(vaultRedemptions).where(eq(vaultRedemptions.id, id));
+  return row ?? null;
+}
+
+/**
+ * The exact prefix `markRedemptionNeedsRefund` writes into `lastError`
+ * — the durable, greppable signature of "mirrorStep hit
+ * `VaultRedemptionOrderNotPayableError`: the payout already landed
+ * (shares collected, value paid out) but the source order was no
+ * longer payable, so the mirror debit was deliberately NOT applied and
+ * the collected shares need a MANUAL refund." Exported so the admin
+ * handler can distinguish this from an ordinary step failure without
+ * re-deriving the string.
+ */
+export const VAULT_REDEMPTION_NEEDS_REFUND_ERROR_PREFIX = 'order not payable at mirror time';
+
+/**
+ * True for a `failed` row that reached its terminal state via
+ * `markRedemptionNeedsRefund` rather than via the ordinary
+ * `recordStepFailure` attempts-exhausted path. This is NOT a step that
+ * re-driving can fix — the payout already happened; re-entering
+ * `mirrorStep` would just hit the exact same
+ * `VaultRedemptionOrderNotPayableError` again (the source order's
+ * non-payable state doesn't change on retry) and re-page ops for
+ * nothing. The admin handler refuses re-drive on this signature and
+ * surfaces the needs-refund status instead of touching the row.
+ */
+export function isVaultRedemptionNeedsRefund(row: VaultRedemptionRow): boolean {
+  return (
+    row.state === 'failed' &&
+    row.lastError !== null &&
+    row.lastError.startsWith(VAULT_REDEMPTION_NEEDS_REFUND_ERROR_PREFIX)
+  );
+}
+
+export type VaultRedemptionRedriveResumeState = 'collecting' | 'redeemed';
+
+/**
+ * Infers the correct resume state for a genuine (non-needs-refund)
+ * `failed` row from `redeemedAt` — set ONLY in the same UPDATE that
+ * lands the payout (`payoutStep`'s fast/slow branches), so it is proof
+ * the payout itself landed, unlike `collectTxHash`/`payoutPath` which
+ * can be set by an in-flight/aborted attempt (CF-18 `onSigned`
+ * persists `collectTxHash` before the collect transfer is even
+ * submitted):
+ *
+ *   - `redeemedAt` set → collect AND payout both landed; only the
+ *     mirror is outstanding. Resume at `'redeemed'` (drive re-enters
+ *     at `mirrorStep`; `collectSharesStep`/`payoutStep` are never
+ *     called again for this row).
+ *   - `redeemedAt` unset → payout has not landed (collect may or may
+ *     not have — `collectedAt`, same reasoning, is the landed-proof
+ *     for THAT sub-step). Resume at `'collecting'`:
+ *     `driveOneVaultRedemption`'s existing branch handles both
+ *     sub-cases correctly without any further help from this
+ *     function — `collectSharesStep` no-ops immediately if
+ *     `collectedAt !== null` ("nothing to do") and falls straight to
+ *     `payoutStep`, or re-claims + verify-or-resubmits the collect
+ *     transfer via `priorTxHash: row.collectTxHash` if it doesn't.
+ */
+export function inferVaultRedemptionResumeState(
+  row: VaultRedemptionRow,
+): VaultRedemptionRedriveResumeState {
+  return row.redeemedAt !== null ? 'redeemed' : 'collecting';
+}
+
+export type VaultRedemptionReclaimResult =
+  | { kind: 'not_found' }
+  /** Row exists but was not `'failed'` at claim time (already redriven by a concurrent call, or moved on its own). */
+  | { kind: 'not_failed'; row: VaultRedemptionRow }
+  /** `failed` via `markRedemptionNeedsRefund` — NOT reclaimed; the caller must surface the needs-refund status, not re-drive. */
+  | { kind: 'needs_refund'; row: VaultRedemptionRow }
+  | { kind: 'reclaimed'; row: VaultRedemptionRow };
+
+/**
+ * Atomically reclaims a `failed` vault-redemption row for re-drive —
+ * mirrors `reclaimFailedVaultEmissionForRedrive` exactly, plus the
+ * needs-refund short-circuit. Locks the row (`FOR UPDATE`), verifies
+ * `'failed'`, refuses (without mutating) a needs-refund row, else
+ * computes the resume target from the SAME locked row and CAS-updates
+ * `state → resumeState, attempts → 0, lastError → null, failedAt →
+ * null`. Resuming into `'collecting'` also clears `collectClaimedAt`
+ * so the per-step collect lease (`claimCollect`'s
+ * `COLLECT_CLAIM_LEASE_MS`) is immediately re-acquirable rather than
+ * depending on the old claim timing out.
+ *
+ * Does NOT drive the row — the caller (the admin handler) does that
+ * via the ordinary `driveOneVaultRedemption(row)`, exactly once, using
+ * the row this function returns. Safe to do so inline/synchronously,
+ * unlike the emission-side equivalent — `driveOneVaultRedemption` is
+ * explicitly designed for concurrent callers (see the module header's
+ * "Concurrency: two drivers, three guards"), so a redrive call racing
+ * the background sweep on the SAME row is the exact scenario the
+ * per-step `collectClaimedAt` CAS + `payoutStep`'s guarded UPDATE
+ * already make safe.
+ */
+export async function reclaimFailedVaultRedemptionForRedrive(
+  id: string,
+): Promise<VaultRedemptionReclaimResult> {
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .select()
+      .from(vaultRedemptions)
+      .where(eq(vaultRedemptions.id, id))
+      .for('update');
+    if (row === undefined) return { kind: 'not_found' };
+    if (row.state !== 'failed') return { kind: 'not_failed', row };
+    if (isVaultRedemptionNeedsRefund(row)) return { kind: 'needs_refund', row };
+    const resumeState = inferVaultRedemptionResumeState(row);
+    const [updated] = await tx
+      .update(vaultRedemptions)
+      .set({
+        state: resumeState,
+        attempts: 0,
+        lastError: null,
+        failedAt: null,
+        ...(resumeState === 'collecting' ? { collectClaimedAt: null } : {}),
+      })
+      .where(and(eq(vaultRedemptions.id, id), eq(vaultRedemptions.state, 'failed')))
+      .returning();
+    if (updated === undefined) return { kind: 'not_failed', row };
+    return { kind: 'reclaimed', row: updated };
+  });
+}
+
 /**
  * Drives a row through as many steps as land within `maxSteps` drive
  * calls (each call can advance multiple internal sub-steps in one

@@ -175,6 +175,20 @@ function collectStringParams(node: unknown): string[] {
   return out;
 }
 
+/**
+ * ADR 031 V7: resolves a plain-by-id `vault_emissions` read (used by
+ * both `getVaultEmissionById`'s bare `.where()` and
+ * `reclaimFailedVaultEmissionForRedrive`'s locked `.where().for('update')`
+ * read) — mirrors `filterVaultRedemptions` in the sibling test file.
+ */
+function filterVaultEmissions(condition: unknown): unknown[] {
+  const params = collectStringParams(condition);
+  const id = params.find((p) => state.vaultEmissionRows.has(p));
+  if (id === undefined) return [];
+  const row = state.vaultEmissionRows.get(id);
+  return row ? [row] : [];
+}
+
 function buildDbMock(): Record<string, unknown> {
   function handleVaultEmissionUpdate(
     patch: Record<string, unknown>,
@@ -244,10 +258,15 @@ function buildDbMock(): Record<string, unknown> {
       table = state.tableNameOf(t);
       return chain;
     };
-    chain['where'] = () => ({
-      // The userCredits FOR UPDATE lock read in mirrorStep: `.where().for('update')`.
+    chain['where'] = (condition: unknown) => ({
+      // ADR 031 V7: `reclaimFailedVaultEmissionForRedrive`'s locked
+      // by-id read (`.where().for('update')`) — resolves to the real
+      // row for `vaultEmissions`; the userCredits FOR UPDATE lock read
+      // in mirrorStep hits this same branch on a different table and
+      // stays a no-op `[]` (its result is never used, only the lock).
       for: () => ({
-        then: (resolve: (v: unknown) => unknown) => resolve([]),
+        then: (resolve: (v: unknown) => unknown) =>
+          resolve(table === 'vaultEmissions' ? filterVaultEmissions(condition) : []),
       }),
       orderBy: () => ({
         // Sweep candidate read: `.orderBy().limit().for('update', {skipLocked})`.
@@ -265,7 +284,9 @@ function buildDbMock(): Record<string, unknown> {
           };
         },
       }),
-      then: (resolve: (v: unknown) => unknown) => resolve([]),
+      // ADR 031 V7: `getVaultEmissionById`'s plain by-id read.
+      then: (resolve: (v: unknown) => unknown) =>
+        resolve(table === 'vaultEmissions' ? filterVaultEmissions(condition) : []),
     });
     return chain;
   }
@@ -426,6 +447,9 @@ import {
   runVaultEmissionSweepTick,
   vaultAssetForCurrency,
   isVaultEligibleCurrency,
+  getVaultEmissionById,
+  inferVaultEmissionResumeState,
+  reclaimFailedVaultEmissionForRedrive,
   type VaultEmissionRow,
 } from '../vault-emissions.js';
 import { db } from '../../../db/client.js';
@@ -799,5 +823,152 @@ describe('runVaultEmissionSweepTick — gated-off leaves the existing path untou
 
     expect(result.considered).toBe(2);
     expect(result.mirrored).toBe(2);
+  });
+});
+
+// ─── ADR 031 V7 — admin re-drive support ───────────────────────────────────
+
+describe('inferVaultEmissionResumeState', () => {
+  it('resumes at transferred when transferredAt is set (only the mirror is outstanding)', () => {
+    const row = state.seedRow({
+      orderId: ORDER_ID,
+      userId: USER_ID,
+      state: 'failed',
+      depositTxHash: 'd1',
+      sharesMinted: 480n,
+      depositedAt: new Date(),
+      transferTxHash: 't1',
+      transferredAt: new Date(),
+    });
+    expect(inferVaultEmissionResumeState(row as unknown as VaultEmissionRow)).toBe('transferred');
+  });
+
+  it('resumes at deposited when depositedAt is set but transferredAt is not, even if a transfer was attempted', () => {
+    // transferTxHash set (CF-18 onSigned fired) but transferredAt is
+    // NOT — the transfer was attempted but never confirmed landed
+    // before the row exhausted its attempts. Must NOT resume at
+    // 'transferred' (that would skip re-verifying/re-submitting it).
+    const row = state.seedRow({
+      orderId: ORDER_ID,
+      userId: USER_ID,
+      state: 'failed',
+      depositTxHash: 'd1',
+      sharesMinted: 480n,
+      depositedAt: new Date(),
+      transferTxHash: 'aborted-transfer-attempt',
+      transferredAt: null,
+    });
+    expect(inferVaultEmissionResumeState(row as unknown as VaultEmissionRow)).toBe('deposited');
+  });
+
+  it('resumes at depositing when neither landing marker is set, even if a deposit was attempted', () => {
+    const row = state.seedRow({
+      orderId: ORDER_ID,
+      userId: USER_ID,
+      state: 'failed',
+      depositTxHash: 'aborted-deposit-attempt',
+      depositedAt: null,
+      transferredAt: null,
+    });
+    expect(inferVaultEmissionResumeState(row as unknown as VaultEmissionRow)).toBe('depositing');
+  });
+
+  it('resumes at depositing when nothing at all was attempted', () => {
+    const row = state.seedRow({ orderId: ORDER_ID, userId: USER_ID, state: 'failed' });
+    expect(inferVaultEmissionResumeState(row as unknown as VaultEmissionRow)).toBe('depositing');
+  });
+});
+
+describe('getVaultEmissionById', () => {
+  it('returns the row for a known id, null for an unknown one', async () => {
+    const row = state.seedRow({ orderId: ORDER_ID, userId: USER_ID });
+    expect(await getVaultEmissionById(row.id)).toMatchObject({ id: row.id });
+    expect(await getVaultEmissionById('nonexistent-id')).toBeNull();
+  });
+});
+
+describe('reclaimFailedVaultEmissionForRedrive', () => {
+  it('not_found for a missing id', async () => {
+    const result = await reclaimFailedVaultEmissionForRedrive('nonexistent-id');
+    expect(result.kind).toBe('not_found');
+  });
+
+  it('not_failed when the row is not currently failed', async () => {
+    const row = state.seedRow({ orderId: ORDER_ID, userId: USER_ID, state: 'deposited' });
+    const result = await reclaimFailedVaultEmissionForRedrive(row.id);
+    expect(result.kind).toBe('not_failed');
+  });
+
+  it('reclaims a failed-after-deposit row to deposited, resetting attempts/lastError/failedAt', async () => {
+    const row = state.seedRow({
+      orderId: ORDER_ID,
+      userId: USER_ID,
+      state: 'failed',
+      depositTxHash: 'd1',
+      sharesMinted: 480n,
+      depositedAt: new Date(),
+      attempts: 5,
+      lastError: 'Soroban RPC timeout',
+      failedAt: new Date(),
+    });
+    const result = await reclaimFailedVaultEmissionForRedrive(row.id);
+    expect(result.kind).toBe('reclaimed');
+    if (result.kind !== 'reclaimed') throw new Error('unreachable');
+    expect(result.row.state).toBe('deposited');
+    expect(result.row.attempts).toBe(0);
+    expect(result.row.lastError).toBeNull();
+    expect(result.row.failedAt).toBeNull();
+    // Landed markers untouched — this is a resume, not a reset to scratch.
+    expect(result.row.depositTxHash).toBe('d1');
+    expect(result.row.sharesMinted).toBe(480n);
+  });
+
+  it('reclaims a failed-after-transfer row to transferred (never back to pending/depositing)', async () => {
+    const row = state.seedRow({
+      orderId: ORDER_ID,
+      userId: USER_ID,
+      state: 'failed',
+      depositTxHash: 'd1',
+      sharesMinted: 480n,
+      depositedAt: new Date(),
+      transferTxHash: 't1',
+      transferredAt: new Date(),
+      attempts: 5,
+      failedAt: new Date(),
+    });
+    const result = await reclaimFailedVaultEmissionForRedrive(row.id);
+    expect(result.kind).toBe('reclaimed');
+    if (result.kind !== 'reclaimed') throw new Error('unreachable');
+    expect(result.row.state).toBe('transferred');
+  });
+
+  it('driving a reclaimed failed-after-deposit row resumes at transfer and does NOT re-deposit (end-to-end through the real drive function)', async () => {
+    vaultClientMocks.transferShares.mockResolvedValue({
+      txHash: 'transfer-tx-redrive',
+      deduped: false,
+    });
+    const row = state.seedRow({
+      orderId: ORDER_ID,
+      userId: USER_ID,
+      cashbackMinor: 500n,
+      state: 'failed',
+      depositTxHash: 'd1',
+      sharesMinted: 480n,
+      depositedAt: new Date(),
+      attempts: 5,
+      failedAt: new Date(),
+    });
+    const reclaimed = await reclaimFailedVaultEmissionForRedrive(row.id);
+    expect(reclaimed.kind).toBe('reclaimed');
+    if (reclaimed.kind !== 'reclaimed') throw new Error('unreachable');
+
+    const outcome = await driveOneVaultEmission(reclaimed.row);
+
+    expect(outcome).toBe('mirrored');
+    expect(vaultClientMocks.depositToVault).not.toHaveBeenCalled();
+    expect(vaultClientMocks.transferShares).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: 480n }),
+    );
+    expect(state.userCreditsBalances.get(`${USER_ID}:USD`)).toBe(500n);
   });
 });
