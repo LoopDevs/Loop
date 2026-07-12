@@ -3,6 +3,7 @@ import type { Merchant } from '@loop/shared';
 import { merchantSlug } from '@loop/shared';
 import { getImageProxyUrl } from '~/utils/image';
 import { brandTileStyle } from '~/utils/brand-color';
+import { formatCashbackPct } from '~/utils/format-cashback';
 import { triggerHaptic } from '~/native/haptics';
 import { LazyImage } from '~/components/ui/LazyImage';
 import { currencySymbol } from '~/i18n/format';
@@ -91,23 +92,6 @@ export interface MerchantCardProps {
    * to `merchant.name`. Image alt text keeps the full name.
    */
   displayName?: string;
-}
-
-/**
- * Formats the numeric-string pct for the card badge. Drops trailing
- * zeros so whole-integer rates read as "5% cashback" rather than
- * "5.00% cashback", while partial rates keep their precision ("2.5").
- * Returns `null` when the input can't be made to render sensibly,
- * which the caller should translate to "don't render the badge".
- */
-function formatCashbackPct(pct: string | null | undefined): string | null {
-  if (pct === null || pct === undefined) return null;
-  const n = Number(pct);
-  if (!Number.isFinite(n) || n <= 0) return null;
-  // One decimal place max — rates like 1.25% are rare and would clutter
-  // a small pill; we prefer the slightly-less-precise "1.3%" read.
-  const rounded = Math.round(n * 10) / 10;
-  return rounded.toFixed(1).replace(/\.0$/, '');
 }
 
 export function MerchantCard({

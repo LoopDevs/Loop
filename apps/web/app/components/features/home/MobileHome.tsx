@@ -26,6 +26,7 @@ import { useLocale } from '~/i18n/locale';
 import { shouldRetry } from '~/hooks/query-retry';
 import { getCashbackSummary } from '~/services/user';
 import { getImageProxyUrl } from '~/utils/image';
+import { formatCashbackPct } from '~/utils/format-cashback';
 import { formatMinorCurrency, formatMoney, useLocaleTag } from '~/i18n/format';
 import { MerchantCardSkeleton } from '~/components/ui/Skeleton';
 import { FavoritesStrip } from '~/components/features/FavoritesStrip';
@@ -667,20 +668,6 @@ function PctPill({
       {children}
     </span>
   );
-}
-
-/**
- * Formats the numeric(5,2) cashback string into the compact pill
- * label. Drops a trailing `.0` so integer rates read as "5%" rather
- * than "5.0%" on the small pill. Returns `null` when the rate parses
- * to 0 / negative / unparseable — the caller hides the pill.
- */
-function formatCashbackPct(pct: string | null | undefined): string | null {
-  if (pct === null || pct === undefined) return null;
-  const n = Number(pct);
-  if (!Number.isFinite(n) || n <= 0) return null;
-  const rounded = Math.round(n * 10) / 10;
-  return rounded.toFixed(1).replace(/\.0$/, '');
 }
 
 function DirectoryCell({
