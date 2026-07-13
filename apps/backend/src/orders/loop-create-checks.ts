@@ -6,11 +6,14 @@
  * response building rather than carrying drizzle imports for two
  * single-row reads.
  *
- *   - `hasSufficientCredit` — the pre-write balance check for
- *     `paymentMethod='credit'` orders. The actual debit is FOR-UPDATE-
- *     guarded inside `repo.createOrder`; this is the friendly 400
- *     before the txn so the client gets a clear "INSUFFICIENT_CREDIT"
- *     rather than a 500 on a unique-violation race.
+ *   - `hasSufficientCredit` — a read-only balance check for
+ *     `paymentMethod='credit'` orders. NOT currently wired into the
+ *     create path: the create handler no longer runs a pre-check
+ *     (removed in the tranche-1 audit remediation). The sole balance
+ *     guard is now the FOR UPDATE re-read inside `repo.createOrder`'s
+ *     credit txn, which throws `InsufficientCreditError` (mapped to a
+ *     400) when the live balance is below the charge. Retained as a
+ *     reusable, unit-tested helper.
  *   - `isFirstLoopAssetOrder` — true when the user has never placed a
  *     `paymentMethod='loop_asset'` order before. Drives the one-shot
  *     `notifyFirstCashbackRecycled` Discord milestone (the user has
@@ -25,10 +28,11 @@ import { orders, userCredits } from '../db/schema.js';
 
 /**
  * Verifies the user has at least `amountMinor` in `currency`. Returns
- * true when the balance covers the order. Called for credit-funded
- * orders before writing the row — the actual debit happens later on
- * payment watcher transition, inside the same txn as the state move
- * to `paid`.
+ * true when the balance covers the order. A read-only helper: it is
+ * NOT currently called on the create path — the authoritative check
+ * is the FOR UPDATE re-read inside the credit-order txn
+ * (`repo-credit-order.insertCreditOrderTxn`), which throws
+ * `InsufficientCreditError` if the live balance is short.
  */
 export async function hasSufficientCredit(
   userId: string,

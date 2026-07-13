@@ -11,14 +11,10 @@ import { useAdminStepUp } from '~/hooks/use-admin-step-up';
 import { ReplayedBadge } from './ReplayedBadge';
 import { ConfirmDialog } from './ConfirmDialog';
 import { StepUpModal } from './StepUpModal';
+import { ADMIN_WRITE_MAX_ABS_MINOR } from './constants';
 
 const CURRENCIES = ['USD', 'GBP', 'EUR'] as const;
 type Currency = (typeof CURRENCIES)[number];
-
-// Backend caps magnitude at 10_000_000 minor (100k major units). Show
-// the friendly bound here so the form can reject pre-submit rather
-// than bouncing off the backend.
-const MAX_ABS_MINOR = 10_000_000n;
 
 interface Props {
   userId: string;
@@ -132,7 +128,7 @@ export function CreditAdjustmentForm({ userId, defaultCurrency }: Props): React.
       return;
     }
     const abs = parsed.minorBigInt < 0n ? -parsed.minorBigInt : parsed.minorBigInt;
-    if (abs > MAX_ABS_MINOR) {
+    if (abs > ADMIN_WRITE_MAX_ABS_MINOR) {
       setFormError('Amount exceeds the ±100,000 major-unit limit.');
       return;
     }

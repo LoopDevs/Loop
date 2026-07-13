@@ -11,11 +11,10 @@ import { useAdminStepUp } from '~/hooks/use-admin-step-up';
 import { ReplayedBadge } from './ReplayedBadge';
 import { ConfirmDialog } from './ConfirmDialog';
 import { StepUpModal } from './StepUpModal';
+import { ADMIN_WRITE_MAX_ABS_MINOR } from './constants';
 
 const CURRENCIES = ['USD', 'GBP', 'EUR'] as const;
 type Currency = (typeof CURRENCIES)[number];
-
-const MAX_ABS_MINOR = 10_000_000n;
 
 interface Props {
   userId: string;
@@ -107,7 +106,7 @@ export function AdminEmissionForm({ userId, defaultCurrency }: Props): React.JSX
       setFormError('Amount must be a positive number (e.g. 12.34 or 50).');
       return;
     }
-    if (parsed.minorBigInt > MAX_ABS_MINOR) {
+    if (parsed.minorBigInt > ADMIN_WRITE_MAX_ABS_MINOR) {
       setFormError('Amount exceeds the 100,000 major-unit limit.');
       return;
     }

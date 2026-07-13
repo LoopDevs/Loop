@@ -50,8 +50,8 @@ export interface CreditOrderBaseValues {
  * Inserts the order row, debits the user's balance under a
  * FOR UPDATE lock, writes the spend ledger row, and flips the
  * order to `paid`. Throws `InsufficientCreditError` if the balance
- * is below the charge amount when re-read inside the txn (a race
- * past the handler's UX-only `hasSufficientCredit` pre-check).
+ * is below the charge amount when re-read inside the txn — this
+ * FOR UPDATE re-read is the only balance check on the credit path.
  */
 export async function insertCreditOrderTxn(values: CreditOrderBaseValues): Promise<Order> {
   return await db.transaction(async (tx) => {
@@ -62,9 +62,9 @@ export async function insertCreditOrderTxn(values: CreditOrderBaseValues): Promi
 
     // Re-read balance under a FOR UPDATE lock. A concurrent admin
     // adjustment or another credit order against the same
-    // (user, currency) row serialises through here. This is the
-    // guard — the earlier `hasSufficientCredit` at the handler is a
-    // UX fast-path that can be racy.
+    // (user, currency) row serialises through here. This is the only
+    // balance guard on the credit path — there is no handler
+    // pre-check ahead of it.
     const fresh = await tx
       .select({ balanceMinor: userCredits.balanceMinor })
       .from(userCredits)
