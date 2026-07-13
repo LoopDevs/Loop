@@ -292,8 +292,18 @@ export function Layout({ children }: { children: React.ReactNode }): React.JSX.E
     .map((d) => d.trim())
     .filter((d) => !/^(frame-ancestors|report-uri|sandbox)\b/.test(d))
     .join('; ');
+  // FE-20 / A11Y-011 / I18N-003: derive the SSR `<html lang>` from the
+  // negotiated ADR-034 route locale (`/:country/:lang`), not a hardcoded
+  // `"en"`. The framework mounts `Layout` as the root route's element
+  // (`<Layout><App/></Layout>`), so it renders *inside* the router — the same
+  // `useLocale()` (→ `useParams()`) the rest of the app reads resolves the URL
+  // segments here too. This is the value in the first server byte, so a crawler
+  // or screen reader on a `/de/de` page sees the real language instead of `en`.
+  // BCP-47-safe: we emit the language subtag (`en`, `de`); `App`'s effect keeps
+  // it in agreement across client-side locale navigation and syncs `<html dir>`.
+  const locale = useLocale();
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang={locale.lang} suppressHydrationWarning>
       <head>
         <meta charSet="utf-8" />
         {csp !== undefined && <meta httpEquiv="Content-Security-Policy" content={csp} />}
@@ -528,22 +538,18 @@ export default function App(): React.JSX.Element {
   const { isRestoring } = useSessionRestore();
   const { isNative } = useNativePlatform();
   const isAuthenticated = useAuthStore((s) => s.accessToken !== null);
-  // A11Y-011 / I18N-003 / CF-35: drive `<html lang>` / `<html dir>` from the
-  // active ADR-034 locale instead of the hardcoded `lang="en"` in Layout.
-  // Today benign (only `en` ships) but a forward-block: a `/de/de` route
-  // would otherwise still report `lang="en"` and give SRs the wrong
-  // pronunciation. `Layout` renders the document shell outside the router,
-  // so this effect (inside the router) is where the URL locale is known.
-  //
-  // ADR 043 (B-6): same effect also syncs the i18next active language to
-  // the route locale — the single place `t()`'s language and `<html lang>`
-  // are kept in agreement. A no-op today (`i18n.changeLanguage('en')` every
-  // time, since `SUPPORTED_LANGS` is still `['en']`), but this is the seam
-  // a second `/:country/:lang` language drops into without a code change.
+  // A11Y-011 / I18N-003 / CF-35 / FE-20: the SSR `<html lang>` is now set in
+  // `Layout` from the negotiated ADR-034 locale (see there) — `Layout` renders
+  // inside the router, so it already knows the URL locale on the server. This
+  // effect keeps `<html dir>` and the i18next active language in agreement with
+  // the route on the client, including client-side locale navigation where the
+  // document shell re-renders (React reconciles `<html lang>` itself). Today a
+  // no-op (only `en` ships, `SUPPORTED_LANGS === ['en']`), but this is the seam
+  // a second `/:country/:lang` language drops into with no code change: `<html
+  // dir>` flips for an RTL script and `t()`'s language follows the URL.
   const locale = useLocale();
   useEffect(() => {
     const el = document.documentElement;
-    el.setAttribute('lang', locale.lang);
     el.setAttribute('dir', getLangDir(locale.lang));
     void i18n.changeLanguage(locale.lang);
   }, [locale.lang]);
