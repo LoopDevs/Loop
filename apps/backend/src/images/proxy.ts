@@ -1,3 +1,6 @@
+import http from 'node:http';
+import https from 'node:https';
+import { Readable } from 'node:stream';
 import sharp from 'sharp';
 import type { Context } from 'hono';
 import { logger } from '../logger.js';
@@ -75,16 +78,19 @@ export async function imageProxyHandler(c: Context): Promise<Response> {
   }
 
   try {
-    // Deliberately bare `fetch`, NOT `getUpstreamCircuit('...').fetch`.
-    // Our breakers are keyed per fixed endpoint category
-    // (`login`, `gift-cards`, etc.). Image URLs here are arbitrary
-    // allowlisted hosts — one bad host would trip a shared breaker and
-    // fail every other host's logo fetches. This handler already has a
-    // `FETCH_TIMEOUT_MS` bound + a 100 MB / 7-day LRU cache in front,
-    // which is the right level of protection for this shape. Documented
-    // exception in `apps/backend/AGENTS.md` under "Upstream calls
-    // always use". See also ADR-005 §5 (DNS rebinding rationale).
-    const upstream = await fetch(imageUrl, {
+    // Deliberately not `getUpstreamCircuit('...').fetch`. Our breakers
+    // are keyed per fixed endpoint category (`login`, `gift-cards`,
+    // etc.). Image URLs here are arbitrary allowlisted hosts — one bad
+    // host would trip a shared breaker and fail every other host's logo
+    // fetches. This handler already has a `FETCH_TIMEOUT_MS` bound + a
+    // 100 MB / 7-day LRU cache in front, which is the right level of
+    // protection for this shape. Documented exception in
+    // `apps/backend/AGENTS.md` under "Upstream calls always use".
+    //
+    // `__imageUpstream.fetch` is the SSRF-safe transport (see above): it
+    // range-checks the connect-time resolved IP via `ssrfSafeLookup`,
+    // closing the DNS-rebinding gap ADR-005 §5 previously only documented.
+    const upstream = await __imageUpstream.fetch(imageUrl, {
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       redirect: 'manual',
     });
@@ -247,9 +253,70 @@ async function readBodyWithLimit(res: Response, limit: number): Promise<Buffer |
 }
 
 // SSRF guard (URL-validate + IP-range checks) lives in
-// `./ssrf-guard.ts`. Imported back here for the single call site
-// in `imageProxyHandler`.
-import { validateImageUrl } from './ssrf-guard.js';
+// `./ssrf-guard.ts`. `validateImageUrl` is the pre-flight check;
+// `ssrfSafeLookup` is the connect-time resolver that closes the
+// DNS-rebinding gap on the actual fetch below.
+import { validateImageUrl, ssrfSafeLookup } from './ssrf-guard.js';
+
+interface UpstreamFetchInit {
+  signal?: AbortSignal;
+  redirect?: 'manual';
+}
+
+// Fetch-spec null-body statuses: the global `Response` ctor throws if
+// handed a body for these. The handler rejects all of them anyway (3xx →
+// UPSTREAM_REDIRECT; 204/205/304 → NOT_AN_IMAGE), so we drain the socket
+// and hand back a bodiless Response.
+const NULL_BODY_STATUSES = new Set([101, 103, 204, 205, 304]);
+
+/**
+ * SSRF-safe upstream fetch. Unlike a bare `fetch()`, the connecting
+ * socket resolves DNS through `ssrfSafeLookup`, which range-checks the
+ * address the request will actually connect to — closing the
+ * DNS-rebinding TOCTOU where an attacker-run resolver answers public to
+ * `validateImageUrl` and private to the fetch, even with the host
+ * allowlist off. `agent: false` forces a fresh validated lookup per
+ * request (no keep-alive socket reuse). Node core never auto-follows
+ * redirects, so a 3xx surfaces as a status the handler rejects (no
+ * redirect-chain SSRF).
+ */
+function ssrfSafeUpstreamFetch(rawUrl: string, init: UpstreamFetchInit): Promise<Response> {
+  const transport = new URL(rawUrl).protocol === 'http:' ? http : https;
+  return new Promise<Response>((resolve, reject) => {
+    const req = transport.request(
+      rawUrl,
+      { method: 'GET', lookup: ssrfSafeLookup, agent: false, signal: init.signal },
+      (res) => {
+        const status = res.statusCode ?? 502;
+        const headers = new Headers();
+        for (const [name, value] of Object.entries(res.headers)) {
+          if (typeof value === 'string') headers.set(name, value);
+          else if (Array.isArray(value)) headers.set(name, value.join(', '));
+        }
+        if (NULL_BODY_STATUSES.has(status)) {
+          res.resume(); // drain so the socket can close
+          resolve(new Response(null, { status, headers }));
+          return;
+        }
+        const body = Readable.toWeb(res) as ReadableStream<Uint8Array>;
+        resolve(new Response(body, { status, headers }));
+      },
+    );
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+/**
+ * Test seam: the upstream fetch is SSRF-safe (node core + a connect-time
+ * IP-validating `lookup`) in production; the proxy tests replace `fetch`
+ * here with a stub returning a synthetic `Response` so they exercise the
+ * resize/cache/redirect handling without real sockets. The connect-time
+ * rebind defence itself is proven directly in `ssrf-guard.test.ts`.
+ */
+export const __imageUpstream: {
+  fetch: (url: string, init: UpstreamFetchInit) => Promise<Response>;
+} = { fetch: ssrfSafeUpstreamFetch };
 
 function clampDimension(v: number): number {
   if (isNaN(v) || v <= 0) return 0;

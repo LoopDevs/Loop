@@ -1,29 +1,36 @@
 /**
  * SSRF guard for the image proxy.
  *
- * Lifted out of `apps/backend/src/images/proxy.ts`. Three pure
- * helpers that share one concern — validating that a remote URL
- * is safe to proxy:
+ * Lifted out of `apps/backend/src/images/proxy.ts`. The helpers
+ * share one concern — validating that a remote URL is safe to proxy:
  *
  *   - `validateImageUrl(rawUrl)` — protocol check, allowlist
  *     check, hostname resolution, IP-range check across every
- *     resolved address.
+ *     resolved address (the pre-flight check).
+ *   - `ssrfSafeLookup(hostname, …)` — the connecting socket's DNS
+ *     resolver for the *actual* fetch: it re-range-checks the address
+ *     the connection will use, so a DNS-rebind between the pre-flight
+ *     check and the fetch cannot land on an internal target.
  *   - `isPrivateOrReservedIp(ip)` — IPv4 + IPv6 range check,
  *     covering RFC 1918 private, loopback, link-local, CGNAT,
- *     reserved, multicast, plus IPv4-mapped IPv6 forms.
+ *     reserved, multicast, IPv4-mapped IPv6 forms, plus NAT64
+ *     (64:ff9b::/96) and 6to4 (2002::/16) addresses whose embedded
+ *     IPv4 falls in one of those ranges.
  *   - `extractEmbeddedIPv4(ipv6Lower)` — pulls the IPv4 out of
  *     `::ffff:a.b.c.d` / `::ffff:XXXX:YYYY` so the IPv4 range
  *     check can run.
  *
  * Pulled out to give the SSRF-defense logic its own focused
  * home — separate from the proxy\'s caching / fetch-with-limit
- * / sharp-resize plumbing in the parent file. The known
- * DNS-rebinding TOCTOU limitation is documented on
- * `validateImageUrl` itself; the practical mitigation
- * (`IMAGE_PROXY_ALLOWED_HOSTS`) is enforced inline.
+ * / sharp-resize plumbing in the parent file. The DNS-rebinding
+ * TOCTOU gap that used to be a documented limitation is now closed
+ * by `ssrfSafeLookup` (wired into the proxy's fetch as the socket's
+ * `lookup`); `IMAGE_PROXY_ALLOWED_HOSTS` remains a defence-in-depth
+ * layer on top, not the only mitigation.
  */
 import { lookup } from 'node:dns/promises';
 import net from 'node:net';
+import type { LookupFunction } from 'node:net';
 import { env } from '../env.js';
 
 /**
@@ -35,15 +42,14 @@ import { env } from '../env.js';
  *
  * Returns an error string if invalid, or null if valid.
  *
- * KNOWN LIMITATION — DNS rebinding TOCTOU.
- * We validate the resolved IPs here, but `fetch()` below performs its own
- * DNS lookup that we do not control. An attacker-controlled DNS server can
- * return a public IP to our validation and a private IP to the subsequent
- * fetch. The practical mitigation is `IMAGE_PROXY_ALLOWED_HOSTS`: when set,
- * only operator-trusted hostnames can be resolved at all. Untrusted input
- * without an allowlist remains exposed to this class of attack; a tighter
- * fix would require a custom undici `dispatcher.connect` that reuses the
- * already-resolved IP with the expected `Host` header.
+ * This is the pre-flight check: it rejects obviously-bad URLs before any
+ * socket is opened. It does NOT, on its own, close the DNS-rebinding
+ * TOCTOU window — an attacker-run resolver can answer with a public IP
+ * here and a private IP to the fetch's own later lookup. That window is
+ * closed at the connection layer by `ssrfSafeLookup`, which the proxy
+ * wires in as the connecting socket's `lookup`, so the address the
+ * request actually connects to is range-checked too. Both layers run
+ * regardless of whether `IMAGE_PROXY_ALLOWED_HOSTS` is configured.
  */
 export async function validateImageUrl(rawUrl: string): Promise<string | null> {
   let parsed: URL;
@@ -101,11 +107,63 @@ export async function validateImageUrl(rawUrl: string): Promise<string | null> {
 }
 
 /**
+ * SSRF-safe DNS resolver for the image proxy's actual fetch — wired in
+ * as the connecting socket's `lookup` (see `proxy.ts`).
+ *
+ * `validateImageUrl` above range-checks the IPs it resolves, but a plain
+ * `fetch()` performs its OWN later DNS lookup that we don't control: an
+ * attacker-run resolver can answer with a public IP during pre-flight and
+ * a private one for the connection (DNS-rebinding TOCTOU). Because Node's
+ * socket calls THIS function to resolve the host it is about to connect
+ * to, doing the range check here means the address the request actually
+ * reaches is validated — closing the rebind gap even when the host
+ * allowlist is disabled. If any resolved address is private/reserved we
+ * fail the lookup (the connection never opens) rather than hand it back.
+ *
+ * IP-literal hosts skip DNS entirely (Node connects directly), so this is
+ * never called for them; `validateImageUrl` already range-checks literals
+ * before the fetch is attempted.
+ */
+export const ssrfSafeLookup: LookupFunction = (hostname, options, callback) => {
+  lookup(hostname, { all: true, family: options.family, hints: options.hints })
+    .then((results) => {
+      const first = results[0];
+      if (first === undefined) {
+        callback(new Error(`SSRF guard: ${hostname} did not resolve`), '');
+        return;
+      }
+      const blocked = results.find((r) => isPrivateOrReservedIp(r.address));
+      if (blocked !== undefined) {
+        callback(
+          new Error(
+            `SSRF guard: refusing to connect to ${hostname} — resolves to private/reserved address ${blocked.address}`,
+          ),
+          '',
+        );
+        return;
+      }
+      if (options.all === true) {
+        callback(null, results);
+      } else {
+        callback(null, first.address, first.family);
+      }
+    })
+    .catch((err: unknown) => {
+      callback(err instanceof Error ? err : new Error(String(err)), '');
+    });
+};
+
+/**
  * Returns true if `ip` belongs to a range we must not proxy to:
  * loopback, private, link-local, CGNAT, reserved, multicast, unspecified,
- * including IPv4-mapped IPv6 forms that would otherwise bypass IPv4 checks.
+ * including IPv4-mapped IPv6 forms, and NAT64 / 6to4 addresses whose
+ * embedded IPv4 falls in one of those ranges (which would otherwise bypass
+ * the IPv4 checks entirely).
+ *
+ * Exported so the connection-layer resolver (`ssrfSafeLookup`) and its
+ * tests can share exactly this range logic.
  */
-function isPrivateOrReservedIp(ip: string): boolean {
+export function isPrivateOrReservedIp(ip: string): boolean {
   if (net.isIPv4(ip)) {
     const parts = ip.split('.').map((p) => Number(p));
     if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) {
@@ -133,12 +191,92 @@ function isPrivateOrReservedIp(ip: string): boolean {
     const embeddedV4 = extractEmbeddedIPv4(lower);
     if (embeddedV4 !== null) return isPrivateOrReservedIp(embeddedV4);
 
+    // NAT64 (RFC 6052 well-known prefix 64:ff9b::/96) and 6to4 (RFC 3056,
+    // 2002::/16) both carry an embedded IPv4 that the raw v6 range checks
+    // below miss: a public-looking literal like `64:ff9b::a9fe:a9fe` or
+    // `2002:a9fe:a9fe::` decodes to 169.254.169.254 (cloud metadata), and
+    // `64:ff9b::7f00:1` to 127.0.0.1. Decode the embedded v4 and range-check
+    // it so such an address can't smuggle a private/reserved target past the
+    // guard. A NAT64/6to4 address whose embedded v4 is public stays allowed.
+    const embeddedTranslatedV4 = extractNat64OrSixToFourIPv4(lower);
+    if (embeddedTranslatedV4 !== null && isPrivateOrReservedIp(embeddedTranslatedV4)) return true;
+
     if (/^fe[89ab][0-9a-f]:/.test(lower)) return true; // fe80::/10 link-local
     if (/^f[cd][0-9a-f]{2}:/.test(lower)) return true; // fc00::/7 unique local
     if (lower.startsWith('ff')) return true; // ff00::/8 multicast
     return false;
   }
   return true;
+}
+
+/**
+ * Expands an IPv6 string to its eight 16-bit groups, handling `::`
+ * compression and a trailing embedded dotted-quad (`…:a.b.c.d`). Returns
+ * null if the input is not a well-formed IPv6 literal.
+ */
+function expandIpv6(ipv6Lower: string): number[] | null {
+  if (!net.isIPv6(ipv6Lower)) return null;
+  let s = ipv6Lower;
+
+  // Fold a trailing dotted-quad (…:a.b.c.d) into its two hex groups so the
+  // rest of the parse only has to deal with `:`-separated hextets.
+  const v4 = /(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/.exec(s);
+  if (v4 !== null && v4.index !== undefined) {
+    const quad = v4[1]?.split('.').map((p) => Number(p)) ?? [];
+    if (quad.length !== 4 || quad.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) {
+      return null;
+    }
+    const q0 = quad[0] as number;
+    const q1 = quad[1] as number;
+    const q2 = quad[2] as number;
+    const q3 = quad[3] as number;
+    s = s.slice(0, v4.index) + `${((q0 << 8) | q1).toString(16)}:${((q2 << 8) | q3).toString(16)}`;
+  }
+
+  const halves = s.split('::');
+  if (halves.length > 2) return null;
+  const toGroups = (part: string): number[] =>
+    part === '' ? [] : part.split(':').map((h) => parseInt(h, 16));
+  const head = toGroups(halves[0] ?? '');
+  const tail = halves.length === 2 ? toGroups(halves[1] ?? '') : [];
+
+  let groups: number[];
+  if (halves.length === 2) {
+    const fill = 8 - head.length - tail.length;
+    if (fill < 0) return null;
+    groups = [...head, ...new Array<number>(fill).fill(0), ...tail];
+  } else {
+    groups = head;
+  }
+  if (groups.length !== 8 || groups.some((g) => !Number.isInteger(g) || g < 0 || g > 0xffff)) {
+    return null;
+  }
+  return groups;
+}
+
+/**
+ * If `ipv6Lower` is a NAT64 well-known-prefix (64:ff9b::/96) or a 6to4
+ * (2002::/16) address, returns the dotted IPv4 it embeds; otherwise null.
+ * NAT64 carries the v4 in the low 32 bits; 6to4 in bits 16-47.
+ */
+function extractNat64OrSixToFourIPv4(ipv6Lower: string): string | null {
+  const groups = expandIpv6(ipv6Lower);
+  if (groups === null) return null;
+  // expandIpv6 guarantees exactly 8 in-range groups; the casts mirror the
+  // noUncheckedIndexedAccess idiom used for `parts` in the IPv4 branch.
+  const g = (i: number): number => groups[i] as number;
+  const toDotted = (hi: number, lo: number): string =>
+    `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
+
+  // NAT64 well-known prefix 64:ff9b:0:0:0:0::/96 — v4 in the final two groups.
+  if (g(0) === 0x0064 && g(1) === 0xff9b && g(2) === 0 && g(3) === 0 && g(4) === 0 && g(5) === 0) {
+    return toDotted(g(6), g(7));
+  }
+  // 6to4 2002::/16 — v4 in groups 1-2.
+  if (g(0) === 0x2002) {
+    return toDotted(g(1), g(2));
+  }
+  return null;
 }
 
 /**

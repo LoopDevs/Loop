@@ -114,15 +114,22 @@ export async function fetchRedemption(ctxOrderId: string): Promise<{
   };
   // Diagnostic: CTX has been returning 200 with all redemption fields
   // missing across long polling windows for operator-account orders.
-  // When that happens, log the raw response keys + a truncated body
-  // so ops can tell `wrong field name` from `genuinely empty`. We
-  // only log when EVERY field is null — once any code/pin/url is
-  // populated the codes are PII and must not land in logs.
+  // When that happens, log the response's top-level KEY NAMES so ops
+  // can tell `wrong field name` (drift) from `genuinely empty`.
+  //
+  // FT-14: never log the raw body or any value here. This branch fires
+  // exactly when all of OUR known fields parsed to null — which is also
+  // precisely what a field-name drift produces (e.g. CTX renames
+  // `redeemCode` → `redemptionCode`), and the drifted field then holds a
+  // LIVE gift-card code/PIN. Logging the raw body would leak that
+  // code/PIN. The key names alone answer the drift-vs-empty question
+  // without exposing any value; scrubbing the body would not be enough —
+  // a short numeric PIN or a hyphenated code slips past the token /
+  // card-shape patterns in `scrubUpstreamBody`.
   if (out.code === null && out.pin === null && out.url === null) {
     const keys = raw !== null && typeof raw === 'object' ? Object.keys(raw) : [];
-    const bodyPreview = JSON.stringify(raw).slice(0, 500);
     log.info(
-      { ctxOrderId, keys, bodyPreview },
+      { ctxOrderId, keys },
       'CTX gift-card detail returned no redemption fields — capturing shape for diagnosis',
     );
   }

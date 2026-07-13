@@ -158,7 +158,7 @@ describe('waitForRedemption', () => {
     expect(JSON.stringify(allCalls)).not.toContain('9999');
   });
 
-  it('logs a diagnostic (keys + truncated body preview) only when every redemption field comes back null', async () => {
+  it('logs a diagnostic (keys only) only when every redemption field comes back null', async () => {
     operatorFetchMock.mockResolvedValueOnce(detailResponse({ someUnrelatedField: 'x' }));
     const result = await fetchRedemption('o-1');
     expect(result).toEqual({ code: null, pin: null, url: null });
@@ -166,6 +166,39 @@ describe('waitForRedemption', () => {
     const [meta, message] = logMock.info.mock.calls[0] as [Record<string, unknown>, string];
     expect(message).toContain('no redemption fields');
     expect(meta['keys']).toEqual(['someUnrelatedField']);
+  });
+
+  it('FT-14: an all-null redemption with a DRIFTED field name never leaks the live code/PIN in the diagnostic log', async () => {
+    // Field-name drift: CTX renames redeemCode→redemptionCode /
+    // redeemPin→redemptionPin. Our parser sees all KNOWN fields absent, so
+    // `out` is all-null and the "capturing shape" diagnostic fires — which
+    // is *exactly* the branch where the drifted field is still carrying a
+    // LIVE gift-card code/PIN. The old code logged the raw body here,
+    // leaking it. The key NAMES may be logged (they answer drift-vs-empty);
+    // the VALUES must never appear in any log call. Note the shapes below
+    // (a hyphenated code, a 4-digit PIN) deliberately slip past the token /
+    // card-shape scrubber, proving keys-only is required, not just scrubbing.
+    operatorFetchMock.mockResolvedValueOnce(
+      detailResponse({ redemptionCode: 'LIVE-CODE-4242', redemptionPin: '7788' }),
+    );
+    const result = await fetchRedemption('o-1');
+    expect(result).toEqual({ code: null, pin: null, url: null });
+
+    // Diagnostic still fires (all-null) and still records the key names.
+    expect(logMock.info).toHaveBeenCalledTimes(1);
+    const [meta, message] = logMock.info.mock.calls[0] as [Record<string, unknown>, string];
+    expect(message).toContain('no redemption fields');
+    expect(meta['keys']).toEqual(['redemptionCode', 'redemptionPin']);
+
+    // ...but the live code + PIN must not surface in ANY log call/level.
+    const allCalls = [
+      ...logMock.info.mock.calls,
+      ...logMock.warn.mock.calls,
+      ...logMock.error.mock.calls,
+      ...logMock.debug.mock.calls,
+    ];
+    expect(JSON.stringify(allCalls)).not.toContain('LIVE-CODE-4242');
+    expect(JSON.stringify(allCalls)).not.toContain('7788');
   });
 
   it('polling tolerates intermittent failures and returns once codes appear', async () => {
