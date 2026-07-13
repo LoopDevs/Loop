@@ -158,22 +158,35 @@ export async function setHomeCurrencyHandler(c: Context): Promise<Response> {
   // subquery is evaluated inside the UPDATE's statement-level snapshot,
   // closing the interleave window that made the previous two-statement
   // sequence visible to racing writers.
+  // DOM-03 (money-correctness): mirror the ADMIN home-currency path's
+  // non-zero-balance guard (`applyAdminHomeCurrencyChange` →
+  // `HomeCurrencyHasLiveBalanceError` in ./home-currency-change.ts). A
+  // live `user_credits` balance is denominated in the CURRENT home
+  // currency; flipping home_currency without zeroing it first orphans
+  // that balance — every user surface filters on
+  // `charge_currency = user.home_currency`, so the row stays on the
+  // ledger but goes invisible, mis-stating money. The admin path
+  // rejects this; the self-serve path must too. Folded into the same
+  // conditional UPDATE as the A2-552 order guard (second NOT EXISTS)
+  // so the balance check shares the statement-level snapshot and a
+  // concurrent credit-write can't slip a balance in between check and
+  // write.
   const [updated] = await db
     .update(users)
     .set({ homeCurrency: parsed.data.currency, updatedAt: sql`NOW()` })
     .where(
-      sql`${users.id} = ${user.id} AND NOT EXISTS (SELECT 1 FROM ${orders} WHERE ${orders.userId} = ${user.id})`,
+      sql`${users.id} = ${user.id}
+        AND NOT EXISTS (SELECT 1 FROM ${orders} WHERE ${orders.userId} = ${user.id})
+        AND NOT EXISTS (SELECT 1 FROM ${userCredits} WHERE ${userCredits.userId} = ${user.id} AND ${userCredits.currency} = ${user.homeCurrency} AND ${userCredits.balanceMinor} <> 0)`,
     )
     .returning();
   if (updated !== undefined) {
     return c.json<UserMeView>(await toView(updated));
   }
 
-  // Zero rows updated: either the user has at least one order (locked)
-  // or the user row vanished between resolve-and-update. Disambiguate
-  // with a cheap existence probe so the client can render the right
-  // copy — "contact support" for the locked case, a re-auth prompt
-  // for the vanished case.
+  // Zero rows updated: the user vanished between resolve-and-update,
+  // OR one of the two guards blocked the write. Disambiguate so the
+  // client can render the right copy.
   const [stillExists] = await db
     .select({ id: users.id })
     .from(users)
@@ -182,10 +195,33 @@ export async function setHomeCurrencyHandler(c: Context): Promise<Response> {
   if (stillExists === undefined) {
     return c.json({ code: 'NOT_FOUND', message: 'User not found' }, 404);
   }
+
+  // Order guard keeps precedence — the "first-time-only" contract and
+  // its "contact support" client copy predate the balance guard, so a
+  // user who has placed an order still sees HOME_CURRENCY_LOCKED.
+  const [hasOrder] = await db
+    .select({ id: orders.id })
+    .from(orders)
+    .where(eq(orders.userId, user.id))
+    .limit(1);
+  if (hasOrder !== undefined) {
+    return c.json(
+      {
+        code: 'HOME_CURRENCY_LOCKED',
+        message: 'Home currency cannot be changed after placing an order',
+      },
+      409,
+    );
+  }
+
+  // No orders, so the only remaining blocking predicate is the live-
+  // balance guard. Surface the SAME error the admin path returns
+  // (code + message shape) so the two surfaces are indistinguishable.
+  const liveBalanceMinor = await resolveHomeCurrencyBalance(user.id, user.homeCurrency);
   return c.json(
     {
-      code: 'HOME_CURRENCY_LOCKED',
-      message: 'Home currency cannot be changed after placing an order',
+      code: 'HOME_CURRENCY_HAS_LIVE_BALANCE',
+      message: `User has a non-zero ${user.homeCurrency} credit balance (${liveBalanceMinor} minor) — zero it via a credit-adjustment before changing home currency`,
     },
     409,
   );
