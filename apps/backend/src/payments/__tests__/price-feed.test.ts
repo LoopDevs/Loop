@@ -257,6 +257,118 @@ describe('stroopsPerCent — CTX rates adapter', () => {
   });
 });
 
+// BK-ctxrates: the CTX rates base URL is now overridable via
+// `LOOP_XLM_CTX_RATES_URL` (default unchanged) and validated at the call
+// site, so an operator can repoint the feed when CTX moves the endpoint
+// instead of shipping a code change — and a malformed override fails
+// loudly rather than silently building a broken fetch URL.
+describe('CTX rates base URL override (BK-ctxrates)', () => {
+  beforeEach(() => {
+    // Exercise the default CTX adapter (no CoinGecko-shape override).
+    delete process.env['LOOP_XLM_PRICE_FEED_URL'];
+    delete process.env['LOOP_XLM_CTX_RATES_URL'];
+    __resetPriceFeedForTests();
+  });
+  afterEach(() => {
+    delete process.env['LOOP_XLM_CTX_RATES_URL'];
+  });
+
+  function stubValidCtx(): ReturnType<typeof vi.spyOn> {
+    return vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
+      const u = String(url);
+      const match = /symbol=xlm(usd|gbp|eur)/i.exec(u);
+      const quote = (match?.[1] ?? 'usd').toUpperCase();
+      return new Response(
+        JSON.stringify([
+          {
+            baseCurrency: 'XLM',
+            price: '0.1610',
+            quoteCurrency: quote,
+            retrieved: new Date().toISOString(),
+            source: 'ctx-average',
+            symbol: `XLM${quote}`,
+          },
+        ]),
+        { status: 200 },
+      );
+    });
+  }
+
+  it('routes CTX fetches through LOOP_XLM_CTX_RATES_URL when it is set', async () => {
+    process.env['LOOP_XLM_CTX_RATES_URL'] = 'https://rates.internal.example/v2/rates';
+    const captured: string[] = [];
+    fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
+      captured.push(String(url));
+      const u = String(url);
+      const match = /symbol=xlm(usd|gbp|eur)/i.exec(u);
+      const quote = (match?.[1] ?? 'usd').toUpperCase();
+      return new Response(
+        JSON.stringify([
+          {
+            baseCurrency: 'XLM',
+            price: '0.1610',
+            quoteCurrency: quote,
+            retrieved: new Date().toISOString(),
+            source: 'ctx-average',
+            symbol: `XLM${quote}`,
+          },
+        ]),
+        { status: 200 },
+      );
+    });
+    await stroopsPerCent('USD');
+    expect(captured).toContain('https://rates.internal.example/v2/rates?source=ctx&symbol=xlmusd');
+    // Nothing should still be hitting the hardcoded default host.
+    expect(captured.every((u) => u.startsWith('https://rates.internal.example/v2/rates'))).toBe(
+      true,
+    );
+  });
+
+  it('falls back to the historical rates.ctx.com default when the override is unset', async () => {
+    const captured: string[] = [];
+    fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
+      captured.push(String(url));
+      const u = String(url);
+      const match = /symbol=xlm(usd|gbp|eur)/i.exec(u);
+      const quote = (match?.[1] ?? 'usd').toUpperCase();
+      return new Response(
+        JSON.stringify([
+          {
+            baseCurrency: 'XLM',
+            price: '0.1610',
+            quoteCurrency: quote,
+            retrieved: new Date().toISOString(),
+            source: 'ctx-average',
+            symbol: `XLM${quote}`,
+          },
+        ]),
+        { status: 200 },
+      );
+    });
+    await stroopsPerCent('USD');
+    expect(captured).toContain('https://rates.ctx.com/rates?source=ctx&symbol=xlmusd');
+  });
+
+  it('rejects a malformed LOOP_XLM_CTX_RATES_URL loudly instead of fetching a broken URL', async () => {
+    process.env['LOOP_XLM_CTX_RATES_URL'] = 'not-a-url';
+    // The stub returns VALID data: on the un-fixed code (which ignores
+    // the override) the USD fetch would succeed and resolve — so the
+    // assertion below only holds because the guard throws BEFORE fetch.
+    fetchSpy = stubValidCtx();
+    await expect(stroopsPerCent('USD')).rejects.toThrow(
+      /LOOP_XLM_CTX_RATES_URL is not a valid URL/,
+    );
+  });
+
+  it('rejects a non-http(s) LOOP_XLM_CTX_RATES_URL scheme', async () => {
+    process.env['LOOP_XLM_CTX_RATES_URL'] = 'ftp://rates.internal.example/rates';
+    fetchSpy = stubValidCtx();
+    await expect(stroopsPerCent('USD')).rejects.toThrow(
+      /LOOP_XLM_CTX_RATES_URL must be an http\(s\) URL/,
+    );
+  });
+});
+
 describe('requiredStroopsForCharge (A4-106)', () => {
   it('keeps sub-cent precision so a 0.105 USD/XLM rate yields the correct ceiling', async () => {
     // The audit case: usd=0.105 USD/XLM. Earlier code did

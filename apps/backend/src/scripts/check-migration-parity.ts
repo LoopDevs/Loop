@@ -63,6 +63,56 @@ const MAINTENANCE_URL =
 const DB_MIGRATIONS = 'loop_parity_migrations';
 const DB_SCHEMA = 'loop_parity_schema';
 
+/** Env escape hatch for an unusual CI whose disposable DB the heuristic below can't recognise. */
+const ALLOW_DESTRUCTIVE_OVERRIDE = 'ALLOW_DESTRUCTIVE_MIGRATION_PARITY';
+
+/**
+ * BK-migparity: heuristic for "this DATABASE_URL points at a database we
+ * must NOT run destructive DDL against." The script DROPs and CREATEs
+ * `loop_parity_*` databases on the target server, so it may only ever
+ * touch a disposable test server. A URL is production-looking (→ true,
+ * refuse) unless it is unmistakably a throwaway target: a loopback host,
+ * or a host/database name carrying an explicit test marker. Any
+ * `prod`/`production` marker is always unsafe; an unparseable URL is
+ * treated as unsafe (we can't prove it's a throwaway).
+ */
+export function isProdLookingDatabaseUrl(rawUrl: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return true;
+  }
+  // `URL.hostname` keeps the brackets on IPv6 literals (`[::1]`); strip
+  // them so the loopback comparison below matches.
+  const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  const dbName = decodeURIComponent(parsed.pathname.replace(/^\/+/, '')).toLowerCase();
+  const haystack = `${host} ${dbName}`;
+  if (haystack.includes('prod')) return true;
+  const isLoopback =
+    host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '0.0.0.0';
+  const TEST_MARKERS = ['test', 'scratch', 'ephemeral', 'parity', 'sandbox'];
+  const hasTestMarker = TEST_MARKERS.some((marker) => haystack.includes(marker));
+  return !(isLoopback || hasTestMarker);
+}
+
+/**
+ * Throws unless `url` is a safe destructive target (or the operator has
+ * explicitly opted out via `ALLOW_DESTRUCTIVE_MIGRATION_PARITY=1`).
+ */
+export function assertEphemeralParityTarget(url: string): void {
+  if (process.env[ALLOW_DESTRUCTIVE_OVERRIDE] === '1') return;
+  if (isProdLookingDatabaseUrl(url)) {
+    throw new Error(
+      `check-migration-parity: refusing to DROP/CREATE databases on ${url} — it does not look ` +
+        `like a disposable test server (no loopback host or test marker, or it carries a ` +
+        `production marker). Point DATABASE_URL at a throwaway server (e.g. ` +
+        `postgres://loop:loop@localhost:5433/loop_test), or set ${ALLOW_DESTRUCTIVE_OVERRIDE}=1 ` +
+        `to override for an unusual CI target.`,
+    );
+  }
+}
+
 interface AllowlistEntry {
   /** 'migrations-only' | 'schema-only' */
   side: string;
@@ -173,6 +223,11 @@ async function introspect(url: string): Promise<Set<string>> {
 }
 
 async function main(): Promise<void> {
+  // BK-migparity: fail before opening any connection if the target
+  // doesn't look like a throwaway server — the very next thing this
+  // function does is DROP/CREATE databases on it.
+  assertEphemeralParityTarget(MAINTENANCE_URL);
+
   const allowlist = JSON.parse(readFileSync(ALLOWLIST_PATH, 'utf8')) as AllowlistEntry[];
 
   const maintenance = postgres(MAINTENANCE_URL, { max: 1, onnotice: () => {} });
@@ -269,4 +324,12 @@ async function main(): Promise<void> {
   );
 }
 
-await main();
+// Only run the CLI when this module is the process entry point. Importing
+// it — e.g. the unit test that exercises the DATABASE_URL guard directly —
+// must NOT run `main()`, connect, or issue DDL. Mirrors quarterly-tax.ts.
+const isEntrypoint =
+  process.argv[1] !== undefined && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (isEntrypoint) {
+  await main();
+}

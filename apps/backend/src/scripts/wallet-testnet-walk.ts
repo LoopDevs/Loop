@@ -55,6 +55,8 @@
  * Run:  npm run walk:wallet-testnet -w @loop/backend
  */
 /* eslint-disable no-console -- operator CLI: the PASS/FAIL report IS the output (same pattern as quarterly-tax.ts) */
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 import {
   Account,
   Asset,
@@ -99,6 +101,39 @@ const STROOPS_PER_MINOR = 100_000n;
 const USER_EMAIL = process.env['WALK_USER_EMAIL'] ?? 'wallet-walk@loopfinance.io';
 const EMISSION_MINOR = BigInt(process.env['WALK_EMISSION_MINOR'] ?? '50000');
 const ORDER_CHARGE_MINOR = BigInt(process.env['WALK_ORDER_CHARGE_MINOR'] ?? '200');
+
+/** Env escape hatch for an unusual scratch DB the heuristic below can't recognise. */
+const ALLOW_WALK_DB_OVERRIDE = 'ALLOW_WALLET_TESTNET_WALK_DB';
+
+/**
+ * BK-testnetwalk: heuristic for "this DATABASE_URL points at a database
+ * the walk must NOT write to." The walk inserts users/orders/ledger rows
+ * and runs migrations, so it may only ever run against a scratch/testnet
+ * Postgres — the module docstring says so, but nothing enforced it. A
+ * URL is production-looking (→ true, refuse) unless it is unmistakably a
+ * throwaway target: a loopback host, or a host/database name carrying an
+ * explicit test marker. Any `prod`/`production` marker is always unsafe;
+ * an unparseable URL is treated as unsafe.
+ */
+export function isProdLookingDatabaseUrl(rawUrl: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return true;
+  }
+  // `URL.hostname` keeps the brackets on IPv6 literals (`[::1]`); strip
+  // them so the loopback comparison below matches.
+  const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  const dbName = decodeURIComponent(parsed.pathname.replace(/^\/+/, '')).toLowerCase();
+  const haystack = `${host} ${dbName}`;
+  if (haystack.includes('prod')) return true;
+  const isLoopback =
+    host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '0.0.0.0';
+  const TEST_MARKERS = ['test', 'scratch', 'ephemeral', 'parity', 'sandbox'];
+  const hasTestMarker = TEST_MARKERS.some((marker) => haystack.includes(marker));
+  return !(isLoopback || hasTestMarker);
+}
 
 interface StepResult {
   name: string;
@@ -190,6 +225,17 @@ async function main(): Promise<void> {
   console.log('Wallet testnet walk — ADR 030/031/036 end-to-end\n');
 
   // ── Step 0: guard rails ───────────────────────────────────────────
+  // BK-testnetwalk: refuse to touch a production-looking database BEFORE
+  // any migration or write. The walk seeds users/orders/ledger rows; a
+  // wrong/absent DATABASE_URL must not be able to land them in prod.
+  if (isProdLookingDatabaseUrl(env.DATABASE_URL) && process.env[ALLOW_WALK_DB_OVERRIDE] !== '1') {
+    fail(
+      'guard rails',
+      `DATABASE_URL (${env.DATABASE_URL}) looks like a production database — the walk writes ` +
+        `users/orders/ledger rows and must only run against a scratch/testnet Postgres. Point ` +
+        `DATABASE_URL at a throwaway DB, or set ${ALLOW_WALK_DB_OVERRIDE}=1 to override.`,
+    );
+  }
   if (env.LOOP_STELLAR_NETWORK_PASSPHRASE !== TESTNET_PASSPHRASE) {
     fail(
       'guard rails',
@@ -556,15 +602,24 @@ function printReport(): boolean {
   return !failed;
 }
 
-try {
-  await main();
-} catch (err) {
-  if (!(err instanceof WalkAbort)) {
-    console.error('\nUnexpected error:', err);
-    report.push({ name: 'unexpected error', status: 'FAIL', detail: String(err) });
+// Only run the walk when this module is the process entry point.
+// Importing it — e.g. the unit test that exercises
+// `isProdLookingDatabaseUrl` directly — must NOT run the walk, connect,
+// or `process.exit()`. Mirrors quarterly-tax.ts.
+const isEntrypoint =
+  process.argv[1] !== undefined && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (isEntrypoint) {
+  try {
+    await main();
+  } catch (err) {
+    if (!(err instanceof WalkAbort)) {
+      console.error('\nUnexpected error:', err);
+      report.push({ name: 'unexpected error', status: 'FAIL', detail: String(err) });
+    }
+  } finally {
+    const ok = printReport();
+    await closeDb().catch(() => undefined);
+    process.exit(ok ? 0 : 1);
   }
-} finally {
-  const ok = printReport();
-  await closeDb().catch(() => undefined);
-  process.exit(ok ? 0 : 1);
 }

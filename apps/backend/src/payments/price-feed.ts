@@ -125,7 +125,39 @@ function feedSource(): { kind: 'ctx' } | { kind: 'coingecko'; url: string } {
   return { kind: 'ctx' };
 }
 
-const CTX_RATES_BASE = 'https://rates.ctx.com/rates';
+const CTX_RATES_DEFAULT_BASE = 'https://rates.ctx.com/rates';
+
+/**
+ * BK-ctxrates: the CTX rates base URL was a bare hardcoded constant with
+ * no override — the only feed env var (`LOOP_XLM_PRICE_FEED_URL`)
+ * switches to the *CoinGecko-shape* adapter, so an operator who wants to
+ * keep the CTX shape but repoint the host (CTX moves the endpoint, or
+ * the checked-in default goes stale) had no lever short of a code
+ * change. `LOOP_XLM_CTX_RATES_URL` is that lever: unset → the historical
+ * default (behaviour unchanged); set → used as the CTX base. It is
+ * validated here at the call site (this feed URL isn't in the zod schema
+ * the way `LOOP_XLM_PRICE_FEED_URL` is, so a malformed value must fail
+ * loudly on use rather than silently degrade to a broken fetch URL).
+ */
+function ctxRatesBaseUrl(): string {
+  const override = process.env['LOOP_XLM_CTX_RATES_URL'];
+  if (override === undefined || override.trim().length === 0) {
+    return CTX_RATES_DEFAULT_BASE;
+  }
+  const trimmed = override.trim();
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new Error(`LOOP_XLM_CTX_RATES_URL is not a valid URL: ${JSON.stringify(trimmed)}`);
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(
+      `LOOP_XLM_CTX_RATES_URL must be an http(s) URL, got ${JSON.stringify(parsed.protocol)}`,
+    );
+  }
+  return trimmed;
+}
 
 async function fetchJson(url: string): Promise<unknown> {
   const res = await fetch(url, {
@@ -146,7 +178,7 @@ async function fetchJson(url: string): Promise<unknown> {
  */
 async function fetchCtxRate(quote: 'USD' | 'GBP' | 'EUR'): Promise<number | null> {
   const symbol = `xlm${quote.toLowerCase()}`;
-  const url = `${CTX_RATES_BASE}?source=ctx&symbol=${symbol}`;
+  const url = `${ctxRatesBaseUrl()}?source=ctx&symbol=${symbol}`;
   let raw: unknown;
   try {
     raw = await fetchJson(url);
