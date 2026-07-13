@@ -556,15 +556,34 @@ async function indexNewMovements(args: {
   return indexed;
 }
 
-async function computeMovementTotals(args: {
+// Exported for the DB-backed MNY-04 regression test (integration
+// suite) — the cursor-vs-observed_at attribution is the exact SQL the
+// finding is about, so the test drives this query directly against
+// real postgres with movements whose observed_at diverges from their
+// paging_token order.
+export async function computeMovementTotals(args: {
   account: string;
   asset: OperatorFloatAsset;
-  baselineCreatedAt: Date;
+  startingCursor: string;
 }): Promise<{
   classifiedMovementDeltaStroops: bigint;
   unclassifiedCount: number;
   indexedMovementCount: number;
 }> {
+  // MNY-04: attribute movements to this baseline's period by the
+  // CANONICAL on-chain cursor (`paging_token`, the Horizon TOID the
+  // indexer already persists), NOT by wall-clock `observed_at`.
+  // `observed_at` is when the indexer SAW the row, not its ledger
+  // ordering — under indexer lag or a cursor replay/re-baseline a
+  // movement can be observed out of order and land in the wrong
+  // reconciliation window (a pre-baseline flow already folded into the
+  // opening balance gets double-counted; a post-baseline flow observed
+  // early gets dropped), so the reconciled float for the period is off.
+  // The baseline's `starting_horizon_cursor` is snapshotted from the
+  // SAME Horizon moment as `opening_balance_stroops`, so the period is
+  // exactly the movements strictly after that anchor. Horizon
+  // paging_tokens are TOIDs (decimal strings, monotonic but NOT
+  // lexically ordered across differing lengths) — compare as `numeric`.
   const rows = await db.execute<{
     classified_delta: bigint | null;
     unclassified_count: number;
@@ -583,7 +602,7 @@ async function computeMovementTotals(args: {
     FROM operator_wallet_movements
     WHERE account = ${args.account}
       AND asset = ${args.asset}
-      AND observed_at >= ${args.baselineCreatedAt}
+      AND paging_token::numeric > ${args.startingCursor}::numeric
   `);
   const normalized = rows as
     | Array<{
@@ -699,7 +718,9 @@ export async function runOperatorFloatReconciliationForAsset(
       const movementTotals = await computeMovementTotals({
         account: args.account,
         asset: args.asset,
-        baselineCreatedAt: baseline.createdAt,
+        // MNY-04: canonical cursor anchor, not `baseline.createdAt`
+        // wall-clock — see computeMovementTotals.
+        startingCursor: baseline.startingHorizonCursor,
       });
       const manualDelta = await computeUnlinkedManualDelta({
         account: args.account,
