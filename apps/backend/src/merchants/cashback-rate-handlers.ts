@@ -31,13 +31,14 @@ const log = logger.child({ handler: 'merchants' });
 
 /**
  * `GET /api/merchants/cashback-rates` — public bulk map of
- * `{ merchantId → userCashbackPct }` for every active config
- * (ADR 011 / 015). Lets catalog / list / map views render a
- * cashback badge on each card without N+1-ing the per-merchant
- * endpoint. Merchants without an active config are omitted (the
- * client should treat a missing key as "no cashback" and hide the
- * badge). Values are `numeric(5,2)` strings, same as the per-
- * merchant endpoint.
+ * `{ merchantId → userCashbackPct }` for every active config whose
+ * merchant is in the live catalog (ADR 011 / 015). Lets catalog /
+ * list / map views render a cashback badge on each card without
+ * N+1-ing the per-merchant endpoint. Merchants without an active
+ * config — or whose config points at an id not in the catalog
+ * (COR-14) — are omitted (the client should treat a missing key as
+ * "no cashback" and hide the badge). Values are `numeric(5,2)`
+ * strings, same as the per-merchant endpoint.
  *
  * 5-minute public Cache-Control matches the merchant-catalog
  * endpoints — admin cashback edits are rare and the stale window
@@ -64,11 +65,21 @@ export async function merchantsCashbackRatesHandler(c: Context): Promise<Respons
     return c.json({ rates: {} });
   }
 
+  // Merchant-catalog guard (COR-14) — apply the SAME per-merchant check the
+  // single-rate endpoint enforces (`merchantsById.has(id)` → 404 otherwise) to
+  // each row of the bulk map. Without it the bulk endpoint leaks active
+  // cashback configs for merchants the catalog hides (de-listed / never-
+  // catalogued ids), disagreeing with the single endpoint and exposing config
+  // for merchants a client can't otherwise see. Rows for unknown merchants are
+  // dropped, exactly as the single handler drops them via 404.
+  const { merchantsById } = getMerchants();
+
   // Map-shaped response — the frontend converts to a `Map` once
   // and does O(1) lookups per merchant card. Plain object (not
   // a tuple array) so the JSON is human-readable in devtools.
   const rates: Record<string, string> = {};
   for (const row of rows) {
+    if (!merchantsById.has(row.merchantId)) continue;
     rates[row.merchantId] = row.userCashbackPct;
   }
 

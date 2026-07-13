@@ -14,8 +14,10 @@ vi.mock('../env.js', () => ({
     CTX_CLIENT_ID_WEB: 'loopweb',
     CTX_CLIENT_ID_IOS: 'loopios',
     CTX_CLIENT_ID_ANDROID: 'loopandroid',
-    // Audit A-023 — rate limiter trusts X-Forwarded-For only when this
-    // is true. Integration tests inject XFF values, so enable trust.
+    // Audit A-023 / FT-08 — the rate limiter keys on the client IP only when
+    // this is true; behind a trusted proxy it reads the spoof-proof
+    // `Fly-Client-IP` header. Integration tests inject Fly-Client-IP values,
+    // so enable trust.
     TRUST_PROXY: true,
   },
 }));
@@ -517,7 +519,7 @@ describe('app-level middleware', () => {
     const doReq = (): Promise<Response> | Response =>
       app.request('/api/auth/request-otp', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-forwarded-for': ip },
+        headers: { 'Content-Type': 'application/json', 'fly-client-ip': ip },
         body: JSON.stringify({ email: 'u@example.com' }),
       });
 

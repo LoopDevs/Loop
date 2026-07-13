@@ -11,8 +11,10 @@ const mockEnv = vi.hoisted(() => ({
   CTX_CLIENT_ID_ANDROID: 'loopandroid',
   REFRESH_INTERVAL_HOURS: 6,
   LOCATION_REFRESH_INTERVAL_HOURS: 24,
-  // Audit A-023 — rate limiter trusts X-Forwarded-For only when this is
-  // true. The existing auth tests inject synthetic XFF values to get
+  // Audit A-023 / FT-08 — the rate limiter keys on the client IP only when
+  // this is true; behind a trusted proxy it reads the spoof-proof
+  // `Fly-Client-IP` header (NOT the client-controllable X-Forwarded-For).
+  // These auth tests inject synthetic Fly-Client-IP values to get
   // per-"client" isolation, so we turn trust on for the test harness.
   TRUST_PROXY: true,
 }));
@@ -104,7 +106,7 @@ function post(
   const ip = `10.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`;
   return app.request(path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-forwarded-for': ip, ...headers },
+    headers: { 'Content-Type': 'application/json', 'fly-client-ip': ip, ...headers },
     body: JSON.stringify(body),
   });
 }
@@ -181,7 +183,7 @@ describe('POST /api/auth/request-otp', () => {
     const doReq = (): Promise<Response> | Response =>
       app.request('/api/auth/request-otp', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-forwarded-for': ip },
+        headers: { 'Content-Type': 'application/json', 'fly-client-ip': ip },
         body: JSON.stringify({ email: 'u@example.com', platform: 'web' }),
       });
 
@@ -259,7 +261,7 @@ describe('POST /api/auth/verify-otp', () => {
     const doReq = (code: string): Promise<Response> | Response =>
       app.request('/api/auth/verify-otp', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-forwarded-for': ip },
+        headers: { 'Content-Type': 'application/json', 'fly-client-ip': ip },
         body: JSON.stringify({ email: 'u@example.com', otp: code, platform: 'web' }),
       });
 
@@ -332,7 +334,7 @@ describe('POST /api/auth/refresh', () => {
     const doReq = (): Promise<Response> | Response =>
       app.request('/api/auth/refresh', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-forwarded-for': ip },
+        headers: { 'Content-Type': 'application/json', 'fly-client-ip': ip },
         body: JSON.stringify({ refreshToken: 'x', platform: 'web' }),
       });
 
@@ -367,7 +369,7 @@ describe('DELETE /api/auth/session', () => {
 
     const res = await app.request('/api/auth/session', {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/json', 'x-forwarded-for': '10.0.0.1' },
+      headers: { 'Content-Type': 'application/json', 'fly-client-ip': '10.0.0.1' },
       body: JSON.stringify({ refreshToken: 'rt-to-revoke', platform: 'web' }),
     });
 
@@ -384,7 +386,7 @@ describe('DELETE /api/auth/session', () => {
 
     const res = await app.request('/api/auth/session', {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/json', 'x-forwarded-for': '10.0.0.2' },
+      headers: { 'Content-Type': 'application/json', 'fly-client-ip': '10.0.0.2' },
       body: JSON.stringify({ refreshToken: 'rt-x', platform: 'web' }),
     });
 
@@ -394,7 +396,7 @@ describe('DELETE /api/auth/session', () => {
   it('succeeds without calling upstream when no refreshToken provided', async () => {
     const res = await app.request('/api/auth/session', {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/json', 'x-forwarded-for': '10.0.0.3' },
+      headers: { 'Content-Type': 'application/json', 'fly-client-ip': '10.0.0.3' },
       body: JSON.stringify({ platform: 'web' }),
     });
 
@@ -419,7 +421,7 @@ describe('DELETE /api/auth/session', () => {
     revokeRefreshMock.mockClear();
     const res = await app.request('/api/auth/session', {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/json', 'x-forwarded-for': '10.0.0.4' },
+      headers: { 'Content-Type': 'application/json', 'fly-client-ip': '10.0.0.4' },
       body: JSON.stringify({ refreshToken: token, platform: 'web' }),
     });
     expect(res.status).toBe(200);
@@ -434,7 +436,7 @@ describe('DELETE /api/auth/session', () => {
     const doReq = (): Promise<Response> | Response =>
       app.request('/api/auth/session', {
         method: 'DELETE',
-        headers: { 'Content-Type': 'application/json', 'x-forwarded-for': ip },
+        headers: { 'Content-Type': 'application/json', 'fly-client-ip': ip },
         body: JSON.stringify({ refreshToken: 'x', platform: 'web' }),
       });
 

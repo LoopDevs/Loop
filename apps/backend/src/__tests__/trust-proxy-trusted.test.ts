@@ -2,12 +2,21 @@ import { describe, it, expect, vi } from 'vitest';
 import type { Context } from 'hono';
 
 /**
- * A2-1526 — companion file to `trust-proxy.test.ts`. This one mocks
- * `env.TRUST_PROXY = true` at module-load and verifies that the
- * bucket-selection logic honours `X-Forwarded-For` under Fly / CDN
- * deployments. Without both flavours of test, a regression that
- * silently inverted the flag would only surface the wrong half of
- * the behaviour.
+ * A2-1526 / FT-08 — companion file to `trust-proxy.test.ts`. This one
+ * mocks `env.TRUST_PROXY = true` at module-load and verifies that the
+ * bucket-selection logic keys on the spoof-proof `Fly-Client-IP`
+ * header under Fly deployments — and specifically that a client-
+ * supplied `X-Forwarded-For` can NOT influence the bucket. Without
+ * both flavours of test, a regression that silently inverted the flag
+ * (or reverted to trusting leftmost XFF) would only surface the wrong
+ * half of the behaviour.
+ *
+ * FT-08 threat model: Fly's edge *appends* the real peer to
+ * `X-Forwarded-For`, so the leftmost XFF entry is whatever the client
+ * sent. Trusting it let an attacker rotate their bucket at will and
+ * pin a victim's IP into the request-otp bucket to force the OTP
+ * lockout. `Fly-Client-IP` is written by the edge and unforgeable, so
+ * the limiter keys on that instead.
  */
 
 vi.mock('../env.js', () => ({
@@ -53,8 +62,13 @@ vi.mock('../clustering/handler.js', () => ({
 
 import { clientIpFor } from '../app.js';
 
-function makeCtx(args: { xForwardedFor?: string; socketAddress?: string }): Context {
+function makeCtx(args: {
+  flyClientIp?: string;
+  xForwardedFor?: string;
+  socketAddress?: string;
+}): Context {
   const headers = new Map<string, string>();
+  if (args.flyClientIp !== undefined) headers.set('fly-client-ip', args.flyClientIp);
   if (args.xForwardedFor !== undefined) headers.set('x-forwarded-for', args.xForwardedFor);
   return {
     req: { header: (name: string) => headers.get(name.toLowerCase()) },
@@ -65,47 +79,76 @@ function makeCtx(args: { xForwardedFor?: string; socketAddress?: string }): Cont
   } as unknown as Context;
 }
 
-describe('clientIpFor — TRUST_PROXY=true (A2-1526)', () => {
-  it('uses the leftmost X-Forwarded-For value — the edge-seen client', () => {
+describe('clientIpFor — TRUST_PROXY=true (A2-1526 / FT-08)', () => {
+  it('keys on the spoof-proof Fly-Client-IP header — the true edge-seen peer', () => {
+    const ctx = makeCtx({
+      flyClientIp: '203.0.113.7',
+      socketAddress: '10.0.0.1',
+    });
+    expect(clientIpFor(ctx)).toBe('203.0.113.7');
+  });
+
+  it('IGNORES a spoofed X-Forwarded-For — Fly-Client-IP wins (FT-08 core defense)', () => {
+    // Attacker sends `X-Forwarded-For: <victim-or-rotating-ip>`; Fly appends
+    // the real peer and sets Fly-Client-IP. The limiter must bucket on the
+    // unforgeable Fly-Client-IP, never the client-supplied XFF.
+    const ctx = makeCtx({
+      xForwardedFor: '1.2.3.4',
+      flyClientIp: '203.0.113.7',
+      socketAddress: '10.0.0.1',
+    });
+    expect(clientIpFor(ctx)).toBe('203.0.113.7');
+    expect(clientIpFor(ctx)).not.toBe('1.2.3.4');
+  });
+
+  it('does NOT fall back to X-Forwarded-For when Fly-Client-IP is absent — uses the socket peer', () => {
+    // No Fly-Client-IP (non-Fly path / internal call). A spoofable XFF is
+    // present but must be ignored; we key on the TCP socket instead.
     const ctx = makeCtx({
       xForwardedFor: '1.2.3.4',
       socketAddress: '10.0.0.1',
     });
-    expect(clientIpFor(ctx)).toBe('1.2.3.4');
+    expect(clientIpFor(ctx)).toBe('10.0.0.1');
+    expect(clientIpFor(ctx)).not.toBe('1.2.3.4');
   });
 
-  it('picks the first entry of a multi-value XFF chain (edge → hop → origin)', () => {
+  it('trims whitespace around the Fly-Client-IP value', () => {
     const ctx = makeCtx({
-      xForwardedFor: '1.2.3.4, 5.6.7.8, 9.10.11.12',
+      flyClientIp: '  203.0.113.7  ',
       socketAddress: '10.0.0.1',
     });
-    // Only the leftmost is trusted — middle / right entries are the Fly
-    // edge's own hop chain.
-    expect(clientIpFor(ctx)).toBe('1.2.3.4');
+    expect(clientIpFor(ctx)).toBe('203.0.113.7');
   });
 
-  it('trims whitespace around the leftmost entry', () => {
-    const ctx = makeCtx({
-      xForwardedFor: '  1.2.3.4  , 5.6.7.8',
-      socketAddress: '10.0.0.1',
-    });
-    expect(clientIpFor(ctx)).toBe('1.2.3.4');
-  });
-
-  it('falls back to the socket address when XFF is absent (curl to internal / healthcheck)', () => {
+  it('falls back to the socket address when Fly-Client-IP is absent (curl to internal / healthcheck)', () => {
     const ctx = makeCtx({ socketAddress: '10.0.0.2' });
     expect(clientIpFor(ctx)).toBe('10.0.0.2');
   });
 
-  it('two clients with DIFFERENT X-Forwarded-For values map to DIFFERENT buckets', () => {
-    const a = clientIpFor(makeCtx({ xForwardedFor: '1.2.3.4', socketAddress: '10.0.0.1' }));
-    const b = clientIpFor(makeCtx({ xForwardedFor: '5.6.7.8', socketAddress: '10.0.0.1' }));
-    expect(a).toBe('1.2.3.4');
-    expect(b).toBe('5.6.7.8');
+  it('an attacker rotating X-Forwarded-For maps to the SAME bucket (spoof cannot fan out)', () => {
+    // Same real peer (Fly-Client-IP), two different forged XFF values → one
+    // bucket. Under the old leftmost-XFF logic these would have been two
+    // buckets, defeating the per-IP limit.
+    const a = clientIpFor(
+      makeCtx({ xForwardedFor: '1.2.3.4', flyClientIp: '203.0.113.7', socketAddress: '10.0.0.1' }),
+    );
+    const b = clientIpFor(
+      makeCtx({ xForwardedFor: '5.6.7.8', flyClientIp: '203.0.113.7', socketAddress: '10.0.0.1' }),
+    );
+    expect(a).toBe('203.0.113.7');
+    expect(b).toBe('203.0.113.7');
+    expect(a).toBe(b);
+  });
+
+  it('two clients with DIFFERENT Fly-Client-IP values map to DIFFERENT buckets', () => {
+    const a = clientIpFor(makeCtx({ flyClientIp: '203.0.113.7', socketAddress: '10.0.0.1' }));
+    const b = clientIpFor(makeCtx({ flyClientIp: '198.51.100.9', socketAddress: '10.0.0.1' }));
+    expect(a).toBe('203.0.113.7');
+    expect(b).toBe('198.51.100.9');
     expect(a).not.toBe(b);
   });
 
-  it('falls back to unknown on both XFF absent AND socket-address unavailable', () => {
+  it('falls back to unknown when Fly-Client-IP absent AND socket-address unavailable', () => {
     const ctx = makeCtx({});
     expect(clientIpFor(ctx)).toBe('unknown');
   });
