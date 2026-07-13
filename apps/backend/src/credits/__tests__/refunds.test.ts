@@ -45,6 +45,8 @@ const { dbMock, state } = vi.hoisted(() => {
   const chain: Record<string, ReturnType<typeof vi.fn>> = {};
   chain['select'] = vi.fn(() => chain);
   chain['from'] = vi.fn(() => chain);
+  // MNY-11: the on-chain-rail cap sum joins orders -> payment_watcher_skips.
+  chain['innerJoin'] = vi.fn(() => chain);
   chain['execute'] = vi.fn(async () => []);
   chain['where'] = vi.fn(() => {
     const thenable: {
@@ -96,12 +98,20 @@ vi.mock('../../db/schema.js', () => ({
     referenceType: 'reference_type',
     referenceId: 'reference_id',
   },
-  orders: { __name: 'orders', id: 'id', paymentReceivedHorizonId: 'payment_received_horizon_id' },
+  orders: {
+    __name: 'orders',
+    id: 'id',
+    paymentReceivedHorizonId: 'payment_received_horizon_id',
+    chargeMinor: 'charge_minor',
+    chargeCurrency: 'charge_currency',
+  },
   paymentWatcherSkips: {
     __name: 'paymentWatcherSkips',
     paymentId: 'payment_id',
     status: 'status',
     orderId: 'order_id',
+    updatedAt: 'updated_at',
+    lastError: 'last_error',
   },
   userCredits: {
     userId: 'user_id',
@@ -690,5 +700,118 @@ describe('applyOrderAutoRefund (CF-20)', () => {
       }),
     ).rejects.toBeInstanceOf(RefundAlreadyIssuedError);
     expect(state.insertCreditCalls).toHaveLength(0);
+  });
+
+  // MNY-11-onchainrail: the on-chain refund rail must count against and
+  // be gated by the SAME fleet-wide daily refund cap as the credit rail.
+  // Guard-txn read order (cap enabled): order-row lock, credit-refund
+  // existence check, credit-rail cap sum, on-chain-rail cap sum, then
+  // (only if under cap) the refundable-deposit skip record.
+  describe('MNY-11-onchainrail: on-chain rail honours the daily refund cap', () => {
+    const payment = {
+      id: 'pay-cap',
+      paging_token: 'pt-cap',
+      type: 'payment',
+      from: 'GSENDER',
+      to: 'GDEPOSIT',
+      asset_type: 'native',
+      amount: '2.0000000',
+      transaction_hash: 'tx-cap',
+      transaction: { memo: 'MEMO-CAP', memo_type: 'text', successful: true },
+    };
+
+    it('rejects an on-chain refund that would exceed the cap — before any skip row or on-chain send', async () => {
+      envMock.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR = 1000n;
+      // [order, credit-refund(none), credit-cap-sum(used=900), on-chain-cap-sum(0)]
+      state.forUpdateResponses = [[{ id: 'o-cap' }], [], [{ usedMinor: '900' }]];
+      await expect(
+        applyOrderAutoRefund({
+          userId: 'u-1',
+          currency: 'USD',
+          amountMinor: 200n,
+          orderId: 'o-cap',
+          paymentMethod: 'xlm',
+          paymentMemo: 'MEMO-CAP',
+          paymentReceivedHorizonId: 'pay-cap',
+          paymentReceivedPayment: payment,
+          reason: 'order failed after CTX paid: timeout',
+        }),
+      ).rejects.toBeInstanceOf(DailyAdjustmentLimitError);
+      // Gated BEFORE any value-moving step: nothing recorded, nothing sent.
+      expect(state.insertSkipCalls).toHaveLength(0);
+      expect(refundDepositMock).not.toHaveBeenCalled();
+    });
+
+    it('counts a PRIOR on-chain refund against the shared budget (both rails share one cap)', async () => {
+      envMock.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR = 1000n;
+      // credit-rail used=0, on-chain-rail used=900 (a prior on-chain
+      // refund today) → 0+900+200 > 1000 → gated.
+      state.forUpdateResponses = [
+        [{ id: 'o-cap2' }],
+        [],
+        [{ usedMinor: '0' }],
+        [{ usedMinor: '900' }],
+      ];
+      await expect(
+        applyOrderAutoRefund({
+          userId: 'u-1',
+          currency: 'USD',
+          amountMinor: 200n,
+          orderId: 'o-cap2',
+          paymentMethod: 'usdc',
+          paymentMemo: 'MEMO-CAP',
+          paymentReceivedHorizonId: 'pay-cap',
+          paymentReceivedPayment: payment,
+          reason: 'x',
+        }),
+      ).rejects.toBeInstanceOf(DailyAdjustmentLimitError);
+      expect(state.insertSkipCalls).toHaveLength(0);
+      expect(refundDepositMock).not.toHaveBeenCalled();
+    });
+
+    it('allows an on-chain refund when the shared daily budget has room', async () => {
+      envMock.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR = 1000n;
+      // credit-rail used=100, on-chain-rail used=0 → 100+200 < 1000.
+      state.forUpdateResponses = [[{ id: 'o-ok' }], [], [{ usedMinor: '100' }], []];
+      const result = await applyOrderAutoRefund({
+        userId: 'u-1',
+        currency: 'USD',
+        amountMinor: 200n,
+        orderId: 'o-ok',
+        paymentMethod: 'usdc',
+        paymentMemo: 'MEMO-CAP',
+        paymentReceivedHorizonId: 'pay-cap',
+        paymentReceivedPayment: payment,
+        reason: 'x',
+      });
+      expect(result).toMatchObject({
+        kind: 'onchain_refund',
+        orderId: 'o-ok',
+        paymentId: 'pay-cap',
+      });
+      expect(state.insertSkipCalls).toHaveLength(1);
+      expect(refundDepositMock).toHaveBeenCalledWith('pay-cap');
+    });
+
+    it('does not gate the on-chain rail when the cap is disabled (0)', async () => {
+      envMock.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR = 0n;
+      // No cap query issued: [order, credit-refund(none)] then straight
+      // to record + on-chain send.
+      state.forUpdateResponses = [[{ id: 'o-nocap' }], []];
+      const result = await applyOrderAutoRefund({
+        userId: 'u-1',
+        currency: 'USD',
+        amountMinor: 9_000_000n,
+        orderId: 'o-nocap',
+        paymentMethod: 'usdc',
+        paymentMemo: 'MEMO-CAP',
+        paymentReceivedHorizonId: 'pay-cap',
+        paymentReceivedPayment: payment,
+        reason: 'x',
+      });
+      expect(result).toMatchObject({ kind: 'onchain_refund' });
+      expect(state.insertSkipCalls).toHaveLength(1);
+      expect(refundDepositMock).toHaveBeenCalledWith('pay-cap');
+    });
   });
 });
