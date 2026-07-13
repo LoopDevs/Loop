@@ -102,50 +102,77 @@ export function AdminAuditTail(): React.JSX.Element {
       ) : query.data.rows.length === 0 ? (
         <p className="px-6 py-4 text-sm text-gray-500 dark:text-gray-400">No admin writes yet.</p>
       ) : (
-        // eslint-disable-next-line jsx-a11y/no-redundant-roles -- ADR 042: Tailwind Preflight sets `list-style: none` on <ul>, which strips the implicit list/listitem role in Safari VoiceOver (a known WebKit quirk — Chrome/Firefox are unaffected). role="list" restores it. The rule can't see the CSS interaction, so this is a documented false positive, not a mistake. Tracked: docs/readiness-backlog-2026-07-03.md B-2.
-        <ul role="list" className="divide-y divide-gray-100 dark:divide-gray-900">
-          {query.data.rows.map((row: AdminAuditTailRow) => (
-            <li
-              key={`${row.actorUserId}-${row.createdAt}`}
-              className="flex items-center gap-4 px-6 py-3 text-sm"
-            >
-              <span
-                className={`rounded-full px-2 py-0.5 text-xs font-medium tabular-nums ${statusColor(row.status)}`}
-                aria-label={`Status ${row.status}`}
+        // ARIA table semantics over the flex layout so SR users get column
+        // context for each cell. We keep the flex rows (not a native <table>)
+        // to preserve the exact visual layout; the header row is visually
+        // hidden but present in the accessibility tree for column names.
+        // (Supersedes the ADR 042 role="list" note: a table exposes richer
+        // structure than a list and isn't subject to the WebKit list quirk.)
+        <div role="table" aria-label="Recent admin activity">
+          <div role="rowgroup" className="sr-only">
+            <div role="row">
+              <span role="columnheader">Status</span>
+              <span role="columnheader">Method</span>
+              <span role="columnheader">Path</span>
+              <span role="columnheader">Actor</span>
+              <span role="columnheader">Time</span>
+            </div>
+          </div>
+          <div role="rowgroup" className="divide-y divide-gray-100 dark:divide-gray-900">
+            {query.data.rows.map((row: AdminAuditTailRow) => (
+              <div
+                role="row"
+                key={`${row.actorUserId}-${row.createdAt}`}
+                className="flex items-center gap-4 px-6 py-3 text-sm"
               >
-                {row.status}
-              </span>
-              <span className="font-mono text-xs text-gray-500 dark:text-gray-400 tabular-nums">
-                {row.method}
-              </span>
-              {(() => {
-                const to = auditRowLink(row.method, row.path);
-                return to !== null ? (
-                  <Link
-                    to={to}
-                    className="font-mono text-xs text-blue-600 hover:underline dark:text-blue-400 flex-1 truncate"
-                    title={row.path}
-                  >
-                    {row.path}
-                  </Link>
-                ) : (
-                  <span className="font-mono text-xs text-gray-700 dark:text-gray-300 flex-1 truncate">
-                    {row.path}
-                  </span>
-                );
-              })()}
-              <span className="text-xs text-gray-600 dark:text-gray-400 truncate max-w-[12rem]">
-                {row.actorEmail}
-              </span>
-              <span
-                title={row.createdAt}
-                className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap"
-              >
-                {fmtRelative(row.createdAt)}
-              </span>
-            </li>
-          ))}
-        </ul>
+                <span
+                  role="cell"
+                  className={`rounded-full px-2 py-0.5 text-xs font-medium tabular-nums ${statusColor(row.status)}`}
+                  aria-label={`Status ${row.status}`}
+                >
+                  {row.status}
+                </span>
+                <span
+                  role="cell"
+                  className="font-mono text-xs text-gray-500 dark:text-gray-400 tabular-nums"
+                >
+                  {row.method}
+                </span>
+                <span role="cell" className="flex-1 min-w-0 font-mono text-xs">
+                  {(() => {
+                    const to = auditRowLink(row.method, row.path);
+                    return to !== null ? (
+                      <Link
+                        to={to}
+                        className="block truncate text-blue-600 hover:underline dark:text-blue-400"
+                        title={row.path}
+                      >
+                        {row.path}
+                      </Link>
+                    ) : (
+                      <span className="block truncate text-gray-700 dark:text-gray-300">
+                        {row.path}
+                      </span>
+                    );
+                  })()}
+                </span>
+                <span
+                  role="cell"
+                  className="text-xs text-gray-600 dark:text-gray-400 truncate max-w-[12rem]"
+                >
+                  {row.actorEmail}
+                </span>
+                <span
+                  role="cell"
+                  title={row.createdAt}
+                  className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap"
+                >
+                  {fmtRelative(row.createdAt)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
       {/* Show/collapse toggle — the default 25-row view keeps the

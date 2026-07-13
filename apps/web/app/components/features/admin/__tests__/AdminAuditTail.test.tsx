@@ -149,6 +149,38 @@ describe('<AdminAuditTail />', () => {
     expect(screen.queryByRole('button', { name: /Show 100/ })).toBeNull();
   });
 
+  // FE-13: the 5-column rows used to render as unlabeled flex rows — a SR
+  // user heard "200 POST /api/... admin@... 3m ago" with no column context.
+  // The rows now carry ARIA table semantics with (visually-hidden) column
+  // headers so each cell is announced under its column name.
+  it('FE-13: exposes the audit rows as an ARIA table with labeled columns', async () => {
+    adminMock.getAdminAuditTail.mockResolvedValue({
+      rows: [
+        {
+          actorUserId: '11111111-1111-1111-1111-111111111111',
+          actorEmail: 'admin@loop.test',
+          method: 'POST',
+          path: '/api/admin/users/u1/credit-adjustments',
+          status: 200,
+          createdAt: new Date(Date.now() - 60_000).toISOString(),
+        },
+      ],
+    });
+    renderComponent();
+    await waitFor(() => {
+      expect(screen.getByText('POST')).toBeDefined();
+    });
+    // The container is a table with an accessible name.
+    expect(screen.getByRole('table', { name: /Recent admin activity/ })).toBeDefined();
+    // Every column has a header so SR users get per-cell context.
+    for (const header of ['Status', 'Method', 'Path', 'Actor', 'Time']) {
+      expect(screen.getByRole('columnheader', { name: header })).toBeDefined();
+    }
+    // One header row + one data row; the data row exposes 5 cells.
+    expect(screen.getAllByRole('row')).toHaveLength(2);
+    expect(screen.getAllByRole('cell')).toHaveLength(5);
+  });
+
   it('renders Show 100 when the first page fills the default limit, and refetches with the bigger limit', async () => {
     const fullPage = Array.from({ length: 25 }, (_, i) => ({
       actorUserId: `aaaaaaaa-0000-0000-0000-${String(i).padStart(12, '0')}`,
