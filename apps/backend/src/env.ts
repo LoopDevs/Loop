@@ -10,6 +10,18 @@ import { infraEnvFields } from './env/sections/infra.js';
 // after the D2 split moved the const into env/schema-helpers.ts.
 export { CANONICAL_MAINNET_USDC_ISSUER } from './env/schema-helpers.js';
 
+// CFG-05: the recognised Stellar network passphrases. The schema for
+// LOOP_STELLAR_NETWORK_PASSPHRASE deliberately accepts any non-empty
+// string (a self-hosted network sets its own), so this set powers a
+// boot WARN — not a reject — when the value is neither pubnet, testnet,
+// nor futurenet, catching a typo that would silently point the payout
+// signer + payment watcher at the wrong network.
+const KNOWN_STELLAR_NETWORK_PASSPHRASES = new Set<string>([
+  MAINNET_NETWORK_PASSPHRASE, // pubnet: 'Public Global Stellar Network ; September 2015'
+  'Test SDF Network ; September 2015', // testnet
+  'Test SDF Future Network ; October 2022', // futurenet
+]);
+
 /**
  * Environment schema. Exported so tests can exercise it directly if they
  * ever need to (today they go through `parseEnv` instead); production
@@ -48,6 +60,33 @@ export function parseEnv(source: NodeJS.ProcessEnv): Env {
     console.warn(
       '[env] INCLUDE_DISABLED_MERCHANTS=true in production — disabled merchants will be visible to end users',
     );
+  }
+
+  // CFG-02: the admin daily money caps (per-admin, per-currency, per
+  // UTC day) bound how much a stolen admin session can drain via many
+  // sub-per-request-cap writes. `0` DISABLES the cap entirely — a
+  // documented dev/test escape hatch — so a fat-finger `0` in
+  // production silently removes the treasury safeguard while everything
+  // still looks healthy. Warn loudly in production (matching the
+  // INCLUDE_DISABLED_MERCHANTS prod-warn) so the disabled cap is
+  // visible; dev/test keep the 0=disable hatch quietly. A warn (not a
+  // throw) preserves the documented "0 disables" contract for a
+  // deliberate operator while removing the SILENCE the footgun relied on.
+  if (parsed.data.NODE_ENV === 'production') {
+    const dailyCaps: ReadonlyArray<readonly [string, bigint]> = [
+      ['ADMIN_DAILY_ADJUSTMENT_CAP_MINOR', parsed.data.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR],
+      ['ADMIN_DAILY_WITHDRAWAL_CAP_MINOR', parsed.data.ADMIN_DAILY_WITHDRAWAL_CAP_MINOR],
+    ];
+    for (const [name, value] of dailyCaps) {
+      if (value === 0n) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[env] ${name}=0 in production DISABLES the per-admin daily cap — a stolen admin ` +
+            `session can drain the treasury via many sub-per-request-cap writes inside the token ` +
+            `TTL. Set a positive minor-unit cap unless this is a deliberate, temporary override.`,
+        );
+      }
+    }
   }
 
   // Hardening B7 (2026-07 plan): HS256 retirement tripwire. After the
@@ -127,6 +166,25 @@ export function parseEnv(source: NodeJS.ProcessEnv): Env {
         `Circle's canonical mainnet USDC issuer (${CANONICAL_MAINNET_USDC_ISSUER}) while the ` +
         `Stellar network passphrase is mainnet. If this is a typo, the payment watcher will ` +
         `silently ignore every legitimate USDC deposit. Double-check the value before serving traffic.`,
+    );
+  }
+
+  // CFG-05: LOOP_STELLAR_NETWORK_PASSPHRASE accepts any non-empty string
+  // (a self-hosted network legitimately sets its own), so the schema
+  // can't reject a typo. But a typo'd pubnet/testnet passphrase silently
+  // points the payout signer AND the payment watcher at the wrong
+  // network — every signed transaction targets a chain that will never
+  // accept it, and the watcher reads a chain nobody is paying into.
+  // Warn (don't throw — self-hosted is a real use case) when the value
+  // isn't a recognised Stellar network passphrase.
+  if (!KNOWN_STELLAR_NETWORK_PASSPHRASES.has(parsed.data.LOOP_STELLAR_NETWORK_PASSPHRASE)) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[env] LOOP_STELLAR_NETWORK_PASSPHRASE=${JSON.stringify(
+        parsed.data.LOOP_STELLAR_NETWORK_PASSPHRASE,
+      )} is not a recognised Stellar network passphrase (pubnet / testnet / futurenet). If this ` +
+        `is a self-hosted network the value is expected; if it's a typo, the payout signer and ` +
+        `payment watcher are pointed at the wrong network and every signed transaction will be rejected.`,
     );
   }
 
@@ -452,6 +510,54 @@ export function parseEnv(source: NodeJS.ProcessEnv): Env {
         `Set LOOP_STELLAR_USDC_ISSUER to the canonical mainnet USDC issuer ` +
         `(${CANONICAL_MAINNET_USDC_ISSUER}) or your network's real USDC issuer, or set ` +
         'DISABLE_USDC_ISSUER_ENFORCEMENT=1 to deliberately ship the USDC rail disabled.',
+    );
+  }
+
+  // CFG-01 (FT-06 follow-up): the entire monitoring/alert tier —
+  // asset-drift, vault-drift, circuit-breaker, stuck-sweeper, and
+  // ledger-invariant pages — fans out to DISCORD_WEBHOOK_MONITORING.
+  // FT-06 made `sendWebhook` return false (and warn once) when the URL
+  // is unset, so an unset webhook now means every alert silently
+  // delivers NOWHERE while /health stays green. Require it in
+  // production so a launch can't fly blind on treasury/integrity
+  // alerting — same required-in-prod shape as the image-proxy /
+  // step-up / USDC-issuer guards, with the same `"1"`-only emergency
+  // opt-out. Keyed on NODE_ENV OR LOOP_ENV so a staging deploy
+  // (NODE_ENV=production, LOOP_ENV=staging) and an explicit
+  // LOOP_ENV=production tag are both covered.
+  if (
+    (parsed.data.NODE_ENV === 'production' || parsed.data.LOOP_ENV === 'production') &&
+    parsed.data.DISCORD_WEBHOOK_MONITORING === undefined &&
+    parsed.data.DISABLE_MONITORING_WEBHOOK_ENFORCEMENT !== '1'
+  ) {
+    throw new Error(
+      'Invalid environment variables — DISCORD_WEBHOOK_MONITORING must be set in production ' +
+        '(CFG-01; FT-06 follow-up). Without it every monitoring alert (asset/vault drift, circuit ' +
+        'breaker, stuck sweepers, ledger-invariant) is dropped silently while /health stays green. ' +
+        'Set it to your Discord monitoring webhook, or set DISABLE_MONITORING_WEBHOOK_ENFORCEMENT=1 ' +
+        'to deliberately ship without monitoring alerts.',
+    );
+  }
+
+  // FT-09: EMAIL_PROVIDER=resend selected without RESEND_API_KEY. The
+  // OTP send path (`getEmailProvider`) throws "EMAIL_PROVIDER=resend
+  // requires RESEND_API_KEY", but `nativeRequestOtpHandler` swallows
+  // that throw into a generic 200 (A4-002 enumeration defence) — so
+  // every login OTP silently fails while the endpoint reports success:
+  // a total, invisible login outage. Fail at boot in production instead
+  // (mirrors the LOOP_WALLET_PROVIDER=privy cross-field check). Scoped
+  // to production: dev/test use the console stub, and a resend-without-
+  // key there surfaces loudly at first use rather than in prod traffic.
+  if (
+    parsed.data.NODE_ENV === 'production' &&
+    parsed.data.EMAIL_PROVIDER === 'resend' &&
+    (parsed.data.RESEND_API_KEY === undefined || parsed.data.RESEND_API_KEY === '')
+  ) {
+    throw new Error(
+      'Invalid environment variables — EMAIL_PROVIDER=resend requires RESEND_API_KEY in ' +
+        'production (FT-09). Without it every request-otp throws in the email provider and is ' +
+        'swallowed into a fake 200 (a silent, total login outage). Set RESEND_API_KEY, or unset ' +
+        'EMAIL_PROVIDER to fall back to the dev console stub.',
     );
   }
 
