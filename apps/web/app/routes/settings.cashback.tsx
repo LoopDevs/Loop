@@ -17,7 +17,7 @@ import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import type { Route } from './+types/settings.cashback';
 import i18n from '~/i18n/i18next';
-import { formatMinorCurrency, useLocaleTag } from '~/i18n/format';
+import { formatDateTime, formatMinorCurrency, useLocaleTag } from '~/i18n/format';
 import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
@@ -90,9 +90,15 @@ function formatAmount(minor: string, currency: string, locale: string): string {
  * from the host default (`undefined`) to the active route tag — so output
  * is byte-identical to the former local formatter for any fixed locale;
  * the locale is the fix.
+ *
+ * Now delegates to the shared `i18n/format#formatDateTime` seam rather than
+ * re-implementing `new Date(iso).toLocaleString(locale, options)` locally
+ * (P2-DATE-SWEEP2 DRY consolidation): same body, so output is unchanged for
+ * a fixed locale; the shared seam adds only its malformed-locale/ISO
+ * degrade-don't-throw guard.
  */
 function formatDate(iso: string, locale: string): string {
-  return new Date(iso).toLocaleString(locale, {
+  return formatDateTime(iso, locale, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',

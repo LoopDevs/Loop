@@ -27,7 +27,7 @@ import { shouldRetry } from '~/hooks/query-retry';
 import { getCashbackSummary } from '~/services/user';
 import { getImageProxyUrl } from '~/utils/image';
 import { formatCashbackPct } from '~/utils/format-cashback';
-import { formatMinorCurrency, formatMoney, useLocaleTag } from '~/i18n/format';
+import { formatDateTime, formatMinorCurrency, formatMoney, useLocaleTag } from '~/i18n/format';
 import { MerchantCardSkeleton } from '~/components/ui/Skeleton';
 import { FavoritesStrip } from '~/components/features/FavoritesStrip';
 import { RecentlyPurchasedStrip } from '~/components/features/RecentlyPurchasedStrip';
@@ -770,7 +770,7 @@ function ActivityRow({
 }): React.JSX.Element {
   const { t } = useTranslation('mobileHome');
   const back = savingsPercentage !== undefined ? amount * (savingsPercentage / 100) : 0;
-  const when = formatWhen(createdAt, t);
+  const when = formatWhen(createdAt, t, locale);
   return (
     <button
       type="button"
@@ -814,7 +814,7 @@ function ActivityRow({
   );
 }
 
-function formatWhen(iso: string, t: TFunction<'mobileHome'>): string {
+function formatWhen(iso: string, t: TFunction<'mobileHome'>, locale: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   const now = new Date();
@@ -822,7 +822,12 @@ function formatWhen(iso: string, t: TFunction<'mobileHome'>): string {
     d.getFullYear() === now.getFullYear() &&
     d.getMonth() === now.getMonth() &&
     d.getDate() === now.getDate();
-  const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  // Route locale, not the host default (`navigator.language` / the CI box's
+  // `LANG`) — a /de/en reader sees the German time/day shape (ADR 034,
+  // P2-DATE-SWEEP2). A time-only options object makes `formatDateTime`
+  // (`toLocaleString`) emit exactly the time the former `toLocaleTimeString`
+  // did, and a date-only object the same date `toLocaleDateString` did.
+  const time = formatDateTime(iso, locale, { hour: 'numeric', minute: '2-digit' });
   if (sameDay) return t('activity.today', { time });
   const yesterday = new Date(now);
   yesterday.setDate(now.getDate() - 1);
@@ -831,5 +836,5 @@ function formatWhen(iso: string, t: TFunction<'mobileHome'>): string {
     d.getMonth() === yesterday.getMonth() &&
     d.getDate() === yesterday.getDate();
   if (isYesterday) return t('activity.yesterday', { time });
-  return d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+  return formatDateTime(iso, locale, { weekday: 'short', day: 'numeric', month: 'short' });
 }

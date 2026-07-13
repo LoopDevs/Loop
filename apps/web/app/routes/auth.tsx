@@ -29,7 +29,7 @@ import {
 } from '~/services/user';
 import { PendingCashbackChip } from '~/components/features/cashback/PendingCashbackChip';
 import { WalletCard, fmtLoopBalance } from '~/components/features/wallet/WalletCard';
-import { useLocaleTag } from '~/i18n/format';
+import { formatDateTime, useLocaleTag } from '~/i18n/format';
 import { useWallet } from '~/hooks/use-wallet';
 import { CURRENCY_TO_ASSET_CODE } from '@loop/shared';
 
@@ -318,6 +318,10 @@ function CashbackHistoryCard({
   // to the user — the history card is supplementary to the balance,
   // which is the source of truth. The next `['me']` refetch will retry.
   const { t } = useTranslation('auth');
+  // Rules of Hooks: read the route locale unconditionally, before the
+  // `isError` early return below (P2-DATE-SWEEP2). Drives the ledger-row
+  // date off the route (ADR 034), not the host `navigator.language`.
+  const locale = useLocaleTag();
   if (isError) return null;
   const shown = entries?.slice(0, 5) ?? [];
   return (
@@ -339,7 +343,7 @@ function CashbackHistoryCard({
                     {ledgerLabel(t, entry.type)}
                   </p>
                   <p className="text-xs text-gray-500 dark:text-gray-400">
-                    {new Date(entry.createdAt).toLocaleDateString(undefined, {
+                    {formatDateTime(entry.createdAt, locale, {
                       month: 'short',
                       day: 'numeric',
                       year: 'numeric',

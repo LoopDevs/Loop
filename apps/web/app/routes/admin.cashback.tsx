@@ -24,6 +24,8 @@ import { MerchantStatsTable } from '~/components/features/admin/MerchantStatsTab
 import { MerchantsFlywheelShareCard } from '~/components/features/admin/MerchantsFlywheelShareCard';
 import { Button } from '~/components/ui/Button';
 import { Spinner } from '~/components/ui/Spinner';
+import { formatDateTime } from '~/i18n/format';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Admin · Cashback — Loop' }];
@@ -316,7 +318,9 @@ function AdminCashbackRouteInner(): React.JSX.Element {
                       />
                     </td>
                     <td className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
-                      {cfg === undefined ? '—' : new Date(cfg.updatedAt).toLocaleDateString()}
+                      {cfg === undefined
+                        ? '—'
+                        : formatDateTime(cfg.updatedAt, ADMIN_LOCALE, { dateStyle: 'medium' })}
                     </td>
                     <td className="px-3 py-2 flex items-center gap-2">
                       <Button
@@ -475,6 +479,18 @@ function HistoryDrawerRow({ merchantId }: { merchantId: string }): React.JSX.Ele
   );
 }
 
+// Admin/ops surface: route the config-change audit timestamp through the shared
+// `i18n/format#formatDateTime` seam pinned to `ADMIN_LOCALE` (en-US), like the
+// sibling merchant config-history table (admin.merchants.$merchantId) — NOT the
+// route locale, so the ops team reads one stable format (A2-1521). This replaces
+// a bare `toLocaleString()` (host locale AND host default full date+time+seconds);
+// `dateStyle:'medium' + timeStyle:'short'` keeps the year the bare output showed
+// while dropping the noise seconds (P2-DATE-SWEEP2 consolidation).
+const HISTORY_DATE_OPTIONS: Intl.DateTimeFormatOptions = {
+  dateStyle: 'medium',
+  timeStyle: 'short',
+};
+
 function HistoryTable({ rows }: { rows: MerchantCashbackConfigHistoryEntry[] }): React.JSX.Element {
   return (
     <table className="w-full text-xs">
@@ -492,7 +508,7 @@ function HistoryTable({ rows }: { rows: MerchantCashbackConfigHistoryEntry[] }):
         {rows.map((row) => (
           <tr key={row.id} className="text-gray-700 dark:text-gray-200">
             <td className="py-1 pr-2 whitespace-nowrap">
-              {new Date(row.changedAt).toLocaleString()}
+              {formatDateTime(row.changedAt, ADMIN_LOCALE, HISTORY_DATE_OPTIONS)}
             </td>
             <td className="py-1 pr-2 font-mono text-[11px]">{row.changedBy}</td>
             <td className="py-1 pr-2">{row.wholesalePct}%</td>
