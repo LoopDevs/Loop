@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Context } from 'hono';
 
 /**
@@ -391,5 +391,119 @@ describe('healthHandler', () => {
         nowSpy.mockRestore();
       }
     });
+  });
+});
+
+// BK-healthrecon: /health leaked a full operational snapshot (per-operator
+// breaker states, internal worker names + degradation, the fleet machine
+// count, raw OTP-delivery error strings, DB/upstream reachability) to any
+// unauthenticated internet caller. The fix gates that detail behind the same
+// ops-probe bearer that already guards /metrics: external callers get only a
+// minimal ok/degraded liveness signal (which is all Fly / CI probes read),
+// authenticated ops callers still get the full snapshot.
+//
+// These run through a fresh module graph with a production env + a configured
+// METRICS_BEARER_TOKEN so the probe gate is CLOSED for a caller with no bearer
+// — the real production posture. (In the default test env the token is unset
+// and the gate stays open, which is why the suite above still sees the full
+// body.) Same resetModules + doMock isolation the email/otp suites use.
+describe('BK-healthrecon: probe-gated /health body', () => {
+  const TOKEN = 'a'.repeat(32);
+
+  async function loadGatedHealthHandler(): Promise<(c: Context) => Promise<Response>> {
+    vi.resetModules();
+    vi.doMock('../env.js', () => ({
+      env: {
+        NODE_ENV: 'production',
+        METRICS_BEARER_TOKEN: TOKEN,
+        REFRESH_INTERVAL_HOURS: 6,
+        LOCATION_REFRESH_INTERVAL_HOURS: 24,
+      },
+    }));
+    vi.doMock('../logger.js', () => ({
+      logger: {
+        child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+      },
+    }));
+    const mod = await import('../health.js');
+    return mod.healthHandler;
+  }
+
+  function makeReqCtx(authorization: string | undefined): {
+    ctx: Context;
+    headers: Map<string, string>;
+  } {
+    const headers = new Map<string, string>();
+    const ctx = {
+      req: { header: (name: string) => (name === 'Authorization' ? authorization : undefined) },
+      header: (k: string, v: string) => headers.set(k, v),
+      json: (body: unknown, status?: number) =>
+        new Response(JSON.stringify(body), {
+          status: status ?? 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    } as unknown as Context;
+    return { ctx, headers };
+  }
+
+  const RECON_FIELDS = [
+    'operatorPool',
+    'operatorPoolExhausted',
+    'workers',
+    'otpDelivery',
+    'rateLimitFleetEstimate',
+    'rateLimitFleetEstimateSource',
+    'databaseReachable',
+    'upstreamReachable',
+    'softDegradedReasons',
+    'softDegraded',
+    'criticalDegraded',
+    'merchantCount',
+    'locationCount',
+    'geoDbBuildEpoch',
+  ] as const;
+
+  afterEach(() => {
+    vi.doUnmock('../env.js');
+    vi.doUnmock('../logger.js');
+    vi.resetModules();
+  });
+
+  it('reduces the UNAUTHENTICATED response to a minimal liveness signal (no recon detail)', async () => {
+    const healthHandlerGated = await loadGatedHealthHandler();
+    const { ctx, headers } = makeReqCtx(undefined); // no Authorization header
+
+    const res = await healthHandlerGated(ctx);
+
+    // Fly still gets its liveness signal: the 200/503 and the status word.
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.status).toBe('healthy');
+
+    // …but none of the operational reconnaissance fields.
+    for (const field of RECON_FIELDS) {
+      expect(body).not.toHaveProperty(field);
+    }
+    // The minimal body is exactly `{ status }` — nothing else rides along.
+    expect(Object.keys(body)).toEqual(['status']);
+
+    // Still uncacheable, and now varies on Authorization since the body
+    // shape depends on the bearer.
+    expect(headers.get('Cache-Control')).toBe('no-store');
+    expect(headers.get('Vary')).toBe('Authorization');
+  });
+
+  it('still returns the full detailed snapshot to an AUTHENTICATED ops caller', async () => {
+    const healthHandlerGated = await loadGatedHealthHandler();
+    const { ctx } = makeReqCtx(`Bearer ${TOKEN}`);
+
+    const res = await healthHandlerGated(ctx);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.status).toBe('healthy');
+    // The bearer unlocks the detail — proves the fix gates, not deletes.
+    for (const field of RECON_FIELDS) {
+      expect(body).toHaveProperty(field);
+    }
   });
 });

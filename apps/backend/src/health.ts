@@ -48,6 +48,7 @@ import { notifyHealthChange, notifyGeoDbStale } from './discord.js';
 import { getOperatorHealth } from './ctx/operator-pool.js';
 import { getGeoDbStatus, GEO_DB_STALE_AFTER_DAYS } from './public/geo.js';
 import { currentFleetSizeEstimate, currentFleetSizeSource } from './middleware/fleet-size.js';
+import { probeGateAllows } from './middleware/probe-gate.js';
 
 const healthLog = logger.child({ component: 'health' });
 
@@ -373,6 +374,29 @@ export async function healthHandler(c: Context): Promise<Response> {
     // long cooldown (7 days) keeps it a once-a-week nudge rather than
     // incident-grade noise.
     maybeNotifyGeoDbStale(geoDbStatus.buildEpoch, geoDbStatus.ageDays);
+  }
+
+  // BK-healthrecon: the detailed body below is reconnaissance surface for
+  // an UNAUTHENTICATED caller — per-operator circuit-breaker states,
+  // internal worker names + which are broken, the fleet machine count
+  // (⇒ the aggregate rate-limit budget), raw OTP-delivery error strings,
+  // and DB/upstream reachability. None of it is needed by a legitimate
+  // external liveness probe: Fly keys purely off the HTTP status
+  // (`apps/backend/fly.toml` → GET /health), and CI/Playwright probes
+  // discard the body. The full operational snapshot is ALSO already
+  // exposed — the same data, in Prometheus form — behind the probe-gated
+  // `/metrics` (`observability-handlers.ts`), so gating it here loses no
+  // observability. Gate on the same ops-probe bearer that guards
+  // `/metrics`: external callers get a minimal ok/degraded liveness
+  // signal (+ the 200/503 Fly cycles on); internal callers presenting the
+  // bearer get the full snapshot. `probeGateAllows` keeps the gate OPEN
+  // in dev/test when no token is configured, so local tooling + vitest
+  // still see the detailed body. All side effects above (hysteresis,
+  // Discord notify, geo-staleness paging) already ran and are unaffected
+  // by which body shape we return.
+  c.header('Vary', 'Authorization');
+  if (!probeGateAllows(c, env.METRICS_BEARER_TOKEN)) {
+    return c.json({ status: degraded ? 'degraded' : 'healthy' }, httpStatus);
   }
   return c.json(
     {
