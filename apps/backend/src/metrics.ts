@@ -230,6 +230,87 @@ export function incrementPageView(): void {
   metrics.pageViewsTotal++;
 }
 
+// ─── Money-integrity breach registry (FT-07 / NS-02) ────────────────────────
+
+/**
+ * FT-07 / NS-02: money-integrity breach signals. The ledger /
+ * drift / solvency / reconciliation watchers each own a named signal
+ * here; a watcher sets `active: true` the instant a tick EVALUATES a
+ * standing breach and `active: false` when a tick evaluates clean.
+ * `/metrics` emits this as the `loop_money_integrity_*` gauge family
+ * (`observability-handlers.ts`) so a live ledger/solvency divergence
+ * is visible on the scrape surface INDEPENDENT of Discord — a
+ * mis-configured or unwatched monitoring webhook can no longer render
+ * a real money breach a green dashboard (the "a money breach is
+ * invisible" gap).
+ *
+ * Deliberately separate from the worker-liveness gauges
+ * (`runtime-health.ts`): a watcher tick that RAN (liveness —
+ * `markWorkerTickSuccess`) and one that FOUND a breach (integrity —
+ * this gauge) are two different facts, and conflating them is exactly
+ * the NS-02 bug (a breach read as HEALTHY because the tick completed).
+ * A watcher updates its signal ONLY on a tick that actually evaluated
+ * the invariant — a lock-skipped / lease-timed-out / all-reads-failed
+ * tick leaves the last-known value untouched. Because each machine
+ * keeps its own copy and only the single-flight lock winner evaluates
+ * per tick, a non-leading machine's value can lag; Prometheus should
+ * aggregate with `max()` across the fleet (a leader's `1` cannot be
+ * masked by a follower's stale `0`), same posture as the per-machine
+ * `loop_worker_*` gauges.
+ */
+export type MoneyIntegritySignalName =
+  | 'ledger_invariant'
+  | 'asset_drift'
+  | 'vault_share_drift'
+  | 'vault_solvency'
+  | 'operator_float'
+  | 'vault_float';
+
+export interface MoneyIntegritySignalState {
+  /** True when the last completed evaluation of this invariant found a standing breach. */
+  active: boolean;
+  /** Unix ms of the last tick that actually evaluated this signal (`null` until first evaluation). */
+  lastEvaluatedAtMs: number | null;
+}
+
+/**
+ * Lazily populated — a signal appears once its watcher completes a
+ * real evaluation (mirrors how `loop_worker_*` gauges appear only
+ * once a worker starts). Order-preserving insertion keeps the
+ * exposition deterministic.
+ */
+const moneyIntegritySignals = new Map<MoneyIntegritySignalName, MoneyIntegritySignalState>();
+
+/**
+ * Records the result of one money-integrity evaluation. Call from a
+ * watcher's interval tick ONLY when the tick actually computed the
+ * invariant this round (not on a lock-skip / lease-timeout). `active`
+ * is the STANDING state ("is there a breach right now"), not "did we
+ * page this tick" — a breach that already paged once but persists must
+ * keep this gauge at 1 so the standing divergence stays visible.
+ */
+export function setMoneyIntegrityBreach(
+  signal: MoneyIntegritySignalName,
+  active: boolean,
+  now: number = Date.now(),
+): void {
+  const existing = moneyIntegritySignals.get(signal);
+  if (existing === undefined) {
+    moneyIntegritySignals.set(signal, { active, lastEvaluatedAtMs: now });
+    return;
+  }
+  existing.active = active;
+  existing.lastEvaluatedAtMs = now;
+}
+
+/** Read-only view for the `/metrics` exposition handler. */
+export function getMoneyIntegritySignals(): ReadonlyMap<
+  MoneyIntegritySignalName,
+  MoneyIntegritySignalState
+> {
+  return moneyIntegritySignals;
+}
+
 /**
  * Test helper: reset both counters between vitest cases. Module
  * state persists across `app.request(...)` calls inside a single
@@ -242,4 +323,5 @@ export function __resetMetricsForTests(): void {
   metrics.requestDurationHistograms.clear();
   metrics.webVitals = initialWebVitals();
   metrics.pageViewsTotal = 0;
+  moneyIntegritySignals.clear();
 }

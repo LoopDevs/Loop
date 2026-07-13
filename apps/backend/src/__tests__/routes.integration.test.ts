@@ -134,6 +134,7 @@ import {
   recordOtpSendSuccess,
   setOtpDeliveryEnabled,
 } from '../runtime-health.js';
+import { __resetMetricsForTests, setMoneyIntegrityBreach } from '../metrics.js';
 
 // Mock global fetch for upstream proxy calls
 const mockFetch = vi.fn();
@@ -754,6 +755,38 @@ describe('app-level middleware', () => {
     expect(body).toContain('loop_rate_limit_fleet_estimate_source 0');
   });
 
+  it('/metrics exposes money-integrity breach gauges independent of Discord (FT-07/NS-02)', async () => {
+    // Simulate what a watcher does when it finds a standing breach: a
+    // ledger drift + a vault solvency breach are live, while asset
+    // drift last evaluated clean. Before FT-07 the /metrics surface
+    // carried NO money-integrity gauge at all, so a live ledger/
+    // solvency breach was a green dashboard detectable only via Discord.
+    __resetMetricsForTests();
+    setMoneyIntegrityBreach('ledger_invariant', true);
+    setMoneyIntegrityBreach('vault_solvency', true);
+    setMoneyIntegrityBreach('asset_drift', false);
+
+    const res = await app.request('/metrics');
+    const body = await res.text();
+
+    expect(body).toContain('# TYPE loop_money_integrity_breach_active gauge');
+    // The breached signals must read 1 — the whole point of the gauge.
+    expect(body).toContain('loop_money_integrity_breach_active{signal="ledger_invariant"} 1');
+    expect(body).toContain('loop_money_integrity_breach_active{signal="vault_solvency"} 1');
+    // An evaluated-clean signal reads 0 (checked, not breached) — not absent.
+    expect(body).toContain('loop_money_integrity_breach_active{signal="asset_drift"} 0');
+    // A signal no watcher has evaluated yet is absent (no false "clean").
+    expect(body).not.toContain('loop_money_integrity_breach_active{signal="operator_float"}');
+    // Freshness gauge so "checked and clean" is distinguishable from
+    // "not being checked" (absent).
+    expect(body).toContain('# TYPE loop_money_integrity_last_evaluated_timestamp_ms gauge');
+    expect(body).toMatch(
+      /loop_money_integrity_last_evaluated_timestamp_ms\{signal="ledger_invariant"\} \d{13}/,
+    );
+
+    __resetMetricsForTests();
+  });
+
   it('/metrics emits exactly one HELP line per metric (audit A-016)', async () => {
     // Prometheus exposition format requires at most one HELP line per
     // metric. We briefly emitted two for loop_circuit_state (one for the
@@ -772,6 +805,8 @@ describe('app-level middleware', () => {
       'loop_geo_db_stale',
       'loop_rate_limit_fleet_estimate',
       'loop_rate_limit_fleet_estimate_source',
+      'loop_money_integrity_breach_active',
+      'loop_money_integrity_last_evaluated_timestamp_ms',
     ]) {
       const helpLines = body.split('\n').filter((l) => l.startsWith(`# HELP ${metric} `));
       expect(helpLines, `expected exactly one HELP line for ${metric}`).toHaveLength(1);

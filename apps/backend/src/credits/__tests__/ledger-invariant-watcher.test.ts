@@ -30,6 +30,7 @@ const { mocks } = vi.hoisted(() => ({
     markWorkerStopped: vi.fn(),
     markWorkerTickFailure: vi.fn(),
     markWorkerTickSuccess: vi.fn(),
+    setMoneyIntegrityBreach: vi.fn<(signal: string, active: boolean) => void>(() => undefined),
   },
 }));
 
@@ -54,6 +55,11 @@ vi.mock('../ledger-invariant.js', () => ({
 
 vi.mock('../../discord.js', () => ({
   notifyLedgerDrift: (args: unknown) => mocks.notifyLedgerDrift(args),
+}));
+
+vi.mock('../../metrics.js', () => ({
+  setMoneyIntegrityBreach: (signal: string, active: boolean) =>
+    mocks.setMoneyIntegrityBreach(signal, active),
 }));
 
 vi.mock('../../runtime-health.js', () => ({
@@ -96,6 +102,7 @@ beforeEach(() => {
   mocks.markWorkerStopped.mockReset();
   mocks.markWorkerTickFailure.mockReset();
   mocks.markWorkerTickSuccess.mockReset();
+  mocks.setMoneyIntegrityBreach.mockReset();
 });
 
 describe('runLedgerInvariantTick', () => {
@@ -176,6 +183,54 @@ describe('ledger-invariant watcher lifecycle', () => {
     stopLedgerInvariantWatcher();
 
     expect(mocks.markWorkerStopped).toHaveBeenCalledOnce();
+  });
+
+  it('NS-02: a tick that finds drift marks the money-integrity signal BREACHED while still reporting worker liveness', async () => {
+    mocks.computeLedgerDriftSql.mockResolvedValue([driftRow(1), driftRow(2)]);
+
+    startLedgerInvariantWatcher({ intervalMs: 60_000 });
+    await flushTick();
+
+    // The invariant is violated, so the money-integrity gauge must read
+    // BREACHED — this is the signal that makes a standing ledger drift
+    // visible on /metrics independent of Discord (FT-07). Before the
+    // fix the watcher set nothing here and only called
+    // markWorkerTickSuccess, so a live drift was a green dashboard.
+    expect(mocks.setMoneyIntegrityBreach).toHaveBeenCalledWith('ledger_invariant', true);
+    // Liveness is NOT sacrificed: the tick still ran, so the worker
+    // must ALSO report success — "worker ran" and "worker found a
+    // breach" are two distinct facts (NS-02).
+    expect(mocks.markWorkerTickSuccess).toHaveBeenCalledOnce();
+
+    stopLedgerInvariantWatcher();
+  });
+
+  it('NS-02: a clean tick marks the money-integrity signal HEALTHY (drift cleared)', async () => {
+    mocks.computeLedgerDriftSql.mockResolvedValue([]);
+
+    startLedgerInvariantWatcher({ intervalMs: 60_000 });
+    await flushTick();
+
+    expect(mocks.setMoneyIntegrityBreach).toHaveBeenCalledWith('ledger_invariant', false);
+    expect(mocks.markWorkerTickSuccess).toHaveBeenCalledOnce();
+
+    stopLedgerInvariantWatcher();
+  });
+
+  it('NS-02: a lock-skipped tick leaves the money-integrity signal untouched (no fresh reading)', async () => {
+    mocks.lockAcquired.value = false;
+
+    startLedgerInvariantWatcher({ intervalMs: 60_000 });
+    await flushTick();
+
+    // This machine never computed the invariant this tick, so it must
+    // NOT overwrite a possibly-breached last-known value with a
+    // stale-clean 0 — leave the gauge to the machine that held the lock.
+    expect(mocks.setMoneyIntegrityBreach).not.toHaveBeenCalled();
+    // Liveness still recorded (the loop is alive, reached the lock probe).
+    expect(mocks.markWorkerTickSuccess).toHaveBeenCalledOnce();
+
+    stopLedgerInvariantWatcher();
   });
 
   it('marks tick failures without throwing out of the interval loop', async () => {

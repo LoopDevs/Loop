@@ -73,6 +73,7 @@ import {
 } from '../db/schema.js';
 import { env } from '../env.js';
 import { logger } from '../logger.js';
+import { setMoneyIntegrityBreach } from '../metrics.js';
 import {
   markWorkerStarted,
   markWorkerStopped,
@@ -817,7 +818,21 @@ export function startOperatorFloatReconciliationWatcher(args?: { intervalMs?: nu
       // A lost advisory lock is a HEALTHY tick — another machine owns
       // the sweep this round. Marking it success keeps the losing
       // machine's worker-staleness monitor quiet on a 2-machine fleet.
-      await runOperatorFloatReconciliationTick();
+      const r = await runOperatorFloatReconciliationTick();
+      // NS-02 / FT-07: a tick that actually reconciled (won the lock and
+      // produced per-asset runs) records the STANDING breach state on
+      // the money-integrity gauge — markWorkerTickSuccess proves only
+      // that the tick ran. Any non-`ok` run (drift / unclassified /
+      // needs_baseline / error — the same states that page Discord) is
+      // a standing R3-1 breach that must be visible on /metrics even
+      // after its at-least-once page has fired. A lock-skip or an
+      // unconfigured account (runs === []) leaves the last value as-is.
+      if (!r.skippedLocked && r.runs.length > 0) {
+        setMoneyIntegrityBreach(
+          'operator_float',
+          r.runs.some((run) => run.state !== 'ok'),
+        );
+      }
       markWorkerTickSuccess('operator_float_reconciliation');
     } catch (err) {
       markWorkerTickFailure('operator_float_reconciliation', err);
