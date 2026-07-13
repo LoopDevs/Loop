@@ -4,6 +4,7 @@ import { useAuthStore } from '~/stores/auth.store';
 import { requestOtp, verifyOtp } from '~/services/auth';
 import { readClipboard } from '~/native/clipboard';
 import { friendlyError } from '~/utils/error-messages';
+import { isValidEmail } from '~/utils/email';
 import { useReducedMotion } from './atoms';
 
 // FE-52 (a11y/UX): cooldown after tapping "Resend code," mirroring the
@@ -54,7 +55,7 @@ export function EmailEntry({
   const { t } = useTranslation('onboarding');
   // Lightweight client check — the real validity is whatever the
   // backend accepts, but this gates the "looks ok" border colour.
-  const valid = /.+@.+\..+/.test(email);
+  const valid = isValidEmail(email);
   // Fallback focus-on-activation for swipe / keyboard nav, where
   // there's no click gesture to piggy-back on. Android ignores this
   // for the keyboard, but at least the caret is parked correctly.

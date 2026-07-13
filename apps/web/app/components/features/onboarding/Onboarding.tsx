@@ -7,6 +7,7 @@ import type { BiometricResult } from '~/native/biometrics';
 import { setHomeCurrency } from '~/services/user';
 import { useAppConfig } from '~/hooks/use-app-config';
 import { readCountryCookie } from '~/i18n/locale';
+import { isValidEmail } from '~/utils/email';
 import { ApiException, isSupportedCountryCode } from '@loop/shared';
 import { Dots, useReducedMotion } from './atoms';
 import { TrustWelcome, TrustHowItWorks, TrustMerchants } from './screens-trust';
@@ -231,7 +232,7 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
   };
 
   // --- step-specific CTA wiring ------------------------------------
-  const emailValid = /.+@.+\..+/.test(email);
+  const emailValid = isValidEmail(email);
   const otpValid = otp.length === 6;
 
   const handleEmailCta = async (): Promise<void> => {
