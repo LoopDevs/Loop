@@ -260,28 +260,47 @@ describe('procureOne — CF-28 pay-ctx failure NEVER fulfils (stranded-order gua
     operatorFetchMock.mockResolvedValue(okCtxResponse());
   });
 
+  // FT-03 / MNY-15 (money finding): a terminal pay-ctx failure of an
+  // already-PAID order must NOT strand the user. Before FT-03 these three
+  // kinds marked the order `failed` and returned WITHOUT refunding or
+  // paging — the user paid Loop, got no gift card, no refund, no alert
+  // (funds stranded). The prior test here LOCKED IN that buggy posture
+  // ("none of them auto-refund"); FT-03 supersedes it. Every terminal
+  // failure of a paid order now refunds the user AND pages ops. The
+  // `ctxPaid` flag differs per kind: config/terminal-submit never paid
+  // CTX (false); a reconcile mismatch may mean a prior on-chain payment
+  // exists, so ops is told to reconcile the possible operator-side debt
+  // (true).
   it.each([
-    ['PayCtxConfigError', () => new PayCtxConfigError('operator secret missing')],
-    ['PayCtxReconcileError', () => new PayCtxReconcileError('amount/asset mismatch')],
+    ['PayCtxConfigError', () => new PayCtxConfigError('operator secret missing'), false],
+    ['PayCtxReconcileError', () => new PayCtxReconcileError('amount/asset mismatch'), true],
     [
       'a terminal PayoutSubmitError',
       () => new PayoutSubmitError('terminal_no_trust', 'op_no_trust', { transaction: 'tx_failed' }),
+      false,
     ],
-  ])('payCtxOrder throwing %s → order failed, NEVER fulfilled', async (_label, makeErr) => {
-    payCtxOrderMock.mockRejectedValue(makeErr());
-    const outcome = await procureOne(fakeOrder());
-    expect(outcome).toBe('failed');
-    expect(markFailed).toHaveBeenCalledWith('order-1', expect.any(String));
-    // The invariant: a pay-ctx failure must not fulfil the order.
-    expect(markFulfilled).not.toHaveBeenCalled();
-    // And it's a failure, not a transient defer.
-    expect(revertToPaid).not.toHaveBeenCalled();
-    // These three kinds are ops-bug / reconciliation-needed / genuinely
-    // terminal — none of them auto-refund (an operator must investigate
-    // first, e.g. a reconcile mismatch could mean CTX WAS actually paid).
-    expect(applyOrderAutoRefundMock).not.toHaveBeenCalled();
-    expect(notifyOrderFailedAfterCtxPaidMock).not.toHaveBeenCalled();
-  });
+  ] as const)(
+    'payCtxOrder throwing %s → order failed, user auto-refunded + ops paged, NEVER fulfilled',
+    async (_label, makeErr, expectedCtxPaid) => {
+      payCtxOrderMock.mockRejectedValue(makeErr());
+      const outcome = await procureOne(fakeOrder());
+      expect(outcome).toBe('failed');
+      expect(markFailed).toHaveBeenCalledWith('order-1', expect.any(String));
+      // The invariant: a pay-ctx failure must not fulfil the order.
+      expect(markFulfilled).not.toHaveBeenCalled();
+      // And it's a failure, not a transient defer.
+      expect(revertToPaid).not.toHaveBeenCalled();
+      // FT-03: the user (who already paid Loop) is auto-refunded off the
+      // order's own charge fields.
+      expect(applyOrderAutoRefundMock).toHaveBeenCalledWith(
+        expect.objectContaining({ orderId: 'order-1', userId: 'user-1', amountMinor: 1000n }),
+      );
+      // FT-03: ops is paged, with refunded=true and the per-kind ctxPaid.
+      expect(notifyOrderFailedAfterCtxPaidMock).toHaveBeenCalledWith(
+        expect.objectContaining({ orderId: 'order-1', refunded: true, ctxPaid: expectedCtxPaid }),
+      );
+    },
+  );
 
   // CF2-04 (2026-06-30 cold audit): transient_horizon/transient_rebuild
   // are the retry-safe kinds `payout-submit.ts` documents — Horizon

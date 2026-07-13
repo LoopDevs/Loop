@@ -49,7 +49,7 @@ import {
   PayCtxConfigError,
   PayCtxReconcileError,
 } from './pay-ctx.js';
-import { requiredStroopsForCharge } from '../payments/price-feed.js';
+import { requiredStroopsForCharge, usdcStroopsPerCent } from '../payments/price-feed.js';
 import { PayoutSubmitError } from '../payments/payout-submit.js';
 import {
   pickProcurementAsset,
@@ -103,6 +103,7 @@ function maxStroopsForBps(expectedStroops: bigint, maxBps: number): bigint {
 async function checkCtxPaymentAmountBand(
   order: Order,
   amount: string,
+  asset: 'USDC' | 'XLM',
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
   const ctxAmountStroops = decimalToStroops(amount);
   if (ctxAmountStroops === null || ctxAmountStroops <= 0n) {
@@ -115,10 +116,21 @@ async function checkCtxPaymentAmountBand(
     };
   }
 
-  const expectedWholesaleStroops = await requiredStroopsForCharge(
-    order.wholesaleMinor,
-    order.chargeCurrency,
-  );
+  // MNY-22: price the expected wholesale in the SAME asset the SEP-7 URI
+  // settles in. `ctxAmountStroops` is denominated in `asset` (7-decimal
+  // stroops of USDC or of XLM). Pricing the expected side in XLM
+  // (`requiredStroopsForCharge`, the XLM oracle) while CTX settles in
+  // USDC compared two different assets' stroops: at ~$0.16/XLM the
+  // XLM-expected is ~6× the true USDC-expected, so the 125% ceiling was
+  // ~6× too loose and a grossly over-priced / tampered USDC payment URL
+  // sailed under the band. Both sides must be the settlement asset's
+  // stroops. (`usdcStroopsPerCent` is USD-static / FX-scaled — no XLM
+  // oracle hop — so this is the correct-denomination CHECK, not a change
+  // to any conversion routine.)
+  const expectedWholesaleStroops =
+    asset === 'USDC'
+      ? (await usdcStroopsPerCent(order.chargeCurrency)) * order.wholesaleMinor
+      : await requiredStroopsForCharge(order.wholesaleMinor, order.chargeCurrency);
   const maxAllowedStroops = maxStroopsForBps(
     expectedWholesaleStroops,
     env.LOOP_CTX_PAYMENT_MAX_BPS_OF_EXPECTED,
@@ -127,7 +139,7 @@ async function checkCtxPaymentAmountBand(
     return {
       ok: false,
       reason:
-        `CTX payment amount ${ctxAmountStroops.toString()} stroops exceeds ` +
+        `CTX payment amount ${ctxAmountStroops.toString()} ${asset} stroops exceeds ` +
         `${env.LOOP_CTX_PAYMENT_MAX_BPS_OF_EXPECTED} bps ceiling ` +
         `(${maxAllowedStroops.toString()} stroops) for expected wholesale`,
     };
@@ -365,7 +377,7 @@ export async function procureOne(order: Order): Promise<'fulfilled' | 'failed' |
       paymentBand =
         priorSettlement !== null
           ? { ok: true as const }
-          : await checkCtxPaymentAmountBand(order, sep7.value.amount);
+          : await checkCtxPaymentAmountBand(order, sep7.value.amount, cryptoCurrency);
     } catch (err) {
       await revertOrderProcuringToPaid(order.id);
       log.warn(
@@ -412,7 +424,15 @@ export async function procureOne(order: Order): Promise<'fulfilled' | 'failed' |
       // can succeed.
       if (err instanceof PayCtxConfigError) {
         log.error({ orderId: order.id, err: err.message }, 'CTX payment config error');
-        await markOrderFailed(order.id, `CTX payment config: ${err.message}`);
+        const reason = `CTX payment config: ${err.message}`;
+        await markOrderFailed(order.id, reason);
+        // FT-03 / MNY-15: the user already paid Loop (procureOne only
+        // runs from `state='paid'`). A config error is terminal here —
+        // the order is `failed` and will never be re-procured — so the
+        // user must be made whole rather than left debited with no card.
+        // No CTX payment was submitted (config check fails before the
+        // signer), so there is no operator-side CTX debt: ctxPaid=false.
+        await autoRefundFailedOrder(order, parsed.data.id, reason, false);
         return 'failed';
       }
       // Idempotency match with a mismatched amount/asset (memo collision
@@ -421,7 +441,18 @@ export async function procureOne(order: Order): Promise<'fulfilled' | 'failed' |
       // an operator must reconcile. See PayCtxReconcileError.
       if (err instanceof PayCtxReconcileError) {
         log.error({ orderId: order.id, err: err.message }, 'CTX payment reconcile mismatch');
-        await markOrderFailed(order.id, `CTX payment reconcile: ${err.message}`);
+        const reason = `CTX payment reconcile: ${err.message}`;
+        await markOrderFailed(order.id, reason);
+        // FT-03 / MNY-15: terminal for the order — the user is owed a
+        // refund regardless of the reconcile outcome (the order is
+        // `failed`; they will never receive a card through it). The
+        // refund is idempotent (partial unique index), so it never
+        // double-credits. A reconcile mismatch means a prior on-chain
+        // payment with this memo may exist, i.e. Loop MAY already have
+        // paid CTX — flag ctxPaid=true so the page tells ops to
+        // reconcile the possible operator-side CTX debt (chase/settle),
+        // which is exactly the "an operator must reconcile" case.
+        await autoRefundFailedOrder(order, parsed.data.id, reason, true);
         return 'failed';
       }
       // CF2-04 (2026-06-30 cold audit): transient_horizon/transient_rebuild
@@ -453,7 +484,13 @@ export async function procureOne(order: Order): Promise<'fulfilled' | 'failed' |
           { orderId: order.id, kind: err.kind, resultCodes: err.resultCodes },
           'CTX payment submit failed',
         );
-        await markOrderFailed(order.id, `CTX payment ${err.kind}`);
+        const reason = `CTX payment ${err.kind}`;
+        await markOrderFailed(order.id, reason);
+        // FT-03 / MNY-15: a terminal submit failure means the tx never
+        // landed — CTX is unpaid (ctxPaid=false) — but the user already
+        // paid Loop and the order is now terminally `failed`. Refund the
+        // user and page ops rather than stranding them debited.
+        await autoRefundFailedOrder(order, parsed.data.id, reason, false);
         return 'failed';
       }
       throw err;

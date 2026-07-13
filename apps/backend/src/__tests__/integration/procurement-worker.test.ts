@@ -130,6 +130,9 @@ vi.mock('../../discord.js', async (importActual) => {
     notifyPaymentWatcherStuck: noop,
     notifyUsdcBelowFloor: noop,
     notifyAdminBulkRead: noop,
+    // FT-03: its own spy so the terminal-failure paging assertion below
+    // can distinguish it from the shared no-op.
+    notifyOrderFailedAfterCtxPaid: vi.fn(),
   };
 });
 
@@ -146,6 +149,9 @@ import { runProcurementTick } from '../../orders/procurement.js';
 import { sweepStuckProcurement } from '../../orders/transitions.js';
 import { ensureMigrated, truncateAllTables } from './db-test-setup.js';
 import { operatorFetch } from '../../ctx/operator-pool.js';
+import { payCtxOrder, PayCtxConfigError, PayCtxReconcileError } from '../../orders/pay-ctx.js';
+import { PayoutSubmitError } from '../../payments/payout-submit.js';
+import { notifyOrderFailedAfterCtxPaid } from '../../discord.js';
 
 const describeIf = RUN_INTEGRATION ? describe : describe.skip;
 
@@ -495,3 +501,88 @@ describeIf('procurement-worker integration — stuck-procurement sweep', () => {
     expect(second).toBe(0);
   });
 });
+
+/**
+ * FT-03 / MNY-15 (money finding) — real-postgres proof that a TERMINAL
+ * CTX-payment failure of an already-PAID order does not strand the user.
+ *
+ * Before FT-03, `procureOne`'s three terminal pay-ctx catch arms
+ * (PayCtxConfigError / PayCtxReconcileError / a terminal
+ * PayoutSubmitError) marked the order `failed` and returned WITHOUT
+ * refunding the user or paging ops — the user paid Loop, got no gift
+ * card, no refund, no alert (funds stranded, MNY-15's missing backstop).
+ *
+ * These drive the REAL refund path (applyOrderAutoRefund is NOT mocked
+ * here) against `loop_test` and assert a `refund` credit_transactions
+ * row lands for the seeded credit order + ops is paged. The band is USDC
+ * (picker default) and the seeded charge currency is USD, so the amount
+ * guard resolves off the USD-static USDC rate with no oracle/network hop.
+ */
+describeIf(
+  'procurement-worker integration — FT-03/MNY-15 terminal pay-ctx failure refunds paid order',
+  () => {
+    beforeAll(async () => {
+      await ensureMigrated();
+    });
+
+    beforeEach(async () => {
+      await truncateAllTables();
+      vi.mocked(operatorFetch).mockReset();
+      vi.mocked(notifyOrderFailedAfterCtxPaid).mockClear();
+      // Reach the pay-ctx hop: a well-formed CTX create-response with a
+      // SEP-7 URI for both rails (payCtxOrder is stubbed, so the amount is
+      // inert to the band's USDC ceiling — 0.10 USDC is well under it).
+      vi.mocked(operatorFetch).mockResolvedValue(
+        new Response(JSON.stringify({ id: 'ctx-ft03', ...CTX_PAY_FIELDS }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    });
+
+    it.each([
+      [
+        'a terminal PayoutSubmitError',
+        () =>
+          new PayoutSubmitError('terminal_no_trust', 'op_no_trust', { transaction: 'tx_failed' }),
+        false,
+      ],
+      [
+        'PayCtxConfigError',
+        () => new PayCtxConfigError('LOOP_STELLAR_OPERATOR_SECRET unset'),
+        false,
+      ],
+      ['PayCtxReconcileError', () => new PayCtxReconcileError('amount/asset mismatch'), true],
+    ])(
+      'payCtxOrder throwing %s → order failed AND user refunded (real ledger row) AND ops paged',
+      async (_label, makeErr, expectedCtxPaid) => {
+        const { userId, orderIds } = await seedPaidOrders(1);
+        const orderId = orderIds[0]!;
+        vi.mocked(payCtxOrder).mockRejectedValueOnce(makeErr());
+
+        const r = await runProcurementTick({ limit: 1 });
+        expect(r.failed).toBe(1);
+        expect(r.fulfilled).toBe(0);
+
+        const [order] = await db.select().from(orders).where(eq(orders.id, orderId));
+        expect(order!.state).toBe('failed');
+
+        // The disease fix: a real refund credit_transactions row for the
+        // full charge (2500 minor), written by the un-mocked refund path.
+        const refunds = await db
+          .select()
+          .from(creditTransactions)
+          .where(eq(creditTransactions.referenceId, orderId));
+        expect(refunds).toHaveLength(1);
+        expect(refunds[0]!.type).toBe('refund');
+        expect(refunds[0]!.amountMinor).toBe(2500n);
+        expect(refunds[0]!.userId).toBe(userId);
+
+        // Ops is paged, with refunded=true and the per-kind ctxPaid flag.
+        expect(vi.mocked(notifyOrderFailedAfterCtxPaid)).toHaveBeenCalledWith(
+          expect.objectContaining({ orderId, refunded: true, ctxPaid: expectedCtxPaid }),
+        );
+      },
+    );
+  },
+);
