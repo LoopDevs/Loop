@@ -1,16 +1,21 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { purgeExpiredOtps, purgeDeadRefreshTokens, purgeStaleOtpAttemptCounters } = vi.hoisted(
-  () => ({
-    purgeExpiredOtps: vi.fn(async () => 0),
-    purgeDeadRefreshTokens: vi.fn(async () => 0),
-    purgeStaleOtpAttemptCounters: vi.fn(async () => 0),
-  }),
-);
+const {
+  purgeExpiredOtps,
+  purgeDeadRefreshTokens,
+  purgeStaleOtpAttemptCounters,
+  purgeExpiredIdTokenUses,
+} = vi.hoisted(() => ({
+  purgeExpiredOtps: vi.fn(async () => 0),
+  purgeDeadRefreshTokens: vi.fn(async () => 0),
+  purgeStaleOtpAttemptCounters: vi.fn(async () => 0),
+  purgeExpiredIdTokenUses: vi.fn(async () => 0),
+}));
 
 vi.mock('../otps.js', () => ({ purgeExpiredOtps }));
 vi.mock('../refresh-tokens.js', () => ({ purgeDeadRefreshTokens }));
 vi.mock('../otp-attempt-counter.js', () => ({ purgeStaleOtpAttemptCounters }));
+vi.mock('../id-token-replay.js', () => ({ purgeExpiredIdTokenUses }));
 vi.mock('../../logger.js', () => ({
   logger: {
     child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
@@ -38,21 +43,30 @@ beforeEach(() => {
   purgeExpiredOtps.mockClear();
   purgeDeadRefreshTokens.mockClear();
   purgeStaleOtpAttemptCounters.mockClear();
+  purgeExpiredIdTokenUses.mockClear();
   purgeExpiredOtps.mockResolvedValue(0);
   purgeDeadRefreshTokens.mockResolvedValue(0);
   purgeStaleOtpAttemptCounters.mockResolvedValue(0);
+  purgeExpiredIdTokenUses.mockResolvedValue(0);
 });
 
 describe('runAuthRowPurgeTick', () => {
-  it('sweeps both tables and returns each delete count', async () => {
+  it('sweeps every table and returns each delete count', async () => {
     purgeExpiredOtps.mockResolvedValue(5);
     purgeDeadRefreshTokens.mockResolvedValue(3);
     purgeStaleOtpAttemptCounters.mockResolvedValue(2);
+    purgeExpiredIdTokenUses.mockResolvedValue(7);
     const r = await runAuthRowPurgeTick();
-    expect(r).toEqual({ otpsDeleted: 5, refreshTokensDeleted: 3, otpAttemptCountersDeleted: 2 });
+    expect(r).toEqual({
+      otpsDeleted: 5,
+      refreshTokensDeleted: 3,
+      otpAttemptCountersDeleted: 2,
+      idTokenUsesDeleted: 7,
+    });
     expect(purgeExpiredOtps).toHaveBeenCalledTimes(1);
     expect(purgeDeadRefreshTokens).toHaveBeenCalledTimes(1);
     expect(purgeStaleOtpAttemptCounters).toHaveBeenCalledTimes(1);
+    expect(purgeExpiredIdTokenUses).toHaveBeenCalledTimes(1);
   });
 
   it('defaults retentionMs to LOOP_AUTH_ROW_RETENTION_DAYS', async () => {
@@ -64,6 +78,9 @@ describe('runAuthRowPurgeTick', () => {
     expect(purgeDeadRefreshTokens).toHaveBeenCalledWith(
       expect.objectContaining({ retentionMs: thirtyDaysMs }),
     );
+    expect(purgeExpiredIdTokenUses).toHaveBeenCalledWith(
+      expect.objectContaining({ retentionMs: thirtyDaysMs }),
+    );
   });
 
   it('honours an explicit retentionMs + now override', async () => {
@@ -72,6 +89,7 @@ describe('runAuthRowPurgeTick', () => {
     expect(purgeExpiredOtps).toHaveBeenCalledWith({ retentionMs: 1000, now });
     expect(purgeDeadRefreshTokens).toHaveBeenCalledWith({ retentionMs: 1000, now });
     expect(purgeStaleOtpAttemptCounters).toHaveBeenCalledWith({ retentionMs: 1000, now });
+    expect(purgeExpiredIdTokenUses).toHaveBeenCalledWith({ retentionMs: 1000, now });
   });
 
   it('propagates a sweep failure to the caller (the interval loop swallows it)', async () => {

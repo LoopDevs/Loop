@@ -11,9 +11,14 @@
  *     `refresh_tokens_expires` index docstring promised a "periodic
  *     cleanup job that trims fully-expired rows" that never existed.
  *     (X-PRIV-08)
+ *   - `social_id_token_uses` — holds a sha256 id-token digest keyed by
+ *     `expires_at` (the token's own `exp`). Its docstring likewise
+ *     promised a sweep that never existed, so it grew one row per
+ *     social login forever. (AGT-06)
  *
- * This sweeper periodically deletes rows in both tables past a
- * retention grace, via `purgeExpiredOtps` / `purgeDeadRefreshTokens`.
+ * This sweeper periodically deletes dead rows in each table past a
+ * retention grace, via `purgeExpiredOtps` / `purgeDeadRefreshTokens` /
+ * `purgeStaleOtpAttemptCounters` / `purgeExpiredIdTokenUses`.
  * DELETE-only — no migration needed.
  *
  * Wiring mirrors the sibling sweeps (`redemption-backfill.ts`,
@@ -33,6 +38,7 @@ import { logger } from '../logger.js';
 import { purgeExpiredOtps } from './otps.js';
 import { purgeDeadRefreshTokens } from './refresh-tokens.js';
 import { purgeStaleOtpAttemptCounters } from './otp-attempt-counter.js';
+import { purgeExpiredIdTokenUses } from './id-token-replay.js';
 import {
   markWorkerStarted,
   markWorkerStopped,
@@ -49,6 +55,8 @@ export interface AuthRowPurgeTickResult {
   refreshTokensDeleted: number;
   /** B5: stale per-email OTP attempt counters deleted this tick. */
   otpAttemptCountersDeleted: number;
+  /** AGT-06: expired social id-token replay-guard rows deleted this tick. */
+  idTokenUsesDeleted: number;
 }
 
 /**
@@ -84,7 +92,11 @@ export async function runAuthRowPurgeTick(args?: {
     retentionMs,
     ...(now ? { now } : {}),
   });
-  return { otpsDeleted, refreshTokensDeleted, otpAttemptCountersDeleted };
+  const idTokenUsesDeleted = await purgeExpiredIdTokenUses({
+    retentionMs,
+    ...(now ? { now } : {}),
+  });
+  return { otpsDeleted, refreshTokensDeleted, otpAttemptCountersDeleted, idTokenUsesDeleted };
 }
 
 // ─── Interval loop ────────────────────────────────────────────────────────
@@ -107,7 +119,12 @@ export function startAuthRowPurge(args?: { intervalMs?: number }): void {
   const tick = async (): Promise<void> => {
     try {
       const r = await runAuthRowPurgeTick();
-      if (r.otpsDeleted > 0 || r.refreshTokensDeleted > 0 || r.otpAttemptCountersDeleted > 0) {
+      if (
+        r.otpsDeleted > 0 ||
+        r.refreshTokensDeleted > 0 ||
+        r.otpAttemptCountersDeleted > 0 ||
+        r.idTokenUsesDeleted > 0
+      ) {
         log.info(r, 'Auth-row purge tick reclaimed rows');
       }
       markWorkerTickSuccess('auth_row_purge');

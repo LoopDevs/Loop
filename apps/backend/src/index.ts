@@ -277,11 +277,12 @@ if (env.LOOP_WORKERS_ENABLED) {
     markWorkerDisabled('interest_mint', 'interest APY is zero');
   }
 
-  // CF-26 / X-PRIV-07/08: auth-row retention purge. Deletes expired/
-  // consumed OTP rows and dead refresh-token rows past the retention
-  // grace so neither PII-bearing table grows without bound. DELETE-only,
-  // no Stellar / CTX dependency — gated here purely to share the
-  // workers' lifecycle. Runbook: docs/runbooks/dsr.md.
+  // CF-26 / X-PRIV-07/08 + AGT-06: auth-row retention purge. Deletes
+  // expired/consumed OTP rows, dead refresh-token rows, and expired
+  // social id-token replay-guard rows past the retention grace so none
+  // of these auth tables grow without bound. DELETE-only, no Stellar /
+  // CTX dependency — gated here purely to share the workers' lifecycle.
+  // Runbook: docs/runbooks/dsr.md.
   startAuthRowPurge({
     intervalMs: env.LOOP_AUTH_ROW_PURGE_INTERVAL_HOURS * 60 * 60 * 1000,
   });
