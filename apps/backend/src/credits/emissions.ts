@@ -329,13 +329,25 @@ export async function applyAdminEmission(args: {
             ),
           );
         const usedMinor = BigInt(dayRow?.usedStroops ?? '0') / STROOPS_PER_MINOR;
-        if (usedMinor + args.amountMinor > capMinor) {
+        // MNY-11: the daily cap must bind the CHECKED value to what is
+        // actually minted. `args.amountMinor` is caller-supplied and can
+        // diverge from `intent.amountStroops` — the amount the INSERT
+        // below actually queues on-chain. Checking the caller's minor let
+        // a caller understate `amountMinor` to slip under the cap while
+        // minting a large `amountStroops` (cap bypass). DERIVE the
+        // checked minor FROM the minted stroops, the same way the sibling
+        // A4-021 (`payout-compensation.ts`: `payout.amountStroops /
+        // 100_000n`) refuses to trust a caller-supplied minor — using the
+        // same floor-division as `usedMinor` two lines above so the
+        // already-used total and this attempt are measured on one scale.
+        const mintedMinor = args.intent.amountStroops / STROOPS_PER_MINOR;
+        if (usedMinor + mintedMinor > capMinor) {
           throw new DailyAdjustmentLimitError(
             args.currency,
             dayStart,
             usedMinor,
             capMinor,
-            args.amountMinor,
+            mintedMinor,
           );
         }
       }

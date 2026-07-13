@@ -1279,6 +1279,57 @@ describeIf('hardening A1 — emission conservation (cumulative, cross-writer, DB
     });
     expect(thrown).toBeInstanceOf(DailyAdjustmentLimitError);
   });
+
+  it('MNY-11: the daily cap binds to minted stroops — an understated amountMinor cannot slip a large amountStroops past it', async () => {
+    // The primitive is the trust boundary (the HTTP handler always sets
+    // amountStroops = amountMinor * 100_000, but a future/rogue internal
+    // caller — or a handler bug — need not). Cap default is 100M minor.
+    //
+    // Attack: understate `amountMinor` to 1 (slips under the cap) while
+    // minting `amountStroops` worth 150M minor (over the cap). The mirror
+    // balance is 200M minor so the per-call balance guard AND the
+    // conservation fence (both app-layer + the migration-0044 DB trigger,
+    // which measures the real amount_stroops) PASS — isolating the DAILY
+    // CAP as the only gate. Before MNY-11 the cap checked the caller's
+    // amountMinor (1) → passed → the 150M-minor emission was queued,
+    // blowing the 100M daily cap with a single call. The fix derives the
+    // cap-checked minor FROM amountStroops, so the cap now REJECTS it.
+    const { targetUser } = await seed();
+    await seedCashbackBalance({ userId: targetUser.id, amountMinor: 200_000_000n });
+
+    const understatedMinor = 1n;
+    const mintedStroops = 150_000_000n * 100_000n; // 150M minor actually minted
+
+    let thrown: unknown = null;
+    const applied = await applyAdminEmission({
+      userId: targetUser.id,
+      currency: 'USD',
+      amountMinor: understatedMinor,
+      intent: {
+        assetCode: 'USDLOOP',
+        assetIssuer: 'GISSUERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+        toAddress: DEST,
+        amountStroops: mintedStroops,
+        memoText: 'mny-11 cap bypass',
+      },
+    }).catch((err: unknown) => {
+      thrown = err;
+      return null;
+    });
+
+    // The cap must reject the emission (bound to the minted stroops),
+    // not silently queue it on the strength of the understated minor.
+    expect(applied).toBeNull();
+    expect(thrown).toBeInstanceOf(DailyAdjustmentLimitError);
+
+    // Bypass provably closed: NO emission row was queued — the caller
+    // could not mint 150M minor of on-chain value under the 100M cap.
+    const queued = await db
+      .select()
+      .from(pendingPayouts)
+      .where(eq(pendingPayouts.userId, targetUser.id));
+    expect(queued).toHaveLength(0);
+  });
 });
 
 describeIf('admin payout-retry write — idempotency-guarded ladder', () => {
