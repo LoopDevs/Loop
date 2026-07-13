@@ -116,7 +116,20 @@ const STROOPS_PER_MINOR = 100_000n;
 
 /**
  * Conservation accounting (hardening A1): net minor units already
- * materialised on-chain for this (user, asset).
+ * materialised on-chain for this (user, MIRROR CURRENCY).
+ *
+ * Scoped by mirror currency — `loop_asset_mirror_currency(asset_code)
+ * = loop_asset_mirror_currency(assetCode)` — NOT by the bare
+ * `asset_code`, to MATCH the DB conservation trigger
+ * (`assert_emission_conservation`, re-scoped by migration 0061). Since
+ * USDLOOP + LOOPUSD both mirror into 'USD' (EURLOOP + LOOPEUR into
+ * 'EUR') they share one `user_credits` headroom, so both must be
+ * summed together. Scoping this pre-check by the bare asset code while
+ * the trigger scopes by mirror currency lets the app pass a shared-
+ * mirror emission the trigger then rejects — surfacing as an opaque
+ * 500 instead of the intended 409 EMISSION_EXCEEDS_UNEMITTED_BALANCE
+ * (CONV-MNY-01). For a classic-only deployment (no LOOPUSD/LOOPEUR
+ * rows) this sum is identical to the old bare-asset_code sum.
  *
  * The invariant every money flow preserves is
  * `mintedNet ≤ mirror balance`:
@@ -162,7 +175,7 @@ const STROOPS_PER_MINOR = 100_000n;
  * 'payout-compensation') — do NOT unify the scopes without also
  * unifying the acquisition order.
  */
-async function emittedNetMinorFor(
+export async function emittedNetMinorFor(
   tx: Pick<typeof db, 'execute'>,
   args: { userId: string; assetCode: string },
 ): Promise<bigint> {
@@ -185,7 +198,7 @@ async function emittedNetMinorFor(
       COALESCE(SUM(amount_stroops) FILTER (WHERE kind = 'burn'), 0)::text AS burned
     FROM pending_payouts
     WHERE user_id = ${args.userId}
-      AND asset_code = ${args.assetCode}
+      AND loop_asset_mirror_currency(asset_code) = loop_asset_mirror_currency(${args.assetCode})
   `);
   const rows = Array.isArray(result)
     ? (result as Array<{ minted: string; burned: string }>)

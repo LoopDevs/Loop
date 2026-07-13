@@ -112,7 +112,13 @@ vi.mock('../../db/schema.js', () => ({
   },
 }));
 
-import { applyAdminEmission, EmissionAlreadyIssuedError } from '../emissions.js';
+import { PgDialect } from 'drizzle-orm/pg-core';
+import type { SQL } from 'drizzle-orm';
+import {
+  applyAdminEmission,
+  EmissionAlreadyIssuedError,
+  emittedNetMinorFor,
+} from '../emissions.js';
 import { InsufficientBalanceError } from '../adjustments.js';
 
 const intent = {
@@ -304,5 +310,48 @@ describe('applyAdminEmission (A2-901 / ADR-024 re-scoped by ADR 036)', () => {
     ).rejects.toMatchObject({ payoutId: 'p-existing' });
     expect(state.insertPayoutCalls).toHaveLength(0);
     expect(state.insertCreditCalls).toHaveLength(0);
+  });
+});
+
+/**
+ * CONV-MNY-01: the conservation pre-check's "already emitted" SUM must
+ * scope by MIRROR CURRENCY, exactly as the DB trigger
+ * `assert_emission_conservation` does after migration 0061
+ * (`loop_asset_mirror_currency(pp.asset_code) = mirror_currency`), NOT
+ * by the bare `asset_code`. USDLOOP + LOOPUSD share a single USD
+ * mirror headroom; a bare-asset_code pre-check undercounts and passes
+ * a shared-mirror emission the trigger then rejects, turning the
+ * intended 409 EMISSION_EXCEEDS_UNEMITTED_BALANCE into an opaque 500.
+ *
+ * This exercises the real query the code builds (compiled via the
+ * drizzle Pg dialect, no DB) — it fails against the pre-fix
+ * `AND asset_code = $n` scope and passes against the corrected
+ * mirror-currency scope.
+ */
+describe('emittedNetMinorFor — conservation SUM scope (CONV-MNY-01)', () => {
+  it('scopes the aggregation by mirror currency, matching the 0061 trigger', async () => {
+    let captured: SQL | undefined;
+    const tx = {
+      execute: async (query: SQL) => {
+        captured = query;
+        return [] as unknown as never;
+      },
+    } as unknown as Parameters<typeof emittedNetMinorFor>[0];
+
+    await emittedNetMinorFor(tx, { userId: 'u-1', assetCode: 'USDLOOP' });
+
+    expect(captured).toBeDefined();
+    const compiled = new PgDialect().sqlToQuery(captured as SQL);
+    const flat = compiled.sql.replace(/\s+/g, ' ');
+
+    // Corrected scope present: both sides routed through the same
+    // mirror-currency mapping the trigger uses.
+    expect(flat).toContain('loop_asset_mirror_currency(asset_code) = loop_asset_mirror_currency(');
+    // Pre-fix bare-asset_code scope must be gone — this is the exact
+    // predicate that diverged from the trigger.
+    expect(flat).not.toMatch(/\band asset_code =\s*\$/i);
+    // The assetCode arg is bound as a parameter (not string-interpolated).
+    expect(compiled.params).toContain('USDLOOP');
+    expect(compiled.params).toContain('u-1');
   });
 });
