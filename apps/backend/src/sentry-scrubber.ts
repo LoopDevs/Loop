@@ -15,23 +15,45 @@
  * structured JSON by the time they reach `beforeSend`).
  *
  * Keep this list in sync with logger.ts REDACT_PATHS. Any secret added
- * there must also land here — Sentry bypasses the logger.
+ * there must also land here — Sentry bypasses the logger. This is now
+ * enforced structurally: SENSITIVE_KEYS below is *derived* from
+ * REDACT_PATHS rather than hand-maintained, so the two pipes cannot
+ * drift.
  */
 
+import { REDACT_PATHS } from './logger.js';
+
 /**
- * Field names whose value must be redacted anywhere in the event.
+ * Field names whose value must be redacted anywhere in the event —
+ * derived from the backend logger's REDACT_PATHS so the two redaction
+ * pipes cannot drift.
+ *
+ * OBS-04: a hand-maintained regex here had drifted from REDACT_PATHS,
+ * so secrets the logger correctly redacted still leaked to Sentry —
+ * `appSecret`, `PRIVY_APP_SECRET`, the OTP `code`, `X-Api-Key`/
+ * `X-Api-Secret`, `issuerSecret`, `channelSecret`, and the
+ * `LOOP_STELLAR_*` operator/issuer/channel env keys. Deriving the set
+ * closes that gap and prevents it reopening: any secret added to
+ * REDACT_PATHS is scrubbed from Sentry events automatically.
+ *
+ * pino's REDACT_PATHS encode nesting via `*.` / explicit prefixes
+ * (e.g. `*.*.appSecret`, `req.headers.authorization`); the scrubber
+ * instead matches a key *anywhere* in the walked event tree, so we
+ * reduce each path to its leaf segment (the part after the last `.`)
+ * and lower-case it for case-insensitive comparison.
  *
  * A4-039: idempotency keys are admin-write identifiers that must
  * not land in Sentry breadcrumbs. The web UI mints them via
  * `crypto.randomUUID()` and the backend keys snapshot replay on
  * `(adminUserId, key)`; an attacker with leaked keys + an admin
  * session can replay a stored response or fabricate an
- * `audit.replayed: true` envelope. Match both the camelCase shape
- * (`idempotencyKey`) used in handler bodies and the header shape
- * (`idempotency-key` / `Idempotency-Key`).
+ * `audit.replayed: true` envelope. Both the camelCase shape
+ * (`idempotencyKey`) and the header shape (`idempotency-key` /
+ * `Idempotency-Key`) live in REDACT_PATHS, so both are covered here.
  */
-const SENSITIVE_KEY_RE =
-  /^(authorization|cookie|accesstoken|refreshtoken|otp|password|apikey|apisecret|secret|privatekey|secretkey|seedphrase|mnemonic|operatorsecret|loop_jwt_signing_key(_previous)?|gift_card_api_(key|secret)|resend_api_key|database_url|sentry_dsn|discord_webhook_(orders|monitoring|admin_audit)|idempotencykey|idempotency-key)$/i;
+const SENSITIVE_KEYS: ReadonlySet<string> = new Set(
+  REDACT_PATHS.map((path) => path.slice(path.lastIndexOf('.') + 1).toLowerCase()),
+);
 
 /**
  * A4-074: regexes for free-text PII shapes that aren't keyed by a
@@ -153,8 +175,8 @@ export function scrubSentryEvent<T extends SentryEventLike>(event: T): T {
 }
 
 /**
- * Recursively walks `v`. At every object key matching
- * SENSITIVE_KEY_RE, replaces the string value with `[REDACTED]`.
+ * Recursively walks `v`. At every object key in SENSITIVE_KEYS
+ * (case-insensitive), replaces the string value with `[REDACTED]`.
  * String values at non-sensitive keys still get the free-text
  * PII regex pass (A4-074) — emails / bearer tokens / Stellar
  * secrets / long hex runs are scrubbed even when they appear in
@@ -165,7 +187,7 @@ export function scrubSentryEvent<T extends SentryEventLike>(event: T): T {
 function scrubObject(obj: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(obj)) {
-    if (SENSITIVE_KEY_RE.test(key) && typeof value === 'string') {
+    if (SENSITIVE_KEYS.has(key.toLowerCase()) && typeof value === 'string') {
       out[key] = '[REDACTED]';
     } else {
       out[key] = scrubAny(value);

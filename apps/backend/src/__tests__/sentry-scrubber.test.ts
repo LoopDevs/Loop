@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { scrubSentryEvent } from '../sentry-scrubber.js';
+import { REDACT_PATHS } from '../logger.js';
 
 describe('scrubSentryEvent (A2-1308)', () => {
   it('redacts Authorization / cookie from request.headers', () => {
@@ -121,5 +122,62 @@ describe('scrubSentryEvent (A2-1308)', () => {
     expect(out.breadcrumbs?.[0]?.message).toBe('user [REDACTED_EMAIL] did something');
     expect((out.breadcrumbs?.[0]?.data as Record<string, string>).accessToken).toBe('[REDACTED]');
     expect(out.breadcrumbs?.[1]?.message).toBe('no pii here');
+  });
+
+  // OBS-04 (cold audit): the scrubber's hand-maintained key list had
+  // drifted from logger.ts REDACT_PATHS — the source of truth it claims
+  // to mirror. Secrets the logger redacts leaked to Sentry: the Privy
+  // wallet-provider app secret (`appSecret` / `PRIVY_APP_SECRET`) and
+  // the OTP `code`. Values below are chosen so they are NOT caught by
+  // the free-text regex pass (no email / Bearer / Stellar-secret /
+  // 32+hex shape) — so a bare `[REDACTED]` here can only come from the
+  // key-based redaction that drifted, not from the A4-074 string pass.
+  it('OBS-04: redacts appSecret / PRIVY_APP_SECRET / OTP code that leaked past the drifted scrubber', () => {
+    const out = scrubSentryEvent({
+      request: {
+        data: {
+          // OTP verification body: logger redacts `code`, scrubber did not.
+          code: '123456',
+          phone: '+15551234567',
+        },
+      },
+      extra: {
+        // Privy adapter config object dumped into `extra`.
+        appSecret: 'privy-app-secret-value',
+        // Fully-qualified env-key shape from an env dump.
+        PRIVY_APP_SECRET: 'privy-env-secret-value',
+        // Nested, to prove depth is covered too.
+        privy: { appSecret: 'nested-privy-secret' },
+        // A non-secret field must still survive.
+        merchantId: 'amazon',
+      },
+    });
+    const data = out.request?.data as Record<string, unknown>;
+    expect(data.code).toBe('[REDACTED]');
+    // Not a secret key — the phone value has no free-text PII shape, so
+    // it passes through (documents that we didn't over-redact).
+    expect(data.phone).toBe('+15551234567');
+    const extra = out.extra as Record<string, unknown>;
+    expect(extra.appSecret).toBe('[REDACTED]');
+    expect(extra.PRIVY_APP_SECRET).toBe('[REDACTED]');
+    expect((extra.privy as Record<string, unknown>).appSecret).toBe('[REDACTED]');
+    expect(extra.merchantId).toBe('amazon');
+  });
+
+  // OBS-04 drift-guard: prove parity with the logger by exercising a
+  // field named after *every* leaf key in REDACT_PATHS. Any key the
+  // scrubber fails to redact is a leak. The value has no free-text PII
+  // shape, so the only way it becomes `[REDACTED]` is key-based
+  // redaction — this fails RED for all 13 drifted keys pre-fix.
+  it('OBS-04: redacts every secret key the logger does (no drift from REDACT_PATHS)', () => {
+    const leafKeys = [...new Set(REDACT_PATHS.map((p) => p.slice(p.lastIndexOf('.') + 1)))];
+    const SAFE_VALUE = 'redact-me-please'; // no email/Bearer/Stellar/hex shape
+    const extra: Record<string, string> = {};
+    for (const k of leafKeys) extra[k] = SAFE_VALUE;
+
+    const out = scrubSentryEvent({ extra });
+    const scrubbed = out.extra as Record<string, string>;
+    const leaked = leafKeys.filter((k) => scrubbed[k] !== '[REDACTED]');
+    expect(leaked).toEqual([]);
   });
 });
