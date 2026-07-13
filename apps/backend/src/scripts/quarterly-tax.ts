@@ -184,9 +184,30 @@ async function emitCashbackRebates(ctx: ReportContext): Promise<string> {
   return outPath;
 }
 
-async function emitCryptoPayouts(ctx: ReportContext): Promise<string> {
-  const reportId = 'crypto-payouts';
-  const rows = (await db.execute(sql`
+export interface CryptoPayoutRow {
+  user_id: string;
+  asset_code: string;
+  row_count: string | bigint;
+  amount_stroops_sum: string | bigint;
+}
+
+/**
+ * Per-(user, asset) confirmed crypto PAID TO the user in the quarter,
+ * for the `crypto-payouts` regulatory export.
+ *
+ * FT-04: the total must reflect only crypto actually PAID to users.
+ * `pending_payouts` also carries `kind='burn'` rows — the issuer-return
+ * side of a redemption (`markOrderPaid` / vault-redemption forward the
+ * received LOOP to the asset's issuer/operator, NEVER to the user). A
+ * burn is the destruction of the user's credit when they redeem, not a
+ * payment to them; its genuine crypto payment is a SEPARATE movement.
+ * Counting the burn overstates / double-counts the regulatory figure,
+ * so it is excluded here. Every other kind (`order_cashback`,
+ * `emission`, `interest_mint`) is an actual on-chain payment to the
+ * user and stays counted.
+ */
+export async function queryCryptoPayouts(quarter: QuarterRange): Promise<CryptoPayoutRow[]> {
+  return (await db.execute(sql`
     SELECT
       user_id,
       asset_code,
@@ -194,17 +215,18 @@ async function emitCryptoPayouts(ctx: ReportContext): Promise<string> {
       COALESCE(SUM(amount_stroops), 0)::bigint AS amount_stroops_sum
     FROM pending_payouts
     WHERE state = 'confirmed'
+      AND kind != 'burn'
       AND confirmed_at IS NOT NULL
-      AND confirmed_at >= ${ctx.quarter.startsAt}::timestamptz
-      AND confirmed_at < ${ctx.quarter.endsBefore}::timestamptz
+      AND confirmed_at >= ${quarter.startsAt}::timestamptz
+      AND confirmed_at < ${quarter.endsBefore}::timestamptz
     GROUP BY user_id, asset_code
     ORDER BY user_id, asset_code
-  `)) as unknown as Array<{
-    user_id: string;
-    asset_code: string;
-    row_count: string | bigint;
-    amount_stroops_sum: string | bigint;
-  }>;
+  `)) as unknown as CryptoPayoutRow[];
+}
+
+async function emitCryptoPayouts(ctx: ReportContext): Promise<string> {
+  const reportId = 'crypto-payouts';
+  const rows = await queryCryptoPayouts(ctx.quarter);
   let out = metadataHeader(ctx, reportId);
   out += csvRow(['user_id', 'asset_code', 'row_count', 'amount_stroops_sum']);
   for (const r of rows) {
