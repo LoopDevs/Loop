@@ -31,7 +31,7 @@ import { db } from '../../db/client.js';
  * children-first; CASCADE handles any FK we miss but explicit order
  * keeps the truncation deterministic.
  */
-const TABLES_TO_TRUNCATE = [
+export const TABLES_TO_TRUNCATE = [
   'asset_drift_state',
   // ADR 031 §D3/D9 (V1 foundation, migration 0060): the vault registry
   // + share-price snapshot tables. No FK to users/orders, but listed
@@ -63,6 +63,31 @@ const TABLES_TO_TRUNCATE = [
   'watchdog_alert_state',
   'otp_attempt_counters',
   'ctx_settlements',
+  // The operator-wallet float-reconciliation subsystem (migration
+  // 0052). None of these have an FK PATH that CASCADE reaches from the
+  // roots below, so — like `vault_hot_float` /
+  // `vault_float_reconciliation_runs` above — they were NEVER cleared
+  // and latent-leaked across tests until listed explicitly here:
+  //   • `operator_float_reconciliation_runs` references
+  //     `operator_wallet_baselines` (its only FK, ON DELETE SET NULL —
+  //     which TRUNCATE CASCADE ignores anyway), so it's a child of a
+  //     table nothing truncates; and
+  //   • `operator_wallet_baselines` / `operator_manual_movements` are
+  //     pure PARENTS. The one child that references them
+  //     (`operator_wallet_movements`) IS swept transitively via
+  //     `orders` below, but CASCADE flows parent→child, so truncating
+  //     that child never reaches these parents.
+  // Listed children-first (runs → baselines) for the same
+  // deterministic-order reasoning as the rest of this list; CASCADE
+  // makes the exact order immaterial for correctness.
+  'operator_float_reconciliation_runs',
+  'operator_wallet_baselines',
+  'operator_manual_movements',
+  // The CTX gift-card catalog-snapshot cache (migration 0053). A
+  // standalone table with NO foreign key to anything — same "CASCADE
+  // never reaches it" gap as the operator-float rows above, so seeded
+  // snapshots leaked across tests until listed here.
+  'ctx_catalog_snapshots',
   // Q6-6: the interest-mint integration suite writes here directly.
   // Not previously listed — CASCADE from `users` below already swept
   // it transitively (interest_mint_snapshots.user_id references
