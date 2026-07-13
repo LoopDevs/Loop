@@ -299,6 +299,11 @@ export function registerAdminUserWritesOpenApi(
           'Target user not found (`USER_NOT_FOUND`). Also returned to non-admin callers: requireStaff masks the admin surface as 404.',
         content: { 'application/json': { schema: errorResponse } },
       },
+      409: {
+        description:
+          'Fail-closed: another clear for this SAME account is in progress and holds the per-target advisory lock, so no clear was performed (`OTP_LOCKOUT_CLEAR_CONCURRENT`) — this serialises distinct-idempotency-key bursts at one target so they can’t slip extra clears past the per-target velocity cap; retry.',
+        content: { 'application/json': { schema: errorResponse } },
+      },
       429: {
         description:
           'Per-IP rate limit (20/min), OR the per-target velocity cap: this account has already had its OTP lockout cleared `CLEAR_LOCKOUT_MAX_PER_TARGET_PER_DAY` (5) times in the last 24h (`OTP_LOCKOUT_CLEAR_RATE_EXCEEDED`) — the control that bounds the clear→guess→clear loop against a single account.',
