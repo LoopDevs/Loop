@@ -255,6 +255,40 @@ describe('SettingsCashbackRoute — ledger amount formatting (AUD-12)', () => {
     expect(await screen.findByText('+US$2.50')).toBeTruthy();
     expect(await screen.findByText('-US$1.00')).toBeTruthy();
   });
+
+  // The ledger row *timestamp* must ALSO follow the active route locale (ADR
+  // 034), not the browser/host default — same defect class as the amount
+  // above (P2-DATE). Only `en` ships as a language, so the locale axis here is
+  // the *country*: rendered under `/ca/en` → `en-CA`, whose day-period for
+  // these options is the dotted lowercase "a.m."/"p.m.". Neither of the two
+  // plausible CI/host defaults produces that token — en-US renders uppercase
+  // "PM" (no dots) and en-GB uses a 24-hour clock with no day-period at all —
+  // so a match proves the *route* locale, not `navigator.language`, drove
+  // `formatDate`. The assertion is timezone-robust: the dotted-lowercase style
+  // is en-CA's day-period whether the hour lands as a.m. or p.m., and "Apr"
+  // stays April at any host TZ, so the exact hour/day never matters.
+  it('formats the ledger date in the active route locale (en-CA dotted day-period)', async () => {
+    // Build the row directly rather than via `mkEntry`: its `?? 'order'`
+    // default coerces an explicit `referenceType: null` back to a reference,
+    // which would render inside the SAME <p> as the date. We want the date
+    // alone so the format assertion can be anchored exactly.
+    const row: Entry = {
+      id: 'tx-ca',
+      type: 'cashback',
+      amountMinor: '250',
+      currency: 'CAD',
+      referenceType: null,
+      referenceId: null,
+      createdAt: '2026-04-20T12:00:00.000Z',
+    };
+    historyMock.getCashbackHistory.mockResolvedValue({ entries: [row] });
+    renderPageAtLocale('ca', 'en');
+    // en-CA: month-first date + dotted lowercase day-period ("Apr 20, 2026,
+    // 12:00 p.m."). The `[ap]\.m\.` token is produced by neither the en-US
+    // (uppercase "PM") nor en-GB (24h, no marker) host default, so this is
+    // red unless the route locale is threaded into `formatDate`.
+    expect(await screen.findByText(/^Apr \d+, 2026, \d{1,2}:\d{2}\s[ap]\.m\.$/)).toBeTruthy();
+  });
 });
 
 describe('SettingsCashbackRoute — on-chain payouts section', () => {

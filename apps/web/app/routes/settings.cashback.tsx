@@ -79,8 +79,20 @@ function formatAmount(minor: string, currency: string, locale: string): string {
   return `+${formatted}`;
 }
 
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
+/**
+ * Ledger row timestamp, formatted in the **route** locale — not the
+ * browser's — so a `/de/en` reader sees the German month/order, not the
+ * visitor's `navigator.language` guess (ADR 034). Plain helper (not a
+ * component): `locale` is threaded in from the caller's `useLocaleTag()`,
+ * same pattern as `formatAmount` above (the AUD-12 fix in this file).
+ *
+ * The date-format OPTIONS are unchanged — only the locale *source* moved
+ * from the host default (`undefined`) to the active route tag — so output
+ * is byte-identical to the former local formatter for any fixed locale;
+ * the locale is the fix.
+ */
+function formatDate(iso: string, locale: string): string {
+  return new Date(iso).toLocaleString(locale, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
@@ -277,7 +289,7 @@ function HistoryPage({
                 {ledgerLabel(t, entry.type)}
               </p>
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                {formatDate(entry.createdAt)}
+                {formatDate(entry.createdAt, locale)}
                 {entry.referenceType !== null ? (
                   <>
                     {' · '}
