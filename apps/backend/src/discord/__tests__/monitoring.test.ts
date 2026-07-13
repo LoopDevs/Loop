@@ -70,6 +70,7 @@ import {
   notifyUsdcBelowFloor,
   notifyOperatorPoolExhausted,
   notifyOperatorCredentialExpired,
+  notifyOperatorFloatDrift,
   notifyUnrecognizedDepositRecorded,
   __resetOperatorCredentialDedupForTests,
   __resetUnrecognizedDepositDedupForTests,
@@ -252,6 +253,47 @@ describe('notifyOperatorPoolExhausted', () => {
     expect(e.color).toBe(0xe74c3c);
     expect(e.fields!.find((f) => f.name === 'Pool size')!.value).toBe('3');
     expect(e.fields!.find((f) => f.name === 'Last error')!.value).toContain('all 3 operators');
+  });
+});
+
+describe('notifyOperatorFloatDrift (NTF-16 — scrubs the caught exception)', () => {
+  // On the `state: 'error'` path `args.error` is a caught exception's
+  // raw message. It must NOT reach the monitoring channel verbatim: a
+  // thrown message can carry a bearer token / Stellar secret / email /
+  // URL, and it should be scrubbed the same way `sendWebhook` scrubs
+  // upstream error bodies.
+  const errorSummary = {
+    asset: 'xlm' as const,
+    account: 'GABCDEFGHIJKLMNOP',
+    baselineId: 'baseline-1',
+    expectedBalanceStroops: null,
+    actualBalanceStroops: null,
+    deltaStroops: null,
+    thresholdStroops: 1000n,
+    unclassifiedCount: 0,
+    indexedMovementCount: 0,
+    state: 'error' as const,
+    error: null as string | null,
+  };
+
+  it('redacts a token-shaped secret in the exception message instead of embedding it raw', () => {
+    // 40-char opaque token — the shape scrubUpstreamBody redacts.
+    const token = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef01234567';
+    notifyOperatorFloatDrift({
+      ...errorSummary,
+      error: `Horizon request failed: bearer ${token} rejected (ECONNRESET)`,
+    });
+    const e = lastEmbed();
+    expect(e.title).toBe('🔴 Operator Float Reconciliation — check failed');
+    // The raw secret never reaches the channel...
+    expect(e.description).not.toContain(token);
+    // ...it is replaced with a tagged redaction marker.
+    expect(e.description).toContain('REDACTED');
+  });
+
+  it('still renders the human triage copy (not a raw error) on a drift run with no exception', () => {
+    notifyOperatorFloatDrift({ ...errorSummary, state: 'drift', error: null });
+    expect(lastEmbed().description).toContain('does not reconcile from its active baseline');
   });
 });
 

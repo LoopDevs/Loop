@@ -24,7 +24,11 @@ vi.mock('../../logger.js', () => ({
   logger: { ...mockLog, child: () => mockLog },
 }));
 
-import { sendWebhook, __resetUnconfiguredWebhookWarningForTests } from '../shared.js';
+import {
+  sendWebhook,
+  formatMinorAmount,
+  __resetUnconfiguredWebhookWarningForTests,
+} from '../shared.js';
 
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
@@ -35,6 +39,31 @@ beforeEach(() => {
   mockFetch.mockReset();
   mockLog.warn.mockReset();
   __resetUnconfiguredWebhookWarningForTests();
+});
+
+describe('formatMinorAmount — BigInt-safe money display (MNY-05)', () => {
+  it('renders a > 2^53 minor amount with no precision loss (no Number cast)', () => {
+    // Major units = 9007199254740993 (2^53 + 1). `Number("9007199254740993")`
+    // collapses to 9007199254740992, so the old `Number(whole).toLocaleString`
+    // path renders "…992.00". The bigint path must keep every digit.
+    const out = formatMinorAmount('900719925474099300', 'USD');
+    expect(out).toContain('9,007,199,254,740,993.00');
+    // Prove the specific corrupted rendering the Number cast produced is
+    // gone — this substring is present iff precision was lost.
+    expect(out).not.toContain('740,992');
+  });
+
+  it('renders a normal amount with narrow symbol, grouping, and the code suffix', () => {
+    expect(formatMinorAmount('250000', 'GBP')).toBe('£2,500.00 GBP');
+  });
+
+  it('renders negative amounts with a leading minus', () => {
+    expect(formatMinorAmount('-4200', 'USD')).toBe('-$42.00 USD');
+  });
+
+  it('pads sub-major amounts to two fraction digits', () => {
+    expect(formatMinorAmount('5', 'USD')).toBe('$0.05 USD');
+  });
 });
 
 describe('sendWebhook — unconfigured webhook contract (FT-06)', () => {

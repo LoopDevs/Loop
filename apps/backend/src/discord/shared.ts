@@ -203,18 +203,32 @@ export function formatAmount(amount: number, currency: string): string {
  * (we don't support 0/3-decimal currencies on Loop today).
  */
 export function formatMinorAmount(minorStr: string, currency: string): string {
-  // A2-1522: BigInt-safe minor-unit rendering with Intl for the
-  // currency symbol. We do the 2-decimal split ourselves (so
-  // cashback totals beyond JS's safe-integer range keep their
-  // precision), then look up the symbol via Intl.
-  const negative = minorStr.startsWith('-');
-  const digits = negative ? minorStr.slice(1) : minorStr;
-  const padded = digits.padStart(3, '0');
-  const whole = padded.slice(0, -2);
-  const fraction = padded.slice(-2);
-  const sign = negative ? '-' : '';
+  // A2-1522 / MNY-05: BigInt-safe minor-unit rendering with Intl for
+  // the currency symbol. Parse the minor amount as a BigInt and split
+  // major/minor by integer division on the bigint (never a `Number`
+  // cast), then GROUP the major units via `Intl.NumberFormat` over the
+  // bigint itself — Intl consumes bigint natively and never routes it
+  // through a Number, so amounts past 2^53 keep full precision. The
+  // prior `Number(whole).toLocaleString(...)` silently rounded large
+  // totals (e.g. 9007199254740993 → …992). This matches @loop/shared's
+  // canonical `formatMinorCurrency` while preserving this notifier's
+  // `<symbol><amount> <CODE>` shape.
   const code = currency.toUpperCase();
-  const wholeWithSeparators = Number(whole).toLocaleString('en-US');
+  let minor: bigint;
+  try {
+    minor = BigInt(minorStr);
+  } catch {
+    // Non-integer input (should never happen for a minor-unit string) —
+    // fall back to the raw value with the code suffix rather than throw
+    // or render `NaN`.
+    return `${escapeMarkdown(minorStr)} ${escapeMarkdown(code)}`;
+  }
+  const negative = minor < 0n;
+  const abs = negative ? -minor : minor;
+  const whole = abs / 100n;
+  const fraction = (abs % 100n).toString().padStart(2, '0');
+  const sign = negative ? '-' : '';
+  const wholeWithSeparators = new Intl.NumberFormat('en-US').format(whole);
   const body = `${wholeWithSeparators}.${fraction}`;
 
   let symbol: string | undefined;
