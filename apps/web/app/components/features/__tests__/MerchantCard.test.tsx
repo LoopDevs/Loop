@@ -71,6 +71,29 @@ describe('MerchantCard — cashback badge (ADR 011 / 015)', () => {
   });
 });
 
+describe('MerchantCard — denomination range grouping (FE-18)', () => {
+  it('renders a min-max range with locale thousands separators', () => {
+    const { container } = renderCard({
+      merchant: merchant({
+        denominations: { type: 'min-max', currency: 'USD', min: 25, max: 1000, denominations: [] },
+      }),
+    });
+    // >= 1000 must render grouped ("$1,000"), not the raw "$1000".
+    expect(container.textContent).toContain('$1,000');
+    expect(container.textContent).not.toContain('$1000');
+  });
+
+  it('renders a fixed denomination range with locale thousands separators', () => {
+    const { container } = renderCard({
+      merchant: merchant({
+        denominations: { type: 'fixed', currency: 'USD', denominations: ['50', '2500'] },
+      }),
+    });
+    expect(container.textContent).toContain('$2,500');
+    expect(container.textContent).not.toContain('$2500');
+  });
+});
+
 describe('MerchantCard — displayName (ADR 032 brand view)', () => {
   it('renders displayName over merchant.name when provided', () => {
     renderCard({
