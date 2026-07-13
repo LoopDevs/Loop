@@ -97,6 +97,7 @@ interface FakeCtx {
 
 function makeCtx(opts: {
   param?: Record<string, string | undefined>;
+  query?: Record<string, string | undefined>;
   body?: unknown;
   user?: { id: string; email?: string };
   /** Idempotency-Key header value. Leave undefined to omit. */
@@ -108,6 +109,7 @@ function makeCtx(opts: {
   const headers: Record<string, string | undefined> = {
     'idempotency-key': opts.idempotencyKey,
   };
+  const query = opts.query ?? {};
   const fake: FakeCtx = {
     param: opts.param ?? {},
     body: opts.body,
@@ -115,6 +117,7 @@ function makeCtx(opts: {
     ctx: {
       req: {
         param: (k: string) => fake.param[k],
+        query: (k: string) => query[k],
         header: (k: string) => headers[k.toLowerCase()],
         json: async () => {
           if (opts.body === '__throw__') throw new Error('bad json');
@@ -461,5 +464,40 @@ describe('configHistoryHandler', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { history: unknown[] };
     expect(body.history).toEqual(rows);
+  });
+
+  // OBS-config-history: page size is a bounded, validated `?limit=`
+  // query param — the row count used to be hardcoded to 50 with no
+  // caller control. The default (absent param) still resolves to 50 so
+  // existing callers are unchanged.
+  it('defaults to 50 rows when no ?limit is given', async () => {
+    const { ctx } = makeCtx({ param: { merchantId: 'm1' } });
+    await configHistoryHandler(ctx);
+    expect(dbMock['limit']).toHaveBeenLastCalledWith(50);
+  });
+
+  it('honours a valid ?limit within bounds', async () => {
+    const { ctx } = makeCtx({ param: { merchantId: 'm1' }, query: { limit: '10' } });
+    await configHistoryHandler(ctx);
+    // Before the fix this was hardcoded to 50 regardless of ?limit.
+    expect(dbMock['limit']).toHaveBeenLastCalledWith(10);
+  });
+
+  it('clamps an over-large ?limit to the MAX_LIMIT ceiling (200)', async () => {
+    const { ctx } = makeCtx({ param: { merchantId: 'm1' }, query: { limit: '99999' } });
+    await configHistoryHandler(ctx);
+    expect(dbMock['limit']).toHaveBeenLastCalledWith(200);
+  });
+
+  it('clamps a below-1 ?limit up to 1', async () => {
+    const { ctx } = makeCtx({ param: { merchantId: 'm1' }, query: { limit: '0' } });
+    await configHistoryHandler(ctx);
+    expect(dbMock['limit']).toHaveBeenLastCalledWith(1);
+  });
+
+  it('falls back to the default for a non-numeric ?limit', async () => {
+    const { ctx } = makeCtx({ param: { merchantId: 'm1' }, query: { limit: 'not-a-number' } });
+    await configHistoryHandler(ctx);
+    expect(dbMock['limit']).toHaveBeenLastCalledWith(50);
   });
 });

@@ -72,16 +72,29 @@ export function bulkRowThresholdFor(path: string): number {
  * read-audit middleware can flag bulk JSON pulls (not just `.csv`
  * exports) to #admin-audit.
  *
- * Admin list endpoints return a JSON object with the rows under a
- * single array property (`users`, `rows`, `payouts`, `orders`,
+ * Admin list endpoints return a JSON object with the rows under an
+ * array property (`users`, `rows`, `payouts`, `orders`,
  * `transactions`, …). Rather than hard-code every key — which would
  * silently miss new endpoints — we take the length of the largest
- * top-level array in the body. Scalar / object-only responses
+ * array anywhere in the body. Scalar / object-only responses
  * (single-row drills, snapshots) count as 0 and never trip the wire.
  *
+ * PRV-read-audit: the array is found at ANY depth, not just the top
+ * level. A response that nests its list under an object key —
+ * `{ data: { users: [...] } }`, a grouped/wrapped envelope, or a
+ * future endpoint that doesn't hoist its rows to the top — used to
+ * report 0 and slip past the tripwire no matter how many rows it
+ * returned, i.e. a single huge read was invisible to CF-10 the moment
+ * its rows weren't a top-level array. Walking the graph makes the
+ * tripwire account for the true response magnitude regardless of the
+ * envelope shape. (Still MAX, not SUM, so a small `meta`/pagination
+ * array riding alongside a large row list doesn't inflate the count.)
+ *
  * Returns 0 (never throws) for non-JSON content types, unparseable
- * bodies, or bodies with no top-level array — a malformed body must
- * never break the response path the middleware wraps.
+ * bodies, or bodies with no array — a malformed body must never break
+ * the response path the middleware wraps. Uses an explicit stack (not
+ * recursion) so a hostile deeply-nested body can't blow the call
+ * stack on the response path.
  */
 export function countAdminListRows(body: string, contentType: string | null): number {
   if (contentType === null || !contentType.toLowerCase().includes('application/json')) {
@@ -94,10 +107,20 @@ export function countAdminListRows(body: string, contentType: string | null): nu
     return 0;
   }
   if (parsed === null || typeof parsed !== 'object') return 0;
-  if (Array.isArray(parsed)) return parsed.length;
   let max = 0;
-  for (const value of Object.values(parsed as Record<string, unknown>)) {
-    if (Array.isArray(value) && value.length > max) max = value.length;
+  const stack: unknown[] = [parsed];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (Array.isArray(node)) {
+      if (node.length > max) max = node.length;
+      for (const el of node) {
+        if (el !== null && typeof el === 'object') stack.push(el);
+      }
+    } else if (node !== null && typeof node === 'object') {
+      for (const value of Object.values(node as Record<string, unknown>)) {
+        if (value !== null && typeof value === 'object') stack.push(value);
+      }
+    }
   }
   return max;
 }

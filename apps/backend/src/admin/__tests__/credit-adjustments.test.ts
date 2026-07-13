@@ -344,6 +344,46 @@ describe('adminCreditAdjustmentHandler', () => {
     expect(state.storedSnapshot).toBeNull();
   });
 
+  // OBS-01: a daily-cap trip is the compromised-session signal (a
+  // stolen admin session draining the treasury via many sub-cap
+  // writes hits exactly this cap). It MUST reach #admin-audit. The
+  // early 429 return skips the post-commit fire-and-forget fanout, so
+  // before the fix the trip was silently rejected with no Discord ping
+  // — the code comment claimed a fanout "still fires" for the attempt,
+  // but the early return meant it never did.
+  it('OBS-01: fires the #admin-audit notifier for a BLOCKED cap-trip attempt', async () => {
+    state.applyThrow = new DailyAdjustmentLimitError(
+      'GBP',
+      new Date('2026-04-24T00:00:00Z'),
+      95_000_000n,
+      100_000_000n,
+      10_000_000n,
+    );
+    const res = await adminCreditAdjustmentHandler(
+      makeCtx({
+        headers: { 'idempotency-key': validKey },
+        body: { amountMinor: '10000000', currency: 'GBP', reason: 'legit but over cap' },
+      }),
+    );
+    expect(res.status).toBe(429);
+    // The cap trip must surface in #admin-audit exactly once.
+    expect(state.discordCalls).toHaveLength(1);
+    expect(state.discordCalls[0]).toMatchObject({
+      actorUserId: adminUser.id,
+      targetUserId,
+      currency: 'GBP',
+      amountMinor: '10000000', // the attempted delta
+      idempotencyKey: validKey,
+      replayed: false,
+    });
+    // Reason marks it as a rejected attempt (not a successful write)
+    // and carries the cap numbers for the on-call operator.
+    const reason = String(state.discordCalls[0]!['reason']);
+    expect(reason).toMatch(/BLOCKED/);
+    expect(reason).toContain('100000000'); // cap
+    expect(reason).toContain('95000000'); // used today
+  });
+
   it('500 when the repo throws an unexpected error', async () => {
     state.applyThrow = new Error('db exploded');
     const res = await adminCreditAdjustmentHandler(
