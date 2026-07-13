@@ -62,6 +62,30 @@ describe('<CashbackCalculator />', () => {
     expect(screen.getByText(/2\.50%/)).toBeDefined();
   });
 
+  it('shows the merchant currency glyph on the input, not a hardcoded $ (P2-09)', async () => {
+    // A UK merchant: currency is GBP, so the input glyph must be `£`, not
+    // the hardcoded `$` that made a UK calculator show `$` on input while
+    // the output rendered `£`.
+    mocks.getPublicCashbackPreview.mockResolvedValue({
+      merchantId: 'tesco-uk',
+      merchantName: 'Tesco',
+      orderAmountMinor: '5000',
+      cashbackPct: '2.50',
+      cashbackMinor: '125',
+      currency: 'GBP',
+    });
+    renderCalculator('tesco-uk');
+    // Wait for the preview to resolve (the £ output row appears).
+    await waitFor(() => {
+      expect(screen.getByText('£1.25')).toBeDefined();
+    });
+    // The glyph is the aria-hidden span sitting beside the amount input.
+    const input = screen.getByLabelText(/Gift card amount/i);
+    const glyph = input.parentElement?.querySelector('span[aria-hidden="true"]');
+    expect(glyph?.textContent).toBe('£');
+    expect(glyph?.textContent).not.toBe('$');
+  });
+
   it('renders em-dash when the merchant has no active cashback config', async () => {
     mocks.getPublicCashbackPreview.mockResolvedValue({
       merchantId: 'amazon-us',

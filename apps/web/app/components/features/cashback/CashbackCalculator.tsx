@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { formatMinorCurrency } from '@loop/shared';
+import { currencySymbol } from '~/i18n/format';
 import { getPublicCashbackPreview, type PublicCashbackPreview } from '~/services/public-stats';
 import { shouldRetry } from '~/hooks/query-retry';
 
@@ -75,6 +76,13 @@ export function CashbackCalculator({ merchantId }: Props): React.JSX.Element {
     data !== undefined && data.cashbackPct !== null
       ? formatCashbackMinor(data.cashbackMinor, data.currency)
       : '—';
+  // Input glyph must match the merchant's real currency (P2-09): a UK
+  // merchant's calculator showed a hardcoded `$` on the input while the
+  // output rendered `£`. Derive the symbol from the same currency the
+  // output formats with (`data.currency`) via the shared `currencySymbol`
+  // seam so input and output agree; `$` is only the pre-load placeholder
+  // shown before the preview resolves.
+  const currencyGlyph = data !== undefined ? currencySymbol(data.currency) : '$';
 
   return (
     <section
@@ -96,7 +104,7 @@ export function CashbackCalculator({ merchantId }: Props): React.JSX.Element {
           Amount
           <div className="flex items-center gap-2">
             <span aria-hidden="true" className="text-lg text-green-900 dark:text-green-100">
-              $
+              {currencyGlyph}
             </span>
             <input
               type="number"
