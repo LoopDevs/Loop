@@ -7,6 +7,15 @@ import { getTableName } from 'drizzle-orm';
  * `treasury/hot-float-reconciliation.ts`) build on. Table-routed FIFO
  * db mock, same convention as
  * `payments/__tests__/operator-float-reconciliation.test.ts`.
+ *
+ * CONV-WATCH-01: the helper now runs its read-decide-send-persist under
+ * `db.transaction` + a `pg_advisory_xact_lock` (fire-once fence). The
+ * mock therefore exposes `transaction(cb)` (invokes `cb(tx)`) and a
+ * `tx.execute` no-op standing in for the advisory-lock statement; the
+ * decision logic these unit tests assert is unchanged. The DB-level
+ * fire-once-under-contention behaviour the lock actually provides is
+ * proven by the real-postgres suite `vault-watchdog-alert-fence.test.ts`
+ * (a mocked lock can't demonstrate a row/key fence).
  */
 
 const { dbState, dbMock } = vi.hoisted(() => {
@@ -33,7 +42,13 @@ const { dbState, dbMock } = vi.hoisted(() => {
       },
     }),
   });
-  return { dbState: state, dbMock: { select, insert } };
+  // The `tx` handed to the `db.transaction` callback: the advisory-lock
+  // `execute` is a no-op here (the lock's real effect is exercised in the
+  // integration suite), while `select`/`insert` route through the same
+  // table-keyed FIFO state as the direct-db mock.
+  const tx = { execute: async () => [], select, insert };
+  const transaction = async (cb: (t: typeof tx) => Promise<unknown>): Promise<unknown> => cb(tx);
+  return { dbState: state, dbMock: { select, insert, transaction } };
 });
 
 vi.mock('../../../db/client.js', () => ({ db: dbMock }));
