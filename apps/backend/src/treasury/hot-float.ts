@@ -247,18 +247,50 @@ export async function runHotFloatReplenishTick(
   }
   const amountOutMinor = amountOutStroops / STROOPS_PER_MINOR;
 
-  // Delta subtract on pendingUnredeemedShares (not "set to 0") — safe
-  // if a concurrent fast-path draw added MORE pending shares after our
-  // read above (module header's concurrency note).
-  await db.transaction((tx) =>
-    applyHotFloatDeltaInTx(
+  // Credit the withdraw proceeds and retire the pending shares this
+  // tick redeemed. Two properties matter here:
+  //
+  //   1. Delta subtract on pendingUnredeemedShares (not "set to 0") —
+  //      safe if a concurrent fast-path draw ADDED more pending shares
+  //      after our read above (module header's concurrency note); we
+  //      retire only the `shares` this tick captured, leaving the rest.
+  //   2. The subtract is CLAMPED at zero (`GREATEST(… , 0)`), not a
+  //      blind `- shares`. `shares` came from an UNLOCKED read
+  //      (`getHotFloatRow`) and the on-chain `withdraw` — a network
+  //      round-trip we cannot hold a row lock across — commits before
+  //      we reach here. So a second replenish tick that raced the SAME
+  //      `pending_unredeemed_shares` (module header + hot-float-
+  //      reconciliation.ts §(b)) can have already retired them: a blind
+  //      `pending - shares` would then underflow and trip the
+  //      `vault_hot_float_pending_shares_non_negative` CHECK, ABORTING
+  //      this transaction — which would silently drop THIS tick's real,
+  //      already-landed proceeds credit AND skip the R3-1 movement
+  //      record below (the OPPOSITE of the stated intent). Clamping
+  //      keeps the invariant `pending >= 0` while still crediting every
+  //      landed withdraw; the residual share-level drift (more shares
+  //      burned than one row's pending accounted for) is exactly what
+  //      the R3-1 reconciler exists to surface — and can only surface
+  //      once this credit + its movement below actually commit.
+  await db.transaction(async (tx) => {
+    await ensureFloatRowInTx(
       tx,
       vault.assetCode as LoopVaultAssetCode,
       vault.network as LoopVaultNetwork,
-      amountOutMinor,
-      -shares,
-    ),
-  );
+    );
+    await tx
+      .update(vaultHotFloat)
+      .set({
+        balanceMinor: sql`${vaultHotFloat.balanceMinor} + ${amountOutMinor}`,
+        pendingUnredeemedShares: sql`GREATEST(${vaultHotFloat.pendingUnredeemedShares} - ${shares}, 0)`,
+        updatedAt: sql`NOW()`,
+      })
+      .where(
+        and(
+          eq(vaultHotFloat.assetCode, vault.assetCode as LoopVaultAssetCode),
+          eq(vaultHotFloat.network, vault.network as LoopVaultNetwork),
+        ),
+      );
+  });
 
   log.info(
     {
