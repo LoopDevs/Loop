@@ -6,6 +6,7 @@ import {
 } from '~/services/user';
 import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
+import { formatDateTime, useLocaleTag } from '~/i18n/format';
 import { Spinner } from '~/components/ui/Spinner';
 
 /**
@@ -106,17 +107,12 @@ export function formatAssetAmount(stroopsStr: string, assetCode: string): string
   }
 }
 
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
-}
-
 function PendingPayoutRow({ row }: { row: UserPendingPayoutView }): React.JSX.Element {
+  // Route-locale tag for the row timestamp — threaded into the shared
+  // `formatDateTime` so the payout date follows the page's market, not the
+  // host default (ADR 034 / P2-DATE). This is a component, so reading the
+  // hook here is correct.
+  const locale = useLocaleTag();
   const ui = PAYOUT_STATE_UI[row.state];
   const explorerHref =
     row.txHash === null
@@ -130,7 +126,13 @@ function PendingPayoutRow({ row }: { row: UserPendingPayoutView }): React.JSX.El
           {formatAssetAmount(row.amountStroops, row.assetCode)}
         </p>
         <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-          {formatDate(primaryTimestamp)}
+          {formatDateTime(primaryTimestamp, locale, {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+          })}
           {explorerHref !== null && (
             <>
               {' · '}

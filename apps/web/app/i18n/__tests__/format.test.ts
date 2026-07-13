@@ -6,6 +6,7 @@ import {
   currencySymbol,
   formatNumber,
   formatMinorCurrency,
+  formatDateTime,
 } from '../format';
 
 describe('localeTag', () => {
@@ -65,6 +66,40 @@ describe('currencySymbol', () => {
 describe('formatNumber', () => {
   it('adds locale thousands separators', () => {
     expect(formatNumber(1234567, 'en-US')).toBe('1,234,567');
+  });
+});
+
+describe('formatDateTime', () => {
+  // The whole point of this seam is that the LOCALE drives the output, not the
+  // host default. `timeZone: 'UTC'` pins the instant so the assertion is
+  // deterministic on any CI box, and `{ day, month: 'long' }` is a shape whose
+  // ORDER differs by locale: German is day-first ("20. April"), English is
+  // month-first ("April 20"). Same instant + same options → different string
+  // purely because the locale differs, which is exactly the contract.
+  it('renders the instant in the given locale, not the host default', () => {
+    const iso = '2026-04-20T12:00:00.000Z';
+    const opts: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'long', timeZone: 'UTC' };
+    expect(formatDateTime(iso, 'de-DE', opts)).toBe('20. April');
+    expect(formatDateTime(iso, 'en-US', opts)).toBe('April 20');
+  });
+
+  it('threads the caller options through (short date + 24h time under en-GB)', () => {
+    const iso = '2026-04-20T09:05:00.000Z';
+    expect(
+      formatDateTime(iso, 'en-GB', {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+        timeZone: 'UTC',
+      }),
+    ).toBe('20 Apr, 09:05');
+  });
+
+  it('degrades to the raw ISO string on a malformed locale tag instead of throwing', () => {
+    const iso = '2026-04-20T12:00:00.000Z';
+    expect(formatDateTime(iso, 'bad locale!')).toBe(iso);
   });
 });
 
