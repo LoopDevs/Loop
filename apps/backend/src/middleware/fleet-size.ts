@@ -57,16 +57,23 @@
  * needlessly re-introduce the "too tight when the fleet shrinks"
  * behaviour the static estimate already had, for no safety benefit.
  *
- * **Known transient (auth-review 2026-07-09).** The "never looser than
- * the static estimate" guarantee above is proven for the DNS-FAILURE
- * path only. On the success path there is a bounded undercount window:
- * a refresh caches the count at N, and machines started in the
- * following `FLEET_SIZE_REFRESH_MS` are not reflected until the next
- * tick — so during a rapid scale-up the divisor can briefly be lower
- * than the true fleet (loosest case: fleet trough of 1 right before a
- * spike). Self-corrects within one refresh interval; the OTP routes'
- * independent per-email lockout (threat-model B5) bounds the practical
- * impact. Recorded in docs/threat-model.md CF2-10.
+ * **Rapid scale-up bias (CF2-10; transient recorded auth-review
+ * 2026-07-09, closed 2026-07-13).** The "never looser than the static
+ * estimate" guarantee above is proven for the DNS-FAILURE path. The
+ * success path once had a bounded UNDERCOUNT window: a refresh caches
+ * the count at N, and machines started in the following
+ * `FLEET_SIZE_REFRESH_MS` were not reflected until the next tick — so
+ * during a rapid scale-up the divisor could briefly be lower than the
+ * true fleet (loosest case: the tick sampling a trough right before a
+ * spike), letting aggregate throughput transiently exceed the global
+ * budget — the unsafe direction. Closed by serving the MAXIMUM of the
+ * successful refreshes seen within `FLEET_SIZE_SCALEUP_BIAS_MS` rather
+ * than only the latest one (see that constant): a transient trough now
+ * errs toward OVER-throttling (safe), while a genuine sustained
+ * downscale still settles onto the true count once the high-water
+ * sample ages out of that short window. The OTP routes' independent
+ * per-email lockout (threat-model B5) remains an additional bound.
+ * Recorded in docs/threat-model.md CF2-10.
  */
 import { resolve6 } from 'node:dns/promises';
 import { env } from '../env.js';
@@ -98,8 +105,39 @@ export const FLEET_SIZE_MAX = 32;
  */
 export const FLEET_SIZE_STALE_GRACE_MS = 5 * 60 * 1000;
 
+/**
+ * Scale-up bias window (CF2-10). A single refresh is a point-in-time
+ * snapshot, so a machine that starts between ticks isn't counted until
+ * the next tick — the divisor can briefly UNDERCOUNT a growing fleet and
+ * let aggregate throughput exceed the global budget (the unsafe
+ * direction; see the "Rapid scale-up bias" module note). To bias a stale
+ * estimate toward OVER-throttling instead, `currentFleetSizeEstimate`
+ * serves the MAXIMUM of the successful refreshes seen in the last
+ * `FLEET_SIZE_SCALEUP_BIAS_MS`, not just the most recent one: a transient
+ * trough (an autoscale dip, or the tick landing in the trough right
+ * before a spike — the loosest documented case) is ignored for this long,
+ * so the divisor holds the recent high-water mark and errs tight. A
+ * GENUINE sustained downscale still takes effect once the higher samples
+ * age out of this window, so the bias only ever makes limits tighter for
+ * a bounded interval, never looser, and never overrides the grace-period
+ * / static-fallback logic (which gate on the LATEST sample's age).
+ *
+ * Sized at a small multiple of the refresh interval: long enough to
+ * bridge a multi-tick trough plus the tick that first observes the spike,
+ * short enough that a real downscale isn't over-throttled for more than
+ * roughly a minute and a half.
+ */
+export const FLEET_SIZE_SCALEUP_BIAS_MS = 3 * FLEET_SIZE_REFRESH_MS;
+
 let dynamicEstimate: number | null = null;
 let dynamicEstimateAt = 0;
+/**
+ * Recent successful-refresh samples `{ value, at }`, newest last, pruned
+ * to the `FLEET_SIZE_SCALEUP_BIAS_MS` window on every write. Backs the
+ * windowed-max scale-up bias above; in production this holds only a
+ * handful of entries (window / refresh interval).
+ */
+let recentSamples: Array<{ value: number; at: number }> = [];
 let refreshTimer: NodeJS.Timeout | null = null;
 
 /**
@@ -119,15 +157,36 @@ function dynamicEstimateIsFresh(now: number): boolean {
 }
 
 /**
+ * The dynamic estimate to serve while fresh: the MAXIMUM record count
+ * over the successful refreshes within `FLEET_SIZE_SCALEUP_BIAS_MS` of
+ * `now` (the scale-up bias, CF2-10) — never below the latest cached
+ * value, which is the floor when no other sample is in-window. Every
+ * stored sample is already clamped to `[FLEET_SIZE_MIN, FLEET_SIZE_MAX]`,
+ * so the max is too. Only called when `dynamicEstimateIsFresh` holds, so
+ * `dynamicEstimate` is non-null.
+ */
+function biasedDynamicEstimate(now: number): number {
+  let max = dynamicEstimate as number;
+  const cutoff = now - FLEET_SIZE_SCALEUP_BIAS_MS;
+  for (const sample of recentSamples) {
+    if (sample.at >= cutoff && sample.value > max) {
+      max = sample.value;
+    }
+  }
+  return max;
+}
+
+/**
  * The value `rate-limit.ts` divides every configured per-route budget
  * by. Never throws. Prefers the dynamic DNS-derived estimate whenever
- * it's fresh (see module doc for why); otherwise falls back to the
- * static `RATE_LIMIT_MACHINE_COUNT_ESTIMATE`.
+ * it's fresh (see module doc for why), biased up to the recent
+ * high-water mark to stay conservative through a rapid scale-up
+ * (CF2-10); otherwise falls back to the static
+ * `RATE_LIMIT_MACHINE_COUNT_ESTIMATE`.
  */
 export function currentFleetSizeEstimate(now: number = Date.now()): number {
   if (dynamicEstimateIsFresh(now)) {
-    // Non-null guaranteed by dynamicEstimateIsFresh's null check.
-    return dynamicEstimate as number;
+    return biasedDynamicEstimate(now);
   }
   return staticFallbackEstimate();
 }
@@ -166,6 +225,13 @@ export async function refreshFleetSize(): Promise<void> {
     }
     dynamicEstimate = Math.min(FLEET_SIZE_MAX, Math.max(FLEET_SIZE_MIN, records.length));
     dynamicEstimateAt = Date.now();
+    // Feed the scale-up bias (CF2-10): retain this sample and drop any
+    // now older than the bias window, so `currentFleetSizeEstimate` can
+    // serve the recent high-water mark and never undercount a fleet that
+    // dipped right before a spike.
+    const biasCutoff = dynamicEstimateAt - FLEET_SIZE_SCALEUP_BIAS_MS;
+    recentSamples = recentSamples.filter((sample) => sample.at >= biasCutoff);
+    recentSamples.push({ value: dynamicEstimate, at: dynamicEstimateAt });
   } catch (err) {
     // Keep the last-good value (if any) in place; currentFleetSizeEstimate's
     // grace period decides when it's too old to trust. A single failed
@@ -212,4 +278,5 @@ export function stopFleetSizeEstimator(): void {
 export function __resetFleetSizeForTests(): void {
   dynamicEstimate = null;
   dynamicEstimateAt = 0;
+  recentSamples = [];
 }

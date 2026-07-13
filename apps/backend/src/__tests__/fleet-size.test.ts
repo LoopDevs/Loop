@@ -53,6 +53,7 @@ import {
   FLEET_SIZE_MAX,
   FLEET_SIZE_STALE_GRACE_MS,
   FLEET_SIZE_REFRESH_MS,
+  FLEET_SIZE_SCALEUP_BIAS_MS,
 } from '../middleware/fleet-size.js';
 
 beforeEach(() => {
@@ -165,6 +166,62 @@ describe('grace-period fallback behaviour', () => {
 
     vi.setSystemTime(new Date(Date.now() + FLEET_SIZE_STALE_GRACE_MS + 1));
     expect(currentFleetSizeEstimate()).toBe(2);
+  });
+});
+
+describe('rapid scale-up bias (CF2-10)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-09T00:00:00.000Z'));
+    envState.FLY_APP_NAME = 'loopfinance-api';
+  });
+
+  it('holds the recent high-water fleet size through a transient trough so the divisor never briefly undercounts a scaling fleet', async () => {
+    // Fleet is large.
+    resolve6Mock.mockResolvedValue(Array.from({ length: 10 }, (_, i) => `fdaa:1::${i}`));
+    await refreshFleetSize();
+    expect(currentFleetSizeEstimate()).toBe(10);
+
+    // A single refresh (one tick later, well within the bias window)
+    // happens to sample a trough of 1 — an autoscale dip, or the tick
+    // landing between a scale-down and the spike that follows. Serving
+    // this latest value directly would drop the divisor to 1 and hand
+    // every machine the full global budget: the under-throttle CF2-10
+    // exists to prevent.
+    vi.setSystemTime(new Date(Date.now() + FLEET_SIZE_REFRESH_MS));
+    resolve6Mock.mockResolvedValue(['fdaa:1::0']);
+    await refreshFleetSize();
+
+    // Instead the estimate errs conservative — it holds the recent
+    // high-water mark within the scale-up window, dividing tight (safe),
+    // not loose. It's still a fresh dynamic reading, just a biased one.
+    expect(currentFleetSizeSource()).toBe('dynamic');
+    expect(currentFleetSizeEstimate()).toBe(10);
+  });
+
+  it('lets a GENUINE sustained downscale take effect once the high sample ages out of the scale-up window (a bounded tightening, not a permanent max)', async () => {
+    resolve6Mock.mockResolvedValue(Array.from({ length: 10 }, (_, i) => `fdaa:1::${i}`));
+    await refreshFleetSize();
+    expect(currentFleetSizeEstimate()).toBe(10);
+
+    // The fleet stays genuinely small across refreshes spanning the
+    // whole bias window (a real downscale, not a one-tick dip).
+    resolve6Mock.mockResolvedValue(['fdaa:1::0']);
+    const start = Date.now();
+    for (
+      let elapsed = FLEET_SIZE_REFRESH_MS;
+      elapsed <= FLEET_SIZE_SCALEUP_BIAS_MS + FLEET_SIZE_REFRESH_MS;
+      elapsed += FLEET_SIZE_REFRESH_MS
+    ) {
+      vi.setSystemTime(new Date(start + elapsed));
+      await refreshFleetSize();
+    }
+
+    // The high-water sample is now older than the bias window, so the
+    // divisor settles onto the true, smaller fleet. The bias never wins
+    // forever — it only ever tightens for a bounded interval.
+    expect(currentFleetSizeSource()).toBe('dynamic');
+    expect(currentFleetSizeEstimate()).toBe(1);
   });
 });
 
