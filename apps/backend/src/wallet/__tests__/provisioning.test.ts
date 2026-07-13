@@ -429,6 +429,37 @@ describe('provisionUserWallet', () => {
     providerState.createWallet.mockRejectedValue(new Error('privy 500'));
     await expect(provisionUserWallet(USER_ID)).rejects.toThrow('privy 500');
   });
+
+  it('CON-DOUBLE-RUN: creates the wallet but defers activation while the fleet lock is held elsewhere', async () => {
+    // Another driver (the sweeper, or a concurrent enqueue) holds the
+    // fleet provisioning lock: the enqueue path must NOT run the
+    // on-chain activation concurrently (operator-sequence collision /
+    // double createAccount) — it defers.
+    dbState.advisoryAcquired = false;
+    providerState.createWallet.mockResolvedValue({
+      walletId: 'wallet-privy-1',
+      address: USER_PUBLIC,
+    });
+    // Fresh user: Step 1 must STILL run so the row gains `wallet_id`
+    // and becomes a sweeper candidate (no stranded brand-new user).
+    dbState.selectQueue = [
+      [userRow({ walletId: null, walletAddress: null, walletProvisioning: 'none' })],
+      [userRow()],
+    ];
+    trustlinesMock.mockResolvedValue(emptyTrustlines(false));
+
+    const outcome = await provisionUserWallet(USER_ID);
+
+    expect(outcome).toBe('activation_deferred');
+    // Step 1 ran — wallet created + linkage persisted (sweeper-visible now).
+    expect(providerState.createWallet).toHaveBeenCalledWith(USER_ID);
+    expect(dbState.updates.some((u) => u['walletProvisioning'] === 'wallet_created')).toBe(true);
+    // Step 2 (activation) did NOT run under the held lock: nothing signed,
+    // nothing submitted, no `activated` mark.
+    expect(submitMock).not.toHaveBeenCalled();
+    expect(providerState.rawSign).not.toHaveBeenCalled();
+    expect(dbState.updates.some((u) => u['walletProvisioning'] === 'activated')).toBe(false);
+  });
 });
 
 // ─── Sweeper ────────────────────────────────────────────────────────────────
@@ -513,4 +544,40 @@ describe('runWalletProvisioningTick', () => {
     expect(r).toMatchObject({ picked: 1, activated: 1, errors: 0 });
     expect(submitMock).toHaveBeenCalledTimes(1);
   });
+
+  it('CON-STARVATION: a stuck item is timed out and does not block the rest of the batch', async () => {
+    const now = 1_900_000_000_000;
+    const STUCK = 'b4b3c0de-0000-4000-8000-0000000000ff';
+    const OK = 'b4b3c0de-0000-4000-8000-0000000000aa';
+    dbState.sweepRows = [
+      { id: STUCK, attempts: 0, lastAttemptAt: null },
+      { id: OK, attempts: 0, lastAttemptAt: null },
+    ];
+    // Per-user reads, in call order: STUCK drive, STUCK failed-attempt
+    // bookkeeping, then OK drive. (The candidate select is served from
+    // sweepRows, so it doesn't consume this queue.)
+    dbState.selectQueue = [
+      [userRow({ id: STUCK })],
+      [userRow({ id: STUCK })],
+      [userRow({ id: OK })],
+    ];
+    // First drive (STUCK) hangs forever inside the Horizon read; the
+    // second (OK) resolves and activates.
+    trustlinesMock
+      .mockImplementationOnce(() => new Promise(() => {}))
+      .mockResolvedValue(emptyTrustlines(false));
+
+    // Tiny per-item deadline so the hung row times out quickly; a
+    // generous lease so the tick itself doesn't abort first.
+    const r = await runWalletProvisioningTick({ now, itemTimeoutMs: 40, leaseMs: 5_000 });
+
+    // The stuck row was recorded as a failed attempt, the healthy row
+    // still activated — head-of-line blocking is gone.
+    expect(r.picked).toBe(2);
+    expect(r.errors).toBe(1);
+    expect(r.activated).toBe(1);
+    expect(submitMock).toHaveBeenCalledTimes(1);
+    // The stuck row's failed-attempt bump landed (backoff will retry it).
+    expect(dbState.updates.some((u) => u['walletProvisioningAttempts'] === 1)).toBe(true);
+  }, 2_000);
 });

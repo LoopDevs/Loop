@@ -66,7 +66,7 @@ import {
   markWorkerTickFailure,
   markWorkerTickSuccess,
 } from '../runtime-health.js';
-import { getWalletProvider } from './provider.js';
+import { getWalletProvider, type WalletProvider } from './provider.js';
 import { attachUserWalletSignature } from './user-signer.js';
 
 const log = logger.child({ area: 'wallet-provisioning' });
@@ -93,13 +93,57 @@ const WALLET_PROVISIONING_BATCH_LIMIT = 10;
 /** Activation tx timebound — matches ADR 016's payout-submit default. */
 const ACTIVATION_TIMEOUT_SECONDS = 60;
 
+/**
+ * CON-STARVATION: per-item wall-clock cap inside the sweeper batch. A
+ * single stuck provisioning drive (a blackholed Horizon/provider that
+ * accepts TCP and never responds) must not consume the whole batch's
+ * slot — without this bound one hung row is head-of-line blocking that
+ * starves every later row AND (with the lease below) pins the fleet
+ * lock. On timeout the row is treated exactly like any other failed
+ * drive (attempt recorded, backoff applied, eventual page) and the
+ * sweep continues to the next row. 120s clears the 60s activation
+ * timebound (`ACTIVATION_TIMEOUT_SECONDS`) plus the provider + Horizon
+ * round-trips, so a healthy-but-slow drive is never abandoned mid-flight
+ * (a re-drive re-reads Horizon before submitting, so even an abandoned
+ * submit can't double-activate — see `activateUserWallet`).
+ */
+const WALLET_PROVISIONING_ITEM_TIMEOUT_MS = 120_000;
+
+/**
+ * CON-STARVATION / INV-9: hard ceiling on how long ONE holder may keep
+ * the fleet-wide provisioning lock. `db/client.ts` puts lease
+ * responsibility on the CALLER (the payout worker's
+ * `PAYOUT_TICK_LEASE_MS` / the redemption-backfill sweeper this one is
+ * modelled on are the established pattern), because a lock held across
+ * unbounded network I/O by a hung-but-alive leader would otherwise
+ * stall the WHOLE fleet's provisioning. On expiry the lock releases and
+ * the orphaned drive degrades to the pre-lock per-machine posture (safe:
+ * every mutation is a guarded compare-and-set and activation re-reads
+ * Horizon before submitting). Must be ≥ the per-item timeout so at
+ * least one row can complete under the lease.
+ */
+const WALLET_PROVISIONING_LEASE_MS = 300_000;
+
+/** Distinct sentinel so the lease-timeout path is testable + loggable. */
+const PROVISIONING_LEASE_TIMED_OUT = Symbol('wallet-provisioning-lease-timeout');
+
 /** Delay before the (attempts+1)-th attempt is due. Exported for tests. */
 export function walletProvisioningDelayMs(attempts: number): number {
   const exp = Math.min(attempts, 30); // 2^30 guard against overflow noise
   return Math.min(WALLET_PROVISIONING_BASE_DELAY_MS * 2 ** exp, WALLET_PROVISIONING_MAX_DELAY_MS);
 }
 
-function walletProvisioningLockKey(): bigint {
+/**
+ * The single fleet-wide advisory-lock key that serialises ALL
+ * provisioning activation — the sweeper tick AND the enqueue-driven
+ * signup/admin path (CON-DOUBLE-RUN). Both entry points funnel through
+ * `runUnderProvisioningLock` with this key, so a user (and, more
+ * subtly, the shared operator sequence number consumed by every
+ * activation tx) can never be driven by two provisioners at once.
+ * Exported so the concurrency integration test can hold the exact same
+ * key and prove the serialization against real postgres.
+ */
+export function walletProvisioningLockKey(): bigint {
   const digest = createHash('sha256').update('loop:wallet-provisioning-sweeper').digest();
   const raw =
     (BigInt(digest[0]!) << 56n) |
@@ -111,6 +155,68 @@ function walletProvisioningLockKey(): bigint {
     (BigInt(digest[6]!) << 8n) |
     BigInt(digest[7]!);
   return BigInt.asIntN(64, raw);
+}
+
+/**
+ * Races `p` against a wall-clock deadline. On timeout the returned
+ * promise REJECTS (so the sweeper's existing catch records the attempt
+ * and backs off) while the orphaned `p` is left to settle in the
+ * background — its late resolution/rejection is swallowed so it never
+ * surfaces as an unhandledRejection. JS promises aren't cancellable, so
+ * the in-flight network call keeps running; the point is only that the
+ * batch slot is bounded, not that the work is aborted.
+ */
+async function withDeadline<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  // Belt-and-suspenders: ensure a late rejection from the orphan is
+  // considered handled once the deadline has already won the race.
+  void p.catch(() => undefined);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      p,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} exceeded ${ms}ms deadline`)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+/**
+ * Runs `fn` while holding the fleet-wide provisioning lock, bounded by
+ * a hard lease deadline. This is the single choke point both
+ * provisioning entry paths share (CON-DOUBLE-RUN): the sweeper tick and
+ * the enqueue-driven activation. `withAdvisoryLock` is non-blocking
+ * (`pg_try_advisory_lock`) — a caller that doesn't get the lock gets
+ * `{ ran: false }` and defers, rather than piling up. The lease bounds
+ * the hold so a hung leader can't stall the fleet (INV-9); on expiry
+ * the lock releases and `fn`'s orphaned promise is left to settle
+ * (swallowed so a late rejection is handled).
+ */
+async function runUnderProvisioningLock<T>(
+  fn: () => Promise<T>,
+  leaseMs: number,
+): Promise<
+  { ran: false } | { ran: true; timedOut: true } | { ran: true; timedOut: false; value: T }
+> {
+  let leaseTimer: ReturnType<typeof setTimeout> | undefined;
+  const locked = await withAdvisoryLock(walletProvisioningLockKey(), () => {
+    // Call `fn` only now that the lock is held. Guard its promise so an
+    // orphaned (lease-timed-out) rejection doesn't go unhandled.
+    const work = fn();
+    void work.catch(() => undefined);
+    return Promise.race<T | typeof PROVISIONING_LEASE_TIMED_OUT>([
+      work,
+      new Promise<typeof PROVISIONING_LEASE_TIMED_OUT>((resolve) => {
+        leaseTimer = setTimeout(() => resolve(PROVISIONING_LEASE_TIMED_OUT), leaseMs);
+      }),
+    ]);
+  });
+  if (leaseTimer !== undefined) clearTimeout(leaseTimer);
+  if (!locked.ran) return { ran: false };
+  if (locked.value === PROVISIONING_LEASE_TIMED_OUT) return { ran: true, timedOut: true };
+  return { ran: true, timedOut: false, value: locked.value };
 }
 
 // ─── Activation transaction builder (pure) ──────────────────────────────────
@@ -185,6 +291,15 @@ export type ProvisionOutcome =
   | 'no_assets_configured'
   /** `LOOP_STELLAR_OPERATOR_SECRET` unset — nobody can sponsor. */
   | 'operator_unconfigured'
+  /**
+   * Step-1 wallet linkage is done, but the fleet provisioning lock was
+   * held by another driver (the sweeper, or a concurrent enqueue) so
+   * activation was NOT run here (CON-DOUBLE-RUN serialization). The row
+   * now has `wallet_id`, which makes it a sweeper candidate — the
+   * activation is simply deferred to whoever holds the lock / the next
+   * sweeper tick, never lost.
+   */
+  | 'activation_deferred'
   /** Account live with all trustlines (freshly submitted or detected). */
   | 'activated';
 
@@ -247,12 +362,42 @@ async function markActivated(userId: string): Promise<void> {
  * policy decides what to do); returns a `ProvisionOutcome` for
  * everything that resolved cleanly.
  *
+ * Two phases with DIFFERENT concurrency postures:
+ *
+ *   - **Step 1 (wallet creation)** runs UN-serialised. It's idempotent
+ *     per user (provider query-before-create + deterministic
+ *     idempotency key) and the persist is guarded on `wallet_id IS
+ *     NULL`, so concurrent drives converge without a lock. Running it
+ *     outside the fleet lock is deliberate: it sets `wallet_id`, which
+ *     is exactly what makes the row a sweeper candidate — so even when
+ *     Step 2 below can't get the lock right now, the sweeper is
+ *     guaranteed to finish the job (a brand-new signup user is never
+ *     stranded invisible to the sweeper).
+ *   - **Step 2 (activation)** MUST be serialised fleet-wide
+ *     (CON-DOUBLE-RUN). It consumes the shared operator sequence number
+ *     and, for a fresh account, submits `createAccount`; two concurrent
+ *     activations (sweeper vs enqueue, or two enqueues — even for
+ *     DIFFERENT users) would collide on the operator sequence
+ *     (`tx_bad_seq` churn) and could double-submit. So it runs under
+ *     `runUnderProvisioningLock`, the same lock the sweeper holds for
+ *     its whole batch.
+ *
+ * The sweeper already holds the lock for its batch, so it passes
+ * `serialized: true` and runs activation directly (re-acquiring the
+ * same session lock on a second connection would only skip against
+ * itself). Every other caller (enqueue) leaves `serialized` unset and
+ * acquires the lock here, deferring cleanly (`activation_deferred`) if
+ * another driver holds it.
+ *
  * Config-shaped outcomes (`provider_disabled`, `no_assets_configured`,
  * `operator_unconfigured`) deliberately do NOT throw: they're the
  * operator's problem, not the user's, so the sweeper must not burn
  * the row's retry budget on them.
  */
-export async function provisionUserWallet(userId: string): Promise<ProvisionOutcome> {
+export async function provisionUserWallet(
+  userId: string,
+  opts?: { serialized?: boolean; leaseMs?: number },
+): Promise<ProvisionOutcome> {
   const provider = getWalletProvider();
   if (provider === null) return 'provider_disabled';
 
@@ -260,9 +405,7 @@ export async function provisionUserWallet(userId: string): Promise<ProvisionOutc
   if (row === null) return 'user_not_found';
   if (row.walletProvisioning === 'activated') return 'already_activated';
 
-  // Step 1: provider wallet. Idempotent on the provider side
-  // (query-before-create + deterministic idempotency key), so
-  // re-driving a half-finished row converges on the same wallet.
+  // Step 1: provider wallet (un-serialised — see the doc-comment).
   if (row.walletId === null || row.walletAddress === null) {
     const wallet = await provider.createWallet(userId);
     await persistWalletCreated(userId, wallet);
@@ -276,17 +419,69 @@ export async function provisionUserWallet(userId: string): Promise<ProvisionOutc
     // committed yet — treat as transient and let the sweeper retry.
     throw new Error(`wallet linkage not yet visible for user ${userId}`);
   }
+  const attempts = row.walletProvisioningAttempts;
 
-  // Step 2: activation. Requires LOOP assets to trust and an
-  // operator to sponsor + sign.
+  // Step 2: activation (fleet-serialised — see the doc-comment).
+  const activation = (): Promise<ProvisionOutcome> =>
+    activateUserWallet({ provider, userId, walletId, walletAddress, attempts });
+
+  // The sweeper already owns the fleet lock; run activation directly.
+  if (opts?.serialized === true) {
+    return activation();
+  }
+
+  const locked = await runUnderProvisioningLock(
+    activation,
+    opts?.leaseMs ?? WALLET_PROVISIONING_LEASE_MS,
+  );
+  if (!locked.ran) {
+    // Another driver (sweeper / concurrent enqueue) holds the lock. The
+    // row now has `wallet_id` (Step 1 ran), so it's a sweeper candidate
+    // — activation is safely deferred, never lost.
+    log.info(
+      { userId },
+      'Wallet activation deferred — provisioning lock held elsewhere; sweeper will complete it',
+    );
+    return 'activation_deferred';
+  }
+  if (locked.timedOut) {
+    log.error(
+      { userId, leaseMs: opts?.leaseMs ?? WALLET_PROVISIONING_LEASE_MS },
+      'Wallet activation exceeded the provisioning lease — released the fleet lock; sweeper will retry',
+    );
+    return 'activation_deferred';
+  }
+  return locked.value;
+}
+
+/**
+ * Step 2 of provisioning: the on-chain activation. MUST run under the
+ * fleet provisioning lock (its callers guarantee this — see
+ * `provisionUserWallet`) because it consumes the shared operator
+ * sequence number and can submit `createAccount`.
+ *
+ * Idempotency pre-check: an account that already exists with every
+ * configured trustline was activated by a prior (crashed or raced)
+ * drive — detect and mark, never re-submit. This re-read of Horizon is
+ * also what keeps a lease-orphaned submit from double-activating: the
+ * next drive sees the landed account and marks it rather than
+ * re-submitting.
+ */
+async function activateUserWallet(args: {
+  provider: WalletProvider;
+  userId: string;
+  walletId: string;
+  walletAddress: string;
+  attempts: number;
+}): Promise<ProvisionOutcome> {
+  const { provider, userId, walletId, walletAddress, attempts } = args;
+
+  // Requires LOOP assets to trust and an operator to sponsor + sign.
   const assets = configuredLoopPayableAssets();
   if (assets.length === 0) return 'no_assets_configured';
   const operatorSecret = env.LOOP_STELLAR_OPERATOR_SECRET;
   if (operatorSecret === undefined) return 'operator_unconfigured';
 
-  // Idempotency pre-check: an account that already exists with every
-  // configured trustline was activated by a prior (crashed or raced)
-  // drive — detect and mark, never re-submit.
   const snapshot = await getAccountTrustlines(walletAddress);
   const missing = assets.filter((a) => !snapshot.trustlines.has(`${a.code}::${a.issuer}`));
   if (snapshot.accountExists && missing.length === 0) {
@@ -309,7 +504,7 @@ export async function provisionUserWallet(userId: string): Promise<ProvisionOutc
     assets: snapshot.accountExists ? missing : assets,
     accountExists: snapshot.accountExists,
     networkPassphrase: env.LOOP_STELLAR_NETWORK_PASSPHRASE,
-    feeStroops: feeForAttempt(row.walletProvisioningAttempts + 1, {
+    feeStroops: feeForAttempt(attempts + 1, {
       baseFeeStroops: env.LOOP_PAYOUT_FEE_BASE_STROOPS,
       capFeeStroops: env.LOOP_PAYOUT_FEE_CAP_STROOPS,
       multiplier: env.LOOP_PAYOUT_FEE_MULTIPLIER,
@@ -422,19 +617,34 @@ export interface WalletProvisioningTickResult {
 export async function runWalletProvisioningTick(args?: {
   limit?: number;
   now?: number;
+  itemTimeoutMs?: number;
+  leaseMs?: number;
 }): Promise<WalletProvisioningTickResult> {
-  const locked = await withAdvisoryLock(walletProvisioningLockKey(), () =>
-    runWalletProvisioningTickLocked(args),
+  // Single-flight the whole tick across machines AND bound how long the
+  // lock is held (INV-9): a blackholed Horizon must not let one leader
+  // stall the fleet's provisioning. Mirrors the redemption-backfill /
+  // payout-worker lease pattern.
+  const locked = await runUnderProvisioningLock(
+    () => runWalletProvisioningTickLocked(args),
+    args?.leaseMs ?? WALLET_PROVISIONING_LEASE_MS,
   );
+  const empty = (skippedLocked: boolean): WalletProvisioningTickResult => ({
+    skippedLocked,
+    picked: 0,
+    notDueYet: 0,
+    activated: 0,
+    errors: 0,
+    abortedUnconfigured: false,
+  });
   if (!locked.ran) {
-    return {
-      skippedLocked: true,
-      picked: 0,
-      notDueYet: 0,
-      activated: 0,
-      errors: 0,
-      abortedUnconfigured: false,
-    };
+    return empty(true);
+  }
+  if (locked.timedOut) {
+    log.error(
+      { leaseMs: args?.leaseMs ?? WALLET_PROVISIONING_LEASE_MS },
+      'Wallet-provisioning tick exceeded the lease deadline — releasing the lock so the fleet is not stalled; the in-flight sweep degrades to the pre-lock per-machine posture',
+    );
+    return empty(false);
   }
   return locked.value;
 }
@@ -442,8 +652,10 @@ export async function runWalletProvisioningTick(args?: {
 async function runWalletProvisioningTickLocked(args?: {
   limit?: number;
   now?: number;
+  itemTimeoutMs?: number;
 }): Promise<WalletProvisioningTickResult> {
   const now = args?.now ?? Date.now();
+  const itemTimeoutMs = args?.itemTimeoutMs ?? WALLET_PROVISIONING_ITEM_TIMEOUT_MS;
   const result: WalletProvisioningTickResult = {
     skippedLocked: false,
     picked: 0,
@@ -487,7 +699,17 @@ async function runWalletProvisioningTickLocked(args?: {
       continue;
     }
     try {
-      const outcome = await provisionUserWallet(row.id);
+      // Per-item wall-clock cap (CON-STARVATION): a stuck row can't
+      // consume the batch's slot / pin the fleet lock — it times out,
+      // is recorded as a failed attempt below, and the sweep moves on.
+      // `serialized: true` because this loop already holds the fleet
+      // lock, so activation runs directly (re-acquiring would only skip
+      // against ourselves).
+      const outcome = await withDeadline(
+        provisionUserWallet(row.id, { serialized: true }),
+        itemTimeoutMs,
+        `wallet provisioning drive for user ${row.id}`,
+      );
       if (outcome === 'activated' || outcome === 'already_activated') {
         result.activated++;
         continue;
