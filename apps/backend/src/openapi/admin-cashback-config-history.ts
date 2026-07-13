@@ -91,6 +91,10 @@ export function registerAdminCashbackConfigHistoryOpenApi(
         description: 'Rate limit exceeded (120/min per IP)',
         content: { 'application/json': { schema: errorResponse } },
       },
+      500: {
+        description: 'Internal error',
+        content: { 'application/json': { schema: errorResponse } },
+      },
     },
   });
 }

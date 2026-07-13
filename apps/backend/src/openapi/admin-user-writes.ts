@@ -186,6 +186,10 @@ export function registerAdminUserWritesOpenApi(
         description: 'Step-up auth unavailable on this deployment (`STEP_UP_UNAVAILABLE`)',
         content: { 'application/json': { schema: errorResponse } },
       },
+      500: {
+        description: 'Internal error',
+        content: { 'application/json': { schema: errorResponse } },
+      },
     },
   });
 

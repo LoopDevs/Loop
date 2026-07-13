@@ -66,6 +66,10 @@ export function registerAdminPayoutsAggregatesOpenApi(
         description: 'Per-(month, assetCode) confirmed-payout totals',
         content: { 'application/json': { schema: AdminPayoutsMonthlyResponse } },
       },
+      401: {
+        description: 'Missing or invalid bearer',
+        content: { 'application/json': { schema: errorResponse } },
+      },
       404: {
         description:
           'Not found — also returned to authenticated non-admin callers: requireAdmin masks the admin surface as 404 by design (see src/auth/require-admin.ts).',
@@ -123,6 +127,10 @@ export function registerAdminPayoutsAggregatesOpenApi(
       200: {
         description: 'Daily confirmed-payout series',
         content: { 'application/json': { schema: PayoutsActivityResponse } },
+      },
+      401: {
+        description: 'Missing or invalid bearer',
+        content: { 'application/json': { schema: errorResponse } },
       },
       404: {
         description:
