@@ -1,7 +1,10 @@
 import { useUiStore } from '~/stores/ui.store';
 
 const TYPE_STYLES = {
-  success: 'bg-green-600 text-white',
+  // `green-600` on white text was 3.22:1 and failed WCAG 1.4.3 (AA text
+  // needs 4.5:1). `green-700` (#008236) clears it at ~4.94:1. `red-600`
+  // (4.77:1) and the dark `gray-800` info fill already pass.
+  success: 'bg-green-700 text-white',
   error: 'bg-red-600 text-white',
   info: 'bg-gray-800 text-white dark:bg-gray-700',
 } as const;

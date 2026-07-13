@@ -48,9 +48,36 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     },
     ref,
   ) => {
+    // Focus ring is a SOLID `blue-500` (the theme's accent-ring token),
+    // not the former `blue-500/40`. Against the `ring-offset-white` gap
+    // the 40%-alpha ring composited to ~1.74:1 and failed WCAG 1.4.11
+    // (non-text UI needs >=3:1); solid `blue-500` (#2f6bff) on white is
+    // ~4.5:1. The white offset means every variant's ring sits on white
+    // on both edges, so this one base token covers all variants.
     const base =
-      'inline-flex items-center justify-center gap-2 min-h-[44px] rounded-md font-medium tracking-[-0.01em] transition-[background-color,border-color,color,box-shadow] duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:opacity-50 disabled:cursor-not-allowed';
+      'inline-flex items-center justify-center gap-2 min-h-[44px] rounded-md font-medium tracking-[-0.01em] transition-[background-color,border-color,color,box-shadow] duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:opacity-50 disabled:cursor-not-allowed';
     const classes = `${base} ${VARIANTS[variant]} ${SIZES[size]} ${className}`.trim();
+
+    // Dev-time a11y guard: an icon-only button (an icon via `leftIcon`/
+    // `rightIcon` with no text children) has no accessible name unless an
+    // `aria-label`/`aria-labelledby` is supplied — screen-reader users
+    // hear nothing. Warn loudly in dev so it's caught before ship; a
+    // labeled button (text children OR aria-label) never trips this and
+    // production is unaffected (guard is stripped when `DEV` is false).
+    if (import.meta.env.DEV) {
+      const present = (v: unknown): boolean => v !== null && v !== undefined;
+      const hasAccessibleName =
+        present(props['aria-label']) ||
+        present(props['aria-labelledby']) ||
+        (typeof children === 'string' ? children.trim() !== '' : present(children));
+      if (!hasAccessibleName && (present(leftIcon) || present(rightIcon))) {
+        // eslint-disable-next-line no-console
+        console.error(
+          'Button: an icon-only button (no text children) must be given an ' +
+            '`aria-label` so screen-reader users get an accessible name.',
+        );
+      }
+    }
 
     return (
       <button

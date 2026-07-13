@@ -46,3 +46,18 @@ describe('ToastContainer dismiss button', () => {
     expect(btn.className).toContain('min-w-[24px]');
   });
 });
+
+describe('ToastContainer success text contrast (P2-02 — WCAG 1.4.3 AA)', () => {
+  it('renders the success toast on green-700, not the sub-4.5:1 green-600', () => {
+    act(() => {
+      useUiStore.setState({ toasts: [{ id: 't1', message: 'Saved', type: 'success' }] });
+    });
+    render(<ToastContainer />);
+    // `role="status"` is the polite success/info live region. Its fill
+    // must be green-700 (#008236, ~4.94:1 on white text); green-600 was
+    // 3.22:1 and failed AA text contrast.
+    const toast = screen.getByRole('status');
+    expect(toast.className).toContain('bg-green-700');
+    expect(toast.className).not.toContain('bg-green-600');
+  });
+});
