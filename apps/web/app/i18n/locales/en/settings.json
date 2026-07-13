@@ -1,4 +1,8 @@
 {
+  "errorBoundary": {
+    "body": "We couldn't display this screen. Your balance and cashback are safe — try again.",
+    "retry": "Try again"
+  },
   "privacy": {
     "meta": {
       "title": "Privacy & data — Loop"
