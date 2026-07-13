@@ -37,6 +37,8 @@ import i18next from 'i18next';
 import { initReactI18next } from 'react-i18next';
 import common from './locales/en/common.json';
 import footer from './locales/en/footer.json';
+import navbar from './locales/en/navbar.json';
+import trustlines from './locales/en/trustlines.json';
 import notFound from './locales/en/notFound.json';
 import home from './locales/en/home.json';
 import auth from './locales/en/auth.json';
@@ -62,6 +64,8 @@ void i18next.use(initReactI18next).init({
   ns: [
     'common',
     'footer',
+    'navbar',
+    'trustlines',
     'notFound',
     'home',
     'auth',
@@ -80,6 +84,8 @@ void i18next.use(initReactI18next).init({
     en: {
       common,
       footer,
+      navbar,
+      trustlines,
       notFound,
       home,
       auth,

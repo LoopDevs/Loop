@@ -1,7 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
+import { Trans, useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import type { Route } from './+types/trustlines';
 import { canonicalHref } from '~/i18n/seo';
+import i18n from '~/i18n/i18next';
 import { getPublicLoopAssets, type PublicLoopAsset } from '~/services/public-stats';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Navbar } from '~/components/features/Navbar';
@@ -36,11 +39,10 @@ const STELLAR_EXPERT_BASE = 'https://stellar.expert/explorer/public/account';
 
 export function meta({ params }: Route.MetaArgs): Route.MetaDescriptors {
   return [
-    { title: 'LOOP asset trustlines — Loop' },
+    { title: i18n.t('trustlines:meta.title') },
     {
       name: 'description',
-      content:
-        'Verified issuer accounts for USDLOOP, GBPLOOP, and EURLOOP Stellar stablecoins. Add a trustline from any Stellar wallet to receive cashback on Loop.',
+      content: i18n.t('trustlines:meta.description'),
     },
     { tagName: 'link', rel: 'canonical', href: canonicalHref(params, '/trustlines') },
   ];
@@ -55,6 +57,7 @@ export default function TrustlinesRoute(): React.JSX.Element {
 }
 
 function TrustlinesBody(): React.JSX.Element {
+  const { t } = useTranslation('trustlines');
   const query = useQuery({
     queryKey: ['public-loop-assets'],
     queryFn: getPublicLoopAssets,
@@ -67,15 +70,13 @@ function TrustlinesBody(): React.JSX.Element {
       <Navbar />
       <main className="container mx-auto max-w-3xl px-4 py-12 space-y-10">
         <header>
-          <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-3">
-            LOOP asset trustlines
-          </h1>
+          <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-3">{t('heading')}</h1>
           <p className="text-lg text-gray-600 dark:text-gray-300">
-            Loop pays cashback in <span className="font-semibold">USDLOOP</span>,{' '}
-            <span className="font-semibold">GBPLOOP</span>, and{' '}
-            <span className="font-semibold">EURLOOP</span> — Stellar stablecoins pinned 1:1 to your
-            home currency. To receive on-chain payouts, add a trustline against the verified issuer
-            account below from any Stellar wallet.
+            <Trans
+              t={t}
+              i18nKey="intro"
+              components={{ bold: <span className="font-semibold" /> }}
+            />
           </p>
         </header>
 
@@ -84,15 +85,11 @@ function TrustlinesBody(): React.JSX.Element {
             <Spinner />
           </div>
         ) : query.isError ? (
-          <p className="py-8 text-red-600 dark:text-red-400">
-            Couldn&rsquo;t load the trustline list. Please refresh.
-          </p>
+          <p className="py-8 text-red-600 dark:text-red-400">{t('loadError')}</p>
         ) : query.data.assets.length === 0 ? (
-          <p className="py-8 text-gray-500 dark:text-gray-400">
-            Trustlines are being configured — check back soon.
-          </p>
+          <p className="py-8 text-gray-500 dark:text-gray-400">{t('empty')}</p>
         ) : (
-          <section aria-label="Verified LOOP asset issuers" className="space-y-3">
+          <section aria-label={t('issuersSectionLabel')} className="space-y-3">
             {query.data.assets.map((asset) => (
               <AssetRow key={asset.code} asset={asset} />
             ))}
@@ -101,24 +98,17 @@ function TrustlinesBody(): React.JSX.Element {
 
         <section className="rounded-xl border border-gray-200 bg-white p-8 dark:border-gray-800 dark:bg-gray-900">
           <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">
-            Why trustlines?
+            {t('why.heading')}
           </h2>
           <p className="text-gray-700 dark:text-gray-300 mb-4">
-            On Stellar, an account needs a trustline for every non-native asset it can hold. A
-            trustline says:{' '}
-            <em>this account is willing to receive tokens issued by this specific issuer.</em>{' '}
-            Without one, an on-chain payout to a USDLOOP address would simply bounce.
+            <Trans t={t} i18nKey="why.body" components={{ em: <em /> }} />
           </p>
-          <p className="text-gray-700 dark:text-gray-300">
-            Using the issuer account from this page — rather than searching by asset code in your
-            wallet — is the single most important safety step. Anyone can issue a token called
-            &ldquo;USDLOOP&rdquo;; only the account below is the real Loop-operated issuer.
-          </p>
+          <p className="text-gray-700 dark:text-gray-300">{t('why.safety')}</p>
         </section>
 
         <section className="rounded-xl border border-gray-200 bg-white p-8 dark:border-gray-800 dark:bg-gray-900">
           <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">
-            Recommended wallets
+            {t('wallets.heading')}
           </h2>
           <ul className="list-disc list-outside pl-6 space-y-2 text-gray-700 dark:text-gray-300">
             <li>
@@ -130,7 +120,7 @@ function TrustlinesBody(): React.JSX.Element {
               >
                 Freighter
               </a>{' '}
-              — browser extension maintained by SDF. Adds trustlines via the Manage Assets screen.
+              — {t('wallets.freighterDesc')}
             </li>
             <li>
               <a
@@ -141,7 +131,7 @@ function TrustlinesBody(): React.JSX.Element {
               >
                 Lobstr
               </a>{' '}
-              — mobile wallet with a built-in asset search. Paste the issuer account from above.
+              — {t('wallets.lobstrDesc')}
             </li>
           </ul>
         </section>
@@ -151,7 +141,7 @@ function TrustlinesBody(): React.JSX.Element {
             to="/"
             className="text-sm text-gray-600 underline hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200"
           >
-            ← Back to home
+            {t('back')}
           </Link>
         </section>
       </main>
@@ -161,16 +151,17 @@ function TrustlinesBody(): React.JSX.Element {
 }
 
 function AssetRow({ asset }: { asset: PublicLoopAsset }): React.JSX.Element {
+  const { t } = useTranslation('trustlines');
   return (
     <article
       className="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900"
-      aria-label={`${asset.code} issuer details`}
+      aria-label={t('asset.rowLabel', { code: asset.code })}
     >
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h3 className="text-xl font-semibold text-gray-900 dark:text-white">{asset.code}</h3>
           <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-            {pinnedCurrencyLine(asset.code)}
+            {pinnedCurrencyLine(t, asset.code)}
           </p>
         </div>
         <a
@@ -179,27 +170,26 @@ function AssetRow({ asset }: { asset: PublicLoopAsset }): React.JSX.Element {
           rel="noopener noreferrer"
           className="text-xs text-blue-600 underline hover:text-blue-800 dark:text-blue-400"
         >
-          View on Stellar Expert
+          {t('asset.stellarExpert')}
         </a>
       </div>
       <div className="mt-4">
-        <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Issuer account</p>
+        <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
+          {t('asset.issuerAccount')}
+        </p>
         <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 font-mono text-xs text-gray-900 dark:border-gray-700 dark:bg-gray-800/50 dark:text-gray-100">
           <span className="break-all">{asset.issuer}</span>
-          <CopyButton text={asset.issuer} label={`Copy ${asset.code} issuer account`} />
+          <CopyButton text={asset.issuer} label={t('asset.copyIssuer', { code: asset.code })} />
         </div>
       </div>
     </article>
   );
 }
 
-function pinnedCurrencyLine(code: PublicLoopAsset['code']): string {
-  switch (code) {
-    case 'USDLOOP':
-      return '1 USDLOOP = 1 US dollar cashback, backed 1:1 by Loop fiat reserves.';
-    case 'GBPLOOP':
-      return '1 GBPLOOP = 1 British pound cashback, backed 1:1 by Loop fiat reserves.';
-    case 'EURLOOP':
-      return '1 EURLOOP = 1 Euro cashback, backed 1:1 by Loop fiat reserves.';
-  }
+// Plain non-component helper — takes the caller's bound `t` (docs/i18n.md §3,
+// the `ledgerLabel(t, type)` pattern) rather than calling the hook itself.
+// The pinned-line key is the asset code (USDLOOP / GBPLOOP / EURLOOP), a brand
+// token kept verbatim; the exhaustive `code` union keeps it type-safe.
+function pinnedCurrencyLine(t: TFunction<'trustlines'>, code: PublicLoopAsset['code']): string {
+  return t(`pinned.${code}`);
 }

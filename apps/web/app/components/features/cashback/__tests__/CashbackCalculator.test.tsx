@@ -3,6 +3,8 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor, fireEvent, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Routes, Route } from 'react-router';
+import { createInstance } from 'i18next';
+import { I18nextProvider } from 'react-i18next';
 import type * as PublicStats from '~/services/public-stats';
 import { CashbackCalculator, formatCashbackMinor } from '../CashbackCalculator';
 
@@ -74,6 +76,54 @@ describe('formatCashbackMinor', () => {
     expect(formatCashbackMinor('123456789', 'USD', 'en-IN')).not.toBe('$1,234,567.89');
     // The 2-arg call keeps the en-US default (backward compatible).
     expect(formatCashbackMinor('123456789', 'USD')).toBe('$1,234,567.89');
+  });
+});
+
+describe('<CashbackCalculator /> i18n wiring', () => {
+  // P2-08: the calculator's chrome copy must render through `t()` (the same
+  // i18n framework Footer uses), not hardcoded English literals. Mount it under
+  // an ISOLATED i18next instance whose `cashback:calculatorWidget.heading` is a
+  // sentinel: if the component still baked in the English literal ("Calculate
+  // your cashback"), the sentinel never renders (RED); routed through t(), it
+  // does (GREEN). A dedicated instance (not the shared singleton from
+  // vitest.setup) keeps the override from leaking into the other tests here.
+  it('renders the calculator heading through i18n, not a hardcoded literal (P2-08)', async () => {
+    // Isolated instance supplied purely via `I18nextProvider` — deliberately
+    // NOT `.use(initReactI18next)`, since that plugin's init reassigns
+    // react-i18next's GLOBAL default instance and would leak this sentinel-only
+    // catalog into the sibling tests that rely on the vitest.setup singleton.
+    const testI18n = createInstance();
+    await testI18n.init({
+      lng: 'en',
+      fallbackLng: 'en',
+      ns: ['cashback'],
+      defaultNS: 'cashback',
+      resources: {
+        en: { cashback: { calculatorWidget: { heading: 'CASHBACK_HEADING_SENTINEL' } } },
+      },
+      interpolation: { escapeValue: false },
+      react: { useSuspense: false },
+    });
+    mocks.getPublicCashbackPreview.mockResolvedValue({
+      merchantId: 'amazon-us',
+      merchantName: 'Amazon',
+      orderAmountMinor: '5000',
+      cashbackPct: '2.50',
+      cashbackMinor: '125',
+      currency: 'USD',
+    });
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <I18nextProvider i18n={testI18n}>
+          <CashbackCalculator merchantId="amazon-us" />
+        </I18nextProvider>
+      </QueryClientProvider>,
+    );
+    // The wired heading resolves to the sentinel from the isolated catalog.
+    expect(screen.getByText('CASHBACK_HEADING_SENTINEL')).toBeDefined();
+    // Guard the exact failure mode: the pre-fix hardcoded literal must be gone.
+    expect(screen.queryByText('Calculate your cashback')).toBeNull();
   });
 });
 

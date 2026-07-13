@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router';
 import { COUNTRIES, foldForSearch } from '@loop/shared';
 import {
@@ -19,6 +20,7 @@ import { useFocusTrap } from '~/hooks/use-focus-trap';
  * page has no localized mount (an app/admin route), it lands on the locale home.
  */
 export function CountrySelector(): React.JSX.Element {
+  const { t } = useTranslation('navbar');
   const locale = useLocale();
   const navigate = useNavigate();
   const location = useLocation();
@@ -94,7 +96,7 @@ export function CountrySelector(): React.JSX.Element {
         onClick={() => setOpen(true)}
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={`Country: ${current.label}`}
+        aria-label={t('country.triggerLabel', { country: current.label })}
         className="flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 py-2 text-sm font-medium text-ink transition-colors hover:bg-gray-50"
       >
         <FlagIcon code={current.code} emoji={current.flag} />
@@ -122,7 +124,7 @@ export function CountrySelector(): React.JSX.Element {
             ref={dialogRef}
             role="dialog"
             aria-modal="true"
-            aria-label="Choose your country"
+            aria-label={t('country.dialogLabel')}
             onMouseDown={(e) => e.stopPropagation()}
             className="w-full max-w-sm overflow-hidden rounded-xl bg-white shadow-2xl"
           >
@@ -154,8 +156,8 @@ export function CountrySelector(): React.JSX.Element {
                     if (c) choose(c.code);
                   }
                 }}
-                placeholder="Search countries"
-                aria-label="Search countries"
+                placeholder={t('country.search')}
+                aria-label={t('country.search')}
                 role="combobox"
                 aria-expanded="true"
                 aria-controls="country-listbox"
@@ -167,7 +169,7 @@ export function CountrySelector(): React.JSX.Element {
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                aria-label="Close country picker"
+                aria-label={t('country.close')}
                 className="shrink-0 rounded-md p-1.5 text-ink-muted hover:bg-gray-100"
               >
                 <svg
@@ -186,7 +188,7 @@ export function CountrySelector(): React.JSX.Element {
               ref={listRef}
               id="country-listbox"
               role="listbox"
-              aria-label="Countries"
+              aria-label={t('country.listLabel')}
               className="max-h-[50vh] overflow-y-auto py-1"
             >
               {matches.map((c, i) => {
@@ -214,7 +216,9 @@ export function CountrySelector(): React.JSX.Element {
                 );
               })}
               {matches.length === 0 ? (
-                <li className="px-4 py-3 text-sm text-ink-muted">No countries match "{query}".</li>
+                <li className="px-4 py-3 text-sm text-ink-muted">
+                  {t('country.noResults', { query })}
+                </li>
               ) : null}
             </ul>
           </div>

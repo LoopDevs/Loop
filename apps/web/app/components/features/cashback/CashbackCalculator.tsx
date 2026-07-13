@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { currencySymbol, formatMinorCurrency, useLocaleTag } from '~/i18n/format';
 import { getPublicCashbackPreview, type PublicCashbackPreview } from '~/services/public-stats';
 import { shouldRetry } from '~/hooks/query-retry';
@@ -58,6 +59,7 @@ export function formatCashbackMinor(minor: string, currency: string, locale?: st
 }
 
 export function CashbackCalculator({ merchantId }: Props): React.JSX.Element {
+  const { t } = useTranslation('cashback');
   // Active route locale (`/:country/:lang` → e.g. `en-IN`) so the projected
   // cashback renders in the visitor's market convention, not always en-US
   // (FE-17). Same seam the rest of the app threads through (ADR 034).
@@ -104,15 +106,13 @@ export function CashbackCalculator({ merchantId }: Props): React.JSX.Element {
         id="cashback-calculator-heading"
         className="text-base font-semibold text-green-900 dark:text-green-100"
       >
-        Calculate your cashback
+        {t('calculatorWidget.heading')}
       </h2>
-      <p className="mt-1 text-sm text-green-800 dark:text-green-200">
-        Enter a gift-card amount and we&rsquo;ll show what you&rsquo;d earn.
-      </p>
+      <p className="mt-1 text-sm text-green-800 dark:text-green-200">{t('calculatorWidget.sub')}</p>
 
       <div className="mt-4 flex flex-wrap items-end gap-4">
         <label className="flex flex-col gap-1 text-xs font-medium uppercase tracking-wide text-green-900/80 dark:text-green-100/80">
-          Amount
+          {t('calculatorWidget.amount')}
           <div className="flex items-center gap-2">
             <span aria-hidden="true" className="text-lg text-green-900 dark:text-green-100">
               {currencyGlyph}
@@ -128,19 +128,19 @@ export function CashbackCalculator({ merchantId }: Props): React.JSX.Element {
                 const n = Number(e.target.value);
                 setAmount(Number.isFinite(n) ? n : 0);
               }}
-              aria-label="Gift card amount"
+              aria-label={t('calculatorWidget.amountAria')}
               className="w-28 rounded-md border border-green-300 bg-white px-3 py-2 text-base tabular-nums text-gray-900 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500 dark:border-green-800 dark:bg-gray-900 dark:text-white"
             />
           </div>
         </label>
         <div className="flex flex-col gap-1 text-xs font-medium uppercase tracking-wide text-green-900/80 dark:text-green-100/80">
-          Rate
+          {t('calculatorWidget.rate')}
           <span className="text-lg font-semibold tabular-nums text-green-900 dark:text-green-100">
             {pctLabel}
           </span>
         </div>
         <div className="flex flex-col gap-1 text-xs font-medium uppercase tracking-wide text-green-900/80 dark:text-green-100/80">
-          You&rsquo;ll earn
+          {t('calculatorWidget.youllEarn')}
           <span className="text-lg font-semibold tabular-nums text-green-900 dark:text-green-100">
             {cashbackLabel}
           </span>

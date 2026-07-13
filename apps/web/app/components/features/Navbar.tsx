@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, forwardRef } from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslation } from 'react-i18next';
 import { useLocation } from 'react-router';
 import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import { useMerchantSearch } from '~/hooks/use-merchants';
@@ -40,6 +41,7 @@ function SearchDropdown({
   selectedIndex,
   onSelect,
 }: SearchDropdownProps): React.JSX.Element {
+  const { t } = useTranslation('navbar');
   return (
     <div
       role="listbox"
@@ -75,13 +77,13 @@ function SearchDropdown({
             <div className="font-medium text-ink truncate">{r.name}</div>
             {r.optionCount !== undefined ? (
               <div className="text-xs text-ink-muted font-medium tabular">
-                {r.optionCount} options
+                {t('search.optionCount', { n: r.optionCount })}
               </div>
             ) : (
               r.savingsPercentage !== undefined &&
               r.savingsPercentage > 0 && (
                 <div className="text-xs text-green-600 font-medium tabular">
-                  {r.savingsPercentage.toFixed(1)}% off
+                  {t('search.percentOff', { pct: r.savingsPercentage.toFixed(1) })}
                 </div>
               )
             )}
@@ -98,6 +100,7 @@ interface SearchBarProps {
 }
 
 const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, ref) => {
+  const { t } = useTranslation('navbar');
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [open, setOpen] = useState(false);
@@ -202,11 +205,11 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
             ref={ref}
             type="text"
             value={query}
-            placeholder="Search brands"
+            placeholder={t('search.label')}
             // UX-05: placeholder-only naming is unreliable for screen
             // readers and disappears once the user starts typing —
             // give the field a real accessible name.
-            aria-label="Search brands"
+            aria-label={t('search.label')}
             aria-autocomplete="list"
             aria-controls="search-listbox"
             aria-activedescendant={
@@ -269,7 +272,7 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
             role="status"
             className="absolute top-full left-0 right-0 mt-2 rounded-lg shadow-lg z-[999999] bg-surface border border-line px-4 py-6 text-center text-sm text-ink-muted"
           >
-            No brands match &ldquo;{trimmedQuery}&rdquo;
+            {t('search.noResults', { query: trimmedQuery })}
           </div>
         ) : showError ? (
           // Distinct from "no results" — a search request failure
@@ -279,7 +282,7 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
             role="status"
             className="absolute top-full left-0 right-0 mt-2 rounded-lg shadow-lg z-[999999] bg-surface border border-line px-4 py-6 text-center text-sm text-ink-muted"
           >
-            Search is unavailable right now. Try again in a moment.
+            {t('search.error')}
           </div>
         ) : null}
       </div>
@@ -294,6 +297,7 @@ SearchBar.displayName = 'SearchBar';
  * outside-click, Escape, or route change.
  */
 function AccountMenu({ showCashbackNav }: { showCashbackNav: boolean }): React.JSX.Element {
+  const { t } = useTranslation('navbar');
   const email = useAuthStore((s) => s.email);
   const { logout } = useAuth();
   const navigate = useLocalizedNavigate();
@@ -324,11 +328,11 @@ function AccountMenu({ showCashbackNav }: { showCashbackNav: boolean }): React.J
   }, [location.pathname]);
 
   const items: Array<{ to: string; label: string }> = [
-    { to: '/orders', label: 'Orders' },
+    { to: '/orders', label: t('account.orders') },
     ...(showCashbackNav
       ? [
-          { to: '/settings/cashback', label: 'Cashback' },
-          { to: '/settings/wallet', label: 'Wallet' },
+          { to: '/settings/cashback', label: t('account.cashback') },
+          { to: '/settings/wallet', label: t('account.wallet') },
         ]
       : []),
   ];
@@ -340,7 +344,7 @@ function AccountMenu({ showCashbackNav }: { showCashbackNav: boolean }): React.J
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label="Account menu"
+        aria-label={t('account.menuLabel')}
         className="flex items-center rounded-full transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-2"
       >
         <Avatar name={email} size="md" />
@@ -351,8 +355,10 @@ function AccountMenu({ showCashbackNav }: { showCashbackNav: boolean }): React.J
           className="absolute right-0 top-full mt-2 w-60 rounded-lg bg-surface border border-line shadow-lg overflow-hidden z-[999999]"
         >
           <div className="px-4 py-3 border-b border-line">
-            <p className="text-xs text-ink-subtle">Signed in as</p>
-            <p className="text-sm font-medium text-ink truncate">{email ?? 'Your account'}</p>
+            <p className="text-xs text-ink-subtle">{t('account.signedInAs')}</p>
+            <p className="text-sm font-medium text-ink truncate">
+              {email ?? t('account.fallbackName')}
+            </p>
           </div>
           <div className="py-1">
             {items.map((it) => (
@@ -378,7 +384,7 @@ function AccountMenu({ showCashbackNav }: { showCashbackNav: boolean }): React.J
               }}
               className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
             >
-              Sign out
+              {t('account.signOut')}
             </button>
           </div>
         </div>
@@ -388,6 +394,7 @@ function AccountMenu({ showCashbackNav }: { showCashbackNav: boolean }): React.J
 }
 
 export function Navbar(_props: NavbarProps = {}): React.JSX.Element {
+  const { t } = useTranslation('navbar');
   const location = useLocation();
   const navigate = useLocalizedNavigate();
   const { isNative } = useNativePlatform();
@@ -432,7 +439,7 @@ export function Navbar(_props: NavbarProps = {}): React.JSX.Element {
         href="#main"
         className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-2 focus:z-[1200] focus:rounded-md focus:bg-blue-600 focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-white"
       >
-        Skip to main content
+        {t('skipToContent')}
       </a>
       <div className="container mx-auto px-4">
         <div className="flex items-center gap-3 py-3 sm:py-4">
@@ -451,19 +458,19 @@ export function Navbar(_props: NavbarProps = {}): React.JSX.Element {
           {/* Desktop nav links. */}
           <div className="hidden md:flex items-center gap-0.5 ml-2">
             <Link to="/" className={navLinkClass('/')}>
-              Directory
+              {t('nav.directory')}
             </Link>
             <Link to="/map" className={navLinkClass('/map')}>
-              Map
+              {t('nav.map')}
             </Link>
             {showCashbackNav && (
               <Link to="/cashback" className={navLinkClass('/cashback')}>
-                Rates
+                {t('nav.rates')}
               </Link>
             )}
             {isAuthenticated && (
               <Link to="/orders" className={navLinkClass('/orders')}>
-                Orders
+                {t('nav.orders')}
               </Link>
             )}
           </div>
@@ -479,13 +486,13 @@ export function Navbar(_props: NavbarProps = {}): React.JSX.Element {
                   to="/auth"
                   className="hidden sm:inline-flex items-center text-sm font-medium px-3 py-2 rounded-md text-ink-muted hover:text-ink hover:bg-gray-50 transition-colors"
                 >
-                  Log in
+                  {t('cta.logIn')}
                 </Link>
                 <Link
                   to="/onboarding"
                   className="inline-flex items-center text-sm font-semibold px-3.5 py-2 rounded-md bg-blue-600 text-white shadow-xs hover:bg-blue-700 active:bg-blue-800 transition-colors"
                 >
-                  Sign up
+                  {t('cta.signUp')}
                 </Link>
               </>
             )}
