@@ -123,7 +123,14 @@ function AdminPayoutsRouteInner(): React.JSX.Element {
     staleTime: 10_000,
   });
 
-  const [retryingId, setRetryingId] = useState<string | null>(null);
+  // FE-12: track in-flight retries PER-ROW. A single scalar `retryingId`
+  // desynced the operator double-submit path — starting a retry on row B
+  // overwrote the id, clearing row A's spinner/disabled state while A's
+  // request was still in flight (double-submit) and capping the list to
+  // one visible loading row. A Set keyed by row id lets each row derive
+  // its own loading/disabled state; ids are added on start and removed
+  // on settle (success AND error) below.
+  const [retryingIds, setRetryingIds] = useState<ReadonlySet<string>>(() => new Set());
   const [retryError, setRetryError] = useState<string | null>(null);
   const [reasonDialogId, setReasonDialogId] = useState<string | null>(null);
 
@@ -148,7 +155,16 @@ function AdminPayoutsRouteInner(): React.JSX.Element {
     onError: (err) => {
       setRetryError(err instanceof Error ? err.message : 'Retry failed');
     },
-    onSettled: () => setRetryingId(null),
+    // FE-12: settle the row that actually finished (success OR error) via
+    // `variables.id` — never blanket-clear, which would drop the loading
+    // state of any sibling retry still in flight.
+    onSettled: (_data, _error, variables) => {
+      setRetryingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(variables.id);
+        return next;
+      });
+    },
   });
 
   // A2-1107: native <dialog>-backed reason prompt replaces the prior
@@ -163,7 +179,13 @@ function AdminPayoutsRouteInner(): React.JSX.Element {
     const id = reasonDialogId;
     setReasonDialogId(null);
     if (id === null || reason === null) return;
-    setRetryingId(id);
+    // FE-12: mark THIS row in-flight without disturbing any sibling
+    // retry already loading.
+    setRetryingIds((prev) => {
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
     setRetryError(null);
     // CF-09: one key per action attempt — minted here, reused on the
     // step-up retry inside `runWithStepUp`.
@@ -385,10 +407,10 @@ function AdminPayoutsRouteInner(): React.JSX.Element {
                       <button
                         type="button"
                         onClick={() => handleRetry(p.id)}
-                        disabled={retryingId === p.id}
+                        disabled={retryingIds.has(p.id)}
                         className="rounded-lg border border-gray-300 bg-white px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
                       >
-                        {retryingId === p.id ? 'Retrying…' : 'Retry'}
+                        {retryingIds.has(p.id) ? 'Retrying…' : 'Retry'}
                       </button>
                     ) : null}
                   </td>
