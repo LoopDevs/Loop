@@ -87,6 +87,25 @@ vi.mock('../../credits/vaults/vault-client.js', () => ({
   resolveOperatorPublicKey: () => vaultClientMocks.resolveOperatorPublicKey(),
 }));
 
+// The stuck-emission watchdog pages via `notifyVaultEmissionsStuck`
+// (→ `sendWebhook(env.DISCORD_WEBHOOK_MONITORING)`). No webhook is set
+// in the integration env, and post-FT-06 an UNSET webhook reports
+// NON-delivery (`false`) — it no longer phantom-reports success — so
+// the watchdog would never latch its fire-once `alert_active`. Stub the
+// delivery-tracked notifier to report a successful delivery (matching
+// how the sibling watcher suite `asset-drift-watcher.test.ts` mocks its
+// own notifiers) so NO real Discord call happens and `notified===true`
+// genuinely asserts the "delivered once, then don't re-page" behaviour
+// rather than the old phantom-true. Every other `../../discord.js`
+// export (e.g. `notifyVaultEmissionFailed`) stays real via `...actual`.
+vi.mock('../../discord.js', async (importActual) => {
+  const actual = (await importActual()) as Record<string, unknown>;
+  return {
+    ...actual,
+    notifyVaultEmissionsStuck: vi.fn(async () => true),
+  };
+});
+
 import { db, withAdvisoryLock } from '../../db/client.js';
 import {
   users,
@@ -472,9 +491,13 @@ describeIf('vault-emissions integration — real postgres (ADR 031 V3)', () => {
       toAddress: user.walletAddress,
     });
     // Make it a STUCK in-flight row: state='deposited', created 30 min
-    // ago (older than the 15-min threshold below). No DISCORD webhook
-    // is configured in the integration env, so notifyVaultEmissionsStuck
-    // → sendWebhook(undefined) → resolves `true` (delivery confirmed).
+    // ago (older than the 15-min threshold below). Delivery is stubbed
+    // to SUCCEED (`notifyVaultEmissionsStuck` → true, mocked at the top
+    // of this file) so the watchdog's fire-once latch actually engages —
+    // this exercises the real "a page WAS delivered, now don't re-page"
+    // semantics. Post-FT-06 an unset webhook makes sendWebhook resolve
+    // `false` (non-delivery), so relying on an unset webhook here (the
+    // old phantom-true contract) would latch nothing and test nothing.
     await db
       .update(vaultEmissions)
       .set({
