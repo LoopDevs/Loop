@@ -159,6 +159,20 @@ export async function markPayoutFailed(args: {
  * Resets a `failed` row back to `pending` so the worker retries it on
  * the next tick. Admin-only; the worker itself should never call this
  * (unbounded-retry would mask real issues).
+ *
+ * REL-09: the `attempts` counter MUST reset to 0 as well. A row only
+ * reaches terminal `failed` after `handleSubmitError`
+ * (payout-worker-pay-one.ts) exhausts its budget — `attempts` is at or
+ * past `LOOP_PAYOUT_MAX_ATTEMPTS`. Leaving that stale on a reset row
+ * defeats the retry the admin asked for two ways: the very next
+ * `handleSubmitError` computes `usedAttempts = attempts + 1 >=
+ * maxAttempts` and re-fails terminally on the FIRST transient error
+ * (zero effective retry budget), and if the re-submit instead stalls
+ * in `submitted`, `listClaimablePayouts`'s watchdog branch (`attempts <
+ * maxAttempts`) never re-claims it — stuck forever. Resetting to 0
+ * restores the intended fresh budget, matching every sibling
+ * reset-for-retry path (`reopenAbandonedSkip`, vault-emission /
+ * -redemption resume).
  */
 export async function resetPayoutToPending(id: string): Promise<PendingPayout | null> {
   const [row] = await db
@@ -167,6 +181,7 @@ export async function resetPayoutToPending(id: string): Promise<PendingPayout | 
       state: 'pending',
       failedAt: null,
       lastError: null,
+      attempts: 0,
     })
     .where(
       and(

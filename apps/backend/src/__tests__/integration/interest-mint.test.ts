@@ -522,4 +522,34 @@ describeIf('interest-mint integration — real postgres (Q6-6)', () => {
     expect(after.skippedLocked).toBe(false);
     expect(after.minted).toBe(1);
   });
+
+  it('CON-04: a hung sweep hits the lease deadline, RELEASES the fleet-wide lock, and does NOT advance the cursor', async () => {
+    const user = await seedActivatedUser();
+    trustlineBalances.set(user.walletAddress, 36_500_000_000n);
+
+    // Make the per-user Horizon read hang so the sweep can never
+    // complete — the exact "blackholed Horizon" shape the lease guards
+    // against. `mockImplementationOnce` hangs only THIS call; the base
+    // mock impl is restored for the sanity re-run below and later tests.
+    vi.mocked(getAccountTrustlines).mockImplementationOnce(() => new Promise(() => {}));
+
+    // A short lease: pre-fix (no lease) the fleet-wide lock is held for
+    // the whole run, so this call would never resolve (the hung sweep
+    // holds the lock forever) — the test would time out. Post-fix the
+    // race settles at the lease and the lock is freed.
+    const result = await runInterestMintTick({ now: DAY_1, apyBps: 10_000, leaseMs: 200 });
+
+    expect(result.leaseTimedOut).toBe(true);
+    expect(result.skippedLocked).toBe(false);
+    expect(result.minted).toBe(0);
+    // The hung sweep never reached any DB write, and the cursor is left
+    // unadvanced so the next tick re-runs the period.
+    expect(await snapshotsFor(user.id)).toHaveLength(0);
+    expect(await cursor()).toBeNull();
+
+    // Proof the fleet-wide lock was actually released despite the
+    // orphaned in-flight sweep: a second session can now take it.
+    const reacquired = await withAdvisoryLock(interestMintLockKeyForTest(), async () => 'ok');
+    expect(reacquired).toEqual({ ran: true, value: 'ok' });
+  });
 });

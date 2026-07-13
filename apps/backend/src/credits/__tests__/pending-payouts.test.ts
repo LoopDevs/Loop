@@ -230,4 +230,23 @@ describe('resetPayoutToPending', () => {
     const row = await resetPayoutToPending('p-1');
     expect(row).toBeNull();
   });
+
+  it('REL-09: resets attempts to 0 so the retried row gets a fresh budget', async () => {
+    // A row only reaches terminal `failed` after its attempts budget is
+    // exhausted (attempts >= LOOP_PAYOUT_MAX_ATTEMPTS). If the reset
+    // leaves that stale, handleSubmitError re-fails on the first
+    // transient error and the submitted-watchdog (attempts < max) never
+    // re-claims a stall. The reset MUST zero it — matching every sibling
+    // reset-for-retry path (reopenAbandonedSkip, vault resume).
+    state.updateReturn = { id: 'p-1', state: 'pending', attempts: 0, lastError: null };
+    await resetPayoutToPending('p-1');
+    expect(updateChain['set']!).toHaveBeenCalledWith(
+      expect.objectContaining({
+        state: 'pending',
+        failedAt: null,
+        lastError: null,
+        attempts: 0,
+      }),
+    );
+  });
 });
