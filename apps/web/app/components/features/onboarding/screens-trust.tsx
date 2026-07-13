@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useAllMerchants } from '~/hooks/use-merchants';
 import { getImageProxyUrl } from '~/utils/image';
 import { LoopLogo } from '~/components/ui/LoopLogo';
-import { MerchantTile, useCountUp } from './atoms';
+import { MerchantTile, useCountUp, useReducedMotion } from './atoms';
 
 interface ScreenCopy {
   eyebrow?: string;
@@ -156,6 +156,7 @@ export function TrustHowItWorks({
   phase1Only = false,
 }: TrustHowItWorksProps): React.JSX.Element {
   const { t } = useTranslation('onboarding');
+  const reduced = useReducedMotion();
   const steps: { num: string; label: string; visual: StepVisual }[] = [
     { num: '1', label: t('trust.step1'), visual: 'app' },
     { num: '2', label: t('trust.step2'), visual: 'card' },
@@ -192,7 +193,9 @@ export function TrustHowItWorks({
             style={{
               opacity: active ? 1 : 0,
               transform: active ? 'translateY(0)' : 'translateY(12px)',
-              transition: `opacity 420ms ease ${i * 100 + 100}ms, transform 420ms cubic-bezier(0.4,0,0.2,1) ${i * 100 + 100}ms`,
+              transition: reduced
+                ? 'none'
+                : `opacity 420ms ease ${i * 100 + 100}ms, transform 420ms cubic-bezier(0.4,0,0.2,1) ${i * 100 + 100}ms`,
             }}
           >
             <div className="w-9 h-9 rounded-[10px] bg-gray-950 dark:bg-white text-white dark:text-gray-950 text-base font-bold flex items-center justify-center flex-shrink-0">
@@ -224,6 +227,7 @@ interface TileMerchant {
  */
 export function TrustMerchants({ active, copy }: ScreenProps): React.JSX.Element {
   const { t } = useTranslation('onboarding');
+  const reduced = useReducedMotion();
   const { merchants } = useAllMerchants();
 
   const tiles = useMemo<TileMerchant[]>(() => {
@@ -284,7 +288,9 @@ export function TrustMerchants({ active, copy }: ScreenProps): React.JSX.Element
             style={{
               opacity: active ? 1 : 0,
               transform: active ? 'scale(1)' : 'scale(0.85)',
-              transition: `opacity 320ms ease ${i * 40}ms, transform 420ms cubic-bezier(0.34,1.56,0.64,1) ${i * 40}ms`,
+              transition: reduced
+                ? 'none'
+                : `opacity 320ms ease ${i * 40}ms, transform 420ms cubic-bezier(0.34,1.56,0.64,1) ${i * 40}ms`,
             }}
           >
             <MerchantTile m={m} size={54} />
