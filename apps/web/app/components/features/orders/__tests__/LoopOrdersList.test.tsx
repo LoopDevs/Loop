@@ -274,4 +274,35 @@ describe('LoopOrdersList', () => {
     expect(link.getAttribute('href')).toBe('https://redeem.example.com/z');
     expect(link.getAttribute('rel')).toMatch(/noopener/);
   });
+
+  // P2-03 (XSS): a redeemUrl is server/upstream-supplied. Dropped into an
+  // `<a href>` unvalidated, a `javascript:` scheme executes on click —
+  // with app privileges inside the Capacitor native WebView. The scheme
+  // must be gated so a dangerous URL is neutralized to "no live link".
+  it.each([
+    ['javascript:', 'javascript:alert(document.cookie)'],
+    ['data:', 'data:text/html,<script>alert(1)</script>'],
+    ['vbscript:', 'vbscript:msgbox(1)'],
+  ])('does NOT render a %s redeemUrl as a live href', async (_scheme, redeemUrl) => {
+    listMock.mockResolvedValue({
+      orders: [
+        mkOrder({
+          redeemCode: null,
+          redeemPin: null,
+          redeemUrl,
+        }),
+      ],
+    });
+    render(wrap(<LoopOrdersList enabled={true} />));
+    const toggle = await waitFor(() => screen.getByRole('button', { name: /Target/ }));
+    await act(async () => {
+      fireEvent.click(toggle);
+    });
+    // The dangerous scheme is dropped — no redemption anchor at all.
+    expect(screen.queryByRole('link', { name: /Open redemption link/i })).toBeNull();
+    // Belt-and-braces: the raw payload never reaches any href attribute.
+    for (const anchor of document.querySelectorAll('a')) {
+      expect(anchor.getAttribute('href')).not.toBe(redeemUrl);
+    }
+  });
 });

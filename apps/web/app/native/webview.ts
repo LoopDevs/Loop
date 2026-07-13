@@ -46,6 +46,29 @@ function assertSafeUrl(url: string): URL {
   return parsed;
 }
 
+/**
+ * Scheme-gates a redeem URL before it is placed in an `<a href>`.
+ *
+ * Returns the URL unchanged if it clears the SAME allow-list as
+ * `openWebView` (`assertSafeUrl`: http(s) only, no embedded
+ * credentials, https-only in production), otherwise `null`.
+ *
+ * A `redeemUrl` is server/upstream-supplied. Dropped straight into an
+ * anchor, a `javascript:` / `data:` value would execute script on
+ * click — with app privileges inside the Capacitor native WebView.
+ * Anchors that can't route through `openWebView` (they render as a
+ * plain link the user taps) must gate the value here and fail closed:
+ * a rejected URL yields `null`, and the caller renders no link at all.
+ */
+export function safeRedeemHref(url: string): string | null {
+  try {
+    assertSafeUrl(url);
+    return url;
+  } catch {
+    return null;
+  }
+}
+
 function originOf(rawUrl: string): string | null {
   try {
     return new URL(rawUrl).origin;

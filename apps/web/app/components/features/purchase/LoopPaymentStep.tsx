@@ -11,6 +11,7 @@ import {
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
 import { isNativePlatform } from '~/native/platform';
+import { safeRedeemHref } from '~/native/webview';
 import { formatMinorCurrency, useLocaleTag } from '~/i18n/format';
 import { PayWithLoopBalance } from './PayWithLoopBalance';
 
@@ -205,7 +206,13 @@ function RedemptionBody({ order }: { order: LoopOrderView }): React.JSX.Element 
   const locale = useLocaleTag();
   const hasCode = order.redeemCode !== null && order.redeemCode.length > 0;
   const hasPin = order.redeemPin !== null && order.redeemPin.length > 0;
-  const hasUrl = order.redeemUrl !== null && order.redeemUrl.length > 0;
+  // P2-03: scheme-gate the upstream redeemUrl before it reaches an
+  // `<a href>`. `safeRedeemHref` returns null for anything that isn't a
+  // safe http(s) URL — a `javascript:`/`data:` value is neutralized to
+  // "no link" rather than a clickable XSS payload in the native WebView.
+  const redeemHref =
+    order.redeemUrl !== null && order.redeemUrl.length > 0 ? safeRedeemHref(order.redeemUrl) : null;
+  const hasUrl = redeemHref !== null;
 
   if (!hasCode && !hasPin && !hasUrl) {
     return (
@@ -222,13 +229,13 @@ function RedemptionBody({ order }: { order: LoopOrderView }): React.JSX.Element 
     <div className="rounded-xl border border-green-200 dark:border-green-900/40 bg-green-50/50 dark:bg-green-900/10 p-4 space-y-3">
       {hasCode ? <Row label="Gift card code" value={order.redeemCode!} copyable mono /> : null}
       {hasPin ? <Row label="PIN" value={order.redeemPin!} copyable mono /> : null}
-      {hasUrl ? (
+      {redeemHref !== null ? (
         <div>
           <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
             Redeem online
           </div>
           <a
-            href={order.redeemUrl!}
+            href={redeemHref}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center justify-center w-full rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2"

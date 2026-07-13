@@ -7,6 +7,7 @@ import { useAllMerchants } from '~/hooks/use-merchants';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
 import { formatMinorCurrency, useLocaleTag } from '~/i18n/format';
+import { safeRedeemHref } from '~/native/webview';
 
 /**
  * Loop-native orders section on the account/orders page.
@@ -80,10 +81,16 @@ function LoopOrderRow({ order }: { order: LoopOrderView }): React.JSX.Element {
     year: 'numeric',
   });
   const isFulfilled = order.state === 'fulfilled';
+  // P2-03: scheme-gate the upstream redeemUrl before it reaches an
+  // `<a href>`. `safeRedeemHref` returns null for anything that isn't a
+  // safe http(s) URL — a `javascript:`/`data:` value is neutralized to
+  // "no link" rather than a clickable XSS payload in the native WebView.
+  const redeemHref =
+    order.redeemUrl !== null && order.redeemUrl.length > 0 ? safeRedeemHref(order.redeemUrl) : null;
   const hasRedemption =
     (order.redeemCode !== null && order.redeemCode.length > 0) ||
     (order.redeemPin !== null && order.redeemPin.length > 0) ||
-    (order.redeemUrl !== null && order.redeemUrl.length > 0);
+    redeemHref !== null;
   // Surface earned cashback on the row's always-visible line so the
   // user doesn't have to expand to see what they earned. Hide when
   // the backend recorded zero (e.g. a margin-only merchant or a
@@ -138,9 +145,9 @@ function LoopOrderRow({ order }: { order: LoopOrderView }): React.JSX.Element {
               {order.redeemPin !== null && order.redeemPin.length > 0 ? (
                 <RedemptionField label={t('loopList.fields.pin')} value={order.redeemPin} />
               ) : null}
-              {order.redeemUrl !== null && order.redeemUrl.length > 0 ? (
+              {redeemHref !== null ? (
                 <a
-                  href={order.redeemUrl}
+                  href={redeemHref}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center justify-center w-full rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium px-3 py-1.5"

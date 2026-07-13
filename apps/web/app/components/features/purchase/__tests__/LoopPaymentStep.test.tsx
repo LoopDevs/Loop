@@ -188,6 +188,36 @@ describe('LoopPaymentStep — fulfilled redemption', () => {
     expect(link.getAttribute('rel')).toMatch(/noopener/);
   });
 
+  // P2-03 (XSS): a redeemUrl is server/upstream-supplied. Dropped into an
+  // `<a href>` unvalidated, a `javascript:` scheme executes on click —
+  // with app privileges inside the Capacitor native WebView. The scheme
+  // must be gated so a dangerous URL is neutralized to "no live link".
+  it.each([
+    ['javascript:', 'javascript:alert(document.cookie)'],
+    ['data:', 'data:text/html,<script>alert(1)</script>'],
+    ['vbscript:', 'vbscript:msgbox(1)'],
+  ])('does NOT render a %s redeemUrl as a live href', async (_scheme, redeemUrl) => {
+    getLoopOrderMock.mockResolvedValue(
+      mkOrder({
+        state: 'fulfilled',
+        redeemCode: null,
+        redeemPin: null,
+        redeemUrl,
+        ctxOrderId: 'ctx-abc',
+        fulfilledAt: new Date().toISOString(),
+      }),
+    );
+    render(wrap(<LoopPaymentStep create={mkStellarCreate()} />));
+    // The fulfilled panel renders (fallback banner) but NO redemption
+    // anchor — the dangerous scheme is dropped, not passed through.
+    await waitFor(() => screen.getByText(/still coming through/i));
+    expect(screen.queryByRole('link', { name: /Open redemption link/i })).toBeNull();
+    // Belt-and-braces: the raw payload never reaches any href attribute.
+    for (const anchor of document.querySelectorAll('a')) {
+      expect(anchor.getAttribute('href')).not.toBe(redeemUrl);
+    }
+  });
+
   it('renders a fallback banner when all redemption fields are null', async () => {
     getLoopOrderMock.mockResolvedValue(
       mkOrder({
