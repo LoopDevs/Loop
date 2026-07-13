@@ -36,7 +36,12 @@ export function Avatar({ name, src, size = 'md', className = '' }: AvatarProps):
     return (
       <img
         src={src}
-        alt={name ?? 'Account'}
+        // `??` only substitutes for null/undefined, so an empty or
+        // whitespace-only name would yield `alt=""` — marking a
+        // meaningful account image as decorative and hiding the identity
+        // from AT. `trim() || 'Account'` also treats blank names as
+        // missing, matching how `initials()` below handles them.
+        alt={name?.trim() || 'Account'}
         className={`${base} object-cover border border-line`}
       />
     );

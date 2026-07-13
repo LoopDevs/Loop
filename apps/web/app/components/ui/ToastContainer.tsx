@@ -34,7 +34,11 @@ export function ToastContainer(): React.JSX.Element | null {
             <button
               type="button"
               onClick={() => removeToast(toast.id)}
-              className="text-white/70 hover:text-white text-lg leading-none"
+              // WCAG 2.5.8 (AA) requires a >=24x24 CSS-px target. The bare
+              // `×` glyph is far smaller, so we grow the hit box to a
+              // 24x24 minimum and center the glyph within it — the visible
+              // `×` size and the toast row layout are unchanged.
+              className="inline-flex items-center justify-center min-h-[24px] min-w-[24px] text-white/70 hover:text-white text-lg leading-none"
               aria-label="Dismiss"
             >
               &times;
