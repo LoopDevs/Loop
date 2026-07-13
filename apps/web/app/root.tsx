@@ -29,6 +29,7 @@ import { setKeyboardAccessoryBarVisible } from '~/native/keyboard';
 import { OfflineBanner } from '~/components/ui/OfflineBanner';
 import { NativeBackButton } from '~/components/features/NativeBackButton';
 import { ToastContainer } from '~/components/ui/ToastContainer';
+import { SessionExpiredPrompt } from '~/components/features/SessionExpiredPrompt';
 import { useAuthStore } from '~/stores/auth.store';
 import { useUiStore } from '~/stores/ui.store';
 import { buildSecurityHeaders } from '~/utils/security-headers';
@@ -515,6 +516,11 @@ function NativeShell({ children }: { children: React.ReactNode }): React.JSX.Ele
       <OfflineBanner />
       <NativeBackButton />
       <ToastContainer />
+      {/* FE-40: app-wide re-auth prompt. Subscribes to the transport's
+          centralized session-expiry event and renders a "sign in again"
+          prompt when a mid-flow 401 kills the session, instead of the
+          call site's generic error. */}
+      <SessionExpiredPrompt />
       <div
         className={
           isNative

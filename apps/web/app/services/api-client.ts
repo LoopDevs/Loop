@@ -1,7 +1,79 @@
-import { ApiException, DEFAULT_CLIENT_IDS } from '@loop/shared';
+import { ApiException, ApiErrorCode, DEFAULT_CLIENT_IDS } from '@loop/shared';
 import type { RefreshRequest } from '@loop/shared';
 import { API_BASE } from './config';
 import { parseErrorResponse } from './parse-error-response';
+
+/**
+ * FE-40: centralized session-expiry handler hook.
+ *
+ * When an authenticated request's session is definitively dead — a 401
+ * whose one silent refresh ALSO fails — the transport used to just clear
+ * the auth store and rethrow, leaving each call site to render a generic
+ * "something went wrong" error (e.g. the purchase flow's "Failed to
+ * create order. Please try again."). A user whose session lapsed
+ * mid-purchase saw an opaque failure, retried into more 401s, and could
+ * lose their in-progress action — there was no single place that said
+ * "your session expired, sign in again".
+ *
+ * This is that single place. The transport stays UI-free: it does NOT
+ * import or render any prompt. It only calls injected listeners with a
+ * typed event; the app layer subscribes (see
+ * `~/components/features/SessionExpiredPrompt`) and renders the re-auth
+ * prompt. Callers register via `onSessionExpired`, which returns an
+ * unsubscribe function.
+ *
+ * Step-up challenges (STEP_UP_*) are deliberately exempt at the emit
+ * site — those have their own re-auth dance (`useAdminStepUp`) and must
+ * not be hijacked into a full re-login.
+ */
+export interface SessionExpiredEvent {
+  /** Backend error code on the 401 that ended the session (e.g. UNAUTHORIZED). */
+  code: string;
+  /** Correlation id, when the response carried one. */
+  requestId: string | undefined;
+}
+
+type SessionExpiredListener = (event: SessionExpiredEvent) => void;
+
+const sessionExpiredListeners = new Set<SessionExpiredListener>();
+
+/**
+ * Subscribe to centralized session-expiry events. Returns an
+ * unsubscribe function — call it on unmount so a re-mounted subscriber
+ * doesn't stack duplicate listeners.
+ */
+export function onSessionExpired(listener: SessionExpiredListener): () => void {
+  sessionExpiredListeners.add(listener);
+  return () => {
+    sessionExpiredListeners.delete(listener);
+  };
+}
+
+function emitSessionExpired(event: SessionExpiredEvent): void {
+  for (const listener of sessionExpiredListeners) {
+    try {
+      listener(event);
+    } catch {
+      // A subscriber throwing must never break the request-teardown
+      // path — swallow so every listener still runs and the original
+      // ApiException still propagates to the caller.
+    }
+  }
+}
+
+/**
+ * FE-40: 401 codes that are NOT a dead-session signal. Admin step-up
+ * challenges are a re-auth flow of their own (`useAdminStepUp` mints a
+ * fresh `X-Admin-Step-Up` token and retries) — surfacing a full
+ * "sign in again" re-auth prompt for them would hijack that flow.
+ */
+const SESSION_EXPIRY_EXEMPT_CODES = new Set<string>([
+  ApiErrorCode.STEP_UP_REQUIRED,
+  ApiErrorCode.STEP_UP_INVALID,
+  ApiErrorCode.STEP_UP_SUBJECT_MISMATCH,
+  ApiErrorCode.STEP_UP_PURPOSE_MISMATCH,
+  ApiErrorCode.STEP_UP_UNAVAILABLE,
+]);
 
 // Browsers have no default fetch timeout. Without this, a backend that hangs
 // (stuck upstream, bad network) would leave the UI spinning forever.
@@ -281,6 +353,15 @@ export async function authenticatedRequest<T>(
       }
       // Refresh also failed — clear stale session
       useAuthStore.getState().clearSession();
+      // FE-40: the session is now definitively dead. Emit the
+      // centralized session-expiry event so the app renders a clear
+      // "sign in again" re-auth prompt instead of the call site's
+      // generic error. Step-up challenges (STEP_UP_*) are exempt —
+      // they own their re-auth dance (`useAdminStepUp`) and must not
+      // be hijacked into a full re-login.
+      if (!SESSION_EXPIRY_EXEMPT_CODES.has(err.code)) {
+        emitSessionExpired({ code: err.code, requestId: err.requestId });
+      }
     }
     throw err;
   }

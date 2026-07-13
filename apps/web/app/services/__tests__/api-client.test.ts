@@ -22,7 +22,7 @@ vi.mock('~/native/platform', () => ({
   getPlatform: () => mockGetPlatform(),
 }));
 
-import { apiRequest, authenticatedRequest, tryRefresh } from '../api-client';
+import { apiRequest, authenticatedRequest, tryRefresh, onSessionExpired } from '../api-client';
 import { ApiException } from '@loop/shared';
 import { useAuthStore } from '~/stores/auth.store';
 
@@ -520,5 +520,102 @@ describe('authenticatedRequest — admin step-up header (ADR 028)', () => {
     const retryHeaders = retryInit.headers as Record<string, string>;
     expect(retryHeaders['X-Admin-Step-Up']).toBe('fresh-step-up-jwt');
     expect(retryHeaders.Authorization).toBe('Bearer at-fresh');
+  });
+});
+
+/**
+ * FE-40: centralized session-expiry handler. When an authenticated
+ * request's session is definitively dead (a 401 whose silent refresh
+ * also fails), the transport emits a session-expiry event so the app
+ * can render a "sign in again" re-auth prompt — instead of leaving each
+ * call site to surface a generic error. Step-up 401s (STEP_UP_*) are
+ * exempt: they own their own re-auth flow and must not be hijacked.
+ */
+describe('authenticatedRequest — session-expiry handler (FE-40)', () => {
+  beforeEach(async () => {
+    vi.restoreAllMocks();
+    mockGetRefreshToken.mockReset();
+    mockStoreRefreshToken.mockReset();
+    mockClearRefreshToken.mockReset();
+    mockGetPlatform.mockReturnValue('web');
+    useAuthStore.getState().clearSession();
+    const { useAdminStepUpStore } = await import('~/stores/admin-step-up.store');
+    useAdminStepUpStore.getState().clear();
+  });
+
+  it('fires the session-expiry handler when a 401 refresh also fails (not a generic error)', async () => {
+    useAuthStore.getState().setAccessToken('at-stale');
+    mockGetRefreshToken.mockResolvedValue('rt-stored');
+    vi.spyOn(globalThis, 'fetch')
+      // First: 401 with a stale access token
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ code: 'UNAUTHORIZED', message: 'expired' }), {
+          status: 401,
+        }),
+      )
+      // Refresh: also 401 → refresh token is dead → session is gone
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ code: 'UNAUTHORIZED', message: 'revoked' }), {
+          status: 401,
+        }),
+      );
+
+    const onExpired = vi.fn();
+    const unsubscribe = onSessionExpired(onExpired);
+    try {
+      await expect(authenticatedRequest('/api/orders/loop')).rejects.toMatchObject({
+        status: 401,
+      });
+    } finally {
+      unsubscribe();
+    }
+
+    expect(onExpired).toHaveBeenCalledTimes(1);
+    expect(onExpired).toHaveBeenCalledWith(expect.objectContaining({ code: 'UNAUTHORIZED' }));
+    // Session was torn down as part of the same path.
+    expect(useAuthStore.getState().accessToken).toBeNull();
+  });
+
+  it('does NOT fire the session-expiry handler for a step-up 401 (own re-auth flow)', async () => {
+    useAuthStore.getState().setAccessToken('at-memory');
+    // Null refresh token so tryRefresh returns null and control reaches
+    // the same session-teardown branch the genuine-expiry case hits —
+    // proving the exemption is the STEP_UP_REQUIRED code, not a
+    // different code path.
+    mockGetRefreshToken.mockResolvedValue(null);
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ code: 'STEP_UP_REQUIRED', message: 'step-up required' }), {
+        status: 401,
+      }),
+    );
+
+    const onExpired = vi.fn();
+    const unsubscribe = onSessionExpired(onExpired);
+    try {
+      await expect(
+        authenticatedRequest('/api/admin/users/u1/credit-adjustments', {
+          method: 'POST',
+          withStepUp: true,
+        }),
+      ).rejects.toMatchObject({ code: 'STEP_UP_REQUIRED' });
+    } finally {
+      unsubscribe();
+    }
+
+    expect(onExpired).not.toHaveBeenCalled();
+  });
+
+  it('unsubscribe() stops further session-expiry notifications', async () => {
+    useAuthStore.getState().setAccessToken('at-stale');
+    mockGetRefreshToken.mockResolvedValue('rt-stored');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ code: 'UNAUTHORIZED', message: 'expired' }), { status: 401 }),
+    );
+
+    const onExpired = vi.fn();
+    onSessionExpired(onExpired)(); // subscribe then immediately unsubscribe
+
+    await expect(authenticatedRequest('/api/orders/loop')).rejects.toMatchObject({ status: 401 });
+    expect(onExpired).not.toHaveBeenCalled();
   });
 });
