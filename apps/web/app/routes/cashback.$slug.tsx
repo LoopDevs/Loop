@@ -117,7 +117,7 @@ function CashbackMerchantLandingBody(): React.JSX.Element {
             name={query.data?.name ?? fallbackName}
             logoUrl={query.data?.logoUrl ?? null}
             userCashbackPct={query.data?.userCashbackPct ?? null}
-            merchantId={query.data?.id ?? slug}
+            merchantSlug={query.data?.slug ?? slug}
             isPending={query.isPending}
           />
         )}
@@ -162,13 +162,13 @@ function HeroCopy({
   name,
   logoUrl,
   userCashbackPct,
-  merchantId,
+  merchantSlug,
   isPending,
 }: {
   name: string;
   logoUrl: string | null;
   userCashbackPct: string | null;
-  merchantId: string;
+  merchantSlug: string;
   isPending: boolean;
 }): React.JSX.Element {
   const { t } = useTranslation('cashback');
@@ -203,7 +203,7 @@ function HeroCopy({
         </p>
       )}
       <Link
-        to={`/gift-card/${encodeURIComponent(merchantId)}`}
+        to={`/gift-card/${encodeURIComponent(merchantSlug)}`}
         className="inline-block rounded-lg bg-blue-600 px-6 py-3 text-base font-semibold text-white hover:bg-blue-700"
       >
         {t('merchant.hero.shopCta', { name })}

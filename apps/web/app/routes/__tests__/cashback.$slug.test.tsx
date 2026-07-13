@@ -86,6 +86,32 @@ describe('<CashbackMerchantLanding />', () => {
     });
   });
 
+  // AUD-07: the primary conversion CTA must link into the gift-card
+  // purchase route by *slug* — that route resolves `:name` via
+  // `/api/merchants/by-slug/:name` (useMerchantBySlug), so a merchant
+  // *id* produces a dead link. Assert the href carries the resolved
+  // slug, not the id.
+  it('links the shop CTA to the gift-card route by slug, not merchant id', async () => {
+    mocks.getPublicMerchant.mockResolvedValue({
+      id: 'm-1',
+      name: 'Argos',
+      slug: 'argos',
+      logoUrl: null,
+      userCashbackPct: '5.50',
+      asOf: new Date().toISOString(),
+    });
+    renderRoute('/cashback/argos');
+    // Wait until the merchant query has *resolved* — before that, the
+    // component renders the URL slug as a fallback (also a valid slug),
+    // which would mask the id-vs-slug bug. The cashback pct only paints
+    // once `query.data` is present.
+    await screen.findByText(/5\.50/);
+    const cta = screen.getByRole('link', { name: /shop argos/i });
+    // Must be the slug (`argos`), never the merchant id (`m-1`) — the
+    // gift-card route resolves `:name` by slug via /merchants/by-slug.
+    expect(cta.getAttribute('href')).toBe('/gift-card/argos');
+  });
+
   it('renders a not-found state for a 404 (e.g. country-filtered-out merchant)', async () => {
     mocks.getPublicMerchant.mockRejectedValue(
       new ApiException(404, { code: 'NOT_FOUND', message: 'not found' }),
