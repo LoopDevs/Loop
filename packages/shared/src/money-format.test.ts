@@ -122,6 +122,69 @@ describe('formatMinorCurrency — locale + unknown-currency fallback', () => {
   });
 });
 
+describe('formatMinorCurrency — currency minor-unit exponent (AUD-13)', () => {
+  // The split must derive from the currency's real exponent, not a hardcoded
+  // 2. Against the old `/100n` split, KWD 1234 came out "KWD 12.34" (10x too
+  // big, wrong decimal count) and JPY 1234 came out "¥12.34".
+  //
+  // ICU renders code-display currencies (KWD/BHD) and some locales with a
+  // non-breaking space (U+00A0 / U+202F) between the code and the number, and
+  // that codepoint varies across ICU/V8 versions. `norm` collapses it to an
+  // ASCII space so the assertions pin the load-bearing part — the three-decimal
+  // split "1.234" vs the buggy "12.34" — and not the engine's whitespace glyph.
+  const norm = (s: string): string => s.replace(/[\u00A0\u202F]/g, ' ');
+
+  it('formats a 3-decimal currency (KWD) with three fraction digits', () => {
+    // 1234 minor units = 1.234 KWD, NOT 12.34.
+    expect(norm(formatMinorCurrency(1234n, 'KWD'))).toBe('KWD 1.234');
+  });
+
+  it('groups a large 3-decimal (KWD) amount and keeps three fraction digits', () => {
+    expect(norm(formatMinorCurrency(1234567n, 'KWD'))).toBe('KWD 1,234.567');
+  });
+
+  it('formats another 3-decimal currency (BHD) correctly', () => {
+    expect(norm(formatMinorCurrency(1234n, 'BHD'))).toBe('BHD 1.234');
+  });
+
+  it('handles a negative 3-decimal amount', () => {
+    expect(norm(formatMinorCurrency(-1234n, 'KWD'))).toBe('-KWD 1.234');
+  });
+
+  it('formats a 0-decimal currency (JPY) with no fraction and full magnitude', () => {
+    // 1234 minor units = ¥1,234 (yen has no sub-unit), NOT ¥12.34. The yen
+    // symbol carries no separator, so these stay exact.
+    expect(formatMinorCurrency(1234n, 'JPY')).toBe('¥1,234');
+    expect(formatMinorCurrency(-1234n, 'JPY')).toBe('-¥1,234');
+  });
+
+  it('is exact for a large 3-decimal amount past 2^53 minor units', () => {
+    // Proves the bigint split uses the /1000 divisor without a Number cast.
+    expect(norm(formatMinorCurrency('9007199254740993456', 'KWD'))).toBe(
+      'KWD 9,007,199,254,740,993.456',
+    );
+  });
+
+  it('respects an explicit fractionDigits:0 override on a 3-decimal currency', () => {
+    // Chart/summary variant: drop the fraction but keep the correct major.
+    expect(norm(formatMinorCurrency(1234n, 'KWD', { fractionDigits: 0 }))).toBe('KWD 1');
+  });
+
+  it('keeps the 3-decimal split under a non-en-US locale', () => {
+    // de-DE: '.' groups, ',' is the decimal separator.
+    expect(norm(formatMinorCurrency(1234567n, 'KWD', { locale: 'de-DE' }))).toBe('1.234,567 KWD');
+  });
+
+  it('leaves 2-decimal currencies byte-identical (USD/GBP/EUR unchanged)', () => {
+    // Guards the "must stay exactly as before" contract for the common case.
+    // Symbol currencies carry no separator, so these assert the exact bytes.
+    expect(formatMinorCurrency(1234n, 'USD')).toBe('$12.34');
+    expect(formatMinorCurrency(4200n, 'GBP')).toBe('£42.00');
+    expect(formatMinorCurrency(2550n, 'EUR')).toBe('€25.50');
+    expect(formatMinorCurrency(19999n, 'USD', { fractionDigits: 0 })).toBe('$199');
+  });
+});
+
 describe('pctBigint', () => {
   it('formats a basic ratio', () => {
     expect(pctBigint(50n, 200n)).toBe('25.0%');

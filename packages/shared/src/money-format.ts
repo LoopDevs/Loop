@@ -21,9 +21,13 @@
  */
 
 /**
- * Minor-units → localised currency string with two decimals.
+ * Minor-units → localised currency string, with the fraction width taken
+ * from the currency's own minor-unit exponent (2 for USD/GBP/EUR, 3 for
+ * KWD/BHD/OMR, 0 for JPY) rather than a hardcoded 2 (AUD-13).
  *
- * `formatMinorCurrency(4200n, 'GBP')` → `"£42.00"` (or locale
+ * `formatMinorCurrency(4200n, 'GBP')` → `"£42.00"`,
+ * `formatMinorCurrency(1234n, 'KWD')` → `"KWD 1.234"`,
+ * `formatMinorCurrency(1234n, 'JPY')` → `"¥1,234"` (or locale
  * equivalent).
  *
  * Accepts `bigint | string | number` (A2-1520). Strings come from
@@ -37,9 +41,9 @@
  * major units — `Intl` consumes `bigint` natively and never routes it
  * through a `Number`, so values past 2^53 minor units (≈ $90T in
  * cents — the exact fleet/solvency aggregates this module exists to
- * protect) group correctly instead of silently rounding. The two-
- * decimal fraction (`abs % 100n`, padded) is spliced into the parts
- * stream, so no IEEE-754 division ever touches the displayed digits.
+ * protect) group correctly instead of silently rounding. The fraction
+ * (`abs % 10^exponent`, padded to the exponent) is spliced into the
+ * parts stream, so no IEEE-754 division ever touches the displayed digits.
  *
  * Non-integer numbers are truncated toward zero (`Math.trunc`, dropping
  * any sub-minor-unit fraction) — NOT floored: floor and trunc only
@@ -51,8 +55,9 @@
  * numbers return `"—"` so a bad backend row doesn't render `NaN` to
  * operators.
  *
- * `opts.fractionDigits` (default `2`) drops to `0` for summary/chart
- * surfaces ("$1,234" bars). `opts.locale` (default `en-US`, the
+ * `opts.fractionDigits` (default: the currency's own exponent) drops to
+ * `0` for summary/chart surfaces ("$1,234" bars). `opts.locale` (default
+ * `en-US`, the
  * admin-facing policy — A2-1521 + `apps/web/app/utils/locale.ts`)
  * lets user-facing surfaces pass the browser locale.
  *
@@ -69,26 +74,35 @@ export function formatMinorCurrency(
 ): string {
   const big = coerceMinor(minor);
   if (big === null) return '—';
-  const fractionDigits = opts?.fractionDigits ?? 2;
   const locale = opts?.locale ?? 'en-US';
+  // Derive the minor-unit exponent from the currency itself (USD → 2,
+  // JPY → 0, KWD/BHD/OMR → 3) instead of hardcoding 2, so both the
+  // minor→major divisor and the fraction width track the real currency
+  // (AUD-13). An explicit `opts.fractionDigits: 0` still forces the
+  // whole-units chart/summary variant; a 0-exponent currency (JPY) has
+  // no fraction to show either way.
+  const exponent = currencyFractionDigits(currency, locale);
+  const showFraction = opts?.fractionDigits !== 0 && exponent > 0;
   const neg = big < 0n;
   const abs = neg ? -big : big;
   // Bigint-exact split: major units stay a bigint so Intl groups them
-  // without a lossy Number cast; the fraction is a fixed-width string.
-  const major = abs / 100n;
-  const fracStr = (abs % 100n).toString().padStart(2, '0');
+  // without a lossy Number cast; the fraction is a fixed-width string
+  // sized to the currency's exponent (2 for USD, 3 for KWD, …).
+  const divisor = 10n ** BigInt(exponent);
+  const major = abs / divisor;
+  const fracStr = (abs % divisor).toString().padStart(exponent, '0');
   const sign = neg ? '-' : '';
   try {
     // Format the integer-major bigint with zero fraction, then splice
-    // our own `.NN` in (2-decimal case) so the whole part is never
-    // coerced through a Number.
+    // our own fraction in so the whole part is never coerced through a
+    // Number.
     const nf = new Intl.NumberFormat(locale, {
       style: 'currency',
       currency,
       minimumFractionDigits: 0,
       maximumFractionDigits: 0,
     });
-    if (fractionDigits === 0) {
+    if (!showFraction) {
       const formatted = nf.format(major);
       return neg ? `-${formatted}` : formatted;
     }
@@ -115,8 +129,28 @@ export function formatMinorCurrency(
     }
     return neg ? `-${out}` : out;
   } catch {
-    const frac = fractionDigits === 0 ? '' : `.${fracStr}`;
+    const frac = showFraction ? `.${fracStr}` : '';
     return `${sign}${major.toString()}${frac} ${currency}`;
+  }
+}
+
+/**
+ * The currency's minor-unit exponent (USD → 2, JPY → 0, KWD/BHD/OMR → 3)
+ * from `Intl`'s CLDR data, so the minor→major split and fraction width
+ * track the real currency instead of a hardcoded 2 (AUD-13). Falls back
+ * to 2 for an unknown/invalid ISO code — the same two-decimal shape the
+ * caller's `"<amount> <code>"` fallback path renders.
+ */
+function currencyFractionDigits(currency: string, locale: string): number {
+  try {
+    // `maximumFractionDigits` is typed `number | undefined`; fall back to the
+    // 2-decimal default if a runtime ever leaves it unset.
+    return (
+      new Intl.NumberFormat(locale, { style: 'currency', currency }).resolvedOptions()
+        .maximumFractionDigits ?? 2
+    );
+  } catch {
+    return 2;
   }
 }
 
