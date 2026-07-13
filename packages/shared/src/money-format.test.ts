@@ -27,8 +27,15 @@ describe('formatMinorCurrency — basic rendering', () => {
     expect(formatMinorCurrency('-1500', 'USD')).toBe('-$15.00');
   });
 
-  it('floors non-integer numbers to minor-unit precision', () => {
+  it('truncates a non-integer number toward zero to minor-unit precision (COR-04)', () => {
+    // Positive: trunc and floor agree — the sub-cent fraction is dropped.
     expect(formatMinorCurrency(1500.9, 'USD')).toBe('$15.00');
+    // Negative: truncation toward zero keeps the magnitude at 1500 → -$15.00.
+    // A floor would push it AWAY from zero to -1501 → -$15.01, so pinning
+    // -$15.00 here locks the rounding DIRECTION and catches a silent flip
+    // of `Math.trunc` to `Math.floor`/round. (Minor units are integers in
+    // practice, so this path is defensive — but the direction still matters.)
+    expect(formatMinorCurrency(-1500.9, 'USD')).toBe('-$15.00');
   });
 
   it('returns em-dash for non-finite numbers', () => {

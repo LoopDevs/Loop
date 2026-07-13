@@ -41,9 +41,15 @@
  * decimal fraction (`abs % 100n`, padded) is spliced into the parts
  * stream, so no IEEE-754 division ever touches the displayed digits.
  *
- * Non-integer numbers are floored (drops to minor-unit precision);
- * non-finite numbers return `"—"` so a bad backend row doesn't
- * render `NaN` to operators.
+ * Non-integer numbers are truncated toward zero (`Math.trunc`, dropping
+ * any sub-minor-unit fraction) — NOT floored: floor and trunc only
+ * differ for a negative fractional input, and this drops the magnitude's
+ * fraction symmetrically about zero. In practice minor units are whole
+ * cents/stroops (bigint and string inputs are always integers; the only
+ * `number` call sites pass integers or pre-rounded values), so this
+ * conversion is a no-op on the values that actually occur. Non-finite
+ * numbers return `"—"` so a bad backend row doesn't render `NaN` to
+ * operators.
  *
  * `opts.fractionDigits` (default `2`) drops to `0` for summary/chart
  * surfaces ("$1,234" bars). `opts.locale` (default `en-US`, the
@@ -118,6 +124,9 @@ function coerceMinor(minor: bigint | string | number): bigint | null {
   if (typeof minor === 'bigint') return minor;
   if (typeof minor === 'number') {
     if (!Number.isFinite(minor)) return null;
+    // Truncate toward zero (not floor) so a fractional magnitude drops its
+    // sub-minor-unit part symmetrically about zero. Minor units are whole
+    // in practice, so this only ever fires defensively.
     return BigInt(Math.trunc(minor));
   }
   try {

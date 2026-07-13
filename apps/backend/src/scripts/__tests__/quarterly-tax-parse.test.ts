@@ -1,34 +1,30 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
-// `parseQuarter` and `csvField` aren't exported because the script is a
-// CLI entry point — keep the surface narrow. Re-implement the same
-// parsing rules here so a refactor that drifts the script's parsing
-// fails this test on the test side too. This is the strongest
-// invariant-locking we can do without exporting the helpers.
+// AGT-07: exercise the REAL `parseQuarter` / `csvField` from the script,
+// not a hand-duplicated copy. The copy this file used to carry had
+// drifted from the source (it re-implemented an RFC-4180-only escaper
+// and so never covered the X-PRIV-11 formula-injection guard the real
+// `csvField` gained), which meant the suite proved nothing about the
+// code that actually ships.
+//
+// The script imports `../db/client.js` at load, which builds a Postgres
+// pool from `env` at module scope (requiring DATABASE_URL and opening a
+// socket). Stub it so importing the pure parse/format helpers stays
+// side-effect free. The script's own top-level `main()` is guarded
+// behind an entry-point check, so importing it here does not run the CLI.
+vi.mock('../../db/client.js', () => ({
+  db: { execute: vi.fn() },
+  closeDb: vi.fn(),
+}));
 
-function parseQuarter(arg: string): { startsAt: string; endsBefore: string } | null {
-  const match = /^(\d{4})-Q([1-4])$/.exec(arg);
-  if (match === null) return null;
-  const year = Number.parseInt(match[1]!, 10);
-  const quarter = Number.parseInt(match[2]!, 10);
-  const startMonth = (quarter - 1) * 3;
-  const startsAt = new Date(Date.UTC(year, startMonth, 1));
-  const endsBefore = new Date(Date.UTC(year, startMonth + 3, 1));
-  return { startsAt: startsAt.toISOString(), endsBefore: endsBefore.toISOString() };
-}
-
-function csvField(value: unknown): string {
-  if (value === null || value === undefined) return '';
-  const s = String(value);
-  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-  return s;
-}
+import { parseQuarter, csvField } from '../quarterly-tax.js';
 
 describe('quarterly-tax parseQuarter (A4-062)', () => {
   it('Q1 = Jan 1 → Apr 1 (UTC, exclusive end)', () => {
     expect(parseQuarter('2026-Q1')).toEqual({
       startsAt: '2026-01-01T00:00:00.000Z',
       endsBefore: '2026-04-01T00:00:00.000Z',
+      label: '2026-Q1',
     });
   });
 
@@ -36,7 +32,12 @@ describe('quarterly-tax parseQuarter (A4-062)', () => {
     expect(parseQuarter('2026-Q4')).toEqual({
       startsAt: '2026-10-01T00:00:00.000Z',
       endsBefore: '2027-01-01T00:00:00.000Z',
+      label: '2026-Q4',
     });
+  });
+
+  it('carries the original token as `label` for filenames / report ids', () => {
+    expect(parseQuarter('2030-Q3')?.label).toBe('2030-Q3');
   });
 
   it('rejects malformed inputs', () => {
@@ -63,5 +64,31 @@ describe('quarterly-tax csvField (A4-062)', () => {
   it('emits empty string for null / undefined', () => {
     expect(csvField(null)).toBe('');
     expect(csvField(undefined)).toBe('');
+  });
+
+  // X-PRIV-11: the real `csvField` delegates to the shared `csvEscape`,
+  // which prefixes a spreadsheet-formula leading char with `'` so an
+  // accountant opening the export in Excel can't have a `merchant_id`-
+  // shaped cell evaluated as a formula. The stale hand-copy never had
+  // this guard, so these assertions are exactly what "test the real
+  // function" buys us.
+  it('neutralises spreadsheet formula-injection leading chars', () => {
+    expect(csvField('=1+1')).toBe("'=1+1");
+    expect(csvField('@SUM(A1)')).toBe("'@SUM(A1)");
+    // Formula char AND an RFC-4180 special (quote/comma): guard first,
+    // then wrap-and-double.
+    expect(csvField('=HYPERLINK("http://evil","x")')).toBe(`"'=HYPERLINK(""http://evil"",""x"")"`);
+  });
+
+  it('leaves signed numeric literals intact so finance SUM/sort still works', () => {
+    // A bare negative/positive number is not an injection vector — prefixing
+    // it with `'` would corrupt the amount into text.
+    expect(csvField('-50')).toBe('-50');
+    expect(csvField('+1')).toBe('+1');
+    expect(csvField(-50)).toBe('-50');
+  });
+
+  it('still guards a leading - / + when the rest of the cell is non-numeric', () => {
+    expect(csvField('-1+cmd|calc')).toBe("'-1+cmd|calc");
   });
 });

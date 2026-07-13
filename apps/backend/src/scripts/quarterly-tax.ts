@@ -46,7 +46,7 @@ interface QuarterRange {
   label: string;
 }
 
-function parseQuarter(arg: string): QuarterRange | null {
+export function parseQuarter(arg: string): QuarterRange | null {
   const match = /^(\d{4})-Q([1-4])$/.exec(arg);
   if (match === null) return null;
   const year = Number.parseInt(match[1]!, 10);
@@ -73,7 +73,7 @@ function parseQuarter(arg: string): QuarterRange | null {
  * leading chars with `'` so a `merchant_id`-shaped value can't be
  * evaluated as a formula.
  */
-function csvField(value: unknown): string {
+export function csvField(value: unknown): string {
   if (value === null || value === undefined) return '';
   return csvEscape(String(value));
 }
@@ -262,12 +262,22 @@ async function main(): Promise<number> {
   return 0;
 }
 
-const code = await main()
-  .catch((err: unknown) => {
-    console.error('quarterly-tax: failed', err);
-    return 2;
-  })
-  .finally(() => {
-    void closeDb();
-  });
-process.exit(code);
+// Only run the CLI when this module is the process entry point (`tsx
+// src/scripts/quarterly-tax.ts …`). Importing it — e.g. the unit tests
+// that exercise `parseQuarter` / `csvField` directly — must NOT run
+// `main()`, open a DB pool, or `process.exit()`. `process.argv[1]` is
+// the invoked script path; compare it to this module's own path.
+const isEntrypoint =
+  process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (isEntrypoint) {
+  const code = await main()
+    .catch((err: unknown) => {
+      console.error('quarterly-tax: failed', err);
+      return 2;
+    })
+    .finally(() => {
+      void closeDb();
+    });
+  process.exit(code);
+}

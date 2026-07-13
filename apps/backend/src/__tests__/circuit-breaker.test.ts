@@ -276,6 +276,49 @@ describe('createCircuitBreaker', () => {
     expect(cb.getState()).toBe('closed');
     // Just verifying it instantiates without errors — defaults are 5 failures, 30s cooldown
   });
+
+  // TST-01: pin the DOCUMENTED defaults (failureThreshold 5, cooldownMs
+  // 30_000 — see the CircuitBreakerOptions JSDoc) so a silent change to
+  // either constant is caught here rather than in production.
+  it('defaults failureThreshold to 5 (4 failures stay CLOSED, the 5th opens)', async () => {
+    const cb = createCircuitBreaker();
+
+    // Four consecutive 5xx must NOT trip the breaker on the default threshold.
+    for (let i = 0; i < 4; i++) {
+      mockFetch.mockResolvedValueOnce(new Response('err', { status: 500 }));
+      await cb.fetch('http://x');
+    }
+    expect(cb.getState()).toBe('closed');
+
+    // The fifth failure reaches the default threshold and opens it.
+    mockFetch.mockResolvedValueOnce(new Response('err', { status: 500 }));
+    await cb.fetch('http://x');
+    expect(cb.getState()).toBe('open');
+  });
+
+  it('defaults cooldownMs to 30_000 (OPEN stays closed to probes until 30s elapses)', async () => {
+    vi.useFakeTimers();
+    try {
+      const cb = createCircuitBreaker(); // default threshold 5, cooldown 30_000
+      for (let i = 0; i < 5; i++) {
+        mockFetch.mockResolvedValueOnce(new Response('err', { status: 500 }));
+        await cb.fetch('http://x');
+      }
+      expect(cb.getState()).toBe('open');
+
+      // One millisecond short of the default cooldown: still OPEN, no probe.
+      vi.advanceTimersByTime(29_999);
+      expect(cb.isAvailable()).toBe(false);
+      expect(cb.getState()).toBe('open');
+
+      // At exactly 30_000ms the cooldown has elapsed → HALF_OPEN, probe allowed.
+      vi.advanceTimersByTime(1);
+      expect(cb.isAvailable()).toBe(true);
+      expect(cb.getState()).toBe('half_open');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('CircuitOpenError', () => {
