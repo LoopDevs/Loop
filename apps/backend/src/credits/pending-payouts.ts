@@ -222,6 +222,25 @@ export async function listClaimablePayouts(opts: {
           ${pendingPayouts.state} = 'submitted'
           AND ${pendingPayouts.submittedAt} < NOW() - make_interval(secs => ${opts.staleSeconds})
           AND ${pendingPayouts.attempts} < ${opts.maxAttempts}
+        )
+        OR (
+          -- FT-compensate-guard (liveness): re-pick a retry-EXHAUSTED
+          -- (attempts >= maxAttempts) 'submitted' row that still carries a
+          -- persisted tx hash. This is a payout whose final transient_horizon
+          -- attempt was DEFERRED (in-flight-ambiguous 404) rather than
+          -- compensated, to avoid double-paying a tx that might still land.
+          -- The clause above excludes it (attempts >= maxAttempts), so without
+          -- this it would wedge in 'submitted' forever — never converging,
+          -- failing, or compensating (a stranded-funds liveness bug). Re-pick
+          -- it once its in-flight window has passed so payOne's
+          -- resolveExhaustedInFlightPayout can settle it off its persisted hash
+          -- (converge if it landed; terminalize + auto-compensate if provably
+          -- dead). payOne routes exhausted rows to a resolve-ONLY path — it is
+          -- never re-submitted here — so this cannot double-pay.
+          ${pendingPayouts.state} = 'submitted'
+          AND ${pendingPayouts.txHash} IS NOT NULL
+          AND ${pendingPayouts.attempts} >= ${opts.maxAttempts}
+          AND ${pendingPayouts.submittedAt} < NOW() - make_interval(secs => ${opts.staleSeconds})
         )`,
       )
       .orderBy(

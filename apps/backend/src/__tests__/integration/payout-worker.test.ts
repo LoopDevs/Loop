@@ -32,7 +32,7 @@
  * Gated on `LOOP_E2E_DB=1` like the sibling integration suites.
  */
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
-import { asc, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, sql } from 'drizzle-orm';
 
 const RUN_INTEGRATION = process.env['LOOP_E2E_DB'] === '1';
 
@@ -101,7 +101,7 @@ vi.mock('../../discord.js', async (importActual) => {
 });
 
 import { db } from '../../db/client.js';
-import { users, orders, pendingPayouts, userCredits } from '../../db/schema.js';
+import { users, orders, pendingPayouts, userCredits, creditTransactions } from '../../db/schema.js';
 import { getAccountTrustlines } from '../../payments/horizon-trustlines.js';
 import { findOrCreateUserByEmail } from '../../db/users.js';
 import { runPayoutTick } from '../../payments/payout-worker.js';
@@ -343,6 +343,317 @@ describeIf('payout-worker integration — A2-602 watchdog re-claim CAS', () => {
     expect(row!.attempts).toBe(2);
   });
 });
+
+describeIf(
+  'payout-worker integration — money-safety (FT-05 / BK-retryexh double-pay guards)',
+  () => {
+    beforeAll(async () => {
+      await ensureMigrated();
+    });
+
+    beforeEach(async () => {
+      await truncateAllTables();
+      vi.mocked(submitPayout).mockReset();
+      vi.mocked(findOutboundPaymentByMemo).mockReset();
+      vi.mocked(findOutboundPaymentByMemo).mockResolvedValue(null);
+      vi.mocked(getOutboundPaymentByTxHash).mockReset();
+      vi.mocked(getOutboundPaymentByTxHash).mockResolvedValue(null);
+    });
+
+    it('FT-05: watchdog re-pick of an IN-FLIGHT submitted row (persisted hash, 404, recent submit) does NOT re-submit — no double-spend', async () => {
+      // The double-spend the watchdog must never introduce: a row re-picked
+      // while its prior tx is still in flight (submitted to the network, not
+      // yet sealed into a ledger). The authoritative lookup 404s because the
+      // tx is not in a ledger *yet*, but its 60s on-chain timebound has NOT
+      // elapsed since `submittedAt`, so it can still land. Even though the
+      // watchdog (deliberately mis-tuned here with staleSeconds=1) re-picks
+      // the row, the guard must defer the re-submit — otherwise a second tx
+      // goes out and both land.
+      const recent = new Date(Date.now() - 5_000); // 5s ago — well under 60s
+      const { payoutId } = await seedPayout({
+        state: 'submitted',
+        attempts: 1,
+        submittedAt: recent,
+        txHash: 'in-flight-hash',
+      });
+      vi.mocked(getOutboundPaymentByTxHash).mockResolvedValue(null); // 404 — ambiguous
+      // Guard against a red run silently throwing: give submit a value.
+      vi.mocked(submitPayout).mockResolvedValue({ txHash: 'SHOULD-NOT-SUBMIT', ledger: 1 });
+
+      const tick = await runPayoutTick({ ...DEFAULT_TICK_ARGS, watchdogStaleSeconds: 1 });
+
+      // The sacred guard: NO second submit while the prior tx may be in flight.
+      expect(submitPayout).not.toHaveBeenCalled();
+      expect(tick.retriedLater).toBe(1);
+      expect(tick.confirmed).toBe(0);
+
+      // Row is untouched — still submitted, same hash, attempts NOT bumped
+      // (no reclaim happened).
+      const [row] = await db.select().from(pendingPayouts).where(eq(pendingPayouts.id, payoutId));
+      expect(row!.state).toBe('submitted');
+      expect(row!.txHash).toBe('in-flight-hash');
+      expect(row!.attempts).toBe(1);
+    });
+
+    it('FT-05: once the prior tx has provably expired (stale submit + 404), the watchdog DOES re-submit', async () => {
+      // The liveness complement: a genuinely-stale re-pick (submittedAt long
+      // past the tx timebound) means the 404 truly is "never landed", so the
+      // fresh submit proceeds exactly as before — the guard only defers the
+      // in-flight window, it never wedges a legitimately-recoverable row.
+      const { payoutId } = await seedPayout({
+        state: 'submitted',
+        attempts: 1,
+        submittedAt: new Date(Date.now() - 600_000), // 10 min ago
+        txHash: 'long-dead-hash',
+      });
+      vi.mocked(getOutboundPaymentByTxHash).mockResolvedValue(null);
+      vi.mocked(submitPayout).mockResolvedValueOnce({ txHash: 'fresh-resubmit', ledger: 7 });
+
+      const tick = await runPayoutTick({ ...DEFAULT_TICK_ARGS, watchdogStaleSeconds: 300 });
+      expect(tick.confirmed).toBe(1);
+      expect(submitPayout).toHaveBeenCalledTimes(1);
+
+      const [row] = await db.select().from(pendingPayouts).where(eq(pendingPayouts.id, payoutId));
+      expect(row!.state).toBe('confirmed');
+      expect(row!.attempts).toBe(2); // reclaim bumped it
+    });
+
+    it('BK-retryexh: transient_horizon at retry-exhaustion whose tx actually landed converges the ALREADY-CLAIMED row to confirmed', async () => {
+      // CF2-07 retry-exhaustion: the final attempt fails ambiguously
+      // (transient_horizon) but its tx actually landed (onSigned persisted
+      // the hash mid-attempt). The row is ALREADY claimed (`submitted` in the
+      // DB) by this point, so the terminal convergence must transition it to
+      // `confirmed`. The pre-fix `convergeConfirmed` keyed its claim step off
+      // the stale in-memory `row.state='pending'`, no-oped the CAS, and left
+      // the landed payout stranded in `submitted` (mislabelled skippedRace).
+      const { payoutId } = await seedPayout({ state: 'pending', attempts: 4 });
+      vi.mocked(submitPayout).mockImplementation(
+        async (args: { onSigned?: (h: string) => Promise<void> | void }) => {
+          // Persist the hash (real recordPayoutTxHash) as a live submit would,
+          // THEN fail ambiguously — the tx is on-chain but we didn't confirm.
+          await args.onSigned?.('landed-at-exhaustion');
+          throw new PayoutSubmitError('transient_horizon', 'ambiguous timeout at exhaustion');
+        },
+      );
+      // getPayoutForAdmin is REAL here → it reads the persisted hash from the
+      // DB row; the authoritative lookup (mocked) proves it landed.
+      vi.mocked(getOutboundPaymentByTxHash).mockImplementation(async (hash: string) =>
+        hash === 'landed-at-exhaustion' ? { landed: true } : null,
+      );
+
+      const tick = await runPayoutTick({ ...DEFAULT_TICK_ARGS, maxAttempts: 5 });
+
+      // NOT failed, NOT compensated — converged to confirmed.
+      expect(tick.failed).toBe(0);
+      expect(tick.skippedAlreadyLanded).toBe(1);
+
+      const [row] = await db.select().from(pendingPayouts).where(eq(pendingPayouts.id, payoutId));
+      expect(row!.state).toBe('confirmed');
+      expect(row!.txHash).toBe('landed-at-exhaustion');
+      // The row was never terminally failed → no auto-compensation debt.
+      expect(row!.failedAt).toBeNull();
+    });
+
+    it('FT-compensate-guard: transient_horizon at retry-exhaustion with an IN-FLIGHT 404 does NOT terminally fail/compensate — defers, row stays submitted', async () => {
+      // The double-pay the money verifier flagged: at retry-exhaustion the final
+      // attempt fails ambiguously (transient_horizon) after `onSigned` persisted
+      // the hash, and the authoritative lookup 404s because the tx is still in
+      // flight (submitted to the network, not yet sealed). The claim that
+      // preceded this submit stamped `submittedAt = NOW`, so the tx's 60s
+      // timebound has NOT elapsed — it can still land. The pre-fix path
+      // `markPayoutFailed` + `autoCompensateFailedWithdrawal`'d here, so a
+      // late-landing tx = user paid on-chain AND compensated. The guard must
+      // instead DEFER: leave the row `submitted` for the watchdog to re-resolve.
+      const { payoutId, userId } = await seedPayout({ state: 'pending', attempts: 4 });
+      vi.mocked(submitPayout).mockImplementation(
+        async (args: { onSigned?: (h: string) => Promise<void> | void }) => {
+          // Live submit persists the hash, THEN the response is lost (blackhole)
+          // — the tx may still be sealing.
+          await args.onSigned?.('in-flight-at-exhaustion');
+          throw new PayoutSubmitError('transient_horizon', 'blackhole at exhaustion');
+        },
+      );
+      // getPayoutForAdmin is REAL → reads the just-persisted hash + the fresh
+      // (NOW) submittedAt from the claimed row; the authoritative lookup 404s.
+      vi.mocked(getOutboundPaymentByTxHash).mockResolvedValue(null);
+
+      const tick = await runPayoutTick({ ...DEFAULT_TICK_ARGS, maxAttempts: 5 });
+
+      // The sacred guard: NOT terminalized while the tx may still land.
+      expect(tick.retriedLater).toBe(1);
+      expect(tick.failed).toBe(0);
+
+      const [row] = await db.select().from(pendingPayouts).where(eq(pendingPayouts.id, payoutId));
+      expect(row!.state).toBe('submitted');
+      expect(row!.txHash).toBe('in-flight-at-exhaustion');
+      expect(row!.failedAt).toBeNull();
+      expect(row!.compensatedAt).toBeNull();
+      // No compensation credit was written — the user's mirror balance is
+      // untouched (the seeded 500 minor, not 1000).
+      const [credit] = await db.select().from(userCredits).where(eq(userCredits.userId, userId));
+      expect(credit?.balanceMinor).toBe(500n);
+    });
+
+    it('FT-compensate-guard (LIVENESS): a genuinely-failed exhausted in-flight payout (404 forever) terminalizes + compensates ONCE within bounded ticks — no wedge', async () => {
+      // The wedge the money panel found: the in-flight defer leaves the row
+      // `submitted` at attempts==maxAttempts, which the base claimable clause
+      // (attempts < maxAttempts) never re-picks — so a genuinely-failed emission
+      // (tx never lands, 404 forever) would strand the user net-negative FOREVER.
+      // This drives the FULL lifecycle on the REAL DB + REAL listClaimablePayouts
+      // query: exhaust → defer → advance time past the timebound + staleSeconds →
+      // the exhausted-reclaim clause re-picks it → the resolver terminalizes
+      // (state='failed') + auto-compensates the user EXACTLY ONCE, never
+      // re-submitting; a further tick is a no-op (no double-compensation).
+      const { payoutId, userId } = await seedPayout({ state: 'pending', attempts: 4 });
+      // Seed the LEGACY at-send withdrawal debit row so the real compensation
+      // primitive (which refuses post-ADR-036 emissions lacking it) actually
+      // credits the user — this is what "made whole" requires end-to-end.
+      await db.insert(creditTransactions).values({
+        userId,
+        type: 'withdrawal',
+        amountMinor: -500n,
+        currency: 'USD',
+        referenceType: 'payout',
+        referenceId: payoutId,
+        reason: 'legacy at-send debit (test seed)',
+      });
+
+      // Every submit blackholes (transient_horizon after persisting the hash) and
+      // the tx NEVER lands (404 forever) — a genuinely-failed payout.
+      vi.mocked(submitPayout).mockImplementation(
+        async (args: { onSigned?: (h: string) => Promise<void> | void }) => {
+          await args.onSigned?.('never-lands-hash');
+          throw new PayoutSubmitError('transient_horizon', 'permanent blackhole');
+        },
+      );
+      vi.mocked(getOutboundPaymentByTxHash).mockResolvedValue(null);
+
+      // Tick 1: reaches exhaustion, defers (no double-pay). The row is left
+      // `submitted` at attempts==maxAttempts with its persisted hash — the exact
+      // wedge candidate. NOT compensated yet.
+      const tick1 = await runPayoutTick({ ...DEFAULT_TICK_ARGS, maxAttempts: 5 });
+      expect(tick1.retriedLater).toBe(1);
+      expect(tick1.failed).toBe(0);
+      let [row] = await db.select().from(pendingPayouts).where(eq(pendingPayouts.id, payoutId));
+      expect(row!.state).toBe('submitted');
+      expect(row!.attempts).toBe(5);
+      expect(row!.failedAt).toBeNull();
+      expect(row!.compensatedAt).toBeNull();
+
+      // Advance time: the tx's 60s timebound (+30s margin) and the watchdog
+      // staleSeconds have now passed — the tx is provably dead and the row is
+      // re-pickable by the exhausted-reclaim clause.
+      await db
+        .update(pendingPayouts)
+        .set({ submittedAt: sql`NOW() - interval '10 minutes'` })
+        .where(eq(pendingPayouts.id, payoutId));
+
+      // Tick 2: the REAL query re-picks the exhausted row; the resolver sees a
+      // provably-expired 404 and terminalizes + compensates — WITHOUT re-submitting.
+      const tick2 = await runPayoutTick({ ...DEFAULT_TICK_ARGS, maxAttempts: 5 });
+      expect(tick2.failed).toBe(1);
+      // Exactly ONE submit total (tick 1's exhaustion attempt) — never re-submitted.
+      expect(vi.mocked(submitPayout)).toHaveBeenCalledTimes(1);
+
+      [row] = await db.select().from(pendingPayouts).where(eq(pendingPayouts.id, payoutId));
+      expect(row!.state).toBe('failed');
+      expect(row!.failedAt).not.toBeNull();
+      expect(row!.compensatedAt).not.toBeNull();
+
+      // The user is made whole: balance credited by the 500-minor magnitude.
+      let [credit] = await db.select().from(userCredits).where(eq(userCredits.userId, userId));
+      expect(credit!.balanceMinor).toBe(1000n); // seeded 500 + 500 compensation
+
+      // Exactly one compensation adjustment row was written.
+      const adjustments = await db
+        .select()
+        .from(creditTransactions)
+        .where(
+          and(
+            eq(creditTransactions.referenceId, payoutId),
+            eq(creditTransactions.type, 'adjustment'),
+          ),
+        );
+      expect(adjustments).toHaveLength(1);
+
+      // Tick 3: idempotency — the failed+compensated row is no longer re-picked
+      // (state='failed' is excluded from every claimable clause), so no
+      // double-compensation.
+      const tick3 = await runPayoutTick({ ...DEFAULT_TICK_ARGS, maxAttempts: 5 });
+      expect(tick3.failed).toBe(0);
+      [credit] = await db.select().from(userCredits).where(eq(userCredits.userId, userId));
+      expect(credit!.balanceMinor).toBe(1000n); // unchanged — compensated exactly once
+    });
+
+    it('FT-compensate-guard (DOUBLE-PAY STAYS CLOSED): an exhausted-deferred payout whose in-flight tx LANDS later converges to confirmed — never compensates, never re-submits', async () => {
+      // The symmetric safety complement of the liveness test: same exhaust →
+      // defer, but the in-flight tx LANDS after the defer instead of expiring.
+      // The exhausted-reclaim resolver must converge it to `confirmed` off the
+      // authoritative hash — never compensating (a double-pay) and never issuing
+      // a second submit (a double-spend).
+      const { payoutId, userId } = await seedPayout({ state: 'pending', attempts: 4 });
+      // Seed the legacy debit row so that if the resolver WRONGLY compensated,
+      // the credit would actually land and the balance assertion would catch it.
+      await db.insert(creditTransactions).values({
+        userId,
+        type: 'withdrawal',
+        amountMinor: -500n,
+        currency: 'USD',
+        referenceType: 'payout',
+        referenceId: payoutId,
+        reason: 'legacy at-send debit (test seed)',
+      });
+
+      vi.mocked(submitPayout).mockImplementation(
+        async (args: { onSigned?: (h: string) => Promise<void> | void }) => {
+          await args.onSigned?.('lands-after-defer-hash');
+          throw new PayoutSubmitError('transient_horizon', 'blackhole then lands');
+        },
+      );
+      // Tick 1: still in-flight (404) → exhaust → defer.
+      vi.mocked(getOutboundPaymentByTxHash).mockResolvedValue(null);
+      const tick1 = await runPayoutTick({ ...DEFAULT_TICK_ARGS, maxAttempts: 5 });
+      expect(tick1.retriedLater).toBe(1);
+      let [row] = await db.select().from(pendingPayouts).where(eq(pendingPayouts.id, payoutId));
+      expect(row!.state).toBe('submitted');
+
+      // The tx LANDS after the defer; advance time so the exhausted clause re-picks.
+      vi.mocked(getOutboundPaymentByTxHash).mockResolvedValue({ landed: true });
+      await db
+        .update(pendingPayouts)
+        .set({ submittedAt: sql`NOW() - interval '10 minutes'` })
+        .where(eq(pendingPayouts.id, payoutId));
+
+      // Tick 2: resolver sees the landed hash → converges to confirmed.
+      const tick2 = await runPayoutTick({ ...DEFAULT_TICK_ARGS, maxAttempts: 5 });
+      expect(tick2.skippedAlreadyLanded).toBe(1);
+      expect(tick2.failed).toBe(0);
+      // Exactly ONE submit total — the resolver never re-submits.
+      expect(vi.mocked(submitPayout)).toHaveBeenCalledTimes(1);
+
+      [row] = await db.select().from(pendingPayouts).where(eq(pendingPayouts.id, payoutId));
+      expect(row!.state).toBe('confirmed');
+      expect(row!.txHash).toBe('lands-after-defer-hash');
+      expect(row!.failedAt).toBeNull();
+      expect(row!.compensatedAt).toBeNull();
+
+      // NEVER compensated — the user was paid on-chain, so the mirror balance is
+      // untouched (500, not 1000). This is the double-pay staying closed.
+      const [credit] = await db.select().from(userCredits).where(eq(userCredits.userId, userId));
+      expect(credit!.balanceMinor).toBe(500n);
+      const adjustments = await db
+        .select()
+        .from(creditTransactions)
+        .where(
+          and(
+            eq(creditTransactions.referenceId, payoutId),
+            eq(creditTransactions.type, 'adjustment'),
+          ),
+        );
+      expect(adjustments).toHaveLength(0);
+    });
+  },
+);
 
 describeIf('payout-worker integration — fee-bump curve across attempts', () => {
   beforeAll(async () => {

@@ -44,9 +44,11 @@ const { repoMocks } = vi.hoisted(() => ({
     // retry-exhaustion failure. Default: no fresh hash persisted (the
     // common case — most attempts fail before `onSigned` even runs),
     // so the new check is a no-op and behaviour matches pre-CF2-07.
-    getPayoutForAdmin: vi.fn<(id: string) => Promise<{ id: string; txHash: string | null } | null>>(
-      async (id: string) => ({ id, txHash: null }),
-    ),
+    getPayoutForAdmin: vi.fn<
+      (
+        id: string,
+      ) => Promise<{ id: string; txHash: string | null; submittedAt?: Date | null } | null>
+    >(async (id: string) => ({ id, txHash: null })),
   },
 }));
 // Hardening A8: the tick runs under a fleet-wide advisory leader lock.
@@ -677,14 +679,54 @@ describe('runPayoutTick', () => {
   });
 
   it('CF-18: re-pick with a persisted hash that never landed (404 → null) → re-submits', async () => {
+    // FT-05: a re-picked `submitted` row's prior in-flight tx is only
+    // provably dead once its on-chain timebound (60s) has passed since the
+    // last `submittedAt`. A genuine watchdog re-pick is always well past
+    // that (it only fires past `staleSeconds`), so model a stale stamp —
+    // 10 min ago — under which the 404 truly means "never landed" and the
+    // fresh submit is safe. (The recent-stamp case that must NOT re-submit
+    // is pinned by the dedicated FT-05 test below.)
     repoMocks.listClaimablePayouts.mockResolvedValue([
-      makeRow({ state: 'submitted', attempts: 1, txHash: 'persisted-never-landed' }),
+      makeRow({
+        state: 'submitted',
+        attempts: 1,
+        txHash: 'persisted-never-landed',
+        submittedAt: new Date(Date.now() - 600_000),
+      }),
     ]);
     horizonMock.getOutboundPaymentByTxHash.mockResolvedValue(null);
     horizonMock.findOutboundPaymentByMemo.mockResolvedValue(null);
     const r = await runPayoutTick(BASE_ARGS);
     expect(r.confirmed).toBe(1);
     expect(sdkMock.submitPayout).toHaveBeenCalledTimes(1);
+  });
+
+  it('FT-05: re-pick with a persisted hash + 404 whose prior submit may still be IN FLIGHT → defers (no double-spend)', async () => {
+    // The double-spend window: a `submitted` row re-picked while its prior
+    // tx is still in flight (submitted to the network, not yet sealed).
+    // The authoritative lookup 404s (not in a ledger *yet*), but the tx's
+    // 60s timebound has NOT elapsed since `submittedAt`, so it could still
+    // land. Re-submitting a fresh tx now would pay twice. The worker must
+    // fail closed (retriedLater), NOT call submitPayout again — regardless
+    // of what `watchdogStaleSeconds` the operator configured.
+    repoMocks.listClaimablePayouts.mockResolvedValue([
+      makeRow({
+        state: 'submitted',
+        attempts: 1,
+        txHash: 'persisted-in-flight',
+        // 5s ago — well under the 60s timebound, so the prior tx is NOT
+        // provably dead.
+        submittedAt: new Date(Date.now() - 5_000),
+      }),
+    ]);
+    horizonMock.getOutboundPaymentByTxHash.mockResolvedValue(null); // 404 — ambiguous
+    horizonMock.findOutboundPaymentByMemo.mockResolvedValue(null);
+    const r = await runPayoutTick(BASE_ARGS);
+    expect(r.retriedLater).toBe(1);
+    expect(r.confirmed).toBe(0);
+    // The double-spend guard: NO second submit while the prior tx is in flight.
+    expect(sdkMock.submitPayout).not.toHaveBeenCalled();
+    expect(repoMocks.reclaimSubmittedPayout).not.toHaveBeenCalled();
   });
 
   it('CF-18: authoritative lookup throwing fails closed (no submit)', async () => {
@@ -781,15 +823,21 @@ describe('runPayoutTick', () => {
       );
     });
 
-    it('landed=false → proceeds with the existing fail + auto-compensate path', async () => {
+    it('landed=false (sealed FAILED on-chain) → compensates immediately, no expiry wait', async () => {
+      // FT-compensate-guard: a `landed === false` is a tx sealed on-chain as
+      // FAILED — it moved no value and can never succeed later, so it is exempt
+      // from the in-flight expiry guard and compensates right away. (This test
+      // previously mocked a 404/`null` here, which is the AMBIGUOUS in-flight
+      // case that must now DEFER — that path is pinned by the dedicated
+      // FT-compensate-guard tests below.)
       repoMocks.listClaimablePayouts.mockResolvedValue([
         makeRow({ attempts: 4, kind: 'emission', assetCode: 'GBPLOOP' }),
       ]);
       sdkMock.submitPayout.mockRejectedValue(
         new PayoutSubmitErrorMock('transient_horizon', 'ambiguous timeout'),
       );
-      repoMocks.getPayoutForAdmin.mockResolvedValue({ id: 'p-1', txHash: 'tx-never-landed' });
-      horizonMock.getOutboundPaymentByTxHash.mockResolvedValue(null);
+      repoMocks.getPayoutForAdmin.mockResolvedValue({ id: 'p-1', txHash: 'tx-sealed-failed' });
+      horizonMock.getOutboundPaymentByTxHash.mockResolvedValue({ landed: false });
       const r = await runPayoutTick({ ...BASE_ARGS, maxAttempts: 5 });
       expect(r.failed).toBe(1);
       expect(repoMocks.markPayoutFailed).toHaveBeenCalledWith(
@@ -812,18 +860,69 @@ describe('runPayoutTick', () => {
       expect(compensationMock.applyAdminPayoutCompensation).toHaveBeenCalled();
     });
 
-    it('the authoritative check itself failing → falls through to the existing fail path (no throw out of the tick)', async () => {
+    it('the authoritative check itself failing at exhaustion → DEFERS (no throw out of the tick, no premature compensation)', async () => {
+      // FT-compensate-guard: an unreadable landed-check is treated as
+      // `landed === null` (ambiguous). At the exhaustion instant the claim just
+      // stamped `submittedAt = NOW`, so the tx cannot yet be provably expired —
+      // a Horizon blip must NOT tip a possibly-in-flight tx into a premature
+      // fail + compensate (that is the double-pay). It defers instead, and the
+      // check throwing does not throw out of the tick. The eventual
+      // terminalization (once the tx lands or its timebound expires) is the
+      // exhausted-reclaim resolver's job — pinned by the dedicated
+      // resolveExhaustedInFlightPayout tests + the DB-backed liveness test.
       repoMocks.listClaimablePayouts.mockResolvedValue([
         makeRow({ attempts: 4, kind: 'emission', assetCode: 'GBPLOOP' }),
       ]);
       sdkMock.submitPayout.mockRejectedValue(
         new PayoutSubmitErrorMock('transient_horizon', 'ambiguous timeout'),
       );
-      repoMocks.getPayoutForAdmin.mockResolvedValue({ id: 'p-1', txHash: 'tx-check-degraded' });
+      repoMocks.getPayoutForAdmin.mockResolvedValue({
+        id: 'p-1',
+        txHash: 'tx-check-degraded',
+        submittedAt: new Date(Date.now() - 5_000), // fresh claim — cannot be provably expired
+      });
       horizonMock.getOutboundPaymentByTxHash.mockRejectedValue(new Error('Horizon 503'));
       const r = await runPayoutTick({ ...BASE_ARGS, maxAttempts: 5 });
-      expect(r.failed).toBe(1);
-      expect(compensationMock.applyAdminPayoutCompensation).toHaveBeenCalled();
+      expect(r.retriedLater).toBe(1);
+      expect(r.failed).toBe(0);
+      expect(repoMocks.markPayoutFailed).not.toHaveBeenCalled();
+      expect(compensationMock.applyAdminPayoutCompensation).not.toHaveBeenCalled();
+    });
+
+    // FT-compensate-guard (the double-pay the money verifier flagged): the
+    // TERMINAL compensate path was exposed to the SAME in-flight 404 ambiguity
+    // the FT-05 pre-check guards on the re-submit path. At retry-exhaustion with
+    // a persisted hash Horizon can't yet locate (404), the prior tx may still
+    // land within its 60s timebound — `markPayoutFailed` + auto-compensating now
+    // and having that tx land later = the user paid on-chain AND re-credited.
+    // The guard defers (retriedLater); the exhausted-reclaim resolver later
+    // converges it (if it lands) or terminalizes it (once provably expired).
+    it('FT-compensate-guard: in-flight 404 at exhaustion → DEFERS (retriedLater), does NOT fail or compensate', async () => {
+      repoMocks.listClaimablePayouts.mockResolvedValue([
+        makeRow({ attempts: 4, kind: 'emission', assetCode: 'GBPLOOP' }),
+      ]);
+      sdkMock.submitPayout.mockRejectedValue(
+        new PayoutSubmitErrorMock('transient_horizon', 'ambiguous timeout'),
+      );
+      // onSigned persisted the hash during THIS attempt; the claim stamped
+      // `submittedAt = NOW`, so the tx's 60s timebound has NOT elapsed — it
+      // could still land.
+      repoMocks.getPayoutForAdmin.mockResolvedValue({
+        id: 'p-1',
+        txHash: 'tx-in-flight-at-exhaustion',
+        submittedAt: new Date(Date.now() - 5_000),
+      });
+      // 404 — the in-flight tx isn't sealed into a ledger yet.
+      horizonMock.getOutboundPaymentByTxHash.mockResolvedValue(null);
+      const r = await runPayoutTick({ ...BASE_ARGS, maxAttempts: 5 });
+      // Fail closed: the row stays `submitted` at attempts==maxAttempts for the
+      // exhausted-reclaim resolver to settle on a later tick.
+      expect(r.retriedLater).toBe(1);
+      expect(r.failed).toBe(0);
+      // The double-pay guard: NO terminal fail and NO compensation while the tx
+      // may still land on-chain.
+      expect(repoMocks.markPayoutFailed).not.toHaveBeenCalled();
+      expect(compensationMock.applyAdminPayoutCompensation).not.toHaveBeenCalled();
     });
 
     it('transient_rebuild (not ambiguous) at retry-exhaustion does NOT trigger the re-check at all', async () => {
@@ -839,6 +938,91 @@ describe('runPayoutTick', () => {
       // re-check — transient_rebuild has no landing ambiguity, so it must
       // never fire here.
       expect(repoMocks.getPayoutForAdmin).not.toHaveBeenCalled();
+    });
+  });
+
+  // FT-compensate-guard (liveness): resolveExhaustedInFlightPayout. A row the
+  // exhausted-reclaim clause re-picked — state='submitted', a persisted
+  // txHash, attempts >= maxAttempts — is resolved off its hash WITHOUT ever
+  // re-submitting. Its `submittedAt` is genuinely old here (it was stamped at
+  // the ORIGINAL claim and never re-stamped on a defer), which is exactly how
+  // production reaches this state; that is why the provably-expired branch is a
+  // LIVE path, not the production-unreachable exhaustion-moment stamp the
+  // earlier tests wrongly pinned.
+  describe('FT-compensate-guard: exhausted-in-flight resolver (no wedge, no re-submit)', () => {
+    function exhaustedRow(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+      return makeRow({
+        state: 'submitted',
+        attempts: 5, // == maxAttempts (BASE_ARGS.maxAttempts)
+        kind: 'emission',
+        assetCode: 'GBPLOOP',
+        orderId: null,
+        txHash: 'exhausted-inflight-hash',
+        submittedAt: new Date(Date.now() - 600_000), // 10 min ago — re-picked well after the claim
+        ...overrides,
+      });
+    }
+
+    it('hash LANDED → converges to confirmed, NEVER compensates, NEVER re-submits', async () => {
+      repoMocks.listClaimablePayouts.mockResolvedValue([exhaustedRow()]);
+      horizonMock.getOutboundPaymentByTxHash.mockResolvedValue({ landed: true });
+      const r = await runPayoutTick({ ...BASE_ARGS, maxAttempts: 5 });
+      expect(r.skippedAlreadyLanded).toBe(1);
+      expect(r.failed).toBe(0);
+      expect(repoMocks.markPayoutConfirmed).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'p-1', txHash: 'exhausted-inflight-hash' }),
+      );
+      expect(repoMocks.markPayoutFailed).not.toHaveBeenCalled();
+      expect(compensationMock.applyAdminPayoutCompensation).not.toHaveBeenCalled();
+      expect(sdkMock.submitPayout).not.toHaveBeenCalled();
+    });
+
+    it('404 but NOT yet provably expired → defers again (retriedLater), no compensate, no re-submit', async () => {
+      repoMocks.listClaimablePayouts.mockResolvedValue([
+        exhaustedRow({ submittedAt: new Date(Date.now() - 5_000) }), // 5s — under the 90s window
+      ]);
+      horizonMock.getOutboundPaymentByTxHash.mockResolvedValue(null);
+      const r = await runPayoutTick({ ...BASE_ARGS, maxAttempts: 5 });
+      expect(r.retriedLater).toBe(1);
+      expect(r.failed).toBe(0);
+      expect(repoMocks.markPayoutFailed).not.toHaveBeenCalled();
+      expect(compensationMock.applyAdminPayoutCompensation).not.toHaveBeenCalled();
+      expect(sdkMock.submitPayout).not.toHaveBeenCalled();
+    });
+
+    it('404 AND provably expired → terminalizes (fail + auto-compensate), no re-submit', async () => {
+      repoMocks.listClaimablePayouts.mockResolvedValue([exhaustedRow()]); // 10 min old → expired
+      horizonMock.getOutboundPaymentByTxHash.mockResolvedValue(null);
+      const r = await runPayoutTick({ ...BASE_ARGS, maxAttempts: 5 });
+      expect(r.failed).toBe(1);
+      expect(repoMocks.markPayoutFailed).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'p-1' }),
+      );
+      expect(compensationMock.applyAdminPayoutCompensation).toHaveBeenCalled();
+      expect(sdkMock.submitPayout).not.toHaveBeenCalled();
+    });
+
+    it('sealed-FAILED (landed===false) → terminalizes immediately (fail + compensate), no re-submit', async () => {
+      repoMocks.listClaimablePayouts.mockResolvedValue([
+        exhaustedRow({ submittedAt: new Date(Date.now() - 5_000) }), // even recent: sealed-failed needs no wait
+      ]);
+      horizonMock.getOutboundPaymentByTxHash.mockResolvedValue({ landed: false });
+      const r = await runPayoutTick({ ...BASE_ARGS, maxAttempts: 5 });
+      expect(r.failed).toBe(1);
+      expect(compensationMock.applyAdminPayoutCompensation).toHaveBeenCalled();
+      expect(sdkMock.submitPayout).not.toHaveBeenCalled();
+    });
+
+    it('landed-check throws → defers (retriedLater), never compensates, no re-submit', async () => {
+      repoMocks.listClaimablePayouts.mockResolvedValue([
+        exhaustedRow({ submittedAt: new Date(Date.now() - 5_000) }),
+      ]);
+      horizonMock.getOutboundPaymentByTxHash.mockRejectedValue(new Error('Horizon 503'));
+      const r = await runPayoutTick({ ...BASE_ARGS, maxAttempts: 5 });
+      expect(r.retriedLater).toBe(1);
+      expect(repoMocks.markPayoutFailed).not.toHaveBeenCalled();
+      expect(compensationMock.applyAdminPayoutCompensation).not.toHaveBeenCalled();
+      expect(sdkMock.submitPayout).not.toHaveBeenCalled();
     });
   });
 
@@ -912,6 +1096,31 @@ describe('runPayoutTick', () => {
     const r = await runPayoutTick(BASE_ARGS);
     expect(r.skippedRace).toBe(1);
     expect(r.confirmed).toBe(0);
+  });
+
+  it('FT-01: submit succeeds but markPayoutConfirmed THROWS → retriedLater, NEVER failed/compensated (no double-pay)', async () => {
+    // The submit landed the payment on-chain (submitPayout resolved with a
+    // tx hash). If the confirm bookkeeping then throws (DB blip), the row
+    // must NOT be routed through handleSubmitError — that would mark it
+    // `failed` and auto-compensate the emission user, re-crediting a
+    // payment that already went out on-chain: a DOUBLE-PAY. Instead the
+    // row is left `submitted` (its hash was persisted via onSigned) for the
+    // watchdog to converge, and the tick reports retriedLater.
+    repoMocks.listClaimablePayouts.mockResolvedValue([
+      makeRow({ kind: 'emission', orderId: null, attempts: 0 }),
+    ]);
+    repoMocks.markPayoutConfirmed.mockRejectedValue(new Error('DB connection reset mid-confirm'));
+    const r = await runPayoutTick(BASE_ARGS);
+    expect(r.retriedLater).toBe(1);
+    expect(r.failed).toBe(0);
+    // The sacred double-pay guard: the confirm-throw must NOT fail the row
+    // nor re-credit the user.
+    expect(repoMocks.markPayoutFailed).not.toHaveBeenCalled();
+    expect(compensationMock.applyAdminPayoutCompensation).not.toHaveBeenCalled();
+    expect(discordMock.notifyPayoutFailed).not.toHaveBeenCalled();
+    // The payment did go out — submit was called exactly once (not retried
+    // in the same tick).
+    expect(sdkMock.submitPayout).toHaveBeenCalledTimes(1);
   });
 
   it('processes rows in order (serialises to respect operator seq numbers)', async () => {

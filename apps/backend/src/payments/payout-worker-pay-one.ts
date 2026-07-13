@@ -37,6 +37,49 @@ import { isLoopAssetCode, currencyForLoopAsset } from '@loop/shared';
 
 const log = logger.child({ area: 'payout-worker' });
 
+/**
+ * FT-05: on-chain lifetime of a submitted payout tx.
+ *
+ * `submitPayout` builds every transaction with a hard 60s timebound
+ * (`setTimeout(60)` — its `timeoutSeconds` default, which the worker
+ * never overrides). A tx signed at a row's `submittedAt` can therefore
+ * only be sealed into a ledger within `PAYOUT_SUBMIT_TIMEBOUND_SECONDS`
+ * of that stamp; past it Stellar rejects the tx (`tx_too_late`) and it
+ * can NEVER land. Keep in sync with `payout-submit.ts`'s default.
+ */
+const PAYOUT_SUBMIT_TIMEBOUND_SECONDS = 60;
+/**
+ * Safety margin added to the timebound before a prior in-flight tx is
+ * treated as provably dead: covers wall-clock skew between machines and
+ * the `loadAccount` round-trip between the `submittedAt` stamp and the
+ * actual tx build (the tx's timebound starts a beat AFTER `submittedAt`).
+ */
+const PAYOUT_SUBMIT_EXPIRY_MARGIN_SECONDS = 30;
+
+/**
+ * FT-05: has the prior submit's on-chain transaction provably expired?
+ *
+ * A re-picked `submitted` row that still carries a persisted `txHash`
+ * whose authoritative Horizon lookup is a 404 is AMBIGUOUS: the prior
+ * tx is either genuinely never-landed OR still in-flight (submitted to
+ * the network, not yet sealed into a ledger). Re-submitting a fresh tx
+ * while a prior one can still land is a DOUBLE-SPEND. This returns true
+ * only once enough time has elapsed since the row's last `submittedAt`
+ * that the prior tx's timebound has certainly passed — at which point a
+ * 404 genuinely means "never landed" and a fresh submit is safe.
+ *
+ * Fail-closed: a row with no `submittedAt` (which a genuine `submitted`
+ * row never has — `markPayoutSubmitted`/`reclaimSubmittedPayout` always
+ * stamp it) gives no timing basis, so it is treated as NOT expired.
+ */
+function priorSubmitProvablyExpired(row: PendingPayout): boolean {
+  const submittedAt = row.submittedAt;
+  if (!(submittedAt instanceof Date)) return false;
+  const elapsedMs = Date.now() - submittedAt.getTime();
+  const guardSeconds = PAYOUT_SUBMIT_TIMEBOUND_SECONDS + PAYOUT_SUBMIT_EXPIRY_MARGIN_SECONDS;
+  return elapsedMs >= guardSeconds * 1000;
+}
+
 export type PayOutcome =
   | 'confirmed'
   | 'failed'
@@ -155,6 +198,25 @@ async function probeTrustline(row: PendingPayout): Promise<PayOutcome | null> {
 }
 
 export async function payOne(row: PendingPayout, args: PayOneArgs): Promise<PayOutcome> {
+  // FT-compensate-guard (liveness): resolve a retry-EXHAUSTED submitted
+  // row (`attempts >= maxAttempts`) that still carries a persisted tx hash
+  // WITHOUT re-entering the submit pipeline. Such a row is one whose final
+  // `transient_horizon` attempt was DEFERRED by `handleSubmitError` (rather
+  // than compensated) because its persisted tx was still in-flight-ambiguous
+  // (404) and compensating an in-flight payout would double-pay. It has no
+  // attempts left, so it must NOT re-submit — the exhausted-reclaim clause in
+  // `listClaimablePayouts` re-picks it here purely so we can resolve it off
+  // its persisted hash: landed → confirm; still in-flight & not provably
+  // expired → keep deferring (no re-submit); provably dead (sealed-FAILED or
+  // 404 past its timebound) → terminalize + auto-compensate. This is the LIVE
+  // compensate-after-expiry path that keeps the in-flight defer from wedging a
+  // genuinely-failed payout in `submitted` forever (a normal watchdog re-pick
+  // can't reach it — the base claimable clause excludes `attempts >= max`).
+  // Runs BEFORE the trustline probe: a persisted-hash row already cleared the
+  // trustline at submit time, and we are converging/terminalizing, not paying.
+  if (row.state === 'submitted' && row.txHash !== null && row.attempts >= args.maxAttempts) {
+    return resolveExhaustedInFlightPayout(row);
+  }
   // Pre-flight: does the destination account have a trustline to
   // this asset? Without it, `submitPayout` will get `op_no_trust`
   // back and the row will be marked `failed`, which is the wrong
@@ -225,9 +287,29 @@ export async function payOne(row: PendingPayout, args: PayOneArgs): Promise<PayO
       if (landed?.landed === true) {
         return await convergeConfirmed(row, row.txHash, 'authoritative-hash');
       }
-      // landed=false (tx on chain but failed) or null (never landed):
-      // fall through to (re-)submit. A new submit builds a fresh tx with
-      // a new sequence, so the failed/absent hash won't collide.
+      // FT-05: a 404 (`landed === null`) is AMBIGUOUS — the persisted tx
+      // is either genuinely never-landed OR still in-flight (submitted to
+      // the network, not yet sealed into a ledger). Re-submitting a fresh
+      // tx while a prior one can still land is a DOUBLE-SPEND. Only fall
+      // through to re-submit once the prior tx's on-chain timebound has
+      // provably expired (so a 404 truly means "never landed"); until then
+      // fail closed and let a later tick resolve it — the prior tx either
+      // lands (the authoritative check then converges → confirmed) or
+      // expires (this guard clears and the re-submit proceeds safely).
+      // This makes the double-spend guard a real state/lease check rather
+      // than an implicit coupling to whatever `watchdogStaleSeconds` an
+      // operator happens to configure.
+      //
+      // `landed === false` needs no wait: that exact tx is sealed on-chain
+      // as FAILED, moved no value, and can never succeed later, so a fresh
+      // submit (new sequence) can't collide with it.
+      if (landed === null && !priorSubmitProvablyExpired(row)) {
+        log.warn(
+          { payoutId: row.id, txHash: row.txHash, submittedAt: row.submittedAt },
+          'Re-picked payout has a persisted tx hash Horizon cannot yet locate (404) and its prior submit may still be in flight — deferring re-submit to avoid a double-spend',
+        );
+        return 'retriedLater';
+      }
     }
     const prior = await findOutboundPaymentByMemo({
       account: signer.account,
@@ -280,6 +362,7 @@ export async function payOne(row: PendingPayout, args: PayOneArgs): Promise<PayO
     );
   }
 
+  let txHash: string;
   try {
     // A2-1921 fee-bump: scale the fee per attempt so a congested
     // network drains naturally instead of going terminal at base
@@ -291,7 +374,7 @@ export async function payOne(row: PendingPayout, args: PayOneArgs): Promise<PayO
       capFeeStroops: env.LOOP_PAYOUT_FEE_CAP_STROOPS,
       multiplier: env.LOOP_PAYOUT_FEE_MULTIPLIER,
     });
-    const { txHash } = await submitPayout({
+    ({ txHash } = await submitPayout({
       secret: signer.secret,
       ...(args.channelSecret !== undefined ? { channelSecret: args.channelSecret } : {}),
       horizonUrl: args.horizonUrl,
@@ -318,7 +401,25 @@ export async function payOne(row: PendingPayout, args: PayOneArgs): Promise<PayO
           throw new Error('row no longer in submitted state — aborting submit');
         }
       },
-    });
+    }));
+  } catch (err) {
+    // Only a genuine SUBMIT failure lands here — the tx did not (provably)
+    // go out, so classify-and-retry / fail is safe. The confirm bookkeeping
+    // below is deliberately OUTSIDE this catch (FT-01).
+    return handleSubmitError(row, err, args.maxAttempts);
+  }
+
+  // FT-01: `submitPayout` has RETURNED a landed tx hash — the payment IS
+  // on-chain. Everything below is confirm bookkeeping. A failure here must
+  // NEVER be routed through `handleSubmitError`: that path misclassifies
+  // it as a submit failure and auto-compensates the user
+  // (autoCompensateFailedWithdrawal), re-crediting an emission that was
+  // already paid on-chain — a DOUBLE-PAY. The deterministic hash was
+  // persisted via `onSigned` BEFORE the network submit, so a confirm that
+  // throws leaves the row in `submitted` with its hash, and the next
+  // watchdog re-pick converges it via the authoritative-hash idempotency
+  // check. Reconcile/alert, do not compensate.
+  try {
     const confirmed = await markPayoutConfirmed({ id: row.id, txHash });
     if (confirmed === null) {
       // Another worker / admin retry beat us to the confirm. Treat
@@ -328,8 +429,12 @@ export async function payOne(row: PendingPayout, args: PayOneArgs): Promise<PayO
     }
     log.info({ payoutId: row.id, txHash }, 'Payout confirmed');
     return 'confirmed';
-  } catch (err) {
-    return handleSubmitError(row, err, args.maxAttempts);
+  } catch (confirmErr) {
+    log.error(
+      { err: confirmErr, payoutId: row.id, txHash },
+      'Payout SUBMITTED on-chain but confirm bookkeeping threw — leaving row in submitted with its persisted tx hash for the watchdog to converge; NOT failing/compensating (the payment already landed; re-paying would double-spend)',
+    );
+    return 'retriedLater';
   }
 }
 
@@ -362,6 +467,109 @@ async function convergeConfirmed(
     'Payout converged via idempotency check — prior submit had landed',
   );
   return 'skippedAlreadyLanded';
+}
+
+/**
+ * FT-compensate-guard (liveness): resolve a retry-EXHAUSTED `submitted`
+ * row that carries a persisted tx hash, WITHOUT re-submitting.
+ *
+ * Reached only from the early return in `payOne` for a row the
+ * exhausted-reclaim clause in `listClaimablePayouts` re-picked
+ * (`state='submitted' AND txHash IS NOT NULL AND attempts >= maxAttempts`).
+ * Such a row's last `transient_horizon` attempt was DEFERRED rather than
+ * compensated to avoid double-paying an in-flight tx; this is where it
+ * finally converges or terminalizes off the authoritative hash:
+ *
+ *   - landed === true  → the tx settled after all: converge → confirmed,
+ *     NEVER compensated (a double-pay). (Also recovers an FT-01 confirm-
+ *     throw that happened on the final attempt.)
+ *   - landed === null && NOT provably expired → still in flight: keep
+ *     deferring (retriedLater). No re-submit, no re-claim — so `submittedAt`
+ *     is left untouched and the expiry clock keeps advancing across ticks
+ *     until the timebound passes.
+ *   - landed === false (sealed-FAILED, moved no value) OR
+ *     landed === null && provably expired (never landed, timebound passed)
+ *     → the prior tx is provably dead: terminalize (fail + auto-compensate).
+ *
+ * A landed-check that itself throws is treated as `landed === null`
+ * (ambiguous → defer), so a Horizon blip can never tip an in-flight tx into
+ * a premature compensation.
+ */
+async function resolveExhaustedInFlightPayout(row: PendingPayout): Promise<PayOutcome> {
+  const txHash = row.txHash;
+  if (txHash === null) {
+    // Defensive: the caller guards `row.txHash !== null`, so this is
+    // unreachable. Leave the row for a later tick rather than terminalize a
+    // row we can't prove anything about.
+    return 'retriedLater';
+  }
+  const landed = await getOutboundPaymentByTxHash(txHash).catch((err: unknown) => {
+    log.warn(
+      { err, payoutId: row.id, txHash },
+      'FT-compensate-guard: authoritative landed-check failed while resolving an exhausted in-flight payout — treating as unresolved (deferring) so a Horizon blip cannot tip an in-flight tx into a premature compensation',
+    );
+    return null;
+  });
+  if (landed?.landed === true) {
+    log.warn(
+      { payoutId: row.id, txHash },
+      'FT-compensate-guard: exhausted in-flight payout LANDED after all — converging to confirmed, never compensating',
+    );
+    const confirmed = await markPayoutConfirmed({ id: row.id, txHash });
+    return confirmed === null ? 'skippedRace' : 'skippedAlreadyLanded';
+  }
+  if (landed === null && !priorSubmitProvablyExpired(row)) {
+    log.warn(
+      { payoutId: row.id, txHash, submittedAt: row.submittedAt },
+      'FT-compensate-guard: exhausted in-flight payout still 404 and not yet provably expired — deferring again (no re-submit) until its timebound passes',
+    );
+    return 'retriedLater';
+  }
+  // landed === false (sealed on-chain as FAILED — moved no value) OR
+  // landed === null && provably expired (never landed, timebound has passed):
+  // the prior tx is provably dead, so it is finally safe to terminalize.
+  const reason =
+    landed?.landed === false
+      ? 'prior submit sealed on-chain as FAILED — moved no value (retry-exhausted)'
+      : 'prior submit provably expired without landing (retry-exhausted)';
+  log.error(
+    { payoutId: row.id, txHash, sealedFailed: landed?.landed === false, attempts: row.attempts },
+    'FT-compensate-guard: exhausted in-flight payout is provably dead — marking failed + auto-compensating',
+  );
+  return terminalizeFailedPayout(row, 'transient_horizon', reason, row.attempts);
+}
+
+/**
+ * Terminal-fail bookkeeping shared by `handleSubmitError` (a submit that
+ * classified as terminal / out-of-retries) and `resolveExhaustedInFlightPayout`
+ * (a deferred exhausted row whose tx proved dead): mark the row `failed`,
+ * page ops, and auto-compensate a legacy-debited withdrawal. `markPayoutFailed`
+ * + `autoCompensateFailedWithdrawal` both persist the `[kind] reason` tag; the
+ * Discord alert carries the plain `reason`. Only ever called once the tx is
+ * proven NOT to have moved value — never on an in-flight-ambiguous row.
+ */
+async function terminalizeFailedPayout(
+  row: PendingPayout,
+  kind: string,
+  reason: string,
+  attempts: number,
+): Promise<'failed'> {
+  const taggedReason = `[${kind}] ${reason}`;
+  await markPayoutFailed({ id: row.id, reason: taggedReason });
+  log.error({ payoutId: row.id, kind, attempts }, 'Payout marked failed');
+  notifyPayoutFailed({
+    payoutId: row.id,
+    userId: row.userId,
+    orderId: row.orderId,
+    payoutKind: row.kind,
+    assetCode: row.assetCode,
+    amount: row.amountStroops.toString(),
+    kind,
+    reason,
+    attempts,
+  });
+  await autoCompensateFailedWithdrawal(row, taggedReason);
+  return 'failed';
 }
 
 async function handleSubmitError(
@@ -403,9 +611,15 @@ async function handleSubmitError(
       const fresh = await getPayoutForAdmin(row.id);
       if (fresh?.txHash !== null && fresh?.txHash !== undefined) {
         const landed = await getOutboundPaymentByTxHash(fresh.txHash).catch((checkErr: unknown) => {
+          // A landed-check that itself fails is no less AMBIGUOUS than a 404:
+          // treat it as `landed === null` and let the FT-compensate-guard below
+          // decide — defer while the tx may still be in flight, only compensate
+          // once its timebound has provably passed. (Before the guard existed
+          // this fell straight through to fail+compensate, which is exactly the
+          // in-flight double-pay the guard now closes.)
           log.warn(
             { payoutId: row.id, err: checkErr },
-            'CF2-07: authoritative landed-check itself failed on ambiguous retry-exhaustion — falling through to terminal-fail path (fail-closed toward NOT compensating twice is not possible here, so we prefer the existing manual-review path)',
+            'CF2-07: authoritative landed-check itself failed on ambiguous retry-exhaustion — treating as unresolved (landed === null); the expiry guard decides whether to defer or compensate',
           );
           return null;
         });
@@ -414,27 +628,53 @@ async function handleSubmitError(
             { payoutId: row.id, txHash: fresh.txHash },
             'CF2-07: ambiguous transient_horizon failure at retry-exhaustion actually landed — converging to confirmed instead of failing/compensating',
           );
-          return await convergeConfirmed(row, fresh.txHash, 'authoritative-hash');
+          // BK-retryexh: the row was already CLAIMED before the submit (it
+          // is `submitted` in the DB by the time we reach handleSubmitError
+          // — `payOne` returns skippedRace earlier if the claim lost), so
+          // confirm it DIRECTLY. `convergeConfirmed` keys its "claim first?"
+          // step off the STALE in-memory `row.state`, which is still
+          // `pending` for a freshly-claimed row; that would no-op its
+          // `markPayoutSubmitted` CAS and leave this LANDED payout stuck in
+          // `submitted` / mislabelled `skippedRace` instead of terminally
+          // `confirmed`. `markPayoutConfirmed` is state-guarded on
+          // `submitted`, so it converges the already-claimed row correctly.
+          const confirmed = await markPayoutConfirmed({ id: row.id, txHash: fresh.txHash });
+          return confirmed === null ? 'skippedRace' : 'skippedAlreadyLanded';
+        }
+        // FT-compensate-guard: `landed === null` (a 404, or the unreadable
+        // landed-check above) at retry-exhaustion is the SAME in-flight
+        // ambiguity the FT-05 pre-check guards on the RE-SUBMIT path — the
+        // persisted tx is either genuinely never-landed OR still in flight
+        // (submitted to the network, not yet sealed into a ledger) and can
+        // still land within its 60s timebound. The terminal path below would
+        // `markPayoutFailed` + `autoCompensateFailedWithdrawal`, so if the
+        // in-flight tx later lands the user is paid on-chain AND compensated =
+        // DOUBLE-PAY. Fail closed — defer (retriedLater). We do NOT re-check the
+        // timebound here: the claim that preceded THIS submit stamped
+        // `submittedAt = NOW` moments ago, so at the exhaustion instant the tx
+        // can never already be provably expired — an expiry check here is dead.
+        // The row is left `submitted` at `attempts == maxAttempts`; the
+        // exhausted-reclaim clause in `listClaimablePayouts` re-picks it and the
+        // `resolveExhaustedInFlightPayout` path at the top of `payOne` owns the
+        // eventual resolution (land → confirm; timebound expires still-404 →
+        // fail + compensate). That is where the LIVE compensate-after-expiry
+        // decision lives, so the row cannot wedge.
+        //
+        // `landed === false` is exempt (falls through): that exact tx is sealed
+        // on-chain as FAILED, moved no value, and can never succeed later, so
+        // compensating immediately is safe — same posture as the pre-check.
+        if (landed === null) {
+          log.warn(
+            { payoutId: row.id, txHash: fresh.txHash, submittedAt: fresh.submittedAt },
+            'FT-compensate-guard: transient_horizon at retry-exhaustion with an in-flight-ambiguous (404) persisted tx that may still land — deferring the terminal fail/compensate to avoid a double-pay; the exhausted-reclaim path re-resolves once the tx lands or its timebound expires',
+          );
+          return 'retriedLater';
         }
       }
     }
 
     // Terminal, or transient but out of retries.
-    await markPayoutFailed({ id: row.id, reason: `[${err.kind}] ${reason}` });
-    log.error({ payoutId: row.id, kind: err.kind, attempts: usedAttempts }, 'Payout marked failed');
-    notifyPayoutFailed({
-      payoutId: row.id,
-      userId: row.userId,
-      orderId: row.orderId,
-      payoutKind: row.kind,
-      assetCode: row.assetCode,
-      amount: row.amountStroops.toString(),
-      kind: err.kind,
-      reason,
-      attempts: usedAttempts,
-    });
-    await autoCompensateFailedWithdrawal(row, `[${err.kind}] ${reason}`);
-    return 'failed';
+    return terminalizeFailedPayout(row, err.kind, reason, usedAttempts);
   }
 
   // Unclassified throw — fail loud.
