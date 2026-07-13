@@ -109,6 +109,27 @@ describe('guessHomeCurrency', () => {
     expect(guessHomeCurrency('fr')).toBe('EUR');
   });
 
+  // FE-39: a bare language doesn't pin a country. Spanish is predominantly
+  // Latin America and Portuguese predominantly Brazil — neither is the
+  // Eurozone — so a language-only `es`/`pt` must NOT default to EUR.
+  it('does not default language-only es/pt to EUR (FE-39)', () => {
+    expect(guessHomeCurrency('es')).not.toBe('EUR');
+    expect(guessHomeCurrency('pt')).not.toBe('EUR');
+    expect(guessHomeCurrency('es')).toBe('USD');
+    expect(guessHomeCurrency('pt')).toBe('USD');
+  });
+
+  // Currency follows the COUNTRY, not the language: a Eurozone region subtag
+  // still yields EUR, while a non-Eurozone Spanish/Portuguese country
+  // (Mexico, Brazil) resolves to the USD default rather than EUR.
+  it('follows the region subtag for es/pt (Spain/Portugal → EUR, LatAm/Brazil → not EUR)', () => {
+    expect(guessHomeCurrency('es-ES')).toBe('EUR');
+    expect(guessHomeCurrency('pt-PT')).toBe('EUR');
+    expect(guessHomeCurrency('es-MX')).toBe('USD');
+    expect(guessHomeCurrency('pt-BR')).not.toBe('EUR');
+    expect(guessHomeCurrency('pt-BR')).toBe('USD');
+  });
+
   it('defaults to USD for unsupported locales', () => {
     expect(guessHomeCurrency('ja-JP')).toBe('USD');
     expect(guessHomeCurrency('zh-CN')).toBe('USD');
