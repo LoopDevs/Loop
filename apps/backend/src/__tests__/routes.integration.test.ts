@@ -873,4 +873,58 @@ describe('bodyLimit middleware (A2-1005)', () => {
     // Handler-level 400 for missing email — NOT the middleware's 413.
     expect(res.status).toBe(400);
   });
+
+  // BK-bodylimit: the global volumetric rate limiter (`globalRateLimit`,
+  // 600/min/IP) MUST sit ahead of the body-size check in the middleware
+  // chain. `bodyLimit` short-circuits an oversized request with a 413
+  // and never calls `next()`; if it ran first, an attacker flooding
+  // oversized bodies would be rejected by size before the rate limiter
+  // ever counted the traffic, so the volumetric backstop would never
+  // engage on that flood. This asserts the observable consequence of
+  // the correct order: once a client's global per-IP budget is spent,
+  // an oversized-body request is throttled (429) rather than slipping
+  // straight to the size backstop (413) — i.e. oversized bodies are
+  // still counted by, and subject to, the rate limiter.
+  it('BK-bodylimit: oversized-body requests hit the global rate limit (429), not the size check (413), once the per-IP budget is spent', async () => {
+    const ip = '198.51.100.200';
+    // `globalRateLimit()` is mounted with its documented default budget
+    // (600/min/IP); the test fleet-size estimate is 1, so the effective
+    // ceiling is exactly 600. Prime the global per-IP bucket to that
+    // ceiling with cheap, body-less requests to an unmatched route (a
+    // 404 still traverses every global middleware, including the
+    // limiter, but carries no per-route limiter of its own — so only
+    // the `__global__` bucket is spent).
+    // Sequential by design: each request must land in the same 60s
+    // window to accumulate into one shared per-IP bucket.
+    const GLOBAL_BUDGET = 600;
+    for (let i = 0; i < GLOBAL_BUDGET; i++) {
+      const primer = await app.request('/api/bk-bodylimit-prime', {
+        method: 'GET',
+        headers: { 'fly-client-ip': ip },
+      });
+      // Sanity: priming stays under budget, so none of these is itself a 429.
+      expect(primer.status).toBe(404);
+    }
+
+    // The bucket is now at its ceiling. The next request from this IP —
+    // an oversized-body POST — must be seen and rejected by the limiter
+    // (429) before the body-size check (413) can short-circuit it.
+    const oversized = 'a'.repeat(1024 * 1024 + 1);
+    const res = await app.request('/api/bk-bodylimit-prime', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': String(oversized.length),
+        'fly-client-ip': ip,
+      },
+      body: oversized,
+    });
+
+    // Pre-fix (bodyLimit ahead of globalRateLimit) this is 413: the
+    // oversized body is rejected by size and never reaches — or is
+    // counted by — the limiter. Post-fix it is 429.
+    expect(res.status).toBe(429);
+    const body = (await res.json()) as { code: string; message: string };
+    expect(body.code).toBe('RATE_LIMITED');
+  });
 });
