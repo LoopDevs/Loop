@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ApiException } from '@loop/shared';
 import type { UserWalletResponse } from '~/services/wallet';
+import type * as QueryRetry from '~/hooks/query-retry';
 import type { VaultApyResponse } from '~/services/vault-apy';
 import { WalletCard, fmtLoopBalance, fmtApyBps } from '../WalletCard';
 
@@ -33,7 +35,13 @@ vi.mock('~/hooks/use-auth', () => ({
   useAuth: () => ({ isAuthenticated: authMock.isAuthenticated }),
 }));
 
-vi.mock('~/hooks/query-retry', () => ({ shouldRetry: () => false }));
+// Keep the REAL isTransientError (WalletCard uses it to tell a
+// transient blip from a permanent 4xx) — only force shouldRetry off so
+// a rejected query settles into isError immediately, no auto-retry.
+vi.mock('~/hooks/query-retry', async (importActual) => ({
+  ...(await importActual<typeof QueryRetry>()),
+  shouldRetry: () => false,
+}));
 
 vi.mock('~/hooks/use-vault-apy', () => ({
   useVaultApy: () => vaultApyMock,
@@ -160,13 +168,71 @@ describe('<WalletCard />', () => {
     });
   });
 
-  it('renders nothing on fetch error (endpoint may not be deployed yet)', async () => {
-    walletMock.getMyWallet.mockRejectedValue(new Error('404'));
+  it('stays quiet on a PERMANENT (4xx) error — endpoint not deployed yet / auth', async () => {
+    // A real deploy-order-gap 404 is an ApiException(404), which is
+    // non-transient: a retry can't heal it, so the card self-hides
+    // rather than showing a retry button that could never succeed.
+    walletMock.getMyWallet.mockRejectedValue(
+      new ApiException(404, { code: 'NOT_FOUND', message: 'no wallet endpoint yet' }),
+    );
     const container = renderCard();
     await waitFor(() => {
       expect(walletMock.getMyWallet).toHaveBeenCalled();
     });
     expect(container.textContent).toBe('');
+    // Specifically: no scary error banner during the deploy window.
+    expect(screen.queryByText(/couldn’t load your balance/)).toBeNull();
+    expect(screen.queryByRole('button', { name: /retry/i })).toBeNull();
+  });
+
+  it('keeps the card visible with an error + retry on a TRANSIENT (5xx) error (AUD-10)', async () => {
+    // A network blip / 5xx must NOT silently unmount the balance —
+    // that reads as "my money vanished". Show a retry instead.
+    walletMock.getMyWallet.mockRejectedValue(
+      new ApiException(503, { code: 'SERVICE_UNAVAILABLE', message: 'blip' }),
+    );
+    const container = renderCard();
+    await waitFor(() => {
+      expect(screen.getByText(/couldn’t load your balance/)).toBeDefined();
+    });
+    // The surface stays on screen (heading + reassurance + retry), NOT empty.
+    expect(container.textContent).not.toBe('');
+    expect(screen.getByText('Your Loop balance')).toBeDefined();
+    expect(screen.getByText(/Your money is safe/)).toBeDefined();
+    expect(screen.getByRole('button', { name: /retry/i })).toBeDefined();
+  });
+
+  it('retry refetches and recovers the balance (AUD-10)', async () => {
+    walletMock.getMyWallet.mockRejectedValueOnce(
+      new ApiException(503, { code: 'SERVICE_UNAVAILABLE', message: 'blip' }),
+    );
+    renderCard();
+    const retry = await screen.findByRole('button', { name: /retry/i });
+    expect(walletMock.getMyWallet).toHaveBeenCalledTimes(1);
+
+    // Next fetch succeeds — the retry affordance re-triggers the query.
+    walletMock.getMyWallet.mockResolvedValue(wallet());
+    fireEvent.click(retry);
+
+    await waitFor(() => {
+      expect(screen.getByText(/42\.50/)).toBeDefined();
+    });
+    expect(walletMock.getMyWallet).toHaveBeenCalledTimes(2);
+    // Error surface is gone once the balance loads.
+    expect(screen.queryByText(/couldn’t load your balance/)).toBeNull();
+  });
+
+  it('stays quiet while loading — no error/retry UI mid-flight (AUD-10)', async () => {
+    // A never-settling fetch keeps the query in flight; loading must
+    // read as quiet, never as the error state.
+    walletMock.getMyWallet.mockReturnValue(new Promise<UserWalletResponse>(() => {}));
+    const container = renderCard();
+    await waitFor(() => {
+      expect(walletMock.getMyWallet).toHaveBeenCalled();
+    });
+    expect(container.textContent).toBe('');
+    expect(screen.queryByText(/couldn’t load your balance/)).toBeNull();
+    expect(screen.queryByRole('button', { name: /retry/i })).toBeNull();
   });
 
   it('renders nothing (and never fetches) when signed out', () => {

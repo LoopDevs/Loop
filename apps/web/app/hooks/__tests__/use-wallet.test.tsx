@@ -86,13 +86,30 @@ describe('useWallet', () => {
     expect(result.current.isActivated).toBe(false);
   });
 
-  it('surfaces isError on fetch failure', async () => {
-    walletMock.getMyWallet.mockRejectedValue(new Error('boom'));
+  it('surfaces isError + the error object on fetch failure', async () => {
+    const boom = new Error('boom');
+    walletMock.getMyWallet.mockRejectedValue(boom);
     const { result } = renderHook(() => useWallet(), { wrapper: makeWrapper() });
     await waitFor(() => {
       expect(result.current.isError).toBe(true);
     });
     expect(result.current.wallet).toBeUndefined();
+    // The error is exposed so callers can tell a transient blip (offer
+    // retry) from a permanent 4xx (stay quiet).
+    expect(result.current.error).toBe(boom);
+  });
+
+  it('refetch re-triggers the wallet request', async () => {
+    walletMock.getMyWallet.mockResolvedValue(activatedWallet());
+    const { result } = renderHook(() => useWallet(), { wrapper: makeWrapper() });
+    await waitFor(() => {
+      expect(result.current.wallet).toBeDefined();
+    });
+    expect(walletMock.getMyWallet).toHaveBeenCalledTimes(1);
+    result.current.refetch();
+    await waitFor(() => {
+      expect(walletMock.getMyWallet).toHaveBeenCalledTimes(2);
+    });
   });
 
   it('exposes the me-surface query key for invalidation', () => {
