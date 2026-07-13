@@ -64,6 +64,9 @@ export function ReasonDialog({
     const trimmed = value.trim();
     if (trimmed.length < MIN_LEN || trimmed.length > MAX_LEN) {
       setError(`Reason must be ${MIN_LEN}–${MAX_LEN} characters`);
+      // Return focus to the field the admin must fix; the submit click
+      // otherwise strands focus on the Confirm button.
+      inputRef.current?.focus();
       return;
     }
     onResolve(trimmed);
@@ -123,7 +126,15 @@ export function ReasonDialog({
           className="w-full rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
         <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
-          <span id={error !== null ? `${helperId}-error` : undefined} className="text-red-600">
+          <span
+            id={error !== null ? `${helperId}-error` : undefined}
+            // Persistent assertive live region: it always occupies the
+            // layout (holding a non-breaking space when clear), so when the
+            // validation message is injected here AT announces it. The bare
+            // <span> made the error visible but silent to screen readers.
+            role="alert"
+            className="text-red-600"
+          >
             {error ?? '\u00a0'}
           </span>
           <span>

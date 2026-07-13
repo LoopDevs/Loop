@@ -51,6 +51,7 @@ export function StepUpModal({ onConfirm, onCancel }: Props): React.JSX.Element {
   // The parent mounts this component only while the step-up flow is
   // active, so we open the dialog once on mount.
   const dialogRef = useRef<HTMLDialogElement | null>(null);
+  const otpInputRef = useRef<HTMLInputElement | null>(null);
   useEffect(() => {
     const dialog = dialogRef.current;
     if (dialog !== null && !dialog.open) dialog.showModal();
@@ -79,6 +80,9 @@ export function StepUpModal({ onConfirm, onCancel }: Props): React.JSX.Element {
   const handleConfirm = async (): Promise<void> => {
     if (otp.trim().length === 0) {
       setError('Enter the verification code from your email.');
+      // Return focus to the field the admin must fill; the Confirm click
+      // otherwise strands focus on the button.
+      otpInputRef.current?.focus();
       return;
     }
     setError(null);
@@ -95,6 +99,10 @@ export function StepUpModal({ onConfirm, onCancel }: Props): React.JSX.Element {
         setError(friendlyError(err, 'Verification failed. Re-send the code and try again.'));
       }
       setStage('awaiting-code');
+      // Return focus to the OTP field so the admin can correct and retry.
+      // rAF waits for the re-enabled input to commit (it's disabled while
+      // 'confirming'). Matches the ReasonDialog / ConfirmDialog focus idiom.
+      requestAnimationFrame(() => otpInputRef.current?.focus());
     }
   };
 
@@ -132,10 +140,18 @@ export function StepUpModal({ onConfirm, onCancel }: Props): React.JSX.Element {
         {(stage === 'sending' || stage === 'awaiting-code' || stage === 'confirming') && (
           <div className="space-y-3">
             <Input
+              ref={otpInputRef}
               type="text"
               label="Verification code"
               value={otp}
               onChange={setOtp}
+              inputMode="numeric"
+              // A2-1100: let iOS surface the emailed OTP from the
+              // notification bar as a keyboard suggestion (Android Autofill
+              // does the same via Google Messages), and bring up a numeric
+              // keypad for the 6-digit code. Matches the login + onboarding
+              // OTP inputs (auth.tsx, signup-tail.tsx).
+              autoComplete="one-time-code"
               // eslint-disable-next-line jsx-a11y/no-autofocus -- ADR 042: deliberate UX — this is the sole input on a step that just became active after an explicit user action (submit email / advance a wizard step), not an unexpected focus jump. eslint-plugin-jsx-a11y blanket-disallows autoFocus; WCAG does not. Tracked: docs/readiness-backlog-2026-07-03.md B-2.
               autoFocus
               disabled={stage === 'confirming'}
@@ -160,7 +176,11 @@ export function StepUpModal({ onConfirm, onCancel }: Props): React.JSX.Element {
           </div>
         )}
 
-        {error !== null && <p className="mt-3 text-sm text-red-600 dark:text-red-400">{error}</p>}
+        {error !== null && (
+          <p role="alert" className="mt-3 text-sm text-red-600 dark:text-red-400">
+            {error}
+          </p>
+        )}
 
         <button
           type="button"

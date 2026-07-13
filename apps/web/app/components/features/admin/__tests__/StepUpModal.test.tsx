@@ -93,4 +93,43 @@ describe('<StepUpModal />', () => {
       expect(onConfirm).toHaveBeenCalledWith('jwt-step-up', '2026-06-11T12:05:00.000Z');
     });
   });
+
+  // FE-15: the emailed 6-digit code should autofill from the OS
+  // notification (iOS suggestion bar / Android autofill) and bring up a
+  // numeric keypad — same contract as the login + onboarding OTP inputs
+  // (auth.tsx, signup-tail.tsx).
+  it('gives the OTP input one-time-code autofill + a numeric keypad (FE-15)', async () => {
+    authMock.requestOtp.mockResolvedValue(undefined);
+    render(<StepUpModal onConfirm={vi.fn()} onCancel={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /send code/i }));
+    const input = await screen.findByLabelText(/^verification code$/i);
+
+    expect(input.getAttribute('autocomplete')).toBe('one-time-code');
+    expect(input.getAttribute('inputmode')).toBe('numeric');
+  });
+
+  // FE-14: a failed confirm must be announced to AT (assertive live
+  // region) and return focus to the OTP field so the admin can correct
+  // and retry — the confirm click otherwise strands focus on the button.
+  it('announces a confirm error via role="alert" and returns focus to the OTP field (FE-14)', async () => {
+    authMock.requestOtp.mockResolvedValue(undefined);
+    stepUpMock.mintAdminStepUp.mockRejectedValue(new Error('bad code'));
+    render(<StepUpModal onConfirm={vi.fn()} onCancel={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /send code/i }));
+    const input = await screen.findByLabelText(/^verification code$/i);
+    fireEvent.change(input, { target: { value: '000000' } });
+
+    // A real submit click leaves focus on the Confirm button; move focus
+    // off the field first so the focus-return assertion is non-vacuous
+    // (fireEvent.click does not move focus on its own).
+    screen.getByRole('button', { name: /cancel/i }).focus();
+    fireEvent.click(screen.getByRole('button', { name: /^confirm$/i }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toMatch(/bad code/i);
+
+    await waitFor(() => expect(document.activeElement).toBe(input));
+  });
 });
