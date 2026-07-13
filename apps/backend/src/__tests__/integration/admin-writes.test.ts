@@ -80,6 +80,17 @@ function idemKey(): string {
   return Buffer.from(crypto.getRandomValues(new Uint8Array(20))).toString('base64url');
 }
 
+/**
+ * MNY-10: the target user's registered wallet. `seed()` provisions this
+ * as the target's ACTIVATED embedded wallet, so an emission whose
+ * `destinationAddress` equals it is pinned + accepted, and any other
+ * address is rejected (`DESTINATION_NOT_REGISTERED`). Every emission
+ * test in this file targets this address (the historic all-`A` literal
+ * the pre-fix tests already used), so the pinning guard is a no-op for
+ * the correctly-addressed happy paths and a hard gate for the rest.
+ */
+const TARGET_WALLET = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+
 interface SeededState {
   adminUserId: string;
   targetUser: { id: string; email: string };
@@ -195,7 +206,13 @@ async function seed(): Promise<SeededState> {
     email: admin.email,
   });
   const target = await findOrCreateUserByEmail('target@test.local');
-  await db.update(users).set({ homeCurrency: 'USD' }).where(eq(users.id, target.id));
+  // MNY-10: give the target an ACTIVATED embedded wallet so emissions
+  // pinned to it (`destinationAddress === TARGET_WALLET`) are accepted.
+  // Non-emission writes (credit-adjust / refund) ignore these columns.
+  await db
+    .update(users)
+    .set({ homeCurrency: 'USD', walletProvisioning: 'activated', walletAddress: TARGET_WALLET })
+    .where(eq(users.id, target.id));
 
   // Insert a fulfilled order so refund has a `referenceId` to bind.
   const [orderRow] = await db
@@ -765,6 +782,155 @@ describeIf('admin emission write — real postgres ladder, mirror untouched (ADR
       .from(pendingPayouts)
       .where(eq(pendingPayouts.userId, targetUser.id));
     expect(payouts).toHaveLength(0);
+  });
+
+  // ── MNY-10: emission destination pinned to the registered wallet ──
+  //
+  // The disease: `destinationAddress` was trusted as free admin input,
+  // so a typo'd/malicious value queued an on-chain LOOP payment to an
+  // address the target user does not control. The handler now resolves
+  // the user's registered wallet (activated embedded wallet, else the
+  // legacy linked stellarAddress — mirroring the cashback payout
+  // builder) and rejects any other destination.
+  it('MNY-10: rejects an emission to a destination that is NOT the registered wallet (400 DESTINATION_NOT_REGISTERED)', async () => {
+    const { targetUser, bearer, stepUp } = await seed();
+    // Fully-funded + otherwise valid — the ONLY defect is that the
+    // destination differs from the user's registered wallet. A valid,
+    // well-formed G-address that is not TARGET_WALLET.
+    await seedCashbackBalance({ userId: targetUser.id, amountMinor: 2000n });
+    const attackerDest = 'GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI';
+    expect(attackerDest).not.toBe(TARGET_WALLET);
+
+    const res = await app.request(`http://localhost/api/admin/users/${targetUser.id}/emissions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${bearer}`,
+        'idempotency-key': idemKey(),
+        'X-Admin-Step-Up': stepUp,
+      },
+      body: JSON.stringify({
+        amountMinor: '500',
+        currency: 'USD',
+        destinationAddress: attackerDest,
+        reason: 'MNY-10: unregistered destination must be refused',
+      }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('DESTINATION_NOT_REGISTERED');
+
+    // The disease-proof: NOTHING was queued to the wrong address.
+    const payouts = await db
+      .select()
+      .from(pendingPayouts)
+      .where(eq(pendingPayouts.userId, targetUser.id));
+    expect(payouts).toHaveLength(0);
+    // Mirror untouched; no ledger row written.
+    const [credit] = await db
+      .select()
+      .from(userCredits)
+      .where(eq(userCredits.userId, targetUser.id));
+    expect(credit?.balanceMinor).toBe(2000n);
+  });
+
+  it('MNY-10: accepts an emission pinned to the registered wallet; queues the payout to that address', async () => {
+    const { targetUser, bearer, stepUp } = await seed();
+    await seedCashbackBalance({ userId: targetUser.id, amountMinor: 2000n });
+
+    const res = await app.request(`http://localhost/api/admin/users/${targetUser.id}/emissions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${bearer}`,
+        'idempotency-key': idemKey(),
+        'X-Admin-Step-Up': stepUp,
+      },
+      body: JSON.stringify({
+        amountMinor: '500',
+        currency: 'USD',
+        destinationAddress: TARGET_WALLET,
+        reason: 'MNY-10: registered destination is accepted',
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { result: { payoutId: string; destinationAddress: string } };
+    expect(body.result.destinationAddress).toBe(TARGET_WALLET);
+
+    const payouts = await db
+      .select()
+      .from(pendingPayouts)
+      .where(eq(pendingPayouts.id, body.result.payoutId));
+    expect(payouts).toHaveLength(1);
+    // Pinned to the DB-authoritative registered wallet.
+    expect(payouts[0]!.toAddress).toBe(TARGET_WALLET);
+  });
+
+  it('MNY-10: rejects an emission when the target user has NO registered wallet (400 NO_REGISTERED_WALLET)', async () => {
+    const { targetUser, bearer, stepUp } = await seed();
+    // Strip the wallet seed() provisioned — model a user who never
+    // linked/activated a wallet. The safe default is to refuse rather
+    // than pay a free-input destination.
+    await db
+      .update(users)
+      .set({ walletProvisioning: 'none', walletAddress: null, stellarAddress: null })
+      .where(eq(users.id, targetUser.id));
+    await seedCashbackBalance({ userId: targetUser.id, amountMinor: 2000n });
+
+    const res = await app.request(`http://localhost/api/admin/users/${targetUser.id}/emissions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${bearer}`,
+        'idempotency-key': idemKey(),
+        'X-Admin-Step-Up': stepUp,
+      },
+      body: JSON.stringify({
+        amountMinor: '500',
+        currency: 'USD',
+        destinationAddress: TARGET_WALLET,
+        reason: 'MNY-10: no registered wallet must be refused',
+      }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('NO_REGISTERED_WALLET');
+
+    const payouts = await db
+      .select()
+      .from(pendingPayouts)
+      .where(eq(pendingPayouts.userId, targetUser.id));
+    expect(payouts).toHaveLength(0);
+  });
+
+  it('MNY-10: for an embedded-wallet-only user, the activated embedded wallet is the pin — a legacy stellarAddress destination is refused', async () => {
+    const { targetUser, bearer, stepUp } = await seed();
+    // Activated embedded wallet = TARGET_WALLET (from seed()), PLUS a
+    // distinct legacy linked address. Resolution mirrors the cashback
+    // builder: the activated embedded wallet wins, so an emission to
+    // the legacy address must be refused.
+    const legacyAddr = 'GCZERWKF5DJUM33F5EPGQNS3EL6KLC4CDZ7LR7WVU2CHKGNGZ5V4B7QI';
+    expect(legacyAddr).not.toBe(TARGET_WALLET);
+    await db.update(users).set({ stellarAddress: legacyAddr }).where(eq(users.id, targetUser.id));
+    await seedCashbackBalance({ userId: targetUser.id, amountMinor: 2000n });
+
+    const res = await app.request(`http://localhost/api/admin/users/${targetUser.id}/emissions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${bearer}`,
+        'idempotency-key': idemKey(),
+        'X-Admin-Step-Up': stepUp,
+      },
+      body: JSON.stringify({
+        amountMinor: '500',
+        currency: 'USD',
+        destinationAddress: legacyAddr,
+        reason: 'MNY-10: activated embedded wallet takes precedence',
+      }),
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code: string }).code).toBe('DESTINATION_NOT_REGISTERED');
   });
 
   it('ADR 036: compensation refuses a debit-less post-ADR-036 emission with 409', async () => {

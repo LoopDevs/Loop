@@ -56,9 +56,15 @@ const log = logger.child({ handler: 'admin-emission' });
 /**
  * Body schema. `amountMinor` is unsigned integer-as-string; same
  * 10,000,000 cap as refund/adjustment. `destinationAddress` is the
- * user's Stellar wallet — admin specifies it explicitly because the
- * use case is "manual payout backfill" where the user might not
- * have a stored wallet yet.
+ * user's Stellar wallet.
+ *
+ * MNY-10: the well-formed address the admin supplies is NOT trusted as
+ * a free destination — the handler pins the emission to the TARGET
+ * user's registered wallet and rejects (`DESTINATION_NOT_REGISTERED`)
+ * any address that does not match it. The field survives as an
+ * explicit operator confirmation/checksum: a typo'd or malicious value
+ * can no longer redirect an on-chain LOOP payment to an account the
+ * user does not control. See the resolution + guards in the handler.
  */
 const BodySchema = z.object({
   amountMinor: z
@@ -138,6 +144,46 @@ export async function adminEmissionHandler(c: Context): Promise<Response> {
     return c.json({ code: 'NOT_FOUND', message: 'Target user not found' }, 404);
   }
 
+  // MNY-10: pin the emission destination to the TARGET user's
+  // registered wallet. The supplied `destinationAddress` must never be
+  // trusted as a free destination — a typo'd or malicious value would
+  // queue an on-chain LOOP payment to an account the user does not
+  // control (the emission is Admin-mediated and irreversible once the
+  // submit worker signs it). Resolve the canonical destination the
+  // SAME way every other payout path does — the order-cashback builder
+  // (orders/fulfillment.ts → credits/payout-builder.ts) and the
+  // interest-mint sweep (credits/interest-mint.ts): an ACTIVATED
+  // embedded wallet wins over the legacy linked `stellarAddress`; a
+  // wallet that exists but is not `activated` has no LOOP trustlines
+  // and must not be targeted, so it does NOT contribute a destination.
+  const registeredWallet: string | null =
+    (targetUser.walletProvisioning === 'activated' ? targetUser.walletAddress : null) ??
+    targetUser.stellarAddress;
+  if (registeredWallet === null) {
+    // No activated embedded wallet and no linked legacy address — there
+    // is no registered wallet to pin to. Reject rather than trust the
+    // free input (the safe default): an emission to an unregistered
+    // destination is exactly the hole MNY-10 closes.
+    return c.json(
+      {
+        code: 'NO_REGISTERED_WALLET',
+        message:
+          'Target user has no registered wallet (activated embedded wallet or linked Stellar address) — cannot pin an emission destination',
+      },
+      400,
+    );
+  }
+  if (parsed.data.destinationAddress !== registeredWallet) {
+    return c.json(
+      {
+        code: 'DESTINATION_NOT_REGISTERED',
+        message:
+          "destinationAddress does not match the target user's registered wallet — emissions are pinned to the user's registered wallet",
+      },
+      400,
+    );
+  }
+
   // Resolve LOOP asset for the requested currency — same
   // payoutAssetFor mapping as order-cashback (USD→USDLOOP,
   // GBP→GBPLOOP, EUR→EURLOOP). Issuer absent in env → return 503
@@ -192,7 +238,11 @@ export async function adminEmissionHandler(c: Context): Promise<Response> {
           intent: {
             assetCode: asset.code,
             assetIssuer,
-            toAddress: parsed.data.destinationAddress,
+            // MNY-10: queue the DB-authoritative registered wallet, not
+            // the raw request field. They are equal here (validated
+            // above), but pinning to the resolved value keeps the
+            // on-chain destination sourced from the user's record.
+            toAddress: registeredWallet,
             amountStroops,
             memoText: generatePayoutMemo(),
           },
@@ -203,7 +253,7 @@ export async function adminEmissionHandler(c: Context): Promise<Response> {
           userId: applied.userId,
           currency: applied.currency,
           amountMinor: applied.amountMinor.toString(),
-          destinationAddress: parsed.data.destinationAddress,
+          destinationAddress: registeredWallet,
           balanceMinor: applied.balanceMinor.toString(),
           createdAt: applied.createdAt.toISOString(),
         };

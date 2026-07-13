@@ -198,7 +198,17 @@ beforeEach(() => {
     },
   );
   notifyMock.mockReset();
-  getUserByIdMock.mockReset().mockResolvedValue({ id: VALID_USER_ID, email: 'u@loop.test' });
+  // MNY-10: the target user's registered wallet is `VALID_DEST` (the
+  // address `GOOD_BODY.destinationAddress` supplies), so the pinning
+  // guard is a no-op on the happy paths. Tests that exercise the guard
+  // override this mock per-case.
+  getUserByIdMock.mockReset().mockResolvedValue({
+    id: VALID_USER_ID,
+    email: 'u@loop.test',
+    walletProvisioning: 'activated',
+    walletAddress: VALID_DEST,
+    stellarAddress: null,
+  });
   payoutAssetForMock.mockReset().mockReturnValue({ code: 'USDLOOP', issuer: 'GISSUER123' });
   generateMemoMock.mockReset().mockReturnValue('memo-fixed-for-tests');
 });
@@ -306,6 +316,62 @@ describe('adminEmissionHandler — ADR-017 + ADR-024/036 invariants', () => {
     const body = (await res.json()) as { code: string };
     expect(body.code).toBe('NOT_FOUND');
     expect(applyMock).not.toHaveBeenCalled();
+  });
+
+  it('400 DESTINATION_NOT_REGISTERED when destinationAddress is not the user registered wallet (MNY-10)', async () => {
+    // User's registered wallet differs from the supplied destination.
+    getUserByIdMock.mockResolvedValueOnce({
+      id: VALID_USER_ID,
+      email: 'u@loop.test',
+      walletProvisioning: 'activated',
+      walletAddress: 'GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI',
+      stellarAddress: null,
+    });
+    const res = await adminEmissionHandler(
+      makeCtx({ userId: VALID_USER_ID, body: GOOD_BODY, idempotencyKey: VALID_KEY }),
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('DESTINATION_NOT_REGISTERED');
+    // The disease-proof: the queue write never fired for the wrong dest.
+    expect(applyMock).not.toHaveBeenCalled();
+  });
+
+  it('400 NO_REGISTERED_WALLET when the target user has no registered wallet (MNY-10)', async () => {
+    getUserByIdMock.mockResolvedValueOnce({
+      id: VALID_USER_ID,
+      email: 'u@loop.test',
+      walletProvisioning: 'none',
+      walletAddress: null,
+      stellarAddress: null,
+    });
+    const res = await adminEmissionHandler(
+      makeCtx({ userId: VALID_USER_ID, body: GOOD_BODY, idempotencyKey: VALID_KEY }),
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('NO_REGISTERED_WALLET');
+    expect(applyMock).not.toHaveBeenCalled();
+  });
+
+  it('pins the destination to a legacy linked stellarAddress when there is no activated embedded wallet (MNY-10)', async () => {
+    // Embedded wallet exists but is NOT activated (no trustlines) →
+    // resolution falls back to the legacy linked address, mirroring the
+    // cashback payout builder. An emission to that address is accepted.
+    getUserByIdMock.mockResolvedValueOnce({
+      id: VALID_USER_ID,
+      email: 'u@loop.test',
+      walletProvisioning: 'wallet_created',
+      walletAddress: 'GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI',
+      stellarAddress: VALID_DEST,
+    });
+    applyMock.mockResolvedValueOnce(APPLIED);
+    const res = await adminEmissionHandler(
+      makeCtx({ userId: VALID_USER_ID, body: GOOD_BODY, idempotencyKey: VALID_KEY }),
+    );
+    expect(res.status).toBe(200);
+    const callArg = applyMock.mock.calls[0]?.[0] as { intent: { toAddress: string } };
+    expect(callArg.intent.toAddress).toBe(VALID_DEST);
   });
 
   it('503 NOT_CONFIGURED when the LOOP asset issuer is missing in env', async () => {
