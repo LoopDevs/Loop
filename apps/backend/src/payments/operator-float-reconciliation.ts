@@ -56,7 +56,7 @@
  * non-numeric or negative override fails boot, not a silent fallback.
  */
 import { createHash } from 'node:crypto';
-import { and, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, isNull, sql } from 'drizzle-orm';
 import { db, withAdvisoryLock } from '../db/client.js';
 import {
   ctxSettlements,
@@ -625,7 +625,11 @@ export async function computeMovementTotals(args: {
   };
 }
 
-async function computeUnlinkedManualDelta(args: {
+// Exported for the DB-backed regression test (integration suite) —
+// the `effective_at >= baselineCreatedAt` bound is the exact query the
+// OPFLOAT-DATEFRAG finding is about, so the test drives it directly
+// against real postgres with an active baseline present.
+export async function computeUnlinkedManualDelta(args: {
   account: string;
   asset: OperatorFloatAsset;
   baselineCreatedAt: Date;
@@ -641,7 +645,15 @@ async function computeUnlinkedManualDelta(args: {
         eq(operatorManualMovements.account, args.account),
         eq(operatorManualMovements.asset, args.asset),
         isNull(operatorManualMovements.movementPaymentId),
-        sql`${operatorManualMovements.effectiveAt} >= ${args.baselineCreatedAt}`,
+        // A2-1610: must use the typed `gte()` operator, not a raw sql
+        // template with the `Date` interpolated — postgres-js can't
+        // bind a `Date` instance at the wire level ("The \"string\"
+        // argument must be of type string ... Received an instance of
+        // Date"), so the raw fragment threw and errored the whole
+        // reconciliation the moment an active baseline existed.
+        // `gte()` lets drizzle's column mapper convert the Date through
+        // the timestamptz column's mode. Same boundary, same column.
+        gte(operatorManualMovements.effectiveAt, args.baselineCreatedAt),
       ),
     );
   return rows.reduce(
