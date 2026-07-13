@@ -34,6 +34,7 @@ const { adminMock, authMock, userMock } = vi.hoisted(() => ({
     listWatcherSkips: vi.fn(),
     getWatcherSkip: vi.fn(),
     reopenWatcherSkip: vi.fn(),
+    refundDeposit: vi.fn(),
   },
   authMock: {
     isAuthenticated: true,
@@ -59,6 +60,17 @@ vi.mock('~/services/admin', async (importActual) => {
       payouts: {},
       operatorPool: { size: 0, operators: [] },
     }),
+  };
+});
+
+// `refundDeposit` is imported into the route directly from
+// `~/services/admin-watcher-skips`, so mock that module (not the barrel).
+import type * as WatcherSkipsModule from '~/services/admin-watcher-skips';
+vi.mock('~/services/admin-watcher-skips', async (importActual) => {
+  const actual = (await importActual()) as typeof WatcherSkipsModule;
+  return {
+    ...actual,
+    refundDeposit: (args: unknown) => adminMock.refundDeposit(args),
   };
 });
 
@@ -91,6 +103,7 @@ beforeEach(() => {
   adminMock.listWatcherSkips.mockReset();
   adminMock.getWatcherSkip.mockReset();
   adminMock.reopenWatcherSkip.mockReset();
+  adminMock.refundDeposit.mockReset();
   authMock.isAuthenticated = true;
   userMock.staffRole = 'support';
   userMock.isAdmin = false;
@@ -279,6 +292,65 @@ describe('<AdminSkipsRoute />', () => {
     });
   });
 
+  it('refund (admin): reason dialog → refundDeposit called with reason + Idempotency-Key → reads envelope result', async () => {
+    userMock.staffRole = 'admin';
+    userMock.isAdmin = true;
+    adminMock.listWatcherSkips.mockResolvedValue({ rows: [abandonedRow] });
+    adminMock.refundDeposit.mockResolvedValue(
+      envelope({ paymentId: 'pay-abandoned-1', status: 'refunded', txHash: 'deadbeefcafebabe' }),
+    );
+    renderAt();
+    // Two 'Refund'-named buttons exist: the row action + the always-
+    // mounted refund ReasonDialog's confirm button. Grab the row one
+    // (not inside a <dialog>).
+    const refundButton = await waitFor(() => {
+      const rowBtns = screen
+        .getAllByRole('button', { name: 'Refund' })
+        .filter((b) => b.closest('dialog') === null);
+      if (rowBtns.length !== 1)
+        throw new Error(`expected 1 row refund button, got ${rowBtns.length}`);
+      return rowBtns[0] as HTMLElement;
+    });
+    await act(async () => {
+      fireEvent.click(refundButton);
+    });
+    // ReasonDialog (ADR-017 — the refund now carries an audited reason):
+    // type the reason into the open dialog's textarea and submit.
+    const openDialog = await waitFor(() => {
+      const d = document.querySelector('dialog[open]');
+      if (!(d instanceof HTMLElement)) throw new Error('no open dialog');
+      return d;
+    });
+    const textarea = openDialog.querySelector('textarea');
+    if (textarea === null) throw new Error('reason textarea not found');
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: 'sender confirmed — OPS-11' } });
+    });
+    const form = textarea.closest('form');
+    if (form === null) throw new Error('reason dialog form not found');
+    await act(async () => {
+      fireEvent.submit(form);
+    });
+    await waitFor(() => {
+      expect(adminMock.refundDeposit).toHaveBeenCalledTimes(1);
+    });
+    const args = adminMock.refundDeposit.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(args['paymentId']).toBe('pay-abandoned-1');
+    expect(args['reason']).toBe('sender confirmed — OPS-11');
+    // Idempotency key minted at mutate-time (CF-09: stable across a
+    // step-up retry of the same closure).
+    expect(typeof args['idempotencyKey']).toBe('string');
+    expect((args['idempotencyKey'] as string).length).toBeGreaterThan(0);
+    // Success toast reads `.result` off the {result, audit} envelope.
+    await waitFor(() => {
+      expect(
+        useUiStore
+          .getState()
+          .toasts.some((t) => t.type === 'success' && /refunded to sender/i.test(t.message)),
+      ).toBe(true);
+    });
+  });
+
   it('cancelling the reason dialog does not call the service', async () => {
     adminMock.listWatcherSkips.mockResolvedValue({ rows: [abandonedRow] });
     renderAt();
@@ -286,8 +358,19 @@ describe('<AdminSkipsRoute />', () => {
     await act(async () => {
       fireEvent.click(reopenButton);
     });
+    // Two ReasonDialogs are mounted (reopen + refund), each with a
+    // Cancel button — click the Cancel inside the OPEN one.
+    const openDialog = await waitFor(() => {
+      const d = document.querySelector('dialog[open]');
+      if (!(d instanceof HTMLElement)) throw new Error('no open dialog');
+      return d;
+    });
+    const cancelButton = Array.from(openDialog.querySelectorAll('button')).find(
+      (b) => b.textContent?.trim() === 'Cancel',
+    );
+    if (cancelButton === undefined) throw new Error('cancel button not found');
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+      fireEvent.click(cancelButton);
     });
     expect(adminMock.reopenWatcherSkip).not.toHaveBeenCalled();
   });

@@ -10,7 +10,12 @@ import {
 } from '@loop/shared';
 import type { Route } from './+types/admin.skips';
 import { shouldRetry } from '~/hooks/query-retry';
-import { getWatcherSkip, listWatcherSkips, reopenWatcherSkip } from '~/services/admin';
+import {
+  generateIdempotencyKey,
+  getWatcherSkip,
+  listWatcherSkips,
+  reopenWatcherSkip,
+} from '~/services/admin';
 import { refundDeposit } from '~/services/admin-watcher-skips';
 import { useStaffRole } from '~/hooks/use-staff-role';
 import { useAdminStepUp } from '~/hooks/use-admin-step-up';
@@ -102,6 +107,9 @@ function AdminSkipsRouteInner(): React.JSX.Element {
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [reopenTarget, setReopenTarget] = useState<AdminWatcherSkipRow | null>(null);
+  // A6 / ADR-017: the refund now carries an audited reason too, so it
+  // takes the same ReasonDialog target as reopen (above).
+  const [refundTarget, setRefundTarget] = useState<AdminWatcherSkipRow | null>(null);
   // A6: refund is an admin-tier + step-up action; support sees the tab
   // but not the Refund button.
   const { isAdminRole } = useStaffRole();
@@ -141,19 +149,31 @@ function AdminSkipsRouteInner(): React.JSX.Element {
     },
   });
 
-  // A6: refund an abandoned late deposit to its sender. Idempotent
-  // server-side (the step-up retry / re-click never double-pays), so a
-  // simple mutation through the step-up dance is safe.
+  // A6: refund an abandoned late deposit to its sender. Full ADR-017
+  // admin write now — carries an audited reason + a per-click
+  // Idempotency-Key, returning the `{ result, audit }` envelope. The
+  // key is minted ONCE at `.mutate()` time (below) and threaded through
+  // `refundDeposit` so the step-up-retry re-run of this same closure
+  // replays the stored snapshot instead of double-paying (CF-09).
   const refund = useMutation({
-    mutationFn: (paymentId: string) =>
+    mutationFn: (args: { paymentId: string; reason: string; idempotencyKey: string }) =>
       // P2-07: echo which deposit the OTP refunds to its on-chain sender.
       // The amount is server-side; the payment id is the identifying
       // detail on the client.
-      stepUp.runWithStepUp(() => refundDeposit(paymentId), {
-        action: 'Refund deposit to sender',
-        destination: paymentId,
-      }),
-    onSuccess: (res) => {
+      stepUp.runWithStepUp(
+        () =>
+          refundDeposit({
+            paymentId: args.paymentId,
+            reason: args.reason,
+            idempotencyKey: args.idempotencyKey,
+          }),
+        {
+          action: 'Refund deposit to sender',
+          destination: args.paymentId,
+        },
+      ),
+    onSuccess: (envelope) => {
+      const res = envelope.result;
       addToast(
         res.status === 'already_refunded'
           ? `Deposit ${res.paymentId} was already refunded (tx ${res.txHash.slice(0, 8)}…).`
@@ -183,6 +203,19 @@ function AdminSkipsRouteInner(): React.JSX.Element {
     setReopenTarget(null);
     if (reasonText === null || target === null) return;
     reopen.mutate({ paymentId: target.paymentId, reason: reasonText });
+  };
+
+  const handleRefundReason = (reasonText: string | null): void => {
+    const target = refundTarget;
+    setRefundTarget(null);
+    if (reasonText === null || target === null) return;
+    // Mint the key here (mutate-time), NOT inside `refundDeposit`, so a
+    // step-up retry of the same mutation closure reuses it verbatim.
+    refund.mutate({
+      paymentId: target.paymentId,
+      reason: reasonText,
+      idempotencyKey: generateIdempotencyKey(),
+    });
   };
 
   const rows = query.data?.rows ?? [];
@@ -327,7 +360,7 @@ function AdminSkipsRouteInner(): React.JSX.Element {
                         {isAdminRole ? (
                           <button
                             type="button"
-                            onClick={() => refund.mutate(row.paymentId)}
+                            onClick={() => setRefundTarget(row)}
                             disabled={refund.isPending}
                             title="Refund this deposit to its on-chain sender"
                             className="rounded-lg border border-teal-300 bg-teal-50 px-3 py-1.5 text-xs font-medium text-teal-800 hover:bg-teal-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-teal-800 dark:bg-teal-900/30 dark:text-teal-300 dark:hover:bg-teal-900/50"
@@ -379,6 +412,20 @@ function AdminSkipsRouteInner(): React.JSX.Element {
         description="The replay sweep re-evaluates the row with a fresh attempt budget. The reason lands in the audit trail and the Discord notification."
         confirmLabel="Reopen"
         onResolve={handleReopenReason}
+      />
+
+      {/* A6 / ADR-017: the refund captures its audited reason the same
+          way reopen does, then runs the step-up dance below. */}
+      <ReasonDialog
+        open={refundTarget !== null}
+        title={
+          refundTarget !== null
+            ? `Reason for refunding deposit ${refundTarget.paymentId}?`
+            : 'Reason for refunding?'
+        }
+        description="Submits an on-chain refund-to-sender for this abandoned late deposit. The reason lands in the audit trail and the Discord notification."
+        confirmLabel="Refund"
+        onResolve={handleRefundReason}
       />
 
       {/* A6: step-up dance for the admin refund action. */}

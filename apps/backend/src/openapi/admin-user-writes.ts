@@ -125,6 +125,15 @@ export function registerAdminUserWritesOpenApi(
   );
 
   // A6: late-deposit refund-to-sender.
+  const DepositRefundBody = registry.register(
+    'DepositRefundBody',
+    z.object({
+      reason: z.string().min(2).max(500).openapi({
+        description: 'Why the deposit is being refunded — lands in the audit trail.',
+      }),
+    }),
+  );
+
   const DepositRefundResult = registry.register(
     'DepositRefundResult',
     z.object({
@@ -134,29 +143,42 @@ export function registerAdminUserWritesOpenApi(
     }),
   );
 
+  const DepositRefundEnvelope = registry.register(
+    'DepositRefundEnvelope',
+    z.object({ result: DepositRefundResult, audit: AdminWriteAudit }),
+  );
+
   registry.registerPath({
     method: 'post',
     path: '/api/admin/deposits/{paymentId}/refund',
     summary: 'Refund an abandoned late deposit to its sender (hardening A6).',
     description:
-      "Submits an outbound Stellar payment from the operator account returning an abandoned late deposit (one that landed just after its order expired) to its on-chain sender. Idempotent + crash-safe (CF-18 hash persisted before submit); a replay returns `already_refunded`. Admin-tier + step-up (`'deposit-refund'` scope). The same `refundDeposit()` path runs automatically when `LOOP_DEPOSIT_REFUND_AUTO=true`.",
+      "Submits an outbound Stellar payment from the operator account returning an abandoned late deposit (one that landed just after its order expired) to its on-chain sender. Idempotent + crash-safe (CF-18 hash persisted before submit); a replay returns `already_refunded`. Admin-tier + step-up (`'deposit-refund'` scope). ADR-017 admin-write contract: `Idempotency-Key` header + `reason` body (2..500 chars) required; a repeat call returns the stored snapshot with `audit.replayed: true`. The same `refundDeposit()` path runs automatically when `LOOP_DEPOSIT_REFUND_AUTO=true`.",
     tags: ['Admin'],
     security: [{ bearerAuth: [] }],
     request: {
       params: z.object({ paymentId: z.string() }),
       headers: z.object({
+        'idempotency-key': z.string().min(16).max(128).openapi({
+          description:
+            'Required. Scoped to (admin_user_id, key); repeats replay the stored snapshot.',
+        }),
         'x-admin-step-up': z.string().openapi({
           description: 'ADR-028 step-up JWT scoped to `deposit-refund`. 5-minute TTL.',
         }),
       }),
+      body: {
+        content: { 'application/json': { schema: DepositRefundBody } },
+      },
     },
     responses: {
       200: {
-        description: 'Refunded (or replayed `already_refunded`)',
-        content: { 'application/json': { schema: DepositRefundResult } },
+        description: 'Refunded (or replayed from idempotency snapshot as `already_refunded`)',
+        content: { 'application/json': { schema: DepositRefundEnvelope } },
       },
       400: {
-        description: 'Missing/invalid paymentId (`VALIDATION_ERROR`)',
+        description:
+          'Missing idempotency key, invalid reason, or missing/invalid paymentId (`VALIDATION_ERROR`)',
         content: { 'application/json': { schema: errorResponse } },
       },
       401: {
