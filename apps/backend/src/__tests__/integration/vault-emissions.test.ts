@@ -540,6 +540,65 @@ describeIf('vault-emissions integration — real postgres (ADR 031 V3)', () => {
     expect(alert3?.alertActive).toBe(false);
   });
 
+  it('MNY-15: the stuck-emission watchdog DETECTS + pages a stale `pending` strand (disabled/deregistered-vault case) — the state the old watchdog silently skipped', async () => {
+    // A `pending` vault_emissions row is user-OWED cashback claimed at
+    // fulfillment with nothing on-chain yet. If its vault is
+    // deregistered, `driveOneVaultEmission` returns `no_vault` and
+    // leaves the row in `pending` forever — a silent money-owed strand.
+    // Seed exactly that (a `pending` row backdated past the threshold,
+    // NOTHING advanced past `pending`) and prove the watchdog now pages.
+    const { notifyVaultEmissionsStuck } = await import('../../discord.js');
+    const notifyMock = vi.mocked(notifyVaultEmissionsStuck);
+    notifyMock.mockClear();
+
+    const user = await seedUser();
+    const orderId = await seedOrder({ userId: user.id, cashbackMinor: 400n });
+    await claimVaultEmission(db as never, {
+      orderId,
+      userId: user.id,
+      assetCode: 'LOOPUSD',
+      network: 'testnet',
+      cashbackMinor: 400n,
+      toAddress: user.walletAddress,
+    });
+    // Strand it: still `pending` (never deposited — no depositTxHash,
+    // no sharesMinted), created 30 min ago (older than the 15-min
+    // threshold below). This is the shape a disabled-vault strand
+    // leaves behind.
+    await db
+      .update(vaultEmissions)
+      .set({ createdAt: new Date(Date.now() - 30 * 60_000) })
+      .where(eq(vaultEmissions.orderId, orderId));
+
+    // Precondition: the strand is genuinely in `pending` — the state the
+    // pre-fix `VAULT_EMISSION_STUCK_STATES` (['depositing','deposited',
+    // 'transferred']) excluded, so the old watchdog found ZERO rows here.
+    const [pre] = await db
+      .select({ state: vaultEmissions.state })
+      .from(vaultEmissions)
+      .where(eq(vaultEmissions.orderId, orderId));
+    expect(pre?.state).toBe('pending');
+
+    // First run: DETECTS the pending strand and pages exactly once.
+    const first = await runVaultEmissionStuckWatchdog({ thresholdMinutes: 15 });
+    expect(first.notified).toBe(true);
+    expect(notifyMock).toHaveBeenCalledTimes(1);
+    // The page's `states` summary names `pending` — proof it is the
+    // pending strand that fired, not some other in-flight row.
+    expect(notifyMock.mock.calls[0]?.[0]).toMatchObject({ states: 'pending' });
+    const [alert1] = await db
+      .select()
+      .from(watchdogAlertState)
+      .where(eq(watchdogAlertState.watchdogName, 'vault-emission-stuck-watchdog'));
+    expect(alert1?.alertActive).toBe(true);
+
+    // Second run while the strand persists: fire-once holds — no
+    // duplicate page.
+    const second = await runVaultEmissionStuckWatchdog({ thresholdMinutes: 15 });
+    expect(second.notified).toBe(false);
+    expect(notifyMock).toHaveBeenCalledTimes(1);
+  });
+
   // ─── ADR 031 V7 — admin re-drive support ────────────────────────────────
 
   it('V7: reclaims + redrives a failed-after-deposit emission to resume at transfer WITHOUT re-depositing (real postgres CAS + FOR UPDATE lock)', async () => {

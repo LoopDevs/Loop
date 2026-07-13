@@ -896,13 +896,27 @@ async function runVaultEmissionSweepLocked(args?: {
 // unreachable, or the operator account is sequence-contended so every
 // deposit/transfer transiently fails — would never reach `failed` and
 // would otherwise be invisible. This watchdog pages once per incident
-// when any row has sat in `depositing`/`deposited`/`transferred` past
-// the threshold, mirroring `stuck-payout-watchdog.ts` exactly:
+// when any row has sat in `pending`/`depositing`/`deposited`/`transferred`
+// past the threshold, mirroring `stuck-payout-watchdog.ts` exactly
+// (which likewise covers its own first, pre-network `pending` state):
 // single-flighted fleet-wide via `pg_try_advisory_xact_lock`, fire-
 // once/re-arm state persisted in `watchdog_alert_state`, confirmed-
 // delivery (persist active=true only after the send resolves).
+//
+// MNY-15: `pending` is covered too, not just the post-CAS in-flight
+// states. A `pending` row is user-OWED cashback claimed at fulfillment
+// (`claimVaultEmission`) with nothing on-chain yet. It is normally
+// transient — the next sweep tick CASes it `pending → depositing`
+// within ~one tick — but if the vault for its (asset, network) is
+// DEREGISTERED, `driveOneVaultEmission` returns `no_vault` at the top
+// and leaves the row in `pending` indefinitely (the sweep re-considers
+// it every tick but can never advance it). Omitting `pending` here made
+// that stranded, user-owed cashback silently invisible — no page, no
+// `failed` transition — the exact money-owed hole this watchdog exists
+// to close. The shared staleness threshold (default 15 min ≫ the ~30s
+// sweep cadence) keeps a healthy, momentarily-`pending` row from paging.
 
-const VAULT_EMISSION_STUCK_STATES = ['depositing', 'deposited', 'transferred'] as const;
+const VAULT_EMISSION_STUCK_STATES = ['pending', 'depositing', 'deposited', 'transferred'] as const;
 
 /** `watchdog_alert_state` row key for the stuck-vault-emission watchdog. */
 const VAULT_EMISSION_STUCK_ALERT_NAME = 'vault-emission-stuck-watchdog';
