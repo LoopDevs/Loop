@@ -127,13 +127,21 @@ function AdminCashbackRouteInner(): React.JSX.Element {
       const loopMarginPct = Number(args.draft.loopMarginPct);
       // ADR 028: step-up gated (sets future emission rates). The hook
       // opens <StepUpModal /> on STEP_UP_REQUIRED and retries once.
-      return stepUp.runWithStepUp(() =>
-        upsertCashbackConfig(args.merchantId, {
-          wholesalePct,
-          userCashbackPct,
-          loopMarginPct,
-          reason: args.reason,
-        }),
+      return stepUp.runWithStepUp(
+        () =>
+          upsertCashbackConfig(args.merchantId, {
+            wholesalePct,
+            userCashbackPct,
+            loopMarginPct,
+            reason: args.reason,
+          }),
+        // P2-07: no single money amount (three percentages), so echo the
+        // split being authorized + the target merchant rather than a
+        // blank confirmation.
+        {
+          action: `Set cashback split — wholesale ${wholesalePct}% / user ${userCashbackPct}% / margin ${loopMarginPct}%`,
+          destination: args.merchantId,
+        },
       );
     },
     onSuccess: async () => {

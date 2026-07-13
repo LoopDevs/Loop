@@ -50,7 +50,11 @@ export function HomeCurrencyForm({ userId, currentHomeCurrency }: Props): React.
 
   const mutation = useMutation({
     mutationFn: (args: Parameters<typeof setUserHomeCurrency>[0]) =>
-      stepUp.runWithStepUp(() => setUserHomeCurrency(args)),
+      // P2-07: not a money movement, but still echo what the OTP
+      // authorizes (target currency) rather than a blank confirmation.
+      stepUp.runWithStepUp(() => setUserHomeCurrency(args), {
+        action: `Change home currency to ${args.homeCurrency}`,
+      }),
     onSuccess: (envelope: AdminWriteEnvelope<HomeCurrencySetResult>) => {
       setLastApplied({ result: envelope.result, replayed: envelope.audit.replayed });
       setReason('');

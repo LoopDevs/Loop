@@ -69,7 +69,14 @@ export function AdminEmissionForm({ userId, defaultCurrency }: Props): React.JSX
 
   const mutation = useMutation({
     mutationFn: (args: Parameters<typeof applyAdminEmission>[0]) =>
-      stepUp.runWithStepUp(() => applyAdminEmission(args)),
+      // P2-07: echo what the step-up OTP authorizes — a Stellar emission
+      // is irreversible once the payout worker fires, so the operator
+      // must see the amount + destination on the OTP surface itself.
+      stepUp.runWithStepUp(() => applyAdminEmission(args), {
+        action: 'Queue emission',
+        amount: { minor: args.amountMinor, currency: args.currency },
+        destination: args.destinationAddress,
+      }),
     onSuccess: (envelope: AdminWriteEnvelope<EmissionResult>) => {
       setLastApplied({ result: envelope.result, replayed: envelope.audit.replayed });
       setAmountMajor('');

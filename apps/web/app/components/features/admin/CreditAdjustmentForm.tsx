@@ -91,7 +91,12 @@ export function CreditAdjustmentForm({ userId, defaultCurrency }: Props): React.
 
   const mutation = useMutation({
     mutationFn: (args: Parameters<typeof applyCreditAdjustment>[0]) =>
-      stepUp.runWithStepUp(() => applyCreditAdjustment(args)),
+      // P2-07: echo the signed amount + target user the OTP authorizes.
+      stepUp.runWithStepUp(() => applyCreditAdjustment(args), {
+        action: 'Apply credit adjustment',
+        amount: { minor: args.amountMinor, currency: args.currency },
+        destination: args.userId,
+      }),
     onSuccess: (envelope: AdminWriteEnvelope<CreditAdjustmentResult>) => {
       setLastApplied({ result: envelope.result, replayed: envelope.audit.replayed });
       setAmountMajor('');

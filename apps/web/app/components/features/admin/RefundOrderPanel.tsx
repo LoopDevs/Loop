@@ -52,15 +52,22 @@ export function RefundOrderPanel({
   const stepUp = useAdminStepUp();
   const refund = useMutation({
     mutationFn: (args: { reason: string; attestationNote?: string; idempotencyKey: string }) =>
-      stepUp.runWithStepUp(() =>
-        refundOrder({
-          orderId,
-          reason: args.reason,
-          ...(args.attestationNote !== undefined
-            ? { attestation: { codeUnused: true as const, attestationNote: args.attestationNote } }
-            : {}),
-          idempotencyKey: args.idempotencyKey,
-        }),
+      stepUp.runWithStepUp(
+        () =>
+          refundOrder({
+            orderId,
+            reason: args.reason,
+            ...(args.attestationNote !== undefined
+              ? {
+                  attestation: { codeUnused: true as const, attestationNote: args.attestationNote },
+                }
+              : {}),
+            idempotencyKey: args.idempotencyKey,
+          }),
+        // P2-07: echo which order the OTP refunds. The refund amount is
+        // the full order charge, computed server-side, so the order id is
+        // the identifying detail available on the client.
+        { action: 'Refund order', destination: orderId },
       ),
     onSuccess: (envelope) => {
       const res = envelope.result;

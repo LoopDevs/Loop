@@ -4,7 +4,7 @@ import { Link } from 'react-router';
 import { ApiException, type AdminStaffEntry, type StaffRole } from '@loop/shared';
 import type { Route } from './+types/admin.staff';
 import { shouldRetry } from '~/hooks/query-retry';
-import { useAdminStepUp } from '~/hooks/use-admin-step-up';
+import { useAdminStepUp, type PendingActionSummary } from '~/hooks/use-admin-step-up';
 import {
   getAdminUserByEmail,
   listAdminStaff,
@@ -67,7 +67,10 @@ function AdminStaffRouteInner(): React.JSX.Element {
 
   const revoke = useMutation({
     mutationFn: (args: { userId: string; reason: string }) =>
-      stepUp.runWithStepUp(() => revokeStaffRole(args)),
+      // P2-07: echo the role change the OTP authorizes (not a money path).
+      stepUp.runWithStepUp(() => revokeStaffRole(args), {
+        action: `Revoke staff role from ${args.userId}`,
+      }),
     onSuccess: (envelope) => {
       addToast(
         envelope.audit.replayed
@@ -234,7 +237,7 @@ function GrantForm({
   runWithStepUp,
 }: {
   onGranted: () => void;
-  runWithStepUp: <T>(fn: () => Promise<T>) => Promise<T>;
+  runWithStepUp: <T>(fn: () => Promise<T>, action?: PendingActionSummary) => Promise<T>;
 }): React.JSX.Element {
   const addToast = useUiStore((s) => s.addToast);
   const [email, setEmail] = useState('');
@@ -263,7 +266,10 @@ function GrantForm({
 
   const grant = useMutation({
     mutationFn: (args: { userId: string; role: StaffRole; reason: string }) =>
-      runWithStepUp(() => setStaffRole(args)),
+      // P2-07: echo the role grant the OTP authorizes (not a money path).
+      runWithStepUp(() => setStaffRole(args), {
+        action: `Grant ${args.role} role to ${args.userId}`,
+      }),
     onSuccess: (envelope) => {
       setLastReplayed(envelope.audit.replayed);
       addToast(

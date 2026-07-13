@@ -145,8 +145,20 @@ function AdminPayoutsRouteInner(): React.JSX.Element {
     // and any post-completion re-click — re-sends the SAME key. The
     // backend's ADR-017 dedup then collapses the re-fire into a replay
     // rather than a second state transition.
-    mutationFn: (args: { id: string; reason: string; idempotencyKey: string }) =>
-      stepUp.runWithStepUp(() => retryPayout(args)),
+    mutationFn: (args: { id: string; reason: string; idempotencyKey: string }) => {
+      // P2-07: echo the amount (Stellar stroops → fmtStroops) + destination
+      // of the specific failed row the OTP re-authorizes for submission.
+      const row = query.data?.payouts.find((p) => p.id === args.id);
+      return stepUp.runWithStepUp(() => retryPayout(args), {
+        action: 'Retry payout',
+        ...(row !== undefined
+          ? {
+              amount: { formatted: fmtStroops(row.amountStroops, row.assetCode) },
+              destination: row.toAddress,
+            }
+          : {}),
+      });
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['admin-payouts'] });
       void queryClient.invalidateQueries({ queryKey: ['admin-treasury'] });

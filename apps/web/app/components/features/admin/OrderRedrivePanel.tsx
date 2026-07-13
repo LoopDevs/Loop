@@ -44,7 +44,13 @@ export function OrderRedrivePanel({
   const stepUp = useAdminStepUp();
   const redrive = useMutation({
     mutationFn: (args: { reason: string; idempotencyKey: string }) =>
-      stepUp.runWithStepUp(() => redriveOrder({ orderId, ...args })),
+      // P2-07: echo which order the OTP re-drives (a redrive can submit a
+      // real outbound Stellar payment). The amount is server-computed, so
+      // the order id is the identifying detail we can surface here.
+      stepUp.runWithStepUp(() => redriveOrder({ orderId, ...args }), {
+        action: 'Re-drive order',
+        destination: orderId,
+      }),
     onSuccess: (envelope) => {
       const res = envelope.result;
       setLast(res);

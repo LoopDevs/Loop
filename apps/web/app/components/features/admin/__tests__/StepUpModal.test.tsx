@@ -109,6 +109,30 @@ describe('<StepUpModal />', () => {
     expect(input.getAttribute('inputmode')).toBe('numeric');
   });
 
+  // P2-07: the modal must echo WHAT the OTP authorizes — amount
+  // (canonical formatter), destination, and action — so an operator
+  // cannot blind-approve an unseen, irreversible money movement.
+  it('echoes the pending action amount and destination it authorizes (P2-07)', () => {
+    render(
+      <StepUpModal
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+        pendingAction={{
+          action: 'Queue emission',
+          amount: { minor: '5000', currency: 'USD' },
+          destination: 'GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXRGH6DUVZ',
+        }}
+      />,
+    );
+
+    // Amount rendered via the canonical formatMinorCurrency (not hand-rolled).
+    expect(screen.getByText('$50.00')).toBeDefined();
+    // Destination shown verbatim.
+    expect(screen.getByText('GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXRGH6DUVZ')).toBeDefined();
+    // Action type shown.
+    expect(screen.getByText('Queue emission')).toBeDefined();
+  });
+
   // FE-14: a failed confirm must be announced to AT (assertive live
   // region) and return focus to the OTP field so the admin can correct
   // and retry — the confirm click otherwise strands focus on the button.

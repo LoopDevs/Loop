@@ -145,7 +145,14 @@ function AdminSkipsRouteInner(): React.JSX.Element {
   // server-side (the step-up retry / re-click never double-pays), so a
   // simple mutation through the step-up dance is safe.
   const refund = useMutation({
-    mutationFn: (paymentId: string) => stepUp.runWithStepUp(() => refundDeposit(paymentId)),
+    mutationFn: (paymentId: string) =>
+      // P2-07: echo which deposit the OTP refunds to its on-chain sender.
+      // The amount is server-side; the payment id is the identifying
+      // detail on the client.
+      stepUp.runWithStepUp(() => refundDeposit(paymentId), {
+        action: 'Refund deposit to sender',
+        destination: paymentId,
+      }),
     onSuccess: (res) => {
       addToast(
         res.status === 'already_refunded'

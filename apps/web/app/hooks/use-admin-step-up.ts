@@ -23,7 +23,9 @@
  */
 import { useCallback, useState } from 'react';
 import { ApiException } from '@loop/shared';
-import { useAdminStepUpStore } from '~/stores/admin-step-up.store';
+import { useAdminStepUpStore, type PendingActionSummary } from '~/stores/admin-step-up.store';
+
+export type { PendingActionSummary, PendingActionAmount } from '~/stores/admin-step-up.store';
 
 const STEP_UP_FAILURE_CODES = new Set([
   'STEP_UP_REQUIRED',
@@ -41,14 +43,19 @@ interface UseAdminStepUpReturn {
   /**
    * Wraps the supplied async mutation. If the inner call rejects with
    * a step-up failure code, the hook opens the modal and resolves
-   * (or rejects) once the modal flow completes.
+   * (or rejects) once the modal flow completes. `action` (P2-07) is a
+   * human-readable summary of what the OTP authorizes — amount /
+   * destination / action type — echoed in the modal so the operator
+   * sees what they approve. Pass it at initiation, where the payload
+   * is still in scope (before the caller nulls its own pending state).
    */
-  runWithStepUp: <T>(fn: () => Promise<T>) => Promise<T>;
+  runWithStepUp: <T>(fn: () => Promise<T>, action?: PendingActionSummary) => Promise<T>;
 }
 
 export function useAdminStepUp(): UseAdminStepUpReturn {
   const setStepUp = useAdminStepUpStore((s) => s.setStepUp);
   const clearStepUp = useAdminStepUpStore((s) => s.clear);
+  const setPendingAction = useAdminStepUpStore((s) => s.setPendingAction);
 
   // Pending state for the queued mutation. Pulling these into refs
   // would avoid re-renders, but the modal itself already gates
@@ -64,6 +71,7 @@ export function useAdminStepUp(): UseAdminStepUpReturn {
     (token: string, expiresAt: string) => {
       setStepUp(token, expiresAt);
       setModalOpen(false);
+      setPendingAction(null);
       const pending = pendingResolve;
       setPendingResolve(null);
       if (pending !== null) {
@@ -74,20 +82,21 @@ export function useAdminStepUp(): UseAdminStepUpReturn {
         pending.fn().then(pending.resolve).catch(pending.reject);
       }
     },
-    [setStepUp, pendingResolve],
+    [setStepUp, setPendingAction, pendingResolve],
   );
 
   const handleStepUpCancel = useCallback(() => {
     setModalOpen(false);
+    setPendingAction(null);
     const pending = pendingResolve;
     setPendingResolve(null);
     if (pending !== null) {
       pending.reject(new Error('Admin step-up cancelled'));
     }
-  }, [pendingResolve]);
+  }, [setPendingAction, pendingResolve]);
 
   const runWithStepUp = useCallback(
-    <T>(fn: () => Promise<T>): Promise<T> => {
+    <T>(fn: () => Promise<T>, action?: PendingActionSummary): Promise<T> => {
       return fn().catch((err: unknown) => {
         if (
           err instanceof ApiException &&
@@ -103,13 +112,17 @@ export function useAdminStepUp(): UseAdminStepUpReturn {
               resolve: resolve as (value: unknown) => void,
               reject,
             });
+            // P2-07: record what the OTP authorizes so StepUpModal can
+            // echo it. `clearStepUp()` above already reset it to null,
+            // so an un-summarised caller shows no (stale) action.
+            if (action !== undefined) setPendingAction(action);
             setModalOpen(true);
           });
         }
         throw err;
       });
     },
-    [clearStepUp],
+    [clearStepUp, setPendingAction],
   );
 
   return { modalOpen, handleStepUpConfirm, handleStepUpCancel, runWithStepUp };

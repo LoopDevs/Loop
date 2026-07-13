@@ -24,10 +24,11 @@
  * catches stolen-token actor swaps.
  */
 import { useEffect, useRef, useState } from 'react';
-import { ApiException } from '@loop/shared';
+import { ApiException, formatMinorCurrency } from '@loop/shared';
 import { requestOtp } from '~/services/auth';
 import { mintAdminStepUp } from '~/services/admin-step-up';
 import { useAuthStore } from '~/stores/auth.store';
+import { useAdminStepUpStore, type PendingActionSummary } from '~/stores/admin-step-up.store';
 import { Button } from '~/components/ui/Button';
 import { Input } from '~/components/ui/Input';
 
@@ -36,10 +37,26 @@ interface Props {
   onConfirm: (stepUpToken: string, expiresAt: string) => void;
   /** Called when the admin dismisses the modal. */
   onCancel: () => void;
+  /**
+   * The pending action this OTP authorizes, echoed in the modal body so
+   * the code visibly authorizes a SHOWN action (P2-07). Defaults to the
+   * summary the step-up store holds (set at initiation by
+   * `useAdminStepUp`); an explicit prop overrides it (used in tests).
+   */
+  pendingAction?: PendingActionSummary;
 }
 
-export function StepUpModal({ onConfirm, onCancel }: Props): React.JSX.Element {
+export function StepUpModal({
+  onConfirm,
+  onCancel,
+  pendingAction: pendingActionProp,
+}: Props): React.JSX.Element {
   const email = useAuthStore((s) => s.email);
+  // P2-07: the modal is mounted at ~10 call sites; reading the summary
+  // from the store means no caller has to remember to pass a prop for
+  // the amount/destination to show. An explicit prop still wins.
+  const pendingActionFromStore = useAdminStepUpStore((s) => s.pendingAction);
+  const pendingAction = pendingActionProp ?? pendingActionFromStore ?? undefined;
   const [otp, setOtp] = useState('');
   const [stage, setStage] = useState<'idle' | 'sending' | 'awaiting-code' | 'confirming'>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -130,6 +147,29 @@ export function StepUpModal({ onConfirm, onCancel }: Props): React.JSX.Element {
           This action requires fresh authentication. We&rsquo;ll email a one-time code to{' '}
           <span className="font-medium">{email ?? 'your admin email'}</span>.
         </p>
+
+        {pendingAction !== undefined && (
+          // P2-07: echo what the OTP authorizes so the operator cannot
+          // blind-approve an unseen (irreversible) money movement.
+          <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-gray-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-gray-100">
+            <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+              You are authorizing
+            </p>
+            <p className="mt-0.5 font-medium">{pendingAction.action}</p>
+            {pendingAction.amount !== undefined && (
+              <p className="mt-1 font-semibold tabular-nums">
+                {'formatted' in pendingAction.amount
+                  ? pendingAction.amount.formatted
+                  : formatMinorCurrency(pendingAction.amount.minor, pendingAction.amount.currency)}
+              </p>
+            )}
+            {pendingAction.destination !== undefined && (
+              <p className="mt-1 text-xs">
+                To: <code className="font-mono break-all">{pendingAction.destination}</code>
+              </p>
+            )}
+          </div>
+        )}
 
         {stage === 'idle' && (
           <Button onClick={() => void handleSendCode()} className="w-full">
