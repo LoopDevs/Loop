@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, act, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, Routes, Route } from 'react-router';
 
 const { historyMock, authMock } = vi.hoisted(() => ({
   historyMock: {
@@ -60,6 +60,25 @@ function renderPage(): ReturnType<typeof render> {
     <QueryClientProvider client={client}>
       <MemoryRouter>
         <SettingsCashbackRoute />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+// Renders the route under an explicit `/:country/:lang` URL so the page's
+// `useLocaleTag()` resolves to that market's locale (ADR 034) — this is what
+// lets us assert that ledger amounts follow the *route* locale, not the
+// browser/host default. `getCashbackHistory` etc. are stubbed by the caller.
+function renderPageAtLocale(country: string, lang: string): ReturnType<typeof render> {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[`/${country}/${lang}/settings/cashback`]}>
+        <Routes>
+          <Route path="/:country/:lang/settings/cashback" element={<SettingsCashbackRoute />} />
+        </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -187,6 +206,54 @@ describe('SettingsCashbackRoute', () => {
     historyMock.getCashbackHistory.mockRejectedValue(new Error('network down'));
     renderPage();
     expect(await screen.findByText(/Couldn.+t load this page/i)).toBeTruthy();
+  });
+});
+
+describe('SettingsCashbackRoute — ledger amount formatting (AUD-12)', () => {
+  // The ledger amount must follow the *active route* locale (ADR 034), not the
+  // browser/host default. India's en-IN grouping ("lakh": ₹12,34,567 rather
+  // than ₹1,234,567) is a signature no en-US/en-GB default produces, so this
+  // pins that the route locale — not `navigator.language` — drives the figure.
+  it('formats the ledger amount in the active route locale (en-IN lakh grouping)', async () => {
+    historyMock.getCashbackHistory.mockResolvedValue({
+      entries: [
+        mkEntry({
+          id: 'tx-inr',
+          type: 'cashback',
+          amountMinor: '123456789',
+          currency: 'INR',
+          referenceType: null,
+          referenceId: null,
+        }),
+      ],
+    });
+    renderPageAtLocale('in', 'en');
+    // en-IN → lakh grouping + the ledger's leading '+' for a credit.
+    expect(await screen.findByText('+₹12,34,567.89')).toBeTruthy();
+  });
+
+  // Guards the ledger's signDisplay:'always' convention: credits carry a
+  // leading '+', debits a '-'. Rendered under a fixed route locale (en-GB) so
+  // the assertion is deterministic on any host. A naive swap to the shared
+  // formatter (which omits the '+') would drop the credit sign and fail here.
+  it("preserves '+' for credits and '-' for debits under a fixed route locale", async () => {
+    historyMock.getCashbackHistory.mockResolvedValue({
+      entries: [
+        mkEntry({ id: 'tx-credit', type: 'cashback', amountMinor: '250', currency: 'USD' }),
+        mkEntry({
+          id: 'tx-debit',
+          type: 'withdrawal',
+          amountMinor: '-100',
+          currency: 'USD',
+          referenceType: null,
+          referenceId: null,
+        }),
+      ],
+    });
+    renderPageAtLocale('gb', 'en');
+    // en-GB renders USD with the disambiguating "US$" symbol.
+    expect(await screen.findByText('+US$2.50')).toBeTruthy();
+    expect(await screen.findByText('-US$1.00')).toBeTruthy();
   });
 });
 

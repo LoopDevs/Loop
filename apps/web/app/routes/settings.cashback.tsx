@@ -17,6 +17,7 @@ import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import type { Route } from './+types/settings.cashback';
 import i18n from '~/i18n/i18next';
+import { formatMinorCurrency, useLocaleTag } from '~/i18n/format';
 import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
@@ -58,28 +59,24 @@ function ledgerLabel(t: TFunction, type: CashbackHistoryEntry['type']): string {
   return labels[type];
 }
 
-function formatAmount(minor: string, currency: string): string {
-  try {
-    // Bigint split per the `@loop/shared` money-format convention
-    // (`formatMinorCurrency`): divide/modulo in bigint space and
-    // Number-cast only the whole + fraction components, so a minor
-    // amount beyond 2^53 can't silently round before the division.
-    // (We format locally rather than calling the shared helper
-    // because this is a user-facing surface — browser locale +
-    // signDisplay, vs the helper's pinned en-US admin locale.)
-    const big = BigInt(minor);
-    const neg = big < 0n;
-    const abs = neg ? -big : big;
-    const major = (neg ? -1 : 1) * (Number(abs / 100n) + Number(abs % 100n) / 100);
-    return new Intl.NumberFormat(undefined, {
-      style: 'currency',
-      currency,
-      maximumFractionDigits: 2,
-      signDisplay: 'always',
-    }).format(major);
-  } catch {
-    return '—';
-  }
+/**
+ * Ledger amount for one credit-history row. Delegates the money math
+ * to the canonical `i18n/format#formatMinorCurrency` (bigint-exact
+ * minor-unit split, `@loop/shared`) threaded with the **route** locale
+ * — not the browser's — so a `/de/en` reader sees `+2,50 $`, not the
+ * visitor's `navigator.language` guess (ADR 034).
+ *
+ * The ledger convention is `signDisplay: 'always'`: credits render with
+ * a leading `+`, debits with `-` (paired with the green/grey colour
+ * coding below). The shared formatter already emits the `-` for
+ * negatives and the `—` parse-failure sentinel; we only add the `+`
+ * the shared helper deliberately omits. Output is byte-identical to the
+ * former local formatter for any fixed locale — the locale is the fix.
+ */
+function formatAmount(minor: string, currency: string, locale: string): string {
+  const formatted = formatMinorCurrency(minor, currency, locale);
+  if (formatted === '—' || formatted.startsWith('-')) return formatted;
+  return `+${formatted}`;
 }
 
 function formatDate(iso: string): string {
@@ -222,6 +219,7 @@ function HistoryPage({
   onLoadMore: (nextCursor: string) => void;
 }): React.JSX.Element {
   const { t } = useTranslation('settings');
+  const locale = useLocaleTag();
   const query = useQuery<CashbackHistoryResponse>({
     queryKey: ['me', 'cashback-history', cursor ?? null, PAGE_SIZE],
     queryFn: () =>
@@ -309,7 +307,7 @@ function HistoryPage({
                   : 'text-green-600 dark:text-green-500'
               }`}
             >
-              {formatAmount(entry.amountMinor, entry.currency)}
+              {formatAmount(entry.amountMinor, entry.currency, locale)}
             </p>
           </li>
         ))}
