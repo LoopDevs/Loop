@@ -59,6 +59,7 @@ import {
   userCredits,
   pendingPayouts,
   adminIdempotencyKeys,
+  otpAttemptCounters,
 } from '../../db/schema.js';
 import { findOrCreateUserByEmail, upsertUserFromCtx } from '../../db/users.js';
 import { app, __resetRateLimitsForTests } from '../../app.js';
@@ -66,6 +67,7 @@ import { notifyAdminBulkRead } from '../../discord.js';
 import { signLoopToken } from '../../auth/tokens.js';
 import { signAdminStepUpToken } from '../../auth/admin-step-up.js';
 import { adjustmentCapLockKey, DailyAdjustmentLimitError } from '../../credits/adjustments.js';
+import { CLEAR_LOCKOUT_MAX_PER_TARGET_PER_DAY } from '../../admin/clear-otp-lockout.js';
 import { applyAdminEmission } from '../../credits/emissions.js';
 import { env } from '../../env.js';
 import { ensureMigrated, truncateAllTables } from './db-test-setup.js';
@@ -2016,3 +2018,107 @@ describeIf('admin home-currency write — real postgres ladder + safety prefligh
     expect(res.status).toBe(401);
   });
 });
+
+// SEC-clearotp: the per-target OTP-lockout-clear velocity cap
+// (CLEAR_LOCKOUT_MAX_PER_TARGET_PER_DAY, default 5) must hold under a
+// CONCURRENT burst of requests with DISTINCT idempotency keys aimed at the
+// SAME target. `withIdempotencyGuard` serialises only same-(admin, key)
+// callers, so before the per-target advisory lock a distinct-key burst all
+// read the same pre-commit prior-clear count and every one slipped past the
+// cap. This exercises the real advisory-lock serialisation against postgres
+// (the unit suite can only prove the handler HONOURS a lock result).
+describeIf(
+  'admin clear-otp-lockout — per-target cap holds under a concurrent distinct-key burst (SEC-clearotp)',
+  () => {
+    beforeAll(async () => {
+      await ensureMigrated();
+    });
+
+    beforeEach(async () => {
+      await truncateAllTables();
+      __resetRateLimitsForTests();
+    });
+
+    it('with CAP-1 prior clears, two concurrent clears apply exactly ONE more — never bypassing the cap', async () => {
+      const { admin, target, bearer } = await (async () => {
+        const a = await upsertUserFromCtx({
+          ctxUserId: 'test-admin-id',
+          email: 'admin@test.local',
+        });
+        const { token } = signLoopToken({
+          sub: a.id,
+          email: a.email,
+          typ: 'access',
+          ttlSeconds: 300,
+        });
+        const t = await findOrCreateUserByEmail('lockme@test.local');
+        return { admin: a, target: t, bearer: token };
+      })();
+
+      const clearPath = `/api/admin/users/${target.id}/clear-otp-lockout`;
+
+      // A real, live lockout so the winning clear reports wasLocked: true and
+      // actually deletes the counter row.
+      await db.insert(otpAttemptCounters).values({
+        email: target.email,
+        failedAttempts: 10,
+        windowStartedAt: new Date(),
+        lockedUntil: new Date(Date.now() + 15 * 60 * 1000),
+      });
+
+      // Seed CAP-1 already-APPLIED clears for THIS target (committed
+      // admin_idempotency_keys rows on the clear path). The next applied clear
+      // is the CAPth (allowed); a bypass would let a SECOND concurrent one
+      // through as the (CAP+1)th.
+      const priorToSeed = CLEAR_LOCKOUT_MAX_PER_TARGET_PER_DAY - 1;
+      for (let i = 0; i < priorToSeed; i++) {
+        await db.insert(adminIdempotencyKeys).values({
+          adminUserId: admin.id,
+          key: `seeded-prior-clear-${i}-${idemKey()}`,
+          method: 'POST',
+          path: clearPath,
+          status: 200,
+          responseBody: '{}',
+        });
+      }
+
+      const fire = (key: string): Promise<Response> =>
+        Promise.resolve(
+          app.request(`http://localhost${clearPath}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${bearer}`,
+              'idempotency-key': key,
+            },
+            body: JSON.stringify({ reason: 'concurrent clear burst — SEC-clearotp' }),
+          }),
+        );
+
+      const [a, b] = await Promise.all([fire(`${idemKey()}-a`), fire(`${idemKey()}-b`)]);
+
+      // Exactly one clear may land as the CAPth. The other is rejected — 409
+      // (lost the per-target advisory lock) or 429 (acquired it but now sees
+      // the cap already reached). Pre-fix: BOTH counted CAP-1 and returned 200.
+      const statuses = [a.status, b.status].sort((x, y) => x - y);
+      expect(statuses[0]).toBe(200);
+      expect([409, 429]).toContain(statuses[1]);
+
+      // Ground truth: applied clears on this path must equal the cap, never
+      // CAP+1. This is the assertion that fails red against the racy code.
+      const [{ n: applied } = { n: 0 }] = await db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(adminIdempotencyKeys)
+        .where(eq(adminIdempotencyKeys.path, clearPath));
+      expect(applied).toBe(CLEAR_LOCKOUT_MAX_PER_TARGET_PER_DAY);
+
+      // The single winning clear actually cleared the counter (idempotent
+      // delete), so the target is unlocked.
+      const counterRows = await db
+        .select()
+        .from(otpAttemptCounters)
+        .where(eq(otpAttemptCounters.email, target.email));
+      expect(counterRows).toHaveLength(0);
+    });
+  },
+);

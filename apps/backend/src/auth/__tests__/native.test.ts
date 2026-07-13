@@ -280,6 +280,10 @@ describe('nativeVerifyOtpHandler', () => {
 
   it('B5: registers a failed attempt on a wrong code (401 when under threshold)', async () => {
     findLiveOtpMock.mockResolvedValue(null);
+    // SEC-15: a wrong guess only arms the per-email lockout when a live OTP
+    // exists to be brute-forced. Establish one (a real pending code the
+    // user is fat-fingering).
+    countRecentMock.mockResolvedValue(1);
     registerFailedOtpAttemptMock.mockResolvedValue({ failedAttempts: 3, locked: false });
     const { ctx } = makeCtx({ email: 'a@b.com', otp: '000000' });
     const res = await nativeVerifyOtpHandler(ctx);
@@ -291,12 +295,40 @@ describe('nativeVerifyOtpHandler', () => {
 
   it('B5: 429 when the wrong guess tips the email over the threshold', async () => {
     findLiveOtpMock.mockResolvedValue(null);
+    // SEC-15: a live OTP is present (real login/attack traffic), so the
+    // brute-force ceiling still applies unchanged.
+    countRecentMock.mockResolvedValue(1);
     registerFailedOtpAttemptMock.mockResolvedValue({ failedAttempts: 10, locked: true });
     const { ctx } = makeCtx({ email: 'a@b.com', otp: '000000' });
     const res = await nativeVerifyOtpHandler(ctx);
     expect(res.status).toBe(429);
     expect(((await res.json()) as { code: string }).code).toBe('TOO_MANY_ATTEMPTS');
     expect(res.headers.get('Retry-After')).toBe('900');
+  });
+
+  it('SEC-15: a wrong guess against an email with NO live OTP does NOT arm the per-email lockout', async () => {
+    // The unauth DoS: an attacker POSTs wrong codes for a victim (incl. an
+    // admin) whose email has no outstanding OTP. Pre-fix, every such guess
+    // called registerFailedOtpAttempt and, at the threshold, 429-locked the
+    // victim out of login AND admin step-up — free, silent, unauthenticated.
+    findLiveOtpMock.mockResolvedValue(null);
+    // No recent OTP rows → nothing to brute-force.
+    countRecentMock.mockResolvedValue(0);
+    // Rigged so that IF the counter were (wrongly) consulted, it would
+    // report a lock — making the pre-fix code return 429 and proving the
+    // test is non-vacuous (it fails red against the un-gated handler).
+    registerFailedOtpAttemptMock.mockResolvedValue({ failedAttempts: 10, locked: true });
+    const { ctx } = makeCtx({ email: 'victim-admin@b.com', otp: '000000' });
+    const res = await nativeVerifyOtpHandler(ctx);
+    // Same generic 401 as any wrong code — but the lockout was NOT armed.
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as { code: string }).code).toBe('UNAUTHORIZED');
+    expect(registerFailedOtpAttemptMock).not.toHaveBeenCalled();
+    // The per-row bump is unconditional (harmless no-op when no live row),
+    // so it still fires — only the per-EMAIL lockout arming is gated.
+    expect(incrementAttemptsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ email: 'victim-admin@b.com' }),
+    );
   });
 
   it('consumes the OTP, upserts the user, mints a pair, and clears the counter on success', async () => {

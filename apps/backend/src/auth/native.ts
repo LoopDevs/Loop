@@ -8,7 +8,13 @@
  */
 import type { Context } from 'hono';
 import { logger } from '../logger.js';
-import { findLiveOtp, incrementOtpAttempts, markOtpConsumed } from './otps.js';
+import {
+  findLiveOtp,
+  incrementOtpAttempts,
+  markOtpConsumed,
+  countRecentOtpsForEmail,
+  OTP_TTL_MS,
+} from './otps.js';
 import {
   isEmailOtpLocked,
   registerFailedOtpAttempt,
@@ -106,15 +112,40 @@ export async function nativeVerifyOtpHandler(c: Context): Promise<Response> {
       // Bump the per-row attempts counter on any guess so brute force
       // against a specific row gets squeezed. No-ops if no live row.
       await incrementOtpAttempts({ email });
-      // B5: the authoritative per-email ceiling. If this guess tips the
-      // email over the threshold, surface the lockout immediately.
-      const { locked } = await registerFailedOtpAttempt({ email });
-      if (locked) {
-        c.header('Retry-After', String(Math.ceil(OTP_EMAIL_LOCKOUT_MS / 1000)));
-        return c.json(
-          { code: 'TOO_MANY_ATTEMPTS', message: 'Too many attempts. Try again later.' },
-          429,
-        );
+      // SEC-15: only arm the per-EMAIL lockout when the email actually has
+      // a live OTP that a wrong guess could be brute-forcing. A "wrong"
+      // guess against an email with NO outstanding code is not brute force
+      // — there is nothing to find — so counting it toward the lockout lets
+      // an UNAUTHENTICATED attacker trip B5 on any account (incl. admins)
+      // just by POSTing wrong codes for an idle email, silently and for
+      // free; and because admin step-up (`admin/step-up-handler.ts`) reads
+      // the SAME per-email lockout, that also denies the victim's step-up.
+      // Gating on live-OTP existence removes that free, silent unauth DoS
+      // WITHOUT weakening brute-force protection: a wrong guess against a
+      // genuinely-pending code still counts in full (the ceiling is
+      // unchanged for real login/attack traffic), and an attacker who wants
+      // to arm the lock must now keep a live OTP present — which only
+      // `request-otp` can create (per-email 3/min + per-IP capped, and it
+      // emails the victim, so the attack is no longer silent or free).
+      //
+      // `countRecentOtpsForEmail(windowMs = OTP_TTL_MS)` is a one-directional
+      // proxy: an OTP row's `expires_at = created_at + OTP_TTL_MS`, so
+      // `count === 0` means every row for this email is already expired
+      // (definitely no live code) — the only case we skip. `count > 0` may
+      // include consumed / attempt-maxed rows, so we still arm (fail toward
+      // counting), never skipping when a real live code exists.
+      const recentOtps = await countRecentOtpsForEmail({ email, windowMs: OTP_TTL_MS });
+      if (recentOtps > 0) {
+        // B5: the authoritative per-email ceiling. If this guess tips the
+        // email over the threshold, surface the lockout immediately.
+        const { locked } = await registerFailedOtpAttempt({ email });
+        if (locked) {
+          c.header('Retry-After', String(Math.ceil(OTP_EMAIL_LOCKOUT_MS / 1000)));
+          return c.json(
+            { code: 'TOO_MANY_ATTEMPTS', message: 'Too many attempts. Try again later.' },
+            429,
+          );
+        }
       }
       return c.json({ code: 'UNAUTHORIZED', message: 'Invalid or expired verification code' }, 401);
     }
