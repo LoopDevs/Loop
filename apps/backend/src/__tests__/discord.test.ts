@@ -24,6 +24,35 @@ vi.mock('../logger.js', () => ({
   },
 }));
 
+// BK-cbdedup: notifyCircuitBreaker now routes through the fleet-wide
+// `watchdog_alert_state` fire-once gate. Emulate that gate in-memory
+// (same false→true / true→false / confirmed-delivery contract as the
+// real `applyBinaryWatchdogAlert` — see vault-watchdog-alert.test.ts) so
+// these unit tests exercise the wiring without a DB. `circuitGateState`
+// models the PERSISTED fired-state: it is deliberately NOT cleared by
+// `__resetCircuitNotifyDedupForTests`, so the reset-survival test can
+// prove the state is fleet-wide, not per-process. The real gate + real
+// `watchdog_alert_state` are covered end-to-end by
+// `__tests__/integration/circuit-breaker-dedup.test.ts`.
+const { circuitGateState } = vi.hoisted(() => ({ circuitGateState: new Map<string, boolean>() }));
+vi.mock('../credits/vaults/vault-watchdog-alert.js', () => ({
+  applyBinaryWatchdogAlert: async (args: {
+    watchdogName: string;
+    shouldBeActive: boolean;
+    notifyActive: () => Promise<boolean>;
+    notifyRecovered: () => Promise<boolean>;
+  }): Promise<boolean> => {
+    const was = circuitGateState.get(args.watchdogName) ?? false;
+    if (was === args.shouldBeActive) return false;
+    const delivered = args.shouldBeActive
+      ? await args.notifyActive()
+      : await args.notifyRecovered();
+    if (!delivered) return false;
+    circuitGateState.set(args.watchdogName, args.shouldBeActive);
+    return true;
+  },
+}));
+
 import {
   notifyOrderCreated,
   notifyOrderFulfilled,
@@ -307,6 +336,10 @@ describe('notifyCashbackCredited', () => {
 
 describe('notifyCircuitBreaker', () => {
   beforeEach(() => {
+    // Clear the emulated FLEET fired-state between tests. (Within a
+    // single test we never clear it — the reset-survival test relies on
+    // it persisting across `__resetCircuitNotifyDedupForTests`.)
+    circuitGateState.clear();
     __resetCircuitNotifyDedupForTests();
   });
 
@@ -327,13 +360,40 @@ describe('notifyCircuitBreaker', () => {
     expect(embed.description).toContain('30s');
   });
 
-  // A2-1326: per-(name, state) dedup.
-  it('dedups a repeat (name, state) pair within the 10-min window', async () => {
+  // BK-cbdedup: a repeat OPEN for the same circuit fires once (fleet-wide
+  // fire-once via watchdog_alert_state), not once per call. The gate is
+  // async (a DB read→send→persist), so we await each fire-and-forget
+  // transition to settle before the next — real breaker transitions are
+  // serialised by the breaker state machine (it won't re-fire 'open' for
+  // an already-open circuit), so this models the real cadence.
+  const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 10));
+  it('dedups a repeat OPEN for the same circuit (fires once fleet-wide)', async () => {
     notifyCircuitBreaker('open', 5, 30, 'upstream:login');
+    await flush();
     notifyCircuitBreaker('open', 5, 30, 'upstream:login');
+    await flush();
+    notifyCircuitBreaker('open', 5, 30, 'upstream:login');
+    await flush();
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  // BK-cbdedup PROVEN-RED: the fired-state is fleet-wide (persisted in
+  // watchdog_alert_state), not a per-process map. A machine restart /
+  // process reset (modelled by `__resetCircuitNotifyDedupForTests`, which
+  // no longer clears any process-local dedup) must NOT re-page an
+  // already-open circuit. Pre-fix the per-process map WAS cleared by the
+  // reset, so the same OPEN re-paged — this asserted `1` call would then
+  // see `2` and fail.
+  it('does not re-page an open circuit after a per-process reset (fleet-wide fired-state)', async () => {
     notifyCircuitBreaker('open', 5, 30, 'upstream:login');
     await new Promise((r) => setTimeout(r, 10));
     expect(mockFetch).toHaveBeenCalledTimes(1);
+
+    __resetCircuitNotifyDedupForTests(); // simulate a machine restart
+
+    notifyCircuitBreaker('open', 5, 30, 'upstream:login');
+    await new Promise((r) => setTimeout(r, 10));
+    expect(mockFetch).toHaveBeenCalledTimes(1); // still 1 — persisted fleet state
   });
 
   it('distinguishes different names — "login open" and "merchants open" both fire', async () => {
@@ -345,15 +405,17 @@ describe('notifyCircuitBreaker', () => {
 
   it('distinguishes the same name across states — "login open" then "login closed" both fire', async () => {
     notifyCircuitBreaker('open', 5, 30, 'upstream:login');
+    await flush();
     notifyCircuitBreaker('closed', 0, 30, 'upstream:login');
-    await new Promise((r) => setTimeout(r, 10));
+    await flush();
     expect(mockFetch).toHaveBeenCalledTimes(2);
   });
 
   it('an unnamed call shares the `unknown` bucket — flood protection on legacy callers', async () => {
     notifyCircuitBreaker('open', 5);
+    await flush();
     notifyCircuitBreaker('open', 5);
-    await new Promise((r) => setTimeout(r, 10));
+    await flush();
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 

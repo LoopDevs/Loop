@@ -231,6 +231,10 @@ const { lifecycleMocks } = vi.hoisted(() => ({
     markWorkerTickFailure: vi.fn(),
     markWorkerTickSuccess: vi.fn(),
     runStuckPayoutWatchdog: vi.fn(async () => undefined),
+    // NS-12: the failed-payout backlog watchdog runs on the same interval
+    // callback as the stuck-payout watchdog. Mocked here (DB-backed; its
+    // own behaviour is covered by the integration suite).
+    runFailedPayoutBacklogWatchdog: vi.fn(async () => undefined),
   },
 }));
 vi.mock('../../runtime-health.js', () => ({
@@ -242,6 +246,9 @@ vi.mock('../../runtime-health.js', () => ({
 vi.mock('../stuck-payout-watchdog.js', () => ({
   STUCK_PAYOUT_WATCHDOG_INTERVAL_MS: 60_000,
   runStuckPayoutWatchdog: () => lifecycleMocks.runStuckPayoutWatchdog(),
+}));
+vi.mock('../failed-payout-backlog-watchdog.js', () => ({
+  runFailedPayoutBacklogWatchdog: () => lifecycleMocks.runFailedPayoutBacklogWatchdog(),
 }));
 
 import {
@@ -351,6 +358,8 @@ beforeEach(() => {
   lifecycleMocks.markWorkerTickSuccess.mockReset();
   lifecycleMocks.runStuckPayoutWatchdog.mockReset();
   lifecycleMocks.runStuckPayoutWatchdog.mockResolvedValue(undefined);
+  lifecycleMocks.runFailedPayoutBacklogWatchdog.mockReset();
+  lifecycleMocks.runFailedPayoutBacklogWatchdog.mockResolvedValue(undefined);
 });
 
 describe('runPayoutTick (A8 leader lock)', () => {
@@ -415,6 +424,8 @@ describe('payout worker lifecycle', () => {
       maxAttempts: START_ARGS.maxAttempts,
     });
     expect(lifecycleMocks.runStuckPayoutWatchdog).toHaveBeenCalledOnce();
+    // NS-12: the failed-payout backlog detector runs on the same tick.
+    expect(lifecycleMocks.runFailedPayoutBacklogWatchdog).toHaveBeenCalledOnce();
     expect(lifecycleMocks.markWorkerTickSuccess).toHaveBeenCalledOnce();
 
     stopPayoutWorker();

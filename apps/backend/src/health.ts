@@ -18,12 +18,14 @@
  *    *back* to healthy (8 of 10 good probes) so a marginally-
  *    slow upstream doesn't bounce us before the underlying issue
  *    settles.
- * 2. **Notify cooldown** (30 minutes) — belt-and-braces second
- *    layer so a sustained hour-long outage emitting repeated
- *    healthy↔degraded transitions (genuine ones, each with a
- *    streak) still keeps the monitoring channel readable. Raw
- *    `/health` state is always queryable so ops still has ground
- *    truth.
+ * 2. **Fleet-wide fire-once gate** (CONV-WATCH-02) — the per-machine
+ *    flip above still absorbs per-probe jitter, but the resulting page
+ *    is routed through the `watchdog_alert_state` dedup gate (the
+ *    pattern the money watchdogs use) so a SHARED-dependency outage
+ *    (DB / required worker) pages ONCE fleet-wide and re-arms on
+ *    recovery, instead of once per machine (N machines ⇒ N pages) with
+ *    a per-process cooldown that a Fly machine-cycle would reset. Raw
+ *    `/health` state is always queryable so ops still has ground truth.
  *
  * The upstream-probe cache (10s TTL) keeps `/health` cheap:
  * `/health` is unauthenticated and unrate-limited (Fly probes
@@ -44,7 +46,9 @@ import { getLocations, isLocationLoading } from './clustering/data-store.js';
 import { getMerchants } from './merchants/sync.js';
 import { getRuntimeHealthSnapshot } from './runtime-health.js';
 import { upstreamUrl } from './upstream.js';
-import { notifyHealthChange, notifyGeoDbStale } from './discord.js';
+import { notifyGeoDbStale } from './discord.js';
+import { sendWebhook, GREEN, ORANGE, DESCRIPTION_MAX, truncate } from './discord/shared.js';
+import { applyBinaryWatchdogAlert } from './credits/vaults/vault-watchdog-alert.js';
 import { getOperatorHealth } from './ctx/operator-pool.js';
 import { getGeoDbStatus, GEO_DB_STALE_AFTER_DAYS } from './public/geo.js';
 import { currentFleetSizeEstimate, currentFleetSizeSource } from './middleware/fleet-size.js';
@@ -58,14 +62,19 @@ const HEALTH_FLIP_TO_DEGRADED_THRESHOLD = 5;
 const HEALTH_FLIP_TO_HEALTHY_THRESHOLD = 8;
 const healthReadings: Array<'healthy' | 'degraded'> = [];
 
-const HEALTH_NOTIFY_COOLDOWN_MS = 30 * 60 * 1000;
-let lastHealthNotifyAt = 0;
+/**
+ * CONV-WATCH-02: fleet-wide `watchdog_alert_state` key for the
+ * health-change page. The per-process rolling window (above) still damps
+ * per-probe jitter on THIS machine; this key makes the resulting page
+ * fleet-wide fire-once. See `routeHealthChangeNotify` for the rationale.
+ */
+const HEALTH_CHANGE_WATCHDOG_NAME = 'health-change';
 
 /**
  * GeoLite2 staleness is a slow-changing, weeks-long condition (unlike the
  * healthy/degraded flap this file otherwise damps), so it gets its own,
- * much longer cooldown rather than piggy-backing on
- * `HEALTH_NOTIFY_COOLDOWN_MS` / the rolling-window flip detector — without
+ * much longer cooldown rather than piggy-backing on the health-change
+ * fleet gate / the rolling-window flip detector — without
  * this a stale-but-not-fixed DB would otherwise either page every 30
  * minutes (too noisy for a "remember to redeploy" nudge) or never re-page
  * once the initial degraded→healthy/healthy→degraded transition already
@@ -99,14 +108,81 @@ let upstreamProbeCache: { reachable: boolean; at: number } | null = null;
 let upstreamProbeInFlight: Promise<boolean> | null = null;
 
 /**
- * Throttle wrapper on top of `notifyHealthChange`. The streak
- * gating absorbs per-probe jitter; this is the second layer.
+ * Delivery-confirming health-change send. Returns whether the Discord
+ * webhook actually delivered (`sendWebhook` reports `false` on a non-2xx
+ * OR an unconfigured webhook), so the fleet-wide gate below only latches
+ * `alert_active` on a real delivery — same at-least-once contract the
+ * money watchdogs rely on. Mirrors the embed `discord/monitoring.ts`'s
+ * `notifyHealthChange` built; kept here because that notifier is
+ * fire-and-forget (`void`) and can't report delivery.
+ */
+function sendHealthChangeWebhook(
+  status: 'healthy' | 'degraded',
+  details: string,
+): Promise<boolean> {
+  return sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+    title: status === 'healthy' ? '💚 Service Healthy' : '🟠 Service Degraded',
+    description: truncate(details, DESCRIPTION_MAX),
+    color: status === 'healthy' ? GREEN : ORANGE,
+  });
+}
+
+/**
+ * CONV-WATCH-02: route the health-change page through the fleet-wide
+ * fire-once dedup gate (`watchdog_alert_state`, the pattern the money
+ * watchdogs use) so a SHARED-dependency outage pages ONCE fleet-wide,
+ * not once per machine.
+ *
+ * Before this, each machine ran its own per-process rolling window AND a
+ * per-process notify cooldown, so a shared outage (DB unreachable /
+ * required worker degraded) flipped every machine to `critical` and each
+ * paged independently — N machines ⇒ N pages — and a Fly machine cycle
+ * reset the per-process cooldown, re-paging on the next flip. The gate
+ * keyed on `HEALTH_CHANGE_WATCHDOG_NAME` persists the fired-state in
+ * Postgres: the first machine to flip → degraded pages and latches
+ * `alert_active=true`; every other machine that flips reads `true` and
+ * stays quiet; whichever machine flips back → healthy re-arms it.
+ *
+ * `shouldBeActive` is derived fresh from the current per-machine status
+ * on each transition — the per-process window still decides WHEN this
+ * machine considers itself degraded; the gate only decides whether the
+ * fleet has already been paged. Exported so the integration suite can
+ * drive the real gate + real `watchdog_alert_state` end-to-end.
+ */
+export function routeHealthChangeNotify(
+  status: 'healthy' | 'degraded',
+  details: string,
+): Promise<boolean> {
+  return applyBinaryWatchdogAlert({
+    watchdogName: HEALTH_CHANGE_WATCHDOG_NAME,
+    shouldBeActive: status === 'degraded',
+    notifyActive: () => sendHealthChangeWebhook('degraded', details),
+    notifyRecovered: () => sendHealthChangeWebhook('healthy', 'All systems operational'),
+  });
+}
+
+/**
+ * Fire-and-forget wrapper so the `/health` response path never blocks on
+ * the gate's DB round-trip or the Discord send.
+ *
+ * Fallback: the dedup gate READS Postgres, but a DB outage is itself a
+ * critical health incident (`!databaseReachable` → the flip that got us
+ * here). If the gate throws (DB unreachable — likely the incident), we
+ * must NOT drop the page: fall back to a direct, un-deduped send so a
+ * DB-down incident still surfaces on the monitoring channel (per-machine,
+ * as before the fix — strictly better than zero pages). When the DB is
+ * up, the gate resolves and dedups fleet-wide; a `false` resolution
+ * (already paged elsewhere) is the intended dedup, NOT an error, so it
+ * does not trigger the fallback.
  */
 function maybeNotifyHealthChange(status: 'healthy' | 'degraded', details: string): void {
-  const now = Date.now();
-  if (now - lastHealthNotifyAt < HEALTH_NOTIFY_COOLDOWN_MS) return;
-  lastHealthNotifyAt = now;
-  notifyHealthChange(status, details);
+  void routeHealthChangeNotify(status, details).catch((err: unknown) => {
+    healthLog.warn(
+      { err },
+      'Health-change fleet dedup gate failed (DB likely the incident) — sending an un-deduped fallback page so the incident still surfaces',
+    );
+    void sendHealthChangeWebhook(status, details);
+  });
 }
 
 /**
@@ -462,7 +538,9 @@ export function __resetHealthProbeCacheForTests(): void {
   dbProbeInFlight = null;
   lastHealthStatus = null;
   healthReadings.length = 0;
-  lastHealthNotifyAt = 0;
+  // CONV-WATCH-02: the notify fired-state is no longer a per-process
+  // variable — it lives fleet-wide in `watchdog_alert_state` under
+  // `HEALTH_CHANGE_WATCHDOG_NAME`. Nothing to reset here for it.
   lastGeoDbNotifyAt = 0;
 }
 

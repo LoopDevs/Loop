@@ -60,6 +60,7 @@ import {
   runStuckPayoutWatchdog,
   STUCK_PAYOUT_WATCHDOG_INTERVAL_MS,
 } from './stuck-payout-watchdog.js';
+import { runFailedPayoutBacklogWatchdog } from './failed-payout-backlog-watchdog.js';
 import {
   markWorkerStarted,
   markWorkerStopped,
@@ -408,6 +409,17 @@ export function startPayoutWorker(args: {
       await runStuckPayoutWatchdog();
     } catch (err) {
       log.error({ err }, 'Stuck-payout watchdog failed');
+    }
+    // NS-12: standing detector for the FAILED-payout backlog. The
+    // stuck-payout watchdog above only covers pending/submitted rows; a
+    // terminally-failed row is paged once inline at failure and, if that
+    // page is lost, would otherwise leave owed cashback/interest
+    // invisible forever. Same cadence + fleet single-flight; independent
+    // try/catch so one failing check never suppresses the other.
+    try {
+      await runFailedPayoutBacklogWatchdog();
+    } catch (err) {
+      log.error({ err }, 'Failed-payout backlog watchdog failed');
     }
   };
   void tick();
