@@ -451,10 +451,30 @@ async function runPaymentWatcherTickLocked(args: {
         return { kind: 'paid' };
       case 'already_paid':
         return { kind: 'already_paid' };
-      case 'unmatched':
-        // The order left pending_payment without this deposit —
-        // expiry, or another payment won the race.
+      case 'unmatched': {
+        // MNY-20: `unmatched` on a retry means the memo no longer
+        // resolves to a PENDING order. Two shapes the live tick records
+        // differently must NOT be collapsed into one outcome here:
+        //   - the memo DOES resolve to a real order that left pending
+        //     (expired / already-paid) → `order_gone`, the A6-refundable
+        //     late/duplicate-deposit path.
+        //   - the memo resolves to NO order at all → this row was
+        //     recorded as `unrecognized_deposit` (a valid-rail deposit
+        //     we cannot attribute to any order). Keep it that way so a
+        //     sweep never promotes an unattributable deposit into the
+        //     auto-refundable `order_gone` path; it stays a visible,
+        //     alertable recovery row under the attempt budget instead.
+        const stranded = await findAnyOrderByMemo(o.memo);
+        if (stranded === null) {
+          return {
+            kind: 'skip',
+            reason: 'unrecognized_deposit',
+            orderId: null,
+            detail: describeUnrecognizedDeposit(payment),
+          };
+        }
         return { kind: 'order_gone' };
+      }
       case 'skip':
         return { kind: 'skip', reason: o.reason, orderId: o.orderId, detail: o.detail };
       case 'no_match':
@@ -588,8 +608,13 @@ async function runPaymentWatcherTickLocked(args: {
         //     deposit from a cursor re-read of the original paying
         //     deposit, avoiding a double-spend refund of a delivered
         //     gift card.
-        // A memo matching NO order stays a counted no-op (refunding an
-        // unattributable payment is a separate decision).
+        // MNY-20: a memo matching NO order at all is no longer a silent
+        // no-op — it is recorded below as an `unrecognized_deposit`
+        // recovery row (value landed, nothing to attribute it to) so ops
+        // can see and reconcile/refund it from /admin/skips. It is
+        // deliberately NOT recorded as `order_gone` (which the sweep
+        // auto-refunds when LOOP_DEPOSIT_REFUND_AUTO is on): refunding an
+        // unattributable deposit is a separate money-movement decision.
         //
         // Recorded BEFORE the cursor advances (CRIT #1, same as the `skip`
         // arm): if the insert throws, the tick aborts with the cursor parked
@@ -597,12 +622,47 @@ async function runPaymentWatcherTickLocked(args: {
         // The sweep then maps this row's retry (`unmatched`) → `order_gone`
         // → abandon → it lands on /admin/skips, refundable to the sender.
         const strandedOrder = await findAnyOrderByMemo(outcome.memo);
+        if (strandedOrder === null) {
+          // MNY-20: valid-rail deposit (isMatchingIncomingPayment held
+          // for `p` — a successful payment/path-payment TO the deposit
+          // account, correct asset, non-empty text memo) whose memo
+          // resolves to NO order at all. Before this fix it fell through
+          // to the bare `break` below: no skip row, cursor advances, the
+          // sender's real funds strand at the operator==deposit account
+          // with no recovery trail (the INV-6 silent drop MNY-20 closes,
+          // the same shape the no-rail/no-memo arm already records). Land
+          // it in the SAME `unrecognized_deposit` recovery bucket — value
+          // arrived, nothing to attribute it to. Idempotent on the
+          // Horizon payment id (recordSkip upsert), so a re-read cursor
+          // never double-inserts. Same refund dust floor the arms around
+          // it apply.
+          const amountStroops = p.amount !== undefined ? parseStroops(p.amount) : null;
+          if (amountStroops !== null && amountStroops < REFUND_MIN_STROOPS) {
+            log.info(
+              {
+                paymentId: p.id,
+                memo: outcome.memo,
+                amount: p.amount,
+                refundMinStroops: REFUND_MIN_STROOPS.toString(),
+              },
+              'Valid-rail deposit with no matching order below refund dust floor — counted but not recorded',
+            );
+            break;
+          }
+          await recordSkip({
+            payment: p,
+            memo: outcome.memo,
+            orderId: null,
+            reason: 'unrecognized_deposit',
+            detail: describeUnrecognizedDeposit(p),
+          });
+          break;
+        }
         if (
-          strandedOrder !== null &&
-          (strandedOrder.state === 'expired' ||
-            (['paid', 'procuring', 'fulfilled'].includes(strandedOrder.state) &&
-              strandedOrder.paymentReceivedHorizonId !== null &&
-              strandedOrder.paymentReceivedHorizonId !== p.id))
+          strandedOrder.state === 'expired' ||
+          (['paid', 'procuring', 'fulfilled'].includes(strandedOrder.state) &&
+            strandedOrder.paymentReceivedHorizonId !== null &&
+            strandedOrder.paymentReceivedHorizonId !== p.id)
         ) {
           if (p.amount !== undefined) {
             const amountStroops = parseStroops(p.amount);
