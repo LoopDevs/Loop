@@ -109,6 +109,21 @@ describe('streamGiftCardStatus', () => {
     );
   });
 
+  it('aborts when a degenerate upstream never emits a frame delimiter (buffer cap)', async () => {
+    // A hostile/degenerate CTX upstream that streams bytes but never a
+    // `\n` delimiter. Without a cap the reader accumulates this into an
+    // unbounded in-memory buffer until the worker OOMs. Emit ~576 KiB of
+    // delimiter-free bytes (past the 512 KiB cap) then end the body.
+    const noDelimiter = 'x'.repeat(576 * 1024);
+    fetchSpy.mockResolvedValueOnce(
+      new Response(new TextEncoder().encode(noDelimiter), {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      }),
+    );
+    await expect(streamGiftCardStatus('o-1', CREDS)).rejects.toThrow(/buffer cap/);
+  });
+
   it('throws when CTX returns non-2xx', async () => {
     fetchSpy.mockResolvedValueOnce(new Response('boom', { status: 503 }));
     await expect(streamGiftCardStatus('o-1', CREDS)).rejects.toThrow(/503/);

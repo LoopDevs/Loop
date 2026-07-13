@@ -37,6 +37,19 @@ import { logger } from '../logger.js';
 const log = logger.child({ area: 'ctx-stream' });
 
 /**
+ * Upper bound on the in-memory SSE accumulation buffer (in decoded
+ * chars). The reader only drains `buffer` when it finds a `\n`
+ * delimiter, so a hostile or degenerate upstream that never emits a
+ * delimiter — or emits one enormous single frame — would otherwise
+ * grow `buffer` without limit until the worker OOMs. Real CTX `data:`
+ * frames are small JSON status objects (a few hundred bytes), so
+ * 512 KiB is orders of magnitude of headroom: exceeding it means the
+ * stream is degenerate, and we abort so the caller falls back to
+ * polling rather than accumulating unbounded memory.
+ */
+const MAX_SSE_BUFFER_CHARS = 512 * 1024;
+
+/**
  * Subset of fields the stream surfaces that the orchestration layer
  * needs. CTX may include other fields; we accept the frame as
  * `Record<string, unknown>` and only narrow what we read.
@@ -165,6 +178,26 @@ export async function streamGiftCardStatus(
           }
           throw new Error(`CTX order ${ctxOrderId} ${status}`);
         }
+      }
+
+      // After draining every complete line, `buffer` holds only the
+      // trailing partial frame (no `\n` yet). If that partial exceeds
+      // the cap, the upstream is either withholding delimiters or
+      // emitting a single oversized frame — bail rather than let the
+      // buffer grow toward an OOM.
+      if (buffer.length > MAX_SSE_BUFFER_CHARS) {
+        try {
+          await reader.cancel();
+        } catch {
+          /* already cancelled */
+        }
+        log.warn(
+          { ctxOrderId, bufferChars: buffer.length },
+          'CTX SSE buffer exceeded cap without a frame delimiter — aborting; caller should poll',
+        );
+        throw new Error(
+          `CTX SSE stream for ${ctxOrderId} exceeded ${MAX_SSE_BUFFER_CHARS}-char buffer cap`,
+        );
       }
     }
   } finally {
