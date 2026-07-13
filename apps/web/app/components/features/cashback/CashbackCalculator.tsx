@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { formatMinorCurrency } from '@loop/shared';
-import { currencySymbol } from '~/i18n/format';
+import { currencySymbol, formatMinorCurrency, useLocaleTag } from '~/i18n/format';
 import { getPublicCashbackPreview, type PublicCashbackPreview } from '~/services/public-stats';
 import { shouldRetry } from '~/hooks/query-retry';
 
@@ -45,12 +44,24 @@ function useDebouncedValue<T>(value: T, ms: number): T {
  * / 100` — kept as a thin named wrapper since this file's own test
  * suite asserts on it directly and other call sites in this file use
  * the short name.
+ *
+ * FE-17: threads the active route `locale` through the `i18n/format` seam
+ * (not the `@loop/shared` formatter with its hardcoded `en-US` default) so a
+ * non-US visitor sees their market's grouping/decimal convention
+ * (e.g. en-IN lakh grouping `$12,34,567.89`) instead of always-en-US. The
+ * caller passes `useLocaleTag()`; `locale` is optional so the direct-call
+ * test path keeps its `en-US` default. Only the locale-dependent formatting
+ * changes — the numeric value and sign are untouched.
  */
-export function formatCashbackMinor(minor: string, currency: string): string {
-  return formatMinorCurrency(minor, currency);
+export function formatCashbackMinor(minor: string, currency: string, locale?: string): string {
+  return formatMinorCurrency(minor, currency, locale);
 }
 
 export function CashbackCalculator({ merchantId }: Props): React.JSX.Element {
+  // Active route locale (`/:country/:lang` → e.g. `en-IN`) so the projected
+  // cashback renders in the visitor's market convention, not always en-US
+  // (FE-17). Same seam the rest of the app threads through (ADR 034).
+  const locale = useLocaleTag();
   const [amount, setAmount] = useState<number>(DEFAULT_AMOUNT);
   const debouncedAmount = useDebouncedValue(amount, DEBOUNCE_MS);
 
@@ -74,7 +85,7 @@ export function CashbackCalculator({ merchantId }: Props): React.JSX.Element {
       : '—';
   const cashbackLabel =
     data !== undefined && data.cashbackPct !== null
-      ? formatCashbackMinor(data.cashbackMinor, data.currency)
+      ? formatCashbackMinor(data.cashbackMinor, data.currency, locale)
       : '—';
   // Input glyph must match the merchant's real currency (P2-09): a UK
   // merchant's calculator showed a hardcoded `$` on the input while the
