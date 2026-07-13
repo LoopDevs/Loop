@@ -286,6 +286,18 @@ export function Layout({ children }: { children: React.ReactNode }): React.JSX.E
       typeof import.meta.env !== 'undefined' && import.meta.env['VITE_API_URL']
         ? (import.meta.env['VITE_API_URL'] as string)
         : 'https://api.loopfinance.io',
+    // FE-08: on the SSR web path a per-request nonce exists (minted in
+    // entry.server.tsx, threaded via NonceContext). Feed it into the meta
+    // CSP so `script-src` lists `'nonce-<value>'` and drops
+    // `'unsafe-inline'`, matching the strict HTTP CSP header the same
+    // `buildSecurityHeaders` builds at serve time. Before this, the meta
+    // still advertised `'unsafe-inline'` on script-src — masked today only
+    // by the browser's header∩meta intersection, but a latent inline-script
+    // XSS weakening if the HTTP header is ever dropped/misconfigured.
+    // Mobile static export has no SSR round-trip, so `nonce` is null there:
+    // omit the option and the meta keeps `'unsafe-inline'` unchanged (no
+    // per-request nonce mechanism exists in the Capacitor webview).
+    ...(nonce !== null ? { inlineScriptNonce: nonce } : {}),
   })['Content-Security-Policy'];
   const csp = fullCsp
     ?.split(';')
