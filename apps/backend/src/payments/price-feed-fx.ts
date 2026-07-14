@@ -142,14 +142,22 @@ async function refreshFx(): Promise<CachedFx> {
   for (const code of FX_RATE_CURRENCIES) {
     const rate = rates[code];
     if (typeof rate !== 'number') continue;
-    validateRateJump({
+    // MNY-22-FX-RATCHET: cache the value validateRateJump RETURNS, not the
+    // raw observation. On a normal (in-bound / cold-start) accept the return
+    // IS the observation; on a corroborated recovery it is the anchor
+    // ratcheted by AT MOST one `maxRatio` step toward the new level — never a
+    // single-cycle jump to an arbitrary (attacker-chosen) observed value.
+    // CRITICAL: unlike the XLM feed (integer micro-cents, which `Math.round`s
+    // the return), this cache's unit is a FLOAT (~0.78 GBP/USD), so the
+    // returned value is consumed AS-IS with no rounding — rounding a
+    // fractional FX rate to an integer would corrupt it.
+    minorPerUsdDollar[code] = validateRateJump({
       currency: code,
       feed: 'fx',
       previousValue: previous?.minorPerUsdDollar[code],
       newValue: rate,
       maxRatio: MAX_FX_RATE_JUMP_RATIO,
     });
-    minorPerUsdDollar[code] = rate;
   }
   cachedFx = {
     minorPerUsdDollar,
