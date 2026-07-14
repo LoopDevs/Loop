@@ -1207,6 +1207,138 @@ describeIf('hardening A1 — emission conservation (cumulative, cross-writer, DB
     expect(third.status).toBe(200);
   });
 
+  // ── MNY-11-EMISSION-HARDENING: first-line amount-consistency guard ──
+  // The primitive takes `amountMinor` (drives the balance + conservation
+  // fences) AND `intent.amountStroops` (the amount actually minted, the
+  // daily cap's checked amount, and what the 0044/0061 trigger measures)
+  // as INDEPENDENT caller inputs. A small `amountMinor` paired with a
+  // large `amountStroops` clears the minor-denominated fences while
+  // minting the large stroops. These tests call the primitive DIRECTLY
+  // (the HTTP handler always derives `amountStroops = amountMinor *
+  // 100_000n`, so the hole is only reachable at the primitive boundary).
+  const HARDENING_ISSUER = 'GISSUERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+
+  it('MNY-11-HARDENING: rejects an inconsistent intent (small amountMinor, large amountStroops) at entry — no mint, balance untouched', async () => {
+    const { targetUser } = await seed();
+    await seedCashbackBalance({ userId: targetUser.id, amountMinor: 2000n });
+
+    // amountMinor=1 clears the balance guard (1 ≤ 2000) and the
+    // conservation check (0 + 1 ≤ 2000), but the intent would mint 1500
+    // minor of stroops — WITHIN the 2000 balance, so the 0044/0061
+    // conservation trigger would ALSO pass (1500 ≤ 2000). Pre-fix the
+    // mint proceeds and a real pending_payouts row lands; the guard is
+    // the only thing that catches this at the app boundary.
+    let thrown: unknown = null;
+    try {
+      await applyAdminEmission({
+        userId: targetUser.id,
+        currency: 'USD',
+        amountMinor: 1n,
+        intent: {
+          assetCode: 'USDLOOP',
+          assetIssuer: HARDENING_ISSUER,
+          toAddress: TARGET_WALLET,
+          amountStroops: 1500n * 100_000n, // 1500 minor — 1500× the checked minor
+          memoText: 'mny11-hardening-red',
+        },
+      });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toMatch(/inconsistent caller amounts/);
+
+    // No mint: zero pending_payouts rows for the user.
+    const payouts = await db
+      .select({ id: pendingPayouts.id })
+      .from(pendingPayouts)
+      .where(eq(pendingPayouts.userId, targetUser.id));
+    expect(payouts).toHaveLength(0);
+
+    // Mirror balance unchanged (emission never debits anyway, but the
+    // rejection must not have written any side effect).
+    const [credit] = await db
+      .select({ balanceMinor: userCredits.balanceMinor })
+      .from(userCredits)
+      .where(eq(userCredits.userId, targetUser.id));
+    expect(credit?.balanceMinor).toBe(2000n);
+
+    // No emission-referencing ledger row (only the seeded cashback row).
+    const emissionTx = await db
+      .select({ id: creditTransactions.id })
+      .from(creditTransactions)
+      .where(eq(creditTransactions.referenceType, 'payout'));
+    expect(emissionTx).toHaveLength(0);
+  });
+
+  it('MNY-11-HARDENING: rejects a sub-minor (non-integral) stroops amount at entry', async () => {
+    const { targetUser } = await seed();
+    await seedCashbackBalance({ userId: targetUser.id, amountMinor: 2000n });
+
+    // 150_000 stroops = 1.5 minor; floor(150_000 / 100_000) = 1 = the
+    // supplied amountMinor, so the equality alone would pass — the
+    // whole-minor modulo guard is what rejects the half-minor remainder.
+    let thrown: unknown = null;
+    try {
+      await applyAdminEmission({
+        userId: targetUser.id,
+        currency: 'USD',
+        amountMinor: 1n,
+        intent: {
+          assetCode: 'USDLOOP',
+          assetIssuer: HARDENING_ISSUER,
+          toAddress: TARGET_WALLET,
+          amountStroops: 150_000n,
+          memoText: 'mny11-hardening-frac',
+        },
+      });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toMatch(/whole-minor/);
+
+    const payouts = await db
+      .select({ id: pendingPayouts.id })
+      .from(pendingPayouts)
+      .where(eq(pendingPayouts.userId, targetUser.id));
+    expect(payouts).toHaveLength(0);
+  });
+
+  it('MNY-11-HARDENING: a CONSISTENT intent still succeeds — no false-reject of legitimate emissions', async () => {
+    const { targetUser } = await seed();
+    await seedCashbackBalance({ userId: targetUser.id, amountMinor: 2000n });
+
+    const result = await applyAdminEmission({
+      userId: targetUser.id,
+      currency: 'USD',
+      amountMinor: 1500n,
+      intent: {
+        assetCode: 'USDLOOP',
+        assetIssuer: HARDENING_ISSUER,
+        toAddress: TARGET_WALLET,
+        amountStroops: 1500n * 100_000n, // consistent: 1500 minor
+        memoText: 'mny11-hardening-green',
+      },
+    });
+    expect(result.amountMinor).toBe(1500n);
+
+    const payouts = await db
+      .select({ kind: pendingPayouts.kind, amountStroops: pendingPayouts.amountStroops })
+      .from(pendingPayouts)
+      .where(eq(pendingPayouts.userId, targetUser.id));
+    expect(payouts).toHaveLength(1);
+    expect(payouts[0]!.kind).toBe('emission');
+    expect(payouts[0]!.amountStroops).toBe(1500n * 100_000n);
+
+    // Mirror still untouched (ADR 036).
+    const [credit] = await db
+      .select({ balanceMinor: userCredits.balanceMinor })
+      .from(userCredits)
+      .where(eq(userCredits.userId, targetUser.id));
+    expect(credit?.balanceMinor).toBe(2000n);
+  });
+
   it('a CONFIRMED prior mint consumes headroom — its liability is already on-chain', async () => {
     // Seeded as a confirmed emission row: the conservation accounting
     // treats the three mint kinds (order_cashback / emission /
@@ -1539,7 +1671,7 @@ describeIf('hardening A1 — emission conservation (cumulative, cross-writer, DB
     expect(thrown).toBeInstanceOf(DailyAdjustmentLimitError);
   });
 
-  it('MNY-11: the daily cap binds to minted stroops — an understated amountMinor cannot slip a large amountStroops past it', async () => {
+  it('MNY-11: an understated amountMinor cannot slip a large amountStroops past the guards — now rejected at entry by the hardening consistency check', async () => {
     // The primitive is the trust boundary (the HTTP handler always sets
     // amountStroops = amountMinor * 100_000, but a future/rogue internal
     // caller — or a handler bug — need not). Cap default is 100M minor.
@@ -1547,12 +1679,25 @@ describeIf('hardening A1 — emission conservation (cumulative, cross-writer, DB
     // Attack: understate `amountMinor` to 1 (slips under the cap) while
     // minting `amountStroops` worth 150M minor (over the cap). The mirror
     // balance is 200M minor so the per-call balance guard AND the
-    // conservation fence (both app-layer + the migration-0044 DB trigger,
-    // which measures the real amount_stroops) PASS — isolating the DAILY
-    // CAP as the only gate. Before MNY-11 the cap checked the caller's
-    // amountMinor (1) → passed → the 150M-minor emission was queued,
-    // blowing the 100M daily cap with a single call. The fix derives the
-    // cap-checked minor FROM amountStroops, so the cap now REJECTS it.
+    // conservation fence PASS — the ONLY thing that could wave this
+    // through is a fence reading the understated minor.
+    //
+    // Layering history:
+    //  - Before MNY-11-emissioncap the DAILY CAP read the caller's
+    //    amountMinor (1) → passed → the 150M-minor emission was queued.
+    //    That fix rebound the cap to `amountStroops / 100_000`.
+    //  - MNY-11-EMISSION-HARDENING then added a FIRST-LINE consistency
+    //    guard at the top of the primitive: any intent whose amountMinor
+    //    ≠ amountStroops / 100_000 is rejected BEFORE the balance,
+    //    conservation, or cap fences run. So this inconsistent intent now
+    //    fails at entry — a strictly earlier, stronger rejection than the
+    //    cap. (The cap-binds-to-minted-stroops property for CONSISTENT
+    //    emissions is still proven by the `fleet-wide daily emission cap`
+    //    sibling test above, which uses matched minor/stroops.)
+    //
+    // The MONEY-SAFETY invariant under test is unchanged: an understated
+    // minor CANNOT queue a large-stroops mint. Only the rejecting layer
+    // (and thus the error type) moved earlier.
     const { targetUser } = await seed();
     await seedCashbackBalance({ userId: targetUser.id, amountMinor: 200_000_000n });
 
@@ -1576,13 +1721,16 @@ describeIf('hardening A1 — emission conservation (cumulative, cross-writer, DB
       return null;
     });
 
-    // The cap must reject the emission (bound to the minted stroops),
-    // not silently queue it on the strength of the understated minor.
+    // The inconsistent intent is refused, not queued on the strength of
+    // the understated minor. Post-hardening the FIRST-LINE consistency
+    // guard is what rejects it (before the cap ever runs); pin that exact
+    // message so this stays a precise, non-vacuous assertion.
     expect(applied).toBeNull();
-    expect(thrown).toBeInstanceOf(DailyAdjustmentLimitError);
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toMatch(/inconsistent caller amounts/);
 
     // Bypass provably closed: NO emission row was queued — the caller
-    // could not mint 150M minor of on-chain value under the 100M cap.
+    // could not mint 150M minor of on-chain value with a minor of 1.
     const queued = await db
       .select()
       .from(pendingPayouts)

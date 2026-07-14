@@ -253,6 +253,12 @@ export interface EmissionResult {
  *   - generic Error — `Emission amount must be positive` if the
  *     caller passes 0 or negative; the schema CHECK enforces this
  *     too but we fail fast with a typed message.
+ *   - generic Error — MNY-11-EMISSION-HARDENING: the caller-supplied
+ *     `amountMinor` and `intent.amountStroops` are internally
+ *     inconsistent (minor ≠ stroops / STROOPS_PER_MINOR, or the
+ *     stroops are not a whole number of minor units). Rejected at
+ *     entry so the minor-denominated fences and the stroops-denominated
+ *     mint cannot be driven by two different amounts.
  */
 export async function applyAdminEmission(args: {
   userId: string;
@@ -262,6 +268,44 @@ export async function applyAdminEmission(args: {
 }): Promise<EmissionResult> {
   if (args.amountMinor <= 0n) {
     throw new Error('Emission amount must be positive');
+  }
+
+  // MNY-11-EMISSION-HARDENING — first-line consistency guard. The
+  // caller supplies BOTH `amountMinor` and `intent.amountStroops`
+  // independently, but the two are consumed on OPPOSITE sides of the
+  // fences: the per-call balance guard (`balance < args.amountMinor`)
+  // and the A1 conservation check (`alreadyEmittedMinor +
+  // args.amountMinor > balance`) read the MINOR, while the row that is
+  // actually minted (INSERT `amountStroops`), the daily cap's checked
+  // amount (`mintedMinor = amountStroops / STROOPS_PER_MINOR`, the
+  // MNY-11-emissioncap fix), the dedup fence, and the 0044/0061
+  // `assert_emission_conservation` trigger all read the STROOPS. If the
+  // two disagree, a small `amountMinor` satisfies the minor-denominated
+  // fences while a large `amountStroops` is queued on-chain — a
+  // cap/guard bypass backstopped today only by the DB trigger (and only
+  // when the minted stroops also exceed the balance). Fail closed HERE,
+  // before any fence or DB work, so all three fences operate on one
+  // validated amount. The downstream math floor-divides stroops by
+  // STROOPS_PER_MINOR (same as `usedMinor`/`mintedMinor` below and the
+  // A4-021 sibling in payout-compensation.ts), so the minor MUST equal
+  // that floor. Emissions are whole-minor by construction — the handler
+  // computes `amountStroops = amountMinor * 100_000n` — so reject a
+  // sub-minor stroop remainder too: otherwise 150_000 stroops (1.5
+  // minor) would floor to a matching `amountMinor` of 1 while minting
+  // 1.5 minor. No DB CHECK enforces whole-minor (only amount_stroops>0),
+  // so this is the only whole-minor gate at the app boundary.
+  if (args.intent.amountStroops % STROOPS_PER_MINOR !== 0n) {
+    throw new Error(
+      `Emission amountStroops (${args.intent.amountStroops}) must be a whole multiple of ` +
+        `${STROOPS_PER_MINOR} stroops per minor unit — emissions are whole-minor`,
+    );
+  }
+  if (args.amountMinor !== args.intent.amountStroops / STROOPS_PER_MINOR) {
+    throw new Error(
+      `Emission amountMinor (${args.amountMinor}) does not match amountStroops ` +
+        `(${args.intent.amountStroops}) / ${STROOPS_PER_MINOR} = ` +
+        `${args.intent.amountStroops / STROOPS_PER_MINOR} — inconsistent caller amounts`,
+    );
   }
 
   try {
