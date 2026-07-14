@@ -16,10 +16,40 @@
 import { Button, Input, Card, Badge, Avatar, Container, LoopLogo } from '~/components/ui';
 import { Spinner } from '~/components/ui/Spinner';
 import { Skeleton } from '~/components/ui/Skeleton';
+import type { Route } from './+types/styleguide';
+
+/**
+ * FE-24: `noindex` is a crawler *hint*, not an access control — this
+ * internal design surface was still served (HTTP 200) to anyone in
+ * production. Gate it server-side so it returns a real 404 there.
+ *
+ * Fail-closed env taxonomy (mirrors `sentry-lazy.ts` A2-1310): both the
+ * prod and staging deploys build with `MODE=production`, so `PROD` alone
+ * can't tell them apart — the explicit `VITE_LOOP_ENV` deploy tag does.
+ * We serve the page only in dev/local (`PROD === false`) or an *explicitly*
+ * tagged `staging` deploy, and 404 everywhere else. That includes a
+ * production build that shipped without `VITE_LOOP_ENV` set (the fly.toml
+ * default is `""`): absent the staging tag we block, so a forgotten env
+ * var fails closed to "not reachable in prod" rather than open.
+ *
+ * The 404 is thrown as a `Response` (same idiom as `not-found-ssr.tsx`)
+ * so RR v7 propagates the status to the HTTP layer and the root
+ * `ErrorBoundary` renders the app's standard 404 UI.
+ */
+export function loader(_: Route.LoaderArgs): null {
+  const isProductionBuild = import.meta.env.PROD === true;
+  const isStaging = import.meta.env.VITE_LOOP_ENV === 'staging';
+  if (isProductionBuild && !isStaging) {
+    throw new Response(null, { status: 404, statusText: 'Not Found' });
+  }
+  return null;
+}
 
 export function meta(): Array<Record<string, string>> {
   return [
     { title: 'Loop — Design system / styleguide' },
+    // Belt-and-suspenders: the loader blocks prod, this keeps the dev/
+    // staging copies out of any index that can still reach them.
     { name: 'robots', content: 'noindex, nofollow' },
   ];
 }

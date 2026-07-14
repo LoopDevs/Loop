@@ -8,6 +8,12 @@ const isMobile = process.env.BUILD_TARGET === 'mobile';
 // has no use for a sitemap anyway.
 const sitemapRoutes = isMobile ? [] : [route('sitemap.xml', 'routes/sitemap.tsx')];
 
+// FE-24: styleguide now exports a `loader` that 404s the design-system
+// page in production. SPA mode (mobile static export) rejects `loader`
+// exports, and the mobile app has no use for the web-only styleguide, so
+// skip it when BUILD_TARGET=mobile (same pattern as sitemap/not-found-ssr).
+const styleguideRoutes = isMobile ? [] : [route('styleguide', 'routes/styleguide.tsx')];
+
 // A2-1111: SSR build wires the splat to `not-found-ssr.tsx`, whose
 // loader throws a real HTTP 404 so crawlers stop seeing soft-200s.
 // Mobile build uses the plain `not-found.tsx` because SPA mode rejects
@@ -72,7 +78,7 @@ export default [
   ...sitemapRoutes,
   route('auth', 'routes/auth.tsx'),
   // Internal design-system kitchen-sink (noindex; gate/remove before public launch).
-  route('styleguide', 'routes/styleguide.tsx'),
+  ...styleguideRoutes,
   route('onboarding', 'routes/onboarding.tsx'),
   route('orders', 'routes/orders.tsx'),
   route('orders/:id', 'routes/orders.$id.tsx'),
