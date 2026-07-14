@@ -1298,8 +1298,32 @@ async function runVaultRedemptionSweepLocked(args?: {
 }
 
 // ─── Stuck-redemption watchdog (mirrors vault-emissions.ts's) ─────────────
+//
+// Pages once per incident when any row has sat in `pending`/`collecting`/
+// `redeemed` past the threshold. Single-flighted fleet-wide via
+// `pg_try_advisory_xact_lock`, fire-once/re-arm state persisted in
+// `watchdog_alert_state`, confirmed-delivery (persist active=true only
+// after the send resolves) — the exact shape of the sibling emission
+// watchdog and `stuck-payout-watchdog.ts`.
+//
+// MNY-15: `pending` is covered too, not just the post-CAS in-flight
+// states. A `pending` row is a user-OWED redemption claimed at
+// `claimVaultRedemption` with nothing on-chain yet (the source order is
+// still `pending_payment`, the `user_credits` liability not yet debited
+// — the user is owed their money-out). It is normally transient — the
+// next sweep tick CASes it `pending → collecting` within ~one tick
+// (`SWEEP_STATES` includes `pending`) — but if the vault for its
+// (asset, network) is DEREGISTERED, `driveOneVaultRedemption` returns
+// `no_vault` at the top and leaves the row in `pending` indefinitely
+// (the sweep re-considers it every tick but can never advance it; it
+// never exhausts attempts, so it never reaches `failed` and never
+// pages). Omitting `pending` here made that stranded, money-owed
+// redemption silently invisible — the exact money-owed hole this
+// watchdog exists to close. The shared staleness threshold (default
+// 15 min ≫ the ~30s sweep cadence) is ANDed uniformly across states, so
+// a healthy, momentarily-`pending` row is never false-paged.
 
-const VAULT_REDEMPTION_STUCK_STATES = ['collecting', 'redeemed'] as const;
+const VAULT_REDEMPTION_STUCK_STATES = ['pending', 'collecting', 'redeemed'] as const;
 const VAULT_REDEMPTION_STUCK_ALERT_NAME = 'vault-redemption-stuck-watchdog';
 export const VAULT_REDEMPTION_STUCK_WATCHDOG_INTERVAL_MS = 60 * 1000;
 
