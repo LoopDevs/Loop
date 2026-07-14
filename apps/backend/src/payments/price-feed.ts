@@ -32,7 +32,7 @@
  */
 import { z } from 'zod';
 import { logger } from '../logger.js';
-import { validateRateJump } from './rate-sanity.js';
+import { validateRateJump, __resetRateSanityForTests, type RateStaleness } from './rate-sanity.js';
 
 const log = logger.child({ area: 'price-feed' });
 
@@ -42,6 +42,14 @@ const log = logger.child({ area: 'price-feed' });
  * wide enough to tolerate real market moves — a >50% move between two
  * 60s-TTL refreshes is still implausible for a liquid asset and far
  * more likely to be a bad feed response than a real one.
+ *
+ * MNY-22: a legitimate >50% move no longer wedges the feed — after
+ * `REQUIRED_CORROBORATIONS` consecutive observations of the new level the
+ * anchor ratchets toward it. MNY-22-wedge (round 2): each corroborated
+ * advance moves the anchor by AT MOST one `MAX_RATE_JUMP_RATIO` step, so a
+ * large legit gap recovers over several paged cycles and a spoofed feed
+ * cannot walk the anchor to an arbitrary rate in one cycle (see
+ * `rate-sanity.ts`, `ratchetedAnchor`).
  */
 const MAX_RATE_JUMP_RATIO = 0.5;
 
@@ -104,11 +112,64 @@ interface CachedPrice {
 }
 
 const CACHE_TTL_MS = 60_000;
+
+/**
+ * MNY-22 (B): upstream-staleness bound for observations that carry a
+ * retrieval timestamp (the CTX rates adapter's `retrieved` field). The
+ * cache already tolerates `CACHE_TTL_MS` (60s) of staleness deliberately
+ * — see the module header — and the upstream's own timestamp naturally
+ * lags our poll by up to a refresh cycle, so this is set to a generous
+ * 10× that TTL. It exists to catch a feed that has plainly FROZEN
+ * (serving a >10-minute-old price), which the relative bound cannot see
+ * on a cold cache; it is not a tight freshness SLA. Deliberately
+ * conservative: it fails toward accepting a slightly-old-but-live rate
+ * so a normally-fresh feed is never rejected. Adapters with no upstream
+ * timestamp (CoinGecko-shape) skip this check entirely (fail open).
+ */
+const MAX_OBSERVATION_AGE_MS = 10 * CACHE_TTL_MS;
+
 let cached: CachedPrice | null = null;
 
 /** Test seam — forgets the price cache so the next call re-fetches. */
 export function __resetPriceFeedForTests(): void {
   cached = null;
+  // MNY-22: also clear the shared rate-sanity corroboration hysteresis so
+  // a breach streak from one test can't leak into the next.
+  __resetRateSanityForTests();
+}
+
+/**
+ * MNY-22 (B): optional per-asset absolute FLOOR for an XLM rate, read
+ * from `LOOP_XLM_MIN_PRICE_<CCY>` (MAJOR units per XLM, e.g.
+ * `LOOP_XLM_MIN_PRICE_USD=0.02` → reject any USD rate below $0.02/XLM).
+ * The relative sanity bound cannot fire on a cold cache (no prior value
+ * to compare), so an absurd first-ever rate would otherwise be accepted;
+ * this floor is that cold-cache backstop.
+ *
+ * The VALUE is money policy with no defensible default (see the MNY-22
+ * NEEDS-DECISION note), so this MECHANISM fails OPEN:
+ *   - UNSET / empty → undefined (no floor) → today's behaviour, accept.
+ *   - Malformed (non-positive / non-numeric) → logged and treated as
+ *     UNSET, NOT thrown, so a config typo can never itself wedge
+ *     settlement — the floor is an extra guard layered on top of the
+ *     (now wedge-free) relative bound, never the primary control.
+ *
+ * Returns the floor in MICRO-CENTS per XLM (the feed's cached unit) so
+ * it compares directly against `microCentsPerXlm`, or undefined.
+ */
+function xlmFloorMicroCents(currency: 'USD' | 'GBP' | 'EUR'): number | undefined {
+  const raw = process.env[`LOOP_XLM_MIN_PRICE_${currency}`];
+  if (raw === undefined || raw.trim().length === 0) return undefined;
+  const major = Number(raw.trim());
+  if (!Number.isFinite(major) || major <= 0) {
+    log.error(
+      { currency, raw },
+      'MNY-22: LOOP_XLM_MIN_PRICE_* is not a positive number — ignoring (fail open, no floor)',
+    );
+    return undefined;
+  }
+  // major units/XLM → micro-cents/XLM = major × 100 cents × 10^6 = major × 1e8.
+  return Math.round(major * 100_000_000);
 }
 
 /**
@@ -171,12 +232,18 @@ async function fetchJson(url: string): Promise<unknown> {
 }
 
 /**
- * Fetches a single XLM/<quote> rate from CTX rates. Returns the
- * decimal price as a number (1 XLM = `price` quote-currency major
- * units). Returns null when the feed has no data for that pair —
- * caller treats this as "currency unavailable in this snapshot."
+ * Fetches a single XLM/<quote> rate from CTX rates. Returns the decimal
+ * price (1 XLM = `price` quote-currency major units) together with the
+ * upstream's own retrieval time parsed from the `retrieved` field
+ * (MNY-22: fed to the staleness bound so a frozen upstream is rejected).
+ * `retrievedAtMs` is `NaN` when `retrieved` is absent/unparseable — the
+ * caller then simply skips the staleness check (fail open). Returns null
+ * when the feed has no data for that pair — caller treats this as
+ * "currency unavailable in this snapshot."
  */
-async function fetchCtxRate(quote: 'USD' | 'GBP' | 'EUR'): Promise<number | null> {
+async function fetchCtxRate(
+  quote: 'USD' | 'GBP' | 'EUR',
+): Promise<{ price: number; retrievedAtMs: number } | null> {
   const symbol = `xlm${quote.toLowerCase()}`;
   const url = `${ctxRatesBaseUrl()}?source=ctx&symbol=${symbol}`;
   let raw: unknown;
@@ -211,7 +278,20 @@ async function fetchCtxRate(quote: 'USD' | 'GBP' | 'EUR'): Promise<number | null
     );
     return null;
   }
-  return price;
+  // MNY-22: `retrieved` is an ISO-8601 string; NaN if absent/unparseable.
+  return { price, retrievedAtMs: Date.parse(record.retrieved) };
+}
+
+/**
+ * MNY-22: builds the optional staleness argument for `validateRateJump`
+ * from an upstream retrieval timestamp. A non-finite timestamp (feed
+ * didn't stamp the observation) yields undefined so the caller skips the
+ * staleness check — fail open, since a missing timestamp is not itself
+ * evidence the rate is stale.
+ */
+function stalenessFrom(retrievedAtMs: number): RateStaleness | undefined {
+  if (!Number.isFinite(retrievedAtMs)) return undefined;
+  return { observedAtMs: retrievedAtMs, maxAgeMs: MAX_OBSERVATION_AGE_MS };
 }
 
 async function refreshCtx(): Promise<CachedPrice> {
@@ -234,36 +314,55 @@ async function refreshCtx(): Promise<CachedPrice> {
   // Scale to micro-cents (cents × 10^6) per A4-106 precision rationale.
   // `price` is major-unit per XLM (e.g. 0.1610 USD per XLM), so
   // microCents per XLM = price × 100 cents/major × 10^6 = price × 1e8.
-  const usdMicroCents = Math.round(usd * 100_000_000);
-  validateRateJump({
-    currency: 'USD',
-    feed: 'xlm',
-    previousValue: previous?.microCentsPerXlm.USD,
-    newValue: usdMicroCents,
-    maxRatio: MAX_RATE_JUMP_RATIO,
-  });
-  const microCentsPerXlm: CachedPrice['microCentsPerXlm'] = { USD: usdMicroCents };
-  if (gbp !== null) {
-    const gbpMicroCents = Math.round(gbp * 100_000_000);
+  // MNY-22-wedge: cache the value validateRateJump RETURNS, not the raw
+  // observation. On a normal accept that IS the observation; on a
+  // corroborated recovery it is the anchor ratcheted by at most one
+  // maxRatio step toward the new level — never a single-cycle jump to an
+  // arbitrary observed value. `Math.round` restores integer micro-cents
+  // (the ratchet cap can land on a half-unit) so the BigInt() size-check
+  // math downstream stays integral.
+  const usdMicroCents = Math.round(usd.price * 100_000_000);
+  const usdAccepted = Math.round(
     validateRateJump({
-      currency: 'GBP',
+      currency: 'USD',
       feed: 'xlm',
-      previousValue: previous?.microCentsPerXlm.GBP,
-      newValue: gbpMicroCents,
+      previousValue: previous?.microCentsPerXlm.USD,
+      newValue: usdMicroCents,
       maxRatio: MAX_RATE_JUMP_RATIO,
-    });
-    microCentsPerXlm.GBP = gbpMicroCents;
+      floor: xlmFloorMicroCents('USD'),
+      staleness: stalenessFrom(usd.retrievedAtMs),
+    }),
+  );
+  const microCentsPerXlm: CachedPrice['microCentsPerXlm'] = { USD: usdAccepted };
+  if (gbp !== null) {
+    const gbpMicroCents = Math.round(gbp.price * 100_000_000);
+    const gbpAccepted = Math.round(
+      validateRateJump({
+        currency: 'GBP',
+        feed: 'xlm',
+        previousValue: previous?.microCentsPerXlm.GBP,
+        newValue: gbpMicroCents,
+        maxRatio: MAX_RATE_JUMP_RATIO,
+        floor: xlmFloorMicroCents('GBP'),
+        staleness: stalenessFrom(gbp.retrievedAtMs),
+      }),
+    );
+    microCentsPerXlm.GBP = gbpAccepted;
   }
   if (eur !== null) {
-    const eurMicroCents = Math.round(eur * 100_000_000);
-    validateRateJump({
-      currency: 'EUR',
-      feed: 'xlm',
-      previousValue: previous?.microCentsPerXlm.EUR,
-      newValue: eurMicroCents,
-      maxRatio: MAX_RATE_JUMP_RATIO,
-    });
-    microCentsPerXlm.EUR = eurMicroCents;
+    const eurMicroCents = Math.round(eur.price * 100_000_000);
+    const eurAccepted = Math.round(
+      validateRateJump({
+        currency: 'EUR',
+        feed: 'xlm',
+        previousValue: previous?.microCentsPerXlm.EUR,
+        newValue: eurMicroCents,
+        maxRatio: MAX_RATE_JUMP_RATIO,
+        floor: xlmFloorMicroCents('EUR'),
+        staleness: stalenessFrom(eur.retrievedAtMs),
+      }),
+    );
+    microCentsPerXlm.EUR = eurAccepted;
   }
   cached = { microCentsPerXlm, expiresAt: Date.now() + CACHE_TTL_MS };
   return cached;
@@ -278,37 +377,51 @@ async function refreshCoinGecko(url: string): Promise<CachedPrice> {
   }
   const { usd, gbp, eur } = parsed.data.stellar;
   // CF2-06: same sanity-bound validation as the CTX adapter above.
+  // MNY-22: the CoinGecko-shape response carries no retrieval timestamp,
+  // so the staleness bound is skipped (fail open) on this adapter; the
+  // absolute floor still applies (it needs no upstream timestamp).
   const previous = cached;
+  // MNY-22-wedge: cache the RETURNED (possibly ratcheted) value, not the
+  // raw observation — see the matching note in `refreshCtx`.
   const usdMicroCents = Math.round(usd * 100_000_000);
-  validateRateJump({
-    currency: 'USD',
-    feed: 'xlm',
-    previousValue: previous?.microCentsPerXlm.USD,
-    newValue: usdMicroCents,
-    maxRatio: MAX_RATE_JUMP_RATIO,
-  });
-  const microCentsPerXlm: CachedPrice['microCentsPerXlm'] = { USD: usdMicroCents };
+  const usdAccepted = Math.round(
+    validateRateJump({
+      currency: 'USD',
+      feed: 'xlm',
+      previousValue: previous?.microCentsPerXlm.USD,
+      newValue: usdMicroCents,
+      maxRatio: MAX_RATE_JUMP_RATIO,
+      floor: xlmFloorMicroCents('USD'),
+    }),
+  );
+  const microCentsPerXlm: CachedPrice['microCentsPerXlm'] = { USD: usdAccepted };
   if (typeof gbp === 'number') {
     const gbpMicroCents = Math.round(gbp * 100_000_000);
-    validateRateJump({
-      currency: 'GBP',
-      feed: 'xlm',
-      previousValue: previous?.microCentsPerXlm.GBP,
-      newValue: gbpMicroCents,
-      maxRatio: MAX_RATE_JUMP_RATIO,
-    });
-    microCentsPerXlm.GBP = gbpMicroCents;
+    const gbpAccepted = Math.round(
+      validateRateJump({
+        currency: 'GBP',
+        feed: 'xlm',
+        previousValue: previous?.microCentsPerXlm.GBP,
+        newValue: gbpMicroCents,
+        maxRatio: MAX_RATE_JUMP_RATIO,
+        floor: xlmFloorMicroCents('GBP'),
+      }),
+    );
+    microCentsPerXlm.GBP = gbpAccepted;
   }
   if (typeof eur === 'number') {
     const eurMicroCents = Math.round(eur * 100_000_000);
-    validateRateJump({
-      currency: 'EUR',
-      feed: 'xlm',
-      previousValue: previous?.microCentsPerXlm.EUR,
-      newValue: eurMicroCents,
-      maxRatio: MAX_RATE_JUMP_RATIO,
-    });
-    microCentsPerXlm.EUR = eurMicroCents;
+    const eurAccepted = Math.round(
+      validateRateJump({
+        currency: 'EUR',
+        feed: 'xlm',
+        previousValue: previous?.microCentsPerXlm.EUR,
+        newValue: eurMicroCents,
+        maxRatio: MAX_RATE_JUMP_RATIO,
+        floor: xlmFloorMicroCents('EUR'),
+      }),
+    );
+    microCentsPerXlm.EUR = eurAccepted;
   }
   cached = { microCentsPerXlm, expiresAt: Date.now() + CACHE_TTL_MS };
   return cached;
