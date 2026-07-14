@@ -142,10 +142,16 @@ describe('revokeRefreshToken', () => {
     expect(s['lastUsedAt']).toBeInstanceOf(Date);
   });
 
-  it('allows replacedByJti to be omitted (null)', async () => {
+  it('COR-11: does NOT write replacedByJti when omitted — preserves rotation-chain lineage', async () => {
     await revokeRefreshToken({ jti: 'jti-1' });
     const s = state.updateSetArgs[0] as Record<string, unknown>;
-    expect(s['replacedByJti']).toBeNull();
+    // Logout revokes by jti with no successor. The update must leave
+    // `replaced_by_jti` untouched, or an already-rotated row's link is
+    // clobbered and the audit chain dead-ends at the logout (COR-11).
+    expect('replacedByJti' in s).toBe(false);
+    // Still a genuine revoke: the terminal marker + last-used stamp.
+    expect(s['revokedAt']).toBeInstanceOf(Date);
+    expect(s['lastUsedAt']).toBeInstanceOf(Date);
   });
 });
 

@@ -85,9 +85,19 @@ export async function findRefreshTokenRecord(jti: string): Promise<RefreshTokenR
 }
 
 /**
- * Revokes a refresh token and optionally links it to its successor
- * (for rotation audit). Called inside the refresh handler's txn path
- * before writing the new row.
+ * Revokes a single refresh token by jti. Sole production caller is the
+ * logout handler — rotation goes through `tryRevokeIfLive` (A4-098),
+ * not this. `revoked_at` is the terminal marker: setting it invalidates
+ * the token (`findLiveRefreshToken` filters on `revoked_at IS NULL`).
+ *
+ * COR-11: the rotation link `replaced_by_jti` is (re)written ONLY when
+ * the caller passes an explicit successor. When omitted it is left
+ * untouched, so an already-rotated row keeps the link to the token that
+ * superseded it. Logout revokes with NO successor — coercing `?? null`
+ * here CLOBBERED that link, destroying the rotation-chain audit lineage
+ * (a stolen-token reuse could no longer be traced past the logout). The
+ * revoke's actual effect (the token is invalidated) is unchanged: it is
+ * carried entirely by `revoked_at`.
  */
 export async function revokeRefreshToken(args: {
   jti: string;
@@ -99,8 +109,11 @@ export async function revokeRefreshToken(args: {
     .update(refreshTokens)
     .set({
       revokedAt: now,
-      replacedByJti: args.replacedByJti ?? null,
       lastUsedAt: now,
+      // COR-11: touch `replaced_by_jti` only when a successor is
+      // explicitly supplied; omitting it preserves the existing
+      // rotation lineage rather than nulling it out.
+      ...(args.replacedByJti !== undefined ? { replacedByJti: args.replacedByJti } : {}),
     })
     .where(eq(refreshTokens.jti, args.jti));
 }

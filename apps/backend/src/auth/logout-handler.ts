@@ -62,6 +62,13 @@ export async function logoutHandler(c: Context): Promise<Response> {
     const verified = verifyLoopToken(parsed.data.refreshToken, 'refresh');
     if (verified.ok && verified.claims.jti !== undefined) {
       try {
+        // COR-11: revoke by jti WITHOUT passing a successor. The token
+        // presented here may already be mid-chain (a stale device or a
+        // rotated-out token still within its signature TTL — verify
+        // above checks the signature, not DB liveness). Passing no
+        // `replacedByJti` leaves the row's rotation link intact, so the
+        // audit chain stays traceable past the logout; `revoked_at`
+        // alone invalidates the token.
         await revokeRefreshToken({ jti: verified.claims.jti });
       } catch (err) {
         // Revocation failure is not fatal — the signed token still
