@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import { useAuthStore } from '~/stores/auth.store';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Routes, Route } from 'react-router';
@@ -110,11 +111,14 @@ describe('buildAssetSummaries', () => {
 describe('<AdminAssetsIndexRoute />', () => {
   it('shows a sign-in prompt when unauthenticated', () => {
     authMock.isAuthenticated = false;
+    // FE-10: model restore-complete + logged-out so the guard shows sign-in, not the spinner
+    useAuthStore.setState({ restoreComplete: true });
     try {
       renderAt();
       expect(screen.getByText(/Sign in with a staff account/i)).toBeDefined();
     } finally {
       authMock.isAuthenticated = true;
+      useAuthStore.setState({ restoreComplete: false });
     }
   });
 
