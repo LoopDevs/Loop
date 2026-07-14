@@ -609,12 +609,32 @@ async function payoutStep(
     const amountOutMinor = amountOutStroops / STROOPS_PER_MINOR;
     // Guaranteed >= 0 by the minAmountsOut floor above.
     const netFloatDelta = amountOutMinor - row.valueMinor;
+    // MNY-06-REDEMPTION-DUST: `amountOutMinor` TRUNCATES the sub-minor
+    // remainder of the REAL on-chain proceeds — `amountOutStroops %
+    // STROOPS_PER_MINOR` stroops of favorable-slippage USDC that would
+    // otherwise be silently DROPPED from the float on every slow-path
+    // redemption (the same leak MNY-06-hotfloat fixed on the replenish
+    // path, on the SAME `vault_hot_float`). Carry that remainder forward
+    // in `carry_stroops` so the float conserves the FULL proceeds:
+    // `balance_minor * PER + carry_stroops == Σ amountOutStroops − Σ
+    // valueMinor*PER`. The remainder is non-negative, so it never drives
+    // the DB-CHECKed carry below zero even when `netFloatDelta` (the
+    // signed whole-minor part, favorable or unfavorable slippage) is
+    // negative.
+    const proceedsCarryStroops = amountOutStroops % STROOPS_PER_MINOR;
 
     let slowPathLanded = false;
     let slowPathResult: VaultRedemptionRow;
     try {
       slowPathResult = await db.transaction(async (tx) => {
-        await applyHotFloatDeltaInTx(tx, assetCode, network, netFloatDelta, 0n);
+        await applyHotFloatDeltaInTx(
+          tx,
+          assetCode,
+          network,
+          netFloatDelta,
+          0n,
+          proceedsCarryStroops,
+        );
         const [updated] = await tx
           .update(vaultRedemptions)
           .set({ state: 'redeemed', payoutPath: 'slow', redeemedAt: new Date() })

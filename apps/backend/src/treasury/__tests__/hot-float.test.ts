@@ -184,11 +184,27 @@ function buildDbMock(): Record<string, unknown> {
       // integration suite (hot-float-dust-conservation.test.ts).
       const patchText = templateText(patch['balanceMinor']);
       if (patchText.includes('/')) {
-        const [proceeds, per] = extractBigints(patch['balanceMinor']);
-        if (proceeds === undefined || per === undefined) {
+        // Two carry-aware shapes flush a whole minor from carry to balance:
+        //   • replenish tick (2 bigints): `balance + (carry + proceeds) / PER`
+        //   • applyHotFloatDeltaInTx (3 bigints, MNY-06-REDEMPTION-DUST):
+        //     `balance + balanceDelta + (carry + carryDelta) / PER`
+        const bigints = extractBigints(patch['balanceMinor']);
+        if (bigints.length === 2) {
+          const [proceeds, per] = bigints;
+          if (proceeds === undefined || per === undefined) {
+            throw new Error('handleUpdate: malformed carry-aware balanceMinor expression');
+          }
+          next.balanceMinor = existing.balanceMinor + (existing.carryStroops + proceeds) / per;
+        } else if (bigints.length === 3) {
+          const [balanceDelta, carryDelta, per] = bigints;
+          if (balanceDelta === undefined || carryDelta === undefined || per === undefined) {
+            throw new Error('handleUpdate: malformed carry-aware balanceMinor expression');
+          }
+          next.balanceMinor =
+            existing.balanceMinor + balanceDelta + (existing.carryStroops + carryDelta) / per;
+        } else {
           throw new Error('handleUpdate: malformed carry-aware balanceMinor expression');
         }
-        next.balanceMinor = existing.balanceMinor + (existing.carryStroops + proceeds) / per;
       } else {
         next.balanceMinor = existing.balanceMinor + extractSqlDelta(patch['balanceMinor']);
       }

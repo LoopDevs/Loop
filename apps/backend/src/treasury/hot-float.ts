@@ -148,6 +148,22 @@ export async function tryDrawHotFloat(
  * Used by the SLOW path (`vault-redemptions.ts`'s payout step credits
  * the vault-withdraw proceeds net of the amount it settles, atomically
  * with its own state transition) and by `runHotFloatReplenishTick`.
+ *
+ * `carryStroopsDelta` (MNY-06-REDEMPTION-DUST) folds a NON-NEGATIVE
+ * sub-minor stroop remainder into `carry_stroops`, flushing a whole
+ * minor into `balance_minor` the moment carry crosses STROOPS_PER_MINOR
+ * — the SAME `(carry + stroops) / PER` flush / `(carry + stroops) % PER`
+ * retain idiom `runHotFloatReplenishTick` carries inline for the
+ * replenish path (MNY-06-hotfloat). A caller whose credit lands on a
+ * whole-minor boundary passes the default `0n` and gets the original
+ * plain-delta behaviour (`(carry + 0) / PER == 0`, `(carry + 0) % PER ==
+ * carry`), so this is a strict superset — pre-existing callers are
+ * byte-for-byte unchanged. Because `carryStroopsDelta` is required
+ * non-negative and the stored carry is already in `[0, PER)`, the sum
+ * stays in `[0, 2*PER)` and the retained `% PER` never leaves
+ * `[0, PER)` — the `vault_hot_float_carry_bounded` CHECK holds
+ * regardless of the SIGN of `balanceDelta` (the signed whole-minor part
+ * lands only in `balance_minor`, never in the carry).
  */
 export async function applyHotFloatDeltaInTx(
   tx: HotFloatTx,
@@ -155,12 +171,14 @@ export async function applyHotFloatDeltaInTx(
   network: LoopVaultNetwork,
   balanceDelta: bigint,
   pendingSharesDelta: bigint,
+  carryStroopsDelta: bigint = 0n,
 ): Promise<void> {
   await ensureFloatRowInTx(tx, assetCode, network);
   await tx
     .update(vaultHotFloat)
     .set({
-      balanceMinor: sql`${vaultHotFloat.balanceMinor} + ${balanceDelta}`,
+      balanceMinor: sql`${vaultHotFloat.balanceMinor} + ${balanceDelta} + (${vaultHotFloat.carryStroops} + ${carryStroopsDelta}) / ${STROOPS_PER_MINOR}`,
+      carryStroops: sql`(${vaultHotFloat.carryStroops} + ${carryStroopsDelta}) % ${STROOPS_PER_MINOR}`,
       pendingUnredeemedShares: sql`${vaultHotFloat.pendingUnredeemedShares} + ${pendingSharesDelta}`,
       updatedAt: sql`NOW()`,
     })

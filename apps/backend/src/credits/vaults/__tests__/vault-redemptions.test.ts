@@ -132,6 +132,26 @@ function extractSqlDelta(node: unknown): bigint {
   return sign * amount;
 }
 
+/** All raw bigint literals interpolated into a `sql\`\`` template, in order. */
+function extractBigints(node: unknown): bigint[] {
+  const chunks = (node as { queryChunks?: unknown[] } | undefined)?.queryChunks;
+  if (!Array.isArray(chunks)) return [];
+  return chunks.filter((c): c is bigint => typeof c === 'bigint');
+}
+
+/** The concatenated literal template text (the operators between chunks). */
+function templateText(node: unknown): string {
+  const chunks = (node as { queryChunks?: unknown[] } | undefined)?.queryChunks ?? [];
+  let text = '';
+  for (const chunk of chunks) {
+    const asStringChunk = chunk as { value?: unknown } | null;
+    if (asStringChunk !== null && Array.isArray(asStringChunk.value)) {
+      text += (asStringChunk.value as unknown[]).join('');
+    }
+  }
+  return text;
+}
+
 const VAULT_REDEMPTION_STATE_SET = new Set([
   'pending',
   'collecting',
@@ -174,6 +194,10 @@ const { state } = vi.hoisted(() => {
     network: string;
     balanceMinor: bigint;
     pendingUnredeemedShares: bigint;
+    // MNY-06-REDEMPTION-DUST (migration 0069): sub-minor stroop carry. A
+    // freshly-seeded row opens at 0 (the NOT NULL DEFAULT 0), matching the
+    // real column.
+    carryStroops: bigint;
     updatedAt: Date;
   }
 
@@ -272,6 +296,7 @@ const { state } = vi.hoisted(() => {
         network,
         balanceMinor,
         pendingUnredeemedShares,
+        carryStroops: 0n,
         updatedAt: new Date(),
       });
     },
@@ -390,7 +415,31 @@ function handleHotFloatUpdate(patch: Record<string, unknown>, condition: unknown
   }
   const next = { ...existing };
   if ('balanceMinor' in patch) {
-    next.balanceMinor = existing.balanceMinor + extractSqlDelta(patch['balanceMinor']);
+    // MNY-06-REDEMPTION-DUST: the slow-path credit (`applyHotFloatDeltaInTx`)
+    // writes a carry-aware COMPOUND `balance + balanceDelta + (carry +
+    // carryDelta) / PER` (has a '/'), while the fast-path draw
+    // (`drawHotFloatInTx`) writes a plain `balance - amount`. Model each
+    // faithfully against the row's CURRENT carry — the authoritative
+    // real-SQL semantics are guarded by the DB-backed integration suite
+    // (vault-redemption-dust-conservation.test.ts).
+    if (templateText(patch['balanceMinor']).includes('/')) {
+      const [balanceDelta, carryDelta, per] = extractBigints(patch['balanceMinor']);
+      if (balanceDelta === undefined || carryDelta === undefined || per === undefined) {
+        throw new Error('handleHotFloatUpdate: malformed carry-aware balanceMinor expression');
+      }
+      next.balanceMinor =
+        existing.balanceMinor + balanceDelta + (existing.carryStroops + carryDelta) / per;
+    } else {
+      next.balanceMinor = existing.balanceMinor + extractSqlDelta(patch['balanceMinor']);
+    }
+  }
+  if ('carryStroops' in patch) {
+    // `(carry + carryDelta) % PER` — the remainder that carries forward.
+    const [carryDelta, per] = extractBigints(patch['carryStroops']);
+    if (carryDelta === undefined || per === undefined) {
+      throw new Error('handleHotFloatUpdate: malformed carryStroops expression');
+    }
+    next.carryStroops = (existing.carryStroops + carryDelta) % per;
   }
   if ('pendingUnredeemedShares' in patch) {
     next.pendingUnredeemedShares =
