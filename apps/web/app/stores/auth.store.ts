@@ -28,12 +28,29 @@ interface AuthState {
   email: string | null;
   /** Access token — memory only. Never persisted. */
   accessToken: string | null;
+  /**
+   * FE-10: has the cold-boot session-restore attempt finished?
+   *
+   * `false` until `useSessionRestore` resolves its restore attempt
+   * (success OR failure), then `true` for the rest of the session.
+   * Access tokens live in memory only, so on a hard reload `accessToken`
+   * is briefly `null` for an *already-authenticated* user while the
+   * refresh-token restore is in flight. Auth guards need to tell that
+   * "don't-know-yet" window apart from "restore done, genuinely logged
+   * out": without this flag `RequireStaff` reads `!isAuthenticated`
+   * mid-restore and flashes the sign-in prompt before flipping to the
+   * admin content. Not a security signal — the real authz decision still
+   * gates on the access token and the `/me` staff role.
+   */
+  restoreComplete: boolean;
 }
 
 interface AuthActions {
   setSession: (email: string, accessToken: string, refreshToken: string | null) => void;
   setAccessToken: (token: string) => void;
   clearSession: () => void;
+  /** Marks the cold-boot restore attempt complete (see `restoreComplete`). Idempotent. */
+  setRestoreComplete: () => void;
 }
 
 /**
@@ -48,6 +65,7 @@ interface AuthActions {
 export const useAuthStore = create<AuthState & AuthActions>((set) => ({
   email: null,
   accessToken: null,
+  restoreComplete: false,
 
   setSession: (email, accessToken, refreshToken) => {
     if (refreshToken !== null) {
@@ -67,6 +85,13 @@ export const useAuthStore = create<AuthState & AuthActions>((set) => ({
     void clearRefreshToken();
     setWasAuthed(false);
     set({ email: null, accessToken: null });
+  },
+
+  // FE-10: the restore attempt is a one-shot per app load. Explicit
+  // login/logout after boot don't reset this — we always know the auth
+  // state definitively once the initial restore has run.
+  setRestoreComplete: () => {
+    set({ restoreComplete: true });
   },
 }));
 

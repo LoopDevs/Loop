@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { ApiException, type StaffRole } from '@loop/shared';
 import { useAuth } from '~/hooks/use-auth';
+import { useAuthStore } from '~/stores/auth.store';
 import { shouldRetry } from '~/hooks/query-retry';
 import { resolveStaffRole } from '~/hooks/use-staff-role';
 import { getMe, type UserMeView } from '~/services/user';
@@ -29,11 +30,15 @@ import { Button } from '~/components/ui/Button';
  *   - `minimum="support"` → admin or support (read views + the three
  *     delivery-unsticking actions).
  *
- * Unauthenticated → sign-in CTA. Authenticated but under-privileged
- * → denial banner, no nav (mirrors the backend's 404-not-403
- * concealment). Loading → spinner. Backend 401/403 → treated as
- * denied (covers the case where `/me` is unreachable because the
- * session just expired).
+ * Session-restore in flight → spinner (FE-10): the access token is
+ * memory-only, so on a hard reload it's briefly null for an already-
+ * authenticated staff user while the boot refresh runs. We wait on the
+ * auth store's `restoreComplete` flag before deciding, so the sign-in
+ * CTA never flashes mid-restore. Unauthenticated (restore done) →
+ * sign-in CTA. Authenticated but under-privileged → denial banner, no
+ * nav (mirrors the backend's 404-not-403 concealment). Loading → spinner.
+ * Backend 401/403 → treated as denied (covers the case where `/me` is
+ * unreachable because the session just expired).
  *
  * The `/me` query is also how the index route and `AdminNav` learn
  * the role, so the TanStack cache line is shared across the whole
@@ -48,6 +53,9 @@ export function RequireStaff({
 }): React.JSX.Element {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
+  // FE-10: has the cold-boot refresh-token restore attempt finished?
+  // (set by `useSessionRestore` — see `restoreComplete` in auth.store).
+  const restoreComplete = useAuthStore((s) => s.restoreComplete);
 
   const me = useQuery<UserMeView, Error>({
     queryKey: ['me'],
@@ -59,6 +67,23 @@ export function RequireStaff({
     // revocation latency to the 15-min token TTL regardless).
     staleTime: 5 * 60 * 1000,
   });
+
+  // FE-10: on a hard reload the access token (memory-only, never
+  // persisted) is briefly null for an already-authenticated staff user
+  // while the refresh-token restore is in flight. Rendering the sign-in
+  // CTA in that window flashes it before the session resolves. Hold the
+  // neutral loading spinner until the boot-restore attempt completes;
+  // only *then* does a genuinely-unauthenticated user fall through to
+  // the sign-in CTA below. Server render and first client paint both
+  // start with `restoreComplete === false` + `accessToken === null`, so
+  // both render this spinner — the states agree, no hydration mismatch.
+  if (!isAuthenticated && !restoreComplete) {
+    return (
+      <main className="max-w-5xl mx-auto px-6 py-12 flex justify-center">
+        <Spinner />
+      </main>
+    );
+  }
 
   if (!isAuthenticated) {
     return (

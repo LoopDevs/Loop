@@ -52,9 +52,20 @@ export function useSessionRestore(): { isRestoring: boolean } {
   const store = useAuthStore();
 
   useEffect(() => {
+    // FE-10: mark BOTH the local restoring flag and the shared
+    // auth-store `restoreComplete` flag. The store flag lets auth guards
+    // (e.g. RequireStaff) that don't call this hook tell "restore still
+    // in flight" apart from "restore done, genuinely logged out" — the
+    // hard-reload sign-in flash. Success and failure both count as
+    // "attempt finished".
+    const markRestored = (): void => {
+      setIsRestoring(false);
+      useAuthStore.getState().setRestoreComplete();
+    };
+
     // Only restore if not already authenticated
     if (store.accessToken !== null) {
-      setIsRestoring(false);
+      markRestored();
       return;
     }
 
@@ -65,7 +76,7 @@ export function useSessionRestore(): { isRestoring: boolean } {
     // parallel with React hydration, so this await typically resolves
     // near-instantly on cold start.
     void getBootRestore().finally(() => {
-      if (!cancelled) setIsRestoring(false);
+      if (!cancelled) markRestored();
     });
 
     // Pending-purchase restore — independent of auth.
