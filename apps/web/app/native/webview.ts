@@ -69,6 +69,45 @@ export function safeRedeemHref(url: string): string | null {
   }
 }
 
+/**
+ * Scheme-gates a SEP-7 payment URI before it is placed in an `<a href>`.
+ *
+ * `paymentUri` is a server-supplied field on the create-order / order-read
+ * API responses — Loop builds it via `buildSep7PayUri`, but it can also be
+ * threaded straight through from CTX's upstream `paymentUrls` map. From the
+ * client's side it is server/upstream-controlled and must not be trusted:
+ * a `javascript:` / `data:` / `vbscript:` value dropped into an anchor
+ * would execute on tap with app privileges inside the Capacitor native
+ * WebView — the SAME XSS class `safeRedeemHref` closes for `redeemUrl`.
+ *
+ * A legitimate payment URI uses the SEP-7 `web+stellar:` / `stellar:`
+ * scheme, which `safeRedeemHref` (http(s)-only, by design for redeem URLs)
+ * deliberately rejects. So this gate allow-lists exactly those two schemes
+ * — applying the same fail-closed embedded-credential guard as
+ * `assertSafeUrl` — and defers every other scheme to `safeRedeemHref`,
+ * reusing one sanitizer rather than forking a second. Anything outside the
+ * allow-list yields `null`, and the caller renders no live link at all.
+ */
+export function safePaymentUriHref(url: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol === 'web+stellar:' || parsed.protocol === 'stellar:') {
+    // Mirror assertSafeUrl's embedded-credential guard. A legitimate SEP-7
+    // URI is opaque (`web+stellar:pay?...`) and carries none; the authority
+    // form `web+stellar://user:pass@…` is a phishing shape we fail closed.
+    if (parsed.username !== '' || parsed.password !== '') return null;
+    return url;
+  }
+  // Not a SEP-7 scheme: fall back to the redeem-URL gate (http(s) only, no
+  // embedded credentials, https-only in production). javascript: / data: /
+  // vbscript: fail closed to null there.
+  return safeRedeemHref(url);
+}
+
 function originOf(rawUrl: string): string | null {
   try {
     return new URL(rawUrl).origin;

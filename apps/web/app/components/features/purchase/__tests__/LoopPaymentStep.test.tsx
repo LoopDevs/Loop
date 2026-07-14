@@ -5,12 +5,25 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
 
 import type * as OrdersLoopModule from '~/services/orders-loop';
+import type * as PlatformModule from '~/native/platform';
 const getLoopOrderMock = vi.fn();
 vi.mock('~/services/orders-loop', async () => {
   const actual = await vi.importActual<typeof OrdersLoopModule>('~/services/orders-loop');
   return {
     ...actual,
     getLoopOrder: (id: string) => getLoopOrderMock(id),
+  };
+});
+
+// PAYMENTURI-UNGATED: the native body (single "Open in wallet" deep-link)
+// only renders when isNativePlatform() is true. Drive it from a mutable flag
+// that defaults to false so every existing test keeps the web variant.
+let mockNativePlatform = false;
+vi.mock('~/native/platform', async () => {
+  const actual = await vi.importActual<typeof PlatformModule>('~/native/platform');
+  return {
+    ...actual,
+    isNativePlatform: () => mockNativePlatform,
   };
 });
 
@@ -92,6 +105,7 @@ function mkOrder(overrides: Partial<LoopOrderView> = {}): LoopOrderView {
 
 beforeEach(() => {
   getLoopOrderMock.mockReset();
+  mockNativePlatform = false;
 });
 afterEach(cleanup);
 
@@ -150,6 +164,76 @@ describe('LoopPaymentStep — stellar (xlm/usdc)', () => {
       fireEvent.click(buttons[0]!);
     });
     expect(writeText).toHaveBeenCalled();
+  });
+});
+
+// PAYMENTURI-UNGATED (XSS): `paymentUri` is a server/upstream-supplied field
+// on the create-order response — Loop builds it via buildSep7PayUri, but it
+// can also be threaded straight through from CTX's `paymentUrls`. Dropped
+// into an `<a href>` unvalidated, a `javascript:`/`data:` scheme executes on
+// tap — with app privileges inside the Capacitor native WebView. The scheme
+// must be gated so a dangerous URI never becomes a live href, while a
+// legitimate SEP-7 `web+stellar:` URI passes through.
+describe('LoopPaymentStep — paymentUri XSS gate', () => {
+  const LEGIT_URI =
+    'web+stellar:pay?destination=GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW&amount=10.0000000&memo=MEMO-ABCDEFGHIJKLMN';
+  const MALICIOUS: Array<[string, string]> = [
+    ['javascript:', 'javascript:alert(document.cookie)'],
+    ['data:', 'data:text/html,<script>alert(1)</script>'],
+    ['vbscript:', 'vbscript:msgbox(1)'],
+  ];
+
+  describe('web (stellar) body', () => {
+    it('passes a legitimate web+stellar: paymentUri through to the href', async () => {
+      getLoopOrderMock.mockResolvedValue(mkOrder());
+      render(wrap(<LoopPaymentStep create={mkStellarCreate({ paymentUri: LEGIT_URI })} />));
+      const link = await waitFor(() => screen.getByRole('link', { name: /Open in wallet/i }));
+      expect(link.getAttribute('href')).toBe(LEGIT_URI);
+    });
+
+    it.each(MALICIOUS)(
+      'does NOT render a %s paymentUri as a live href',
+      async (_scheme, paymentUri) => {
+        getLoopOrderMock.mockResolvedValue(mkOrder());
+        render(wrap(<LoopPaymentStep create={mkStellarCreate({ paymentUri })} />));
+        // The address/memo copy path still renders (the user can still pay),
+        // but the dangerous URI is dropped — no "Open in wallet" anchor.
+        await waitFor(() => screen.getByText(/GABCDEFGHIJKLMNOPQRSTUVWXYZ234567/));
+        expect(screen.queryByRole('link', { name: /Open in wallet/i })).toBeNull();
+        // Belt-and-braces: the raw payload never reaches any href attribute.
+        for (const anchor of document.querySelectorAll('a')) {
+          expect(anchor.getAttribute('href')).not.toBe(paymentUri);
+        }
+      },
+    );
+  });
+
+  describe('native body', () => {
+    beforeEach(() => {
+      mockNativePlatform = true;
+    });
+
+    it('passes a legitimate web+stellar: paymentUri through to the href', async () => {
+      getLoopOrderMock.mockResolvedValue(mkOrder());
+      render(wrap(<LoopPaymentStep create={mkStellarCreate({ paymentUri: LEGIT_URI })} />));
+      const link = await waitFor(() => screen.getByRole('link', { name: /Open in wallet/i }));
+      expect(link.getAttribute('href')).toBe(LEGIT_URI);
+    });
+
+    it.each(MALICIOUS)(
+      'collapses a %s paymentUri to a disabled state, never a live href',
+      async (_scheme, paymentUri) => {
+        getLoopOrderMock.mockResolvedValue(mkOrder());
+        render(wrap(<LoopPaymentStep create={mkStellarCreate({ paymentUri })} />));
+        // Native body has no copy path — the dangerous URI collapses to a
+        // disabled "Payment link unavailable" state, not a clickable anchor.
+        await waitFor(() => screen.getByText(/Payment link unavailable/i));
+        expect(screen.queryByRole('link', { name: /Open in wallet/i })).toBeNull();
+        for (const anchor of document.querySelectorAll('a')) {
+          expect(anchor.getAttribute('href')).not.toBe(paymentUri);
+        }
+      },
+    );
   });
 });
 
