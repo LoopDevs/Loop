@@ -1,13 +1,11 @@
-import { useState, useEffect } from 'react';
-import { watchNetwork } from '~/native/network';
+import { useOnline } from '~/hooks/use-online';
 
 /** Shows a banner when the device is offline. Auto-hides when reconnected. */
 export function OfflineBanner(): React.JSX.Element | null {
-  const [online, setOnline] = useState(true);
-
-  useEffect(() => {
-    return watchNetwork(setOnline);
-  }, []);
+  // Single source of truth for connectivity — the same hook that gates
+  // the money/network-action buttons (FE-43). Previously this inlined its
+  // own `useState`/`watchNetwork` copy of the exact same logic.
+  const online = useOnline();
 
   if (online) return null;
 

@@ -23,10 +23,11 @@
  * are needed: ConfirmDialog catches fat-finger amounts, StepUpModal
  * catches stolen-token actor swaps.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { ApiException, formatMinorCurrency } from '@loop/shared';
 import { requestOtp } from '~/services/auth';
 import { mintAdminStepUp } from '~/services/admin-step-up';
+import { useOnline } from '~/hooks/use-online';
 import { useAuthStore } from '~/stores/auth.store';
 import { useAdminStepUpStore, type PendingActionSummary } from '~/stores/admin-step-up.store';
 import { Button } from '~/components/ui/Button';
@@ -57,6 +58,14 @@ export function StepUpModal({
   // the amount/destination to show. An explicit prop still wins.
   const pendingActionFromStore = useAdminStepUpStore((s) => s.pendingAction);
   const pendingAction = pendingActionProp ?? pendingActionFromStore ?? undefined;
+  // FE-43: sending the OTP and confirming the step-up token are both network
+  // POSTs. Offline they can only fail, so disable them (with a spoken-aloud
+  // reason) until the device reconnects — matching the PayWithLoopBalance
+  // offline-guard pattern. Cancel stays enabled so the operator can always
+  // back out. This is offline-affordance UX only; the OTP/token security
+  // properties are untouched.
+  const online = useOnline();
+  const offlineHintId = useId();
   const [otp, setOtp] = useState('');
   const [stage, setStage] = useState<'idle' | 'sending' | 'awaiting-code' | 'confirming'>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -181,7 +190,12 @@ export function StepUpModal({
         )}
 
         {stage === 'idle' && (
-          <Button onClick={() => void handleSendCode()} className="w-full">
+          <Button
+            onClick={() => void handleSendCode()}
+            className="w-full"
+            disabled={!online}
+            aria-describedby={!online ? offlineHintId : undefined}
+          >
             Send code
           </Button>
         )}
@@ -209,7 +223,8 @@ export function StepUpModal({
               <Button
                 onClick={() => void handleConfirm()}
                 loading={stage === 'confirming'}
-                disabled={otp.trim().length === 0 || stage === 'sending'}
+                disabled={otp.trim().length === 0 || stage === 'sending' || !online}
+                aria-describedby={!online ? offlineHintId : undefined}
                 className="flex-1"
               >
                 Confirm
@@ -217,12 +232,19 @@ export function StepUpModal({
               <Button
                 variant="secondary"
                 onClick={() => void handleSendCode()}
-                disabled={stage === 'sending' || stage === 'confirming'}
+                disabled={stage === 'sending' || stage === 'confirming' || !online}
+                aria-describedby={!online ? offlineHintId : undefined}
               >
                 Resend
               </Button>
             </div>
           </div>
+        )}
+
+        {!online && (
+          <p id={offlineHintId} className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+            You’re offline — reconnect to verify.
+          </p>
         )}
 
         {error !== null && (

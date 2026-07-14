@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import type { Merchant } from '@loop/shared';
 import { Button } from '~/components/ui/Button';
 import { Input } from '~/components/ui/Input';
+import { useOnline } from '~/hooks/use-online';
 import { currencySymbol, useLocaleTag } from '~/i18n/format';
 
 interface AmountSelectionProps {
@@ -56,6 +57,12 @@ export function AmountSelection({
 }: AmountSelectionProps): React.JSX.Element {
   const denominations = merchant.denominations;
   const locale = useLocaleTag();
+  // FE-43: confirming an amount POSTs create-order (a money/network action) via
+  // the parent's onConfirm. Offline that request can only fail; disable the
+  // confirm button (with a spoken-aloud reason) until the device reconnects,
+  // matching the PayWithLoopBalance offline-guard pattern.
+  const online = useOnline();
+  const offlineHintId = useId();
   // Currency symbol — £ for GBP, € for EUR, $ for USD / CAD. Shared
   // helper picks from Intl.NumberFormat (keyed on the route locale) so
   // we don't maintain a table. Falls back to `$` when the merchant's
@@ -158,11 +165,17 @@ export function AmountSelection({
           className="w-full"
           onClick={handleConfirm}
           loading={isLoading}
-          disabled={selected === null || isLoading}
+          disabled={selected === null || isLoading || !online}
+          aria-describedby={!online ? offlineHintId : undefined}
         >
           Buy {symbol}
           {selected ?? '—'} gift card
         </Button>
+        {!online && (
+          <p id={offlineHintId} className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+            You’re offline — reconnect to place your order.
+          </p>
+        )}
       </div>
     );
   }
@@ -204,10 +217,16 @@ export function AmountSelection({
         className="w-full mt-4"
         onClick={handleConfirm}
         loading={isLoading}
-        disabled={!customAmount || isLoading}
+        disabled={!customAmount || isLoading || !online}
+        aria-describedby={!online ? offlineHintId : undefined}
       >
         Continue
       </Button>
+      {!online && (
+        <p id={offlineHintId} className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+          You’re offline — reconnect to place your order.
+        </p>
+      )}
     </div>
   );
 }

@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ApiException, type AdminOrderRedriveResult } from '@loop/shared';
 import { useAdminStepUp } from '~/hooks/use-admin-step-up';
+import { useOnline } from '~/hooks/use-online';
 import { useStaffRole } from '~/hooks/use-staff-role';
 import { generateIdempotencyKey, redriveOrder } from '~/services/admin';
 import { useUiStore } from '~/stores/ui.store';
@@ -38,6 +39,12 @@ export function OrderRedrivePanel({
   const { isAdminRole } = useStaffRole();
   const queryClient = useQueryClient();
   const addToast = useUiStore((s) => s.addToast);
+  // FE-43: a redrive can submit a real outbound Stellar payment — a
+  // money/network write. Offline the request can only fail, so gate the entry
+  // into the reason dialog on connectivity, matching the PayWithLoopBalance
+  // offline-guard pattern.
+  const online = useOnline();
+  const offlineHintId = useId();
   const [last, setLast] = useState<AdminOrderRedriveResult | null>(null);
   const [reasonOpen, setReasonOpen] = useState(false);
 
@@ -110,11 +117,17 @@ export function OrderRedrivePanel({
         <button
           type="button"
           onClick={() => setReasonOpen(true)}
-          disabled={redrive.isPending}
+          disabled={redrive.isPending || !online}
+          aria-describedby={!online ? offlineHintId : undefined}
           className="rounded-lg border border-gray-900 bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white dark:bg-white dark:text-gray-900 dark:hover:bg-gray-200"
         >
           {redrive.isPending ? 'Redriving…' : 'Re-drive order'}
         </button>
+        {!online && (
+          <p id={offlineHintId} className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+            You’re offline — reconnect to re-drive this order.
+          </p>
+        )}
       </div>
 
       <ReasonDialog

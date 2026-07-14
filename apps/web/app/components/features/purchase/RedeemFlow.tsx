@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useId, useRef } from 'react';
 import { usePurchaseStore } from '~/stores/purchase.store';
+import { useOnline } from '~/hooks/use-online';
 import { Button } from '~/components/ui/Button';
 import { copyToClipboard } from '~/native/clipboard';
 import { triggerHaptic, triggerHapticNotification } from '~/native/haptics';
@@ -35,6 +36,13 @@ export function RedeemFlow({
   scripts,
 }: RedeemFlowProps): React.JSX.Element {
   const store = usePurchaseStore();
+  // FE-43: opening the merchant redemption page is a network action — offline
+  // it can only fail to load, and an enabled button just invites a confused
+  // re-tap. Disable it (with a spoken-aloud reason) while offline, matching
+  // the PayWithLoopBalance pattern. The `manual entry` Save path stays
+  // enabled because it writes to the local store, not the network.
+  const online = useOnline();
+  const offlineHintId = useId();
   const [copied, setCopied] = useState(false);
   const [webViewOpen, setWebViewOpen] = useState(false);
   const [showManualEntry, setShowManualEntry] = useState(false);
@@ -170,6 +178,8 @@ export function RedeemFlow({
               void handleOpenWebView();
               setShowManualEntry(false);
             }}
+            disabled={!online}
+            aria-describedby={!online ? offlineHintId : undefined}
           >
             Reopen page
           </Button>
@@ -177,6 +187,12 @@ export function RedeemFlow({
             Save
           </Button>
         </div>
+        {!online && (
+          <p id={offlineHintId} className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+            You’re offline — reconnect to reopen the redemption page. You can still enter the code
+            manually and save it.
+          </p>
+        )}
       </div>
     );
   }
@@ -229,10 +245,17 @@ export function RedeemFlow({
         onClick={() => {
           void handleOpenWebView();
         }}
-        disabled={webViewOpen}
+        disabled={webViewOpen || !online}
+        aria-describedby={!online ? offlineHintId : undefined}
       >
         {webViewOpen ? 'Opening...' : 'Open redemption page'}
       </Button>
+
+      {!online && (
+        <p id={offlineHintId} className="mt-2 text-xs text-center text-gray-500 dark:text-gray-400">
+          You’re offline — reconnect to open the redemption page.
+        </p>
+      )}
 
       {openError !== null && (
         <button
