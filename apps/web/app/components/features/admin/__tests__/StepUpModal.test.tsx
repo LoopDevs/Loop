@@ -20,8 +20,14 @@ vi.mock('~/services/auth', () => ({
   requestOtp: (email: string) => authMock.requestOtp(email),
 }));
 vi.mock('~/services/admin-step-up', () => ({
-  mintAdminStepUp: (otp: string) => stepUpMock.mintAdminStepUp(otp),
+  // SEC-02-stepup: the modal mints a token scoped to the pending action.
+  mintAdminStepUp: (otp: string, scope: string) => stepUpMock.mintAdminStepUp(otp, scope),
 }));
+
+// SEC-02-stepup: the modal requires a pending action (carrying the
+// action-CLASS `scope`) to mint a class-bound token. Every render that
+// reaches the Confirm step supplies one.
+const EMISSION_ACTION = { action: 'Queue emission', scope: 'emission' as const };
 vi.mock('~/stores/auth.store', () => ({
   useAuthStore: (selector: (s: { email: string | null }) => unknown) =>
     selector({ email: authState.email }),
@@ -81,7 +87,7 @@ describe('<StepUpModal />', () => {
       expiresAt: '2026-06-11T12:05:00.000Z',
     });
     const onConfirm = vi.fn();
-    render(<StepUpModal onConfirm={onConfirm} onCancel={vi.fn()} />);
+    render(<StepUpModal onConfirm={onConfirm} onCancel={vi.fn()} pendingAction={EMISSION_ACTION} />);
 
     fireEvent.click(screen.getByRole('button', { name: /send code/i }));
     await waitFor(() => {
@@ -96,7 +102,7 @@ describe('<StepUpModal />', () => {
     fireEvent.click(screen.getByRole('button', { name: /^confirm$/i }));
 
     await waitFor(() => {
-      expect(stepUpMock.mintAdminStepUp).toHaveBeenCalledWith('123456');
+      expect(stepUpMock.mintAdminStepUp).toHaveBeenCalledWith('123456', 'emission');
       expect(onConfirm).toHaveBeenCalledWith('jwt-step-up', '2026-06-11T12:05:00.000Z');
     });
   });
@@ -126,6 +132,7 @@ describe('<StepUpModal />', () => {
         onCancel={vi.fn()}
         pendingAction={{
           action: 'Queue emission',
+          scope: 'emission',
           amount: { minor: '5000', currency: 'USD' },
           destination: 'GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXRGH6DUVZ',
         }}
@@ -146,7 +153,7 @@ describe('<StepUpModal />', () => {
   it('announces a confirm error via role="alert" and returns focus to the OTP field (FE-14)', async () => {
     authMock.requestOtp.mockResolvedValue(undefined);
     stepUpMock.mintAdminStepUp.mockRejectedValue(new Error('bad code'));
-    render(<StepUpModal onConfirm={vi.fn()} onCancel={vi.fn()} />);
+    render(<StepUpModal onConfirm={vi.fn()} onCancel={vi.fn()} pendingAction={EMISSION_ACTION} />);
 
     fireEvent.click(screen.getByRole('button', { name: /send code/i }));
     const input = await screen.findByLabelText(/^verification code$/i);
@@ -178,7 +185,9 @@ describe('<StepUpModal />', () => {
       code: string,
     ): Promise<HTMLElement> {
       authMock.requestOtp.mockResolvedValue(undefined);
-      render(<StepUpModal onConfirm={onConfirm} onCancel={vi.fn()} />);
+      render(
+        <StepUpModal onConfirm={onConfirm} onCancel={vi.fn()} pendingAction={EMISSION_ACTION} />,
+      );
       fireEvent.click(screen.getByRole('button', { name: /send code/i }));
       const input = await screen.findByLabelText(/^verification code$/i);
       fireEvent.change(input, { target: { value: code } });
@@ -202,7 +211,7 @@ describe('<StepUpModal />', () => {
 
       // The mint WAS attempted with the typed code (we exercised the real
       // path) but its rejection was NOT treated as success.
-      expect(stepUpMock.mintAdminStepUp).toHaveBeenCalledWith('000000');
+      expect(stepUpMock.mintAdminStepUp).toHaveBeenCalledWith('000000', 'emission');
       expect(onConfirm).not.toHaveBeenCalled();
 
       // Modal stays open on the code-entry step so the admin can retry.

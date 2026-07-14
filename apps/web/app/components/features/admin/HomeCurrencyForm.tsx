@@ -54,6 +54,7 @@ export function HomeCurrencyForm({ userId, currentHomeCurrency }: Props): React.
       // authorizes (target currency) rather than a blank confirmation.
       stepUp.runWithStepUp(() => setUserHomeCurrency(args), {
         action: `Change home currency to ${args.homeCurrency}`,
+        scope: 'home-currency',
       }),
     onSuccess: (envelope: AdminWriteEnvelope<HomeCurrencySetResult>) => {
       setLastApplied({ result: envelope.result, replayed: envelope.audit.replayed });

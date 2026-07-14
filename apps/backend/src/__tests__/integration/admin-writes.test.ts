@@ -65,7 +65,7 @@ import { findOrCreateUserByEmail, upsertUserFromCtx } from '../../db/users.js';
 import { app, __resetRateLimitsForTests } from '../../app.js';
 import { notifyAdminBulkRead } from '../../discord.js';
 import { signLoopToken } from '../../auth/tokens.js';
-import { signAdminStepUpToken } from '../../auth/admin-step-up.js';
+import { signAdminStepUpToken, type AdminStepUpScope } from '../../auth/admin-step-up.js';
 import { adjustmentCapLockKey, DailyAdjustmentLimitError } from '../../credits/adjustments.js';
 import { CLEAR_LOCKOUT_MAX_PER_TARGET_PER_DAY } from '../../admin/clear-otp-lockout.js';
 import { applyAdminEmission } from '../../credits/emissions.js';
@@ -109,8 +109,14 @@ interface SeededState {
    * `auth/__tests__/admin-step-up.test.ts`. CF-11 (06-15 audit) found
    * this comment previously claimed handler-level coverage that did
    * not actually exist — `step-up-handler.test.ts` closes that gap.
+   *
+   * SEC-02-stepup: step-up tokens are now SINGLE-USE and CLASS-BOUND, so
+   * one pre-minted wildcard token can no longer be replayed across writes.
+   * `mintStepUp(scope)` mints a FRESH token scoped to exactly the action
+   * a given request guards; each protected request (including each side
+   * of an idempotency replay / concurrency race) mints its own.
    */
-  stepUp: string;
+  mintStepUp: (scope: AdminStepUpScope) => string;
   orderId: string;
 }
 
@@ -201,10 +207,9 @@ async function seed(): Promise<SeededState> {
     typ: 'access',
     ttlSeconds: 300,
   });
-  const { token: stepUp } = signAdminStepUpToken({
-    sub: admin.id,
-    email: admin.email,
-  });
+  // SEC-02-stepup: mint fresh, class-bound single-use tokens on demand.
+  const mintStepUp = (scope: AdminStepUpScope): string =>
+    signAdminStepUpToken({ sub: admin.id, email: admin.email, scope }).token;
   const target = await findOrCreateUserByEmail('target@test.local');
   // MNY-10: give the target an ACTIVATED embedded wallet so emissions
   // pinned to it (`destinationAddress === TARGET_WALLET`) are accepted.
@@ -244,10 +249,90 @@ async function seed(): Promise<SeededState> {
     adminUserId: admin.id,
     targetUser: { id: target.id, email: target.email },
     bearer: token,
-    stepUp,
+    mintStepUp,
     orderId: orderRow.id,
   };
 }
+
+// SEC-02-stepup: end-to-end proof through the REAL Hono app + REAL
+// middleware + REAL consume that the step-up token is (1) class-bound —
+// a token minted for action A is rejected on action B's endpoint — and
+// (2) single-use — the same token replayed against its own endpoint is
+// rejected. This is the audited "one token → any write, unlimited times"
+// hole, closed at the live request path.
+describeIf('SEC-02-stepup: admin step-up gate is class-bound + single-use (HTTP end-to-end)', () => {
+  beforeAll(async () => {
+    await ensureMigrated();
+  });
+  beforeEach(async () => {
+    await truncateAllTables();
+  });
+
+  it('rejects a token minted for a DIFFERENT action class (emission token on the credit-adjust endpoint) → STEP_UP_PURPOSE_MISMATCH', async () => {
+    const { targetUser, bearer, mintStepUp } = await seed();
+    const res = await app.request(
+      `http://localhost/api/admin/users/${targetUser.id}/credit-adjustments`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${bearer}`,
+          'idempotency-key': idemKey(),
+          // Minted to queue an EMISSION; replayed against a credit-adjust.
+          'X-Admin-Step-Up': mintStepUp('emission'),
+        },
+        body: JSON.stringify({ amountMinor: '500', currency: 'USD', reason: 'wrong-class replay' }),
+      },
+    );
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as { code: string }).code).toBe('STEP_UP_PURPOSE_MISMATCH');
+
+    // The wrong-class presentation wrote nothing — no ledger row.
+    const txRows = await db
+      .select()
+      .from(creditTransactions)
+      .where(eq(creditTransactions.userId, targetUser.id));
+    expect(txRows).toHaveLength(0);
+  });
+
+  it('is single-use: replaying the SAME token against its own endpoint → STEP_UP_ALREADY_USED', async () => {
+    const { targetUser, bearer, mintStepUp } = await seed();
+    const token = mintStepUp('credit-adjustment');
+    const url = `http://localhost/api/admin/users/${targetUser.id}/credit-adjustments`;
+    const headersWith = (key: string): Record<string, string> => ({
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${bearer}`,
+      'idempotency-key': key,
+      'X-Admin-Step-Up': token,
+    });
+
+    // First use of the token — passes step-up, applies the write.
+    const first = await app.request(url, {
+      method: 'POST',
+      headers: headersWith(idemKey()),
+      body: JSON.stringify({ amountMinor: '500', currency: 'USD', reason: 'first use' }),
+    });
+    expect(first.status).toBe(200);
+
+    // Same token, DIFFERENT idempotency key (so the idempotency fence
+    // can't mask it): the single-use consume rejects the replay.
+    const second = await app.request(url, {
+      method: 'POST',
+      headers: headersWith(idemKey()),
+      body: JSON.stringify({ amountMinor: '300', currency: 'USD', reason: 'replayed token' }),
+    });
+    expect(second.status).toBe(401);
+    expect(((await second.json()) as { code: string }).code).toBe('STEP_UP_ALREADY_USED');
+
+    // Only the FIRST write landed — the replay never reached the handler.
+    const txRows = await db
+      .select()
+      .from(creditTransactions)
+      .where(eq(creditTransactions.userId, targetUser.id));
+    expect(txRows).toHaveLength(1);
+    expect(txRows[0]!.amountMinor).toBe(500n);
+  });
+});
 
 describeIf('admin credit-adjustment write — real postgres ladder', () => {
   beforeAll(async () => {
@@ -266,7 +351,7 @@ describeIf('admin credit-adjustment write — real postgres ladder', () => {
   });
 
   it('credit happy path: writes ledger row + bumps balance + returns envelope', async () => {
-    const { targetUser, bearer, stepUp } = await seed();
+    const { targetUser, bearer, mintStepUp } = await seed();
     const key = idemKey();
     const res = await app.request(
       `http://localhost/api/admin/users/${targetUser.id}/credit-adjustments`,
@@ -276,7 +361,7 @@ describeIf('admin credit-adjustment write — real postgres ladder', () => {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${bearer}`,
           'idempotency-key': key,
-          'X-Admin-Step-Up': stepUp,
+          'X-Admin-Step-Up': mintStepUp('credit-adjustment'),
         },
         body: JSON.stringify({
           amountMinor: '500',
@@ -311,26 +396,29 @@ describeIf('admin credit-adjustment write — real postgres ladder', () => {
   });
 
   it('replays the stored snapshot when the same idempotency key arrives again', async () => {
-    const { targetUser, bearer, stepUp } = await seed();
+    const { targetUser, bearer, mintStepUp } = await seed();
     const key = idemKey();
     const body = JSON.stringify({
       amountMinor: '300',
       currency: 'USD',
       reason: 'replay test',
     });
-    const headers = {
+    // SEC-02-stepup: each request mints its own single-use, class-bound
+    // token — the idempotency replay is proven at the idempotency layer,
+    // so both requests must first pass step-up with a fresh token.
+    const headers = (): Record<string, string> => ({
       'Content-Type': 'application/json',
       Authorization: `Bearer ${bearer}`,
       'idempotency-key': key,
-      'X-Admin-Step-Up': stepUp,
-    };
+      'X-Admin-Step-Up': mintStepUp('credit-adjustment'),
+    });
     const url = `http://localhost/api/admin/users/${targetUser.id}/credit-adjustments`;
-    const first = await app.request(url, { method: 'POST', headers, body });
+    const first = await app.request(url, { method: 'POST', headers: headers(), body });
     expect(first.status).toBe(200);
     const firstBody = (await first.json()) as { audit: { replayed: boolean }; result: unknown };
     expect(firstBody.audit.replayed).toBe(false);
 
-    const second = await app.request(url, { method: 'POST', headers, body });
+    const second = await app.request(url, { method: 'POST', headers: headers(), body });
     expect(second.status).toBe(200);
     const secondBody = (await second.json()) as {
       audit: { replayed: boolean };
@@ -354,7 +442,7 @@ describeIf('admin credit-adjustment write — real postgres ladder', () => {
   });
 
   it('rejects a debit that would drive the balance negative with 409 INSUFFICIENT_BALANCE', async () => {
-    const { targetUser, bearer, stepUp } = await seed();
+    const { targetUser, bearer, mintStepUp } = await seed();
     // Target user has a $0 balance. Try to debit $5.
     const res = await app.request(
       `http://localhost/api/admin/users/${targetUser.id}/credit-adjustments`,
@@ -364,7 +452,7 @@ describeIf('admin credit-adjustment write — real postgres ladder', () => {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${bearer}`,
           'idempotency-key': idemKey(),
-          'X-Admin-Step-Up': stepUp,
+          'X-Admin-Step-Up': mintStepUp('credit-adjustment'),
         },
         body: JSON.stringify({
           amountMinor: '-500',
@@ -388,7 +476,7 @@ describeIf('admin credit-adjustment write — real postgres ladder', () => {
     const previousCap = env.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR;
     env.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR = 500n;
     try {
-      const { bearer, targetUser, stepUp } = await seed();
+      const { bearer, targetUser, mintStepUp } = await seed();
       const secondTarget = await findOrCreateUserByEmail('target-2@test.local');
       await db.update(users).set({ homeCurrency: 'USD' }).where(eq(users.id, secondTarget.id));
 
@@ -405,7 +493,7 @@ describeIf('admin credit-adjustment write — real postgres ladder', () => {
               'Content-Type': 'application/json',
               Authorization: `Bearer ${bearer}`,
               'idempotency-key': key,
-              'X-Admin-Step-Up': stepUp,
+              'X-Admin-Step-Up': mintStepUp('credit-adjustment'),
             },
             body: JSON.stringify({
               amountMinor,
@@ -445,7 +533,7 @@ describeIf('admin refund write — real postgres ladder + duplicate guard', () =
   });
 
   it('refund happy path: order-bound credit-tx + balance bumped', async () => {
-    const { targetUser, bearer, stepUp, orderId } = await seed();
+    const { targetUser, bearer, mintStepUp, orderId } = await seed();
     const res = await app.request(`http://localhost/api/admin/users/${targetUser.id}/refunds`, {
       method: 'POST',
       headers: {
@@ -453,7 +541,7 @@ describeIf('admin refund write — real postgres ladder + duplicate guard', () =
         Authorization: `Bearer ${bearer}`,
         'idempotency-key': idemKey(),
         // CF-06: refund is now step-up-gated like its sibling writers.
-        'X-Admin-Step-Up': stepUp,
+        'X-Admin-Step-Up': mintStepUp('refund'),
       },
       body: JSON.stringify({
         amountMinor: '1000',
@@ -484,14 +572,14 @@ describeIf('admin refund write — real postgres ladder + duplicate guard', () =
   });
 
   it('rejects a second refund for the same orderId with 409 REFUND_ALREADY_ISSUED', async () => {
-    const { targetUser, bearer, stepUp, orderId } = await seed();
+    const { targetUser, bearer, mintStepUp, orderId } = await seed();
     const url = `http://localhost/api/admin/users/${targetUser.id}/refunds`;
     const headers = (key: string): Record<string, string> => ({
       'Content-Type': 'application/json',
       Authorization: `Bearer ${bearer}`,
       'idempotency-key': key,
       // CF-06: refund is now step-up-gated like its sibling writers.
-      'X-Admin-Step-Up': stepUp,
+      'X-Admin-Step-Up': mintStepUp('refund'),
     });
     const body = JSON.stringify({
       amountMinor: '500',
@@ -546,7 +634,7 @@ describeIf('admin emission write — real postgres ladder, mirror untouched (ADR
   });
 
   it('emission happy path: queues pending_payouts row; balance unchanged + no ledger row', async () => {
-    const { targetUser, bearer, stepUp } = await seed();
+    const { targetUser, bearer, mintStepUp } = await seed();
     // The unbacked-emission guard requires an existing mirror
     // balance >= the emitted amount. Pre-seed a credit_transactions
     // row + user_credits balance directly.
@@ -571,7 +659,7 @@ describeIf('admin emission write — real postgres ladder, mirror untouched (ADR
         'Content-Type': 'application/json',
         Authorization: `Bearer ${bearer}`,
         'idempotency-key': idemKey(),
-        'X-Admin-Step-Up': stepUp,
+        'X-Admin-Step-Up': mintStepUp('emission'),
       },
       body: JSON.stringify({
         amountMinor: '500',
@@ -626,7 +714,7 @@ describeIf('admin emission write — real postgres ladder, mirror untouched (ADR
   });
 
   it('rejects a second semantic duplicate emission with a fresh idempotency key', async () => {
-    const { targetUser, bearer, stepUp } = await seed();
+    const { targetUser, bearer, mintStepUp } = await seed();
     await seedCashbackBalance({ userId: targetUser.id, amountMinor: 2000n });
 
     const destinationAddress = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
@@ -644,7 +732,7 @@ describeIf('admin emission write — real postgres ladder, mirror untouched (ADR
         'Content-Type': 'application/json',
         Authorization: `Bearer ${bearer}`,
         'idempotency-key': idemKey(),
-        'X-Admin-Step-Up': stepUp,
+        'X-Admin-Step-Up': mintStepUp('emission'),
       },
       body,
     });
@@ -656,7 +744,7 @@ describeIf('admin emission write — real postgres ladder, mirror untouched (ADR
         'Content-Type': 'application/json',
         Authorization: `Bearer ${bearer}`,
         'idempotency-key': idemKey(),
-        'X-Admin-Step-Up': stepUp,
+        'X-Admin-Step-Up': mintStepUp('emission'),
       },
       body,
     });
@@ -687,7 +775,7 @@ describeIf('admin emission write — real postgres ladder, mirror untouched (ADR
   });
 
   it('serialises concurrent same-key emission requests into one write plus one replay', async () => {
-    const { targetUser, bearer, stepUp } = await seed();
+    const { targetUser, bearer, mintStepUp } = await seed();
     await seedCashbackBalance({ userId: targetUser.id, amountMinor: 2000n });
 
     const idempotencyKey = idemKey();
@@ -699,18 +787,22 @@ describeIf('admin emission write — real postgres ladder, mirror untouched (ADR
       destinationAddress,
       reason: 'same-key contention test',
     });
-    const headers = {
+    // SEC-02-stepup: step-up is single-use, so each concurrent request
+    // carries its OWN fresh emission-scoped token — both pass step-up
+    // (distinct jtis) and then genuinely contend at the idempotency-key
+    // layer, which is what this test proves.
+    const headers = (): Record<string, string> => ({
       'Content-Type': 'application/json',
       Authorization: `Bearer ${bearer}`,
       'idempotency-key': idempotencyKey,
-      'X-Admin-Step-Up': stepUp,
-    };
+      'X-Admin-Step-Up': mintStepUp('emission'),
+    });
 
     // Fire both requests before awaiting either so they genuinely
     // contend on the idempotency-key row inside the writer's
     // transaction, rather than running back-to-back.
-    const firstPromise = app.request(url, { method: 'POST', headers, body });
-    const secondPromise = app.request(url, { method: 'POST', headers, body });
+    const firstPromise = app.request(url, { method: 'POST', headers: headers(), body });
+    const secondPromise = app.request(url, { method: 'POST', headers: headers(), body });
     const [first, second] = await Promise.all([firstPromise, secondPromise]);
 
     expect(first.status).toBe(200);
@@ -750,7 +842,7 @@ describeIf('admin emission write — real postgres ladder, mirror untouched (ADR
   });
 
   it('rejects an emission exceeding the mirror balance with 400 INSUFFICIENT_BALANCE', async () => {
-    const { targetUser, bearer, stepUp } = await seed();
+    const { targetUser, bearer, mintStepUp } = await seed();
     // No prior balance. Try to emit $5 — would mint unbacked LOOP.
     const res = await app.request(`http://localhost/api/admin/users/${targetUser.id}/emissions`, {
       method: 'POST',
@@ -758,7 +850,7 @@ describeIf('admin emission write — real postgres ladder, mirror untouched (ADR
         'Content-Type': 'application/json',
         Authorization: `Bearer ${bearer}`,
         'idempotency-key': idemKey(),
-        'X-Admin-Step-Up': stepUp,
+        'X-Admin-Step-Up': mintStepUp('emission'),
       },
       body: JSON.stringify({
         amountMinor: '500',
@@ -793,7 +885,7 @@ describeIf('admin emission write — real postgres ladder, mirror untouched (ADR
   // legacy linked stellarAddress — mirroring the cashback payout
   // builder) and rejects any other destination.
   it('MNY-10: rejects an emission to a destination that is NOT the registered wallet (400 DESTINATION_NOT_REGISTERED)', async () => {
-    const { targetUser, bearer, stepUp } = await seed();
+    const { targetUser, bearer, mintStepUp } = await seed();
     // Fully-funded + otherwise valid — the ONLY defect is that the
     // destination differs from the user's registered wallet. A valid,
     // well-formed G-address that is not TARGET_WALLET.
@@ -807,7 +899,7 @@ describeIf('admin emission write — real postgres ladder, mirror untouched (ADR
         'Content-Type': 'application/json',
         Authorization: `Bearer ${bearer}`,
         'idempotency-key': idemKey(),
-        'X-Admin-Step-Up': stepUp,
+        'X-Admin-Step-Up': mintStepUp('emission'),
       },
       body: JSON.stringify({
         amountMinor: '500',
@@ -835,7 +927,7 @@ describeIf('admin emission write — real postgres ladder, mirror untouched (ADR
   });
 
   it('MNY-10: accepts an emission pinned to the registered wallet; queues the payout to that address', async () => {
-    const { targetUser, bearer, stepUp } = await seed();
+    const { targetUser, bearer, mintStepUp } = await seed();
     await seedCashbackBalance({ userId: targetUser.id, amountMinor: 2000n });
 
     const res = await app.request(`http://localhost/api/admin/users/${targetUser.id}/emissions`, {
@@ -844,7 +936,7 @@ describeIf('admin emission write — real postgres ladder, mirror untouched (ADR
         'Content-Type': 'application/json',
         Authorization: `Bearer ${bearer}`,
         'idempotency-key': idemKey(),
-        'X-Admin-Step-Up': stepUp,
+        'X-Admin-Step-Up': mintStepUp('emission'),
       },
       body: JSON.stringify({
         amountMinor: '500',
@@ -867,7 +959,7 @@ describeIf('admin emission write — real postgres ladder, mirror untouched (ADR
   });
 
   it('MNY-10: rejects an emission when the target user has NO registered wallet (400 NO_REGISTERED_WALLET)', async () => {
-    const { targetUser, bearer, stepUp } = await seed();
+    const { targetUser, bearer, mintStepUp } = await seed();
     // Strip the wallet seed() provisioned — model a user who never
     // linked/activated a wallet. The safe default is to refuse rather
     // than pay a free-input destination.
@@ -883,7 +975,7 @@ describeIf('admin emission write — real postgres ladder, mirror untouched (ADR
         'Content-Type': 'application/json',
         Authorization: `Bearer ${bearer}`,
         'idempotency-key': idemKey(),
-        'X-Admin-Step-Up': stepUp,
+        'X-Admin-Step-Up': mintStepUp('emission'),
       },
       body: JSON.stringify({
         amountMinor: '500',
@@ -904,7 +996,7 @@ describeIf('admin emission write — real postgres ladder, mirror untouched (ADR
   });
 
   it('MNY-10: for an embedded-wallet-only user, the activated embedded wallet is the pin — a legacy stellarAddress destination is refused', async () => {
-    const { targetUser, bearer, stepUp } = await seed();
+    const { targetUser, bearer, mintStepUp } = await seed();
     // Activated embedded wallet = TARGET_WALLET (from seed()), PLUS a
     // distinct legacy linked address. Resolution mirrors the cashback
     // builder: the activated embedded wallet wins, so an emission to
@@ -920,7 +1012,7 @@ describeIf('admin emission write — real postgres ladder, mirror untouched (ADR
         'Content-Type': 'application/json',
         Authorization: `Bearer ${bearer}`,
         'idempotency-key': idemKey(),
-        'X-Admin-Step-Up': stepUp,
+        'X-Admin-Step-Up': mintStepUp('emission'),
       },
       body: JSON.stringify({
         amountMinor: '500',
@@ -934,7 +1026,7 @@ describeIf('admin emission write — real postgres ladder, mirror untouched (ADR
   });
 
   it('ADR 036: compensation refuses a debit-less post-ADR-036 emission with 409', async () => {
-    const { targetUser, bearer, stepUp } = await seed();
+    const { targetUser, bearer, mintStepUp } = await seed();
     // A failed emission WITHOUT the legacy at-send debit row — the
     // post-ADR-036 shape. Compensating it would mint unbacked mirror
     // balance, so the primitive must refuse.
@@ -963,7 +1055,7 @@ describeIf('admin emission write — real postgres ladder, mirror untouched (ADR
         Authorization: `Bearer ${bearer}`,
         'idempotency-key': idemKey(),
         // CF-07: compensate is step-up-gated.
-        'X-Admin-Step-Up': stepUp,
+        'X-Admin-Step-Up': mintStepUp('payout-compensation'),
       },
       body: JSON.stringify({ reason: 'should be refused — no legacy debit' }),
     });
@@ -986,7 +1078,7 @@ describeIf('admin emission write — real postgres ladder, mirror untouched (ADR
   });
 
   it('keeps retry and compensation at-most-once when both hit the same failed payout', async () => {
-    const { targetUser, bearer, stepUp } = await seed();
+    const { targetUser, bearer, mintStepUp } = await seed();
     await seedCashbackBalance({ userId: targetUser.id, amountMinor: 1500n });
     const payoutId = await seedFailedLegacyWithdrawalPayout({
       userId: targetUser.id,
@@ -1001,7 +1093,7 @@ describeIf('admin emission write — real postgres ladder, mirror untouched (ADR
             'Content-Type': 'application/json',
             Authorization: `Bearer ${bearer}`,
             'idempotency-key': idemKey(),
-            'X-Admin-Step-Up': stepUp,
+            'X-Admin-Step-Up': mintStepUp('payout-retry'),
           },
           body: JSON.stringify({ reason: 'race retry' }),
         }),
@@ -1014,7 +1106,7 @@ describeIf('admin emission write — real postgres ladder, mirror untouched (ADR
             Authorization: `Bearer ${bearer}`,
             'idempotency-key': idemKey(),
             // CF-07: compensate is now step-up-gated like its sibling /retry.
-            'X-Admin-Step-Up': stepUp,
+            'X-Admin-Step-Up': mintStepUp('payout-compensation'),
           },
           body: JSON.stringify({ reason: 'race compensate' }),
         }),
@@ -1071,7 +1163,7 @@ describeIf('hardening A1 — emission conservation (cumulative, cross-writer, DB
   async function emit(args: {
     userId: string;
     bearer: string;
-    stepUp: string;
+    mintStepUp: (scope: AdminStepUpScope) => string;
     amountMinor: string;
     /** Defaults to 'USD' (→ USDLOOP). P2-f's interest_mint case needs 'GBP' (→ GBPLOOP, the only interest_mint-eligible asset — see the kind_shape CHECK). */
     currency?: 'USD' | 'GBP' | 'EUR';
@@ -1082,7 +1174,8 @@ describeIf('hardening A1 — emission conservation (cumulative, cross-writer, DB
         'Content-Type': 'application/json',
         Authorization: `Bearer ${args.bearer}`,
         'idempotency-key': idemKey(),
-        'X-Admin-Step-Up': args.stepUp,
+        // SEC-02-stepup: fresh single-use emission token per call.
+        'X-Admin-Step-Up': args.mintStepUp('emission'),
       },
       body: JSON.stringify({
         amountMinor: args.amountMinor,
@@ -1097,20 +1190,20 @@ describeIf('hardening A1 — emission conservation (cumulative, cross-writer, DB
     // THE finding: each call passes `balance >= amount` because
     // emission never debits, so before A1 an admin could emit 1500,
     // then 800, then 800… against a 2000 balance forever.
-    const { targetUser, bearer, stepUp } = await seed();
+    const { targetUser, bearer, mintStepUp } = await seed();
     await seedCashbackBalance({ userId: targetUser.id, amountMinor: 2000n });
 
-    const first = await emit({ userId: targetUser.id, bearer, stepUp, amountMinor: '1500' });
+    const first = await emit({ userId: targetUser.id, bearer, mintStepUp, amountMinor: '1500' });
     expect(first.status).toBe(200);
 
-    const second = await emit({ userId: targetUser.id, bearer, stepUp, amountMinor: '800' });
+    const second = await emit({ userId: targetUser.id, bearer, mintStepUp, amountMinor: '800' });
     expect(second.status).toBe(409);
     const body = (await second.json()) as { code: string; message: string };
     expect(body.code).toBe('EMISSION_EXCEEDS_UNEMITTED_BALANCE');
     expect(body.message).toContain('500'); // remaining headroom named for the operator
 
     // Exactly the remaining headroom still emits fine.
-    const third = await emit({ userId: targetUser.id, bearer, stepUp, amountMinor: '500' });
+    const third = await emit({ userId: targetUser.id, bearer, mintStepUp, amountMinor: '500' });
     expect(third.status).toBe(200);
   });
 
@@ -1121,7 +1214,7 @@ describeIf('hardening A1 — emission conservation (cumulative, cross-writer, DB
     // CHECK requires order_cashback rows to carry a real order — the
     // state coverage (confirmed counts, failed doesn't) is what these
     // two tests pin.
-    const { targetUser, bearer, stepUp } = await seed();
+    const { targetUser, bearer, mintStepUp } = await seed();
     await seedCashbackBalance({ userId: targetUser.id, amountMinor: 2000n });
     await db.insert(pendingPayouts).values({
       userId: targetUser.id,
@@ -1134,7 +1227,7 @@ describeIf('hardening A1 — emission conservation (cumulative, cross-writer, DB
       state: 'confirmed',
     });
 
-    const res = await emit({ userId: targetUser.id, bearer, stepUp, amountMinor: '1' });
+    const res = await emit({ userId: targetUser.id, bearer, mintStepUp, amountMinor: '1' });
     expect(res.status).toBe(409);
     expect(((await res.json()) as { code: string }).code).toBe(
       'EMISSION_EXCEEDS_UNEMITTED_BALANCE',
@@ -1142,7 +1235,7 @@ describeIf('hardening A1 — emission conservation (cumulative, cross-writer, DB
   });
 
   it('a FAILED prior mint does NOT consume headroom — the backfill use case emission exists for', async () => {
-    const { targetUser, bearer, stepUp } = await seed();
+    const { targetUser, bearer, mintStepUp } = await seed();
     await seedCashbackBalance({ userId: targetUser.id, amountMinor: 2000n });
     await db.insert(pendingPayouts).values({
       userId: targetUser.id,
@@ -1157,7 +1250,7 @@ describeIf('hardening A1 — emission conservation (cumulative, cross-writer, DB
       attempts: 5,
     });
 
-    const res = await emit({ userId: targetUser.id, bearer, stepUp, amountMinor: '2000' });
+    const res = await emit({ userId: targetUser.id, bearer, mintStepUp, amountMinor: '2000' });
     expect(res.status).toBe(200);
   });
 
@@ -1197,7 +1290,7 @@ describeIf('hardening A1 — emission conservation (cumulative, cross-writer, DB
     // UPDATE-side trigger: an emission fails terminally, ops re-emits
     // the backfill (legitimate — failed rows free headroom), and then
     // someone retries the ORIGINAL failed row from the payouts list.
-    const { targetUser, bearer, stepUp } = await seed();
+    const { targetUser, bearer, mintStepUp } = await seed();
     await seedCashbackBalance({ userId: targetUser.id, amountMinor: 2000n });
 
     // The original emission, terminally failed.
@@ -1218,7 +1311,7 @@ describeIf('hardening A1 — emission conservation (cumulative, cross-writer, DB
       .returning({ id: pendingPayouts.id });
 
     // The backfill emission — legitimate, consumes the full headroom.
-    const backfill = await emit({ userId: targetUser.id, bearer, stepUp, amountMinor: '2000' });
+    const backfill = await emit({ userId: targetUser.id, bearer, mintStepUp, amountMinor: '2000' });
     expect(backfill.status).toBe(200);
 
     // Retrying the original failed row would mint BOTH → 409.
@@ -1228,7 +1321,7 @@ describeIf('hardening A1 — emission conservation (cumulative, cross-writer, DB
         'Content-Type': 'application/json',
         Authorization: `Bearer ${bearer}`,
         'idempotency-key': idemKey(),
-        'X-Admin-Step-Up': stepUp,
+        'X-Admin-Step-Up': mintStepUp('payout-retry'),
       },
       body: JSON.stringify({ reason: 'attempting the double-mint retry' }),
     });
@@ -1245,7 +1338,7 @@ describeIf('hardening A1 — emission conservation (cumulative, cross-writer, DB
   });
 
   it('a legitimate retry (headroom intact) still passes the re-entry trigger', async () => {
-    const { targetUser, bearer, stepUp } = await seed();
+    const { targetUser, bearer, mintStepUp } = await seed();
     await seedCashbackBalance({ userId: targetUser.id, amountMinor: 2000n });
     const [failedRow] = await db
       .insert(pendingPayouts)
@@ -1269,7 +1362,7 @@ describeIf('hardening A1 — emission conservation (cumulative, cross-writer, DB
         'Content-Type': 'application/json',
         Authorization: `Bearer ${bearer}`,
         'idempotency-key': idemKey(),
-        'X-Admin-Step-Up': stepUp,
+        'X-Admin-Step-Up': mintStepUp('payout-retry'),
       },
       body: JSON.stringify({ reason: 'legitimate retry, nothing re-materialised' }),
     });
@@ -1296,7 +1389,7 @@ describeIf('hardening A1 — emission conservation (cumulative, cross-writer, DB
   // 'retry-after-backfill double mint' case above for the other two
   // kinds the same trigger gates.
   it('retry-after-backfill double mint is rejected by the re-entry trigger for kind=order_cashback (P2-f)', async () => {
-    const { targetUser, bearer, stepUp, orderId } = await seed();
+    const { targetUser, bearer, mintStepUp, orderId } = await seed();
     await seedCashbackBalance({ userId: targetUser.id, amountMinor: 2000n });
 
     // The original fulfilment-time cashback payout, terminally failed.
@@ -1323,7 +1416,7 @@ describeIf('hardening A1 — emission conservation (cumulative, cross-writer, DB
     // legitimately consumes the full headroom. The trigger sums all
     // three mint kinds together, so this is exactly the cross-kind
     // double-mint shape the fence must catch.
-    const backfill = await emit({ userId: targetUser.id, bearer, stepUp, amountMinor: '2000' });
+    const backfill = await emit({ userId: targetUser.id, bearer, mintStepUp, amountMinor: '2000' });
     expect(backfill.status).toBe(200);
 
     // Retrying the original failed order_cashback row would mint BOTH → 409.
@@ -1333,7 +1426,7 @@ describeIf('hardening A1 — emission conservation (cumulative, cross-writer, DB
         'Content-Type': 'application/json',
         Authorization: `Bearer ${bearer}`,
         'idempotency-key': idemKey(),
-        'X-Admin-Step-Up': stepUp,
+        'X-Admin-Step-Up': mintStepUp('payout-retry'),
       },
       body: JSON.stringify({ reason: 'attempting the double-mint retry (order_cashback)' }),
     });
@@ -1353,7 +1446,7 @@ describeIf('hardening A1 — emission conservation (cumulative, cross-writer, DB
     // interest_mint rows are GBPLOOP-only (kind_shape CHECK: kind !=
     // 'interest_mint' OR asset_code = 'GBPLOOP') — seed the balance and
     // the backfill emission in GBP to match.
-    const { targetUser, bearer, stepUp } = await seed();
+    const { targetUser, bearer, mintStepUp } = await seed();
     await seedCashbackBalance({ userId: targetUser.id, currency: 'GBP', amountMinor: 2000n });
 
     const [failedRow] = await db
@@ -1375,7 +1468,7 @@ describeIf('hardening A1 — emission conservation (cumulative, cross-writer, DB
     const backfill = await emit({
       userId: targetUser.id,
       bearer,
-      stepUp,
+      mintStepUp,
       amountMinor: '2000',
       currency: 'GBP',
     });
@@ -1387,7 +1480,7 @@ describeIf('hardening A1 — emission conservation (cumulative, cross-writer, DB
         'Content-Type': 'application/json',
         Authorization: `Bearer ${bearer}`,
         'idempotency-key': idemKey(),
-        'X-Admin-Step-Up': stepUp,
+        'X-Admin-Step-Up': mintStepUp('payout-retry'),
       },
       body: JSON.stringify({ reason: 'attempting the double-mint retry (interest_mint)' }),
     });
@@ -1592,7 +1685,7 @@ describeIf('admin payout-retry write — idempotency-guarded ladder', () => {
   async function retryRequest(args: {
     payoutId: string;
     bearer: string;
-    stepUp: string;
+    mintStepUp: (scope: AdminStepUpScope) => string;
     key: string;
     reason: string;
   }): Promise<Response> {
@@ -1605,21 +1698,23 @@ describeIf('admin payout-retry write — idempotency-guarded ladder', () => {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${args.bearer}`,
         'idempotency-key': args.key,
-        'X-Admin-Step-Up': args.stepUp,
+        // SEC-02-stepup: fresh single-use payout-retry token per call —
+        // same-key replay / concurrent retries each present their own.
+        'X-Admin-Step-Up': args.mintStepUp('payout-retry'),
       },
       body: JSON.stringify({ reason: args.reason }),
     });
   }
 
   it('replays the cached envelope on idempotency-key reuse — the reset runs exactly once', async () => {
-    const { targetUser, bearer, stepUp } = await seed();
+    const { targetUser, bearer, mintStepUp } = await seed();
     const payoutId = await seedFailedLegacyWithdrawalPayout({
       userId: targetUser.id,
       amountStroops: 500n * 100_000n,
     });
     const key = idemKey();
 
-    const first = await retryRequest({ payoutId, bearer, stepUp, key, reason: 'first click' });
+    const first = await retryRequest({ payoutId, bearer, mintStepUp, key, reason: 'first click' });
     expect(first.status).toBe(200);
     const firstBody = (await first.json()) as {
       result: { id: string; state: string };
@@ -1636,7 +1731,7 @@ describeIf('admin payout-retry write — idempotency-guarded ladder', () => {
       .set({ state: 'failed', failedAt: new Date(), lastError: 'failed again post-retry' })
       .where(eq(pendingPayouts.id, payoutId));
 
-    const second = await retryRequest({ payoutId, bearer, stepUp, key, reason: 'second click' });
+    const second = await retryRequest({ payoutId, bearer, mintStepUp, key, reason: 'second click' });
     expect(second.status).toBe(200);
     const secondBody = (await second.json()) as {
       result: { id: string; state: string };
@@ -1650,7 +1745,7 @@ describeIf('admin payout-retry write — idempotency-guarded ladder', () => {
   });
 
   it('serialises truly-concurrent same-key retries into one reset plus one replay', async () => {
-    const { targetUser, bearer, stepUp } = await seed();
+    const { targetUser, bearer, mintStepUp } = await seed();
     const payoutId = await seedFailedLegacyWithdrawalPayout({
       userId: targetUser.id,
       amountStroops: 500n * 100_000n,
@@ -1662,8 +1757,8 @@ describeIf('admin payout-retry write — idempotency-guarded ladder', () => {
     // lock. Pre-guard both passed the unguarded lookup and both
     // reported a fresh (replayed: false) write.
     const [first, second] = await Promise.all([
-      retryRequest({ payoutId, bearer, stepUp, key, reason: 'race click a' }),
-      retryRequest({ payoutId, bearer, stepUp, key, reason: 'race click b' }),
+      retryRequest({ payoutId, bearer, mintStepUp, key, reason: 'race click a' }),
+      retryRequest({ payoutId, bearer, mintStepUp, key, reason: 'race click b' }),
     ]);
 
     expect(first.status).toBe(200);
@@ -1677,14 +1772,14 @@ describeIf('admin payout-retry write — idempotency-guarded ladder', () => {
   });
 
   it('does NOT pin a 404 to the key: a failed-again payout is retryable with the same key', async () => {
-    const { bearer, stepUp } = await seed();
+    const { bearer, mintStepUp } = await seed();
     const key = idemKey();
     const missingId = crypto.randomUUID();
 
     const miss = await retryRequest({
       payoutId: missingId,
       bearer,
-      stepUp,
+      mintStepUp,
       key,
       reason: 'not there yet',
     });
@@ -1710,7 +1805,7 @@ describeIf('admin idempotency guard — corrupt snapshot fails loud', () => {
   async function postAdjustment(args: {
     targetUserId: string;
     bearer: string;
-    stepUp: string;
+    mintStepUp: (scope: AdminStepUpScope) => string;
     key: string;
   }): Promise<Response> {
     return app.request(`http://localhost/api/admin/users/${args.targetUserId}/credit-adjustments`, {
@@ -1719,7 +1814,8 @@ describeIf('admin idempotency guard — corrupt snapshot fails loud', () => {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${args.bearer}`,
         'idempotency-key': args.key,
-        'X-Admin-Step-Up': args.stepUp,
+        // SEC-02-stepup: fresh single-use credit-adjustment token per call.
+        'X-Admin-Step-Up': args.mintStepUp('credit-adjustment'),
       },
       body: JSON.stringify({
         amountMinor: '500',
@@ -1746,7 +1842,7 @@ describeIf('admin idempotency guard — corrupt snapshot fails loud', () => {
   }
 
   it('unparseable stored snapshot → 500 IDEMPOTENCY_SNAPSHOT_CORRUPT and NO write executes', async () => {
-    const { adminUserId, targetUser, bearer, stepUp } = await seed();
+    const { adminUserId, targetUser, bearer, mintStepUp } = await seed();
     const key = idemKey();
     await seedSnapshot({
       adminUserId,
@@ -1755,7 +1851,7 @@ describeIf('admin idempotency guard — corrupt snapshot fails loud', () => {
       responseBody: '{this is not json',
     });
 
-    const res = await postAdjustment({ targetUserId: targetUser.id, bearer, stepUp, key });
+    const res = await postAdjustment({ targetUserId: targetUser.id, bearer, mintStepUp, key });
     expect(res.status).toBe(500);
     const body = (await res.json()) as { code: string };
     expect(body.code).toBe('IDEMPOTENCY_SNAPSHOT_CORRUPT');
@@ -1774,11 +1870,11 @@ describeIf('admin idempotency guard — corrupt snapshot fails loud', () => {
   });
 
   it('empty-object stored snapshot → 500 IDEMPOTENCY_SNAPSHOT_CORRUPT and NO write executes', async () => {
-    const { adminUserId, targetUser, bearer, stepUp } = await seed();
+    const { adminUserId, targetUser, bearer, mintStepUp } = await seed();
     const key = idemKey();
     await seedSnapshot({ adminUserId, key, targetUserId: targetUser.id, responseBody: '{}' });
 
-    const res = await postAdjustment({ targetUserId: targetUser.id, bearer, stepUp, key });
+    const res = await postAdjustment({ targetUserId: targetUser.id, bearer, mintStepUp, key });
     expect(res.status).toBe(500);
     const body = (await res.json()) as { code: string };
     expect(body.code).toBe('IDEMPOTENCY_SNAPSHOT_CORRUPT');
@@ -1811,7 +1907,7 @@ describeIf('admin payout-compensation write — fleet-wide daily cap race', () =
     // 500 each; one fits, two would total 1000 > 700.
     env.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR = 700n;
     try {
-      const { targetUser, bearer, stepUp } = await seed();
+      const { targetUser, bearer, mintStepUp } = await seed();
       const payoutA = await seedFailedLegacyWithdrawalPayout({
         userId: targetUser.id,
         amountStroops: 500n * 100_000n,
@@ -1833,7 +1929,7 @@ describeIf('admin payout-compensation write — fleet-wide daily cap race', () =
             Authorization: `Bearer ${bearer}`,
             'idempotency-key': idemKey(),
             // CF-07: compensate is now step-up-gated.
-            'X-Admin-Step-Up': stepUp,
+            'X-Admin-Step-Up': mintStepUp('payout-compensation'),
           },
           body: JSON.stringify({ reason: 'concurrent cap race test' }),
         });
@@ -1886,7 +1982,7 @@ describeIf('admin payout-compensation write — fleet-wide daily cap race', () =
     const previousCap = env.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR;
     env.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR = 700n;
     try {
-      const { targetUser, bearer, stepUp } = await seed();
+      const { targetUser, bearer, mintStepUp } = await seed();
       const payoutId = await seedFailedLegacyWithdrawalPayout({
         userId: targetUser.id,
         amountStroops: 500n * 100_000n,
@@ -1929,7 +2025,7 @@ describeIf('admin payout-compensation write — fleet-wide daily cap race', () =
             Authorization: `Bearer ${bearer}`,
             'idempotency-key': idemKey(),
             // CF-07: compensate is now step-up-gated.
-            'X-Admin-Step-Up': stepUp,
+            'X-Admin-Step-Up': mintStepUp('payout-compensation'),
           },
           body: JSON.stringify({ reason: 'must wait for the cap lock' }),
         }),
@@ -2071,7 +2167,7 @@ describeIf('admin home-currency write — real postgres ladder + safety prefligh
   });
 
   it('happy path: flips home_currency, returns envelope, persists updated_at', async () => {
-    const { targetUser, bearer, stepUp } = await seed();
+    const { targetUser, bearer, mintStepUp } = await seed();
     const before = await db.select().from(users).where(eq(users.id, targetUser.id));
     expect(before[0]?.homeCurrency).toBe('USD');
 
@@ -2084,7 +2180,7 @@ describeIf('admin home-currency write — real postgres ladder + safety prefligh
           'Content-Type': 'application/json',
           Authorization: `Bearer ${bearer}`,
           'idempotency-key': key,
-          'X-Admin-Step-Up': stepUp,
+          'X-Admin-Step-Up': mintStepUp('home-currency'),
         },
         body: JSON.stringify({ homeCurrency: 'GBP', reason: 'support ticket #42' }),
       },
@@ -2104,18 +2200,20 @@ describeIf('admin home-currency write — real postgres ladder + safety prefligh
   });
 
   it('replays the stored snapshot on idempotency-key reuse without re-running the preflight', async () => {
-    const { targetUser, bearer, stepUp } = await seed();
+    const { targetUser, bearer, mintStepUp } = await seed();
     const key = idemKey();
-    const headers = {
+    // SEC-02-stepup: fresh single-use token per request (the replay is
+    // proven at the idempotency layer, past a valid step-up each time).
+    const headers = (): Record<string, string> => ({
       'Content-Type': 'application/json',
       Authorization: `Bearer ${bearer}`,
       'idempotency-key': key,
-      'X-Admin-Step-Up': stepUp,
-    };
+      'X-Admin-Step-Up': mintStepUp('home-currency'),
+    });
     const url = `http://localhost/api/admin/users/${targetUser.id}/home-currency`;
     const body = JSON.stringify({ homeCurrency: 'GBP', reason: 'idempotent retry' });
 
-    const first = await app.request(url, { method: 'POST', headers, body });
+    const first = await app.request(url, { method: 'POST', headers: headers(), body });
     expect(first.status).toBe(200);
     const firstBody = (await first.json()) as { audit: { replayed: boolean }; result: unknown };
     expect(firstBody.audit.replayed).toBe(false);
@@ -2128,7 +2226,7 @@ describeIf('admin home-currency write — real postgres ladder + safety prefligh
       amountMinor: 250n,
     });
 
-    const second = await app.request(url, { method: 'POST', headers, body });
+    const second = await app.request(url, { method: 'POST', headers: headers(), body });
     expect(second.status).toBe(200);
     const secondBody = (await second.json()) as {
       audit: { replayed: boolean };
@@ -2143,7 +2241,7 @@ describeIf('admin home-currency write — real postgres ladder + safety prefligh
   });
 
   it('409 HOME_CURRENCY_UNCHANGED when new currency equals current', async () => {
-    const { targetUser, bearer, stepUp } = await seed();
+    const { targetUser, bearer, mintStepUp } = await seed();
     const res = await app.request(
       `http://localhost/api/admin/users/${targetUser.id}/home-currency`,
       {
@@ -2152,7 +2250,7 @@ describeIf('admin home-currency write — real postgres ladder + safety prefligh
           'Content-Type': 'application/json',
           Authorization: `Bearer ${bearer}`,
           'idempotency-key': idemKey(),
-          'X-Admin-Step-Up': stepUp,
+          'X-Admin-Step-Up': mintStepUp('home-currency'),
         },
         body: JSON.stringify({ homeCurrency: 'USD', reason: 'no-op' }),
       },
@@ -2163,7 +2261,7 @@ describeIf('admin home-currency write — real postgres ladder + safety prefligh
   });
 
   it('409 HOME_CURRENCY_HAS_LIVE_BALANCE when user has non-zero credits in old currency', async () => {
-    const { targetUser, bearer, stepUp } = await seed();
+    const { targetUser, bearer, mintStepUp } = await seed();
     await seedCashbackBalance({
       userId: targetUser.id,
       currency: 'USD',
@@ -2178,7 +2276,7 @@ describeIf('admin home-currency write — real postgres ladder + safety prefligh
           'Content-Type': 'application/json',
           Authorization: `Bearer ${bearer}`,
           'idempotency-key': idemKey(),
-          'X-Admin-Step-Up': stepUp,
+          'X-Admin-Step-Up': mintStepUp('home-currency'),
         },
         body: JSON.stringify({ homeCurrency: 'GBP', reason: 'should fail' }),
       },
@@ -2194,7 +2292,7 @@ describeIf('admin home-currency write — real postgres ladder + safety prefligh
   });
 
   it('allows the change when user has a zero-balance row in the old currency', async () => {
-    const { targetUser, bearer, stepUp } = await seed();
+    const { targetUser, bearer, mintStepUp } = await seed();
     // Insert a zero-balance row directly — `seedCashbackBalance` would
     // also write a credit_transactions row (which the schema CHECK
     // forbids at amount=0 for `cashback`). The row exists from a
@@ -2213,7 +2311,7 @@ describeIf('admin home-currency write — real postgres ladder + safety prefligh
           'Content-Type': 'application/json',
           Authorization: `Bearer ${bearer}`,
           'idempotency-key': idemKey(),
-          'X-Admin-Step-Up': stepUp,
+          'X-Admin-Step-Up': mintStepUp('home-currency'),
         },
         body: JSON.stringify({ homeCurrency: 'EUR', reason: 'zero-balance ok' }),
       },
@@ -2224,7 +2322,7 @@ describeIf('admin home-currency write — real postgres ladder + safety prefligh
   });
 
   it('409 HOME_CURRENCY_HAS_IN_FLIGHT_PAYOUTS when user has a pending payout', async () => {
-    const { targetUser, bearer, stepUp, orderId } = await seed();
+    const { targetUser, bearer, mintStepUp, orderId } = await seed();
     await db.insert(pendingPayouts).values({
       userId: targetUser.id,
       kind: 'order_cashback',
@@ -2245,7 +2343,7 @@ describeIf('admin home-currency write — real postgres ladder + safety prefligh
           'Content-Type': 'application/json',
           Authorization: `Bearer ${bearer}`,
           'idempotency-key': idemKey(),
-          'X-Admin-Step-Up': stepUp,
+          'X-Admin-Step-Up': mintStepUp('home-currency'),
         },
         body: JSON.stringify({ homeCurrency: 'GBP', reason: 'should fail' }),
       },
@@ -2256,7 +2354,7 @@ describeIf('admin home-currency write — real postgres ladder + safety prefligh
   });
 
   it('allows the change when user has only failed payouts (already off the worker hot path)', async () => {
-    const { targetUser, bearer, stepUp } = await seed();
+    const { targetUser, bearer, mintStepUp } = await seed();
     await seedFailedLegacyWithdrawalPayout({
       userId: targetUser.id,
       amountStroops: 5_000_000n,
@@ -2269,7 +2367,7 @@ describeIf('admin home-currency write — real postgres ladder + safety prefligh
           'Content-Type': 'application/json',
           Authorization: `Bearer ${bearer}`,
           'idempotency-key': idemKey(),
-          'X-Admin-Step-Up': stepUp,
+          'X-Admin-Step-Up': mintStepUp('home-currency'),
         },
         body: JSON.stringify({ homeCurrency: 'EUR', reason: 'failed payouts ok' }),
       },
@@ -2280,7 +2378,7 @@ describeIf('admin home-currency write — real postgres ladder + safety prefligh
   });
 
   it('404 USER_NOT_FOUND when target user does not exist', async () => {
-    const { bearer, stepUp } = await seed();
+    const { bearer, mintStepUp } = await seed();
     const res = await app.request(
       `http://localhost/api/admin/users/aaaaaaaa-bbbb-cccc-dddd-000000000000/home-currency`,
       {
@@ -2289,7 +2387,7 @@ describeIf('admin home-currency write — real postgres ladder + safety prefligh
           'Content-Type': 'application/json',
           Authorization: `Bearer ${bearer}`,
           'idempotency-key': idemKey(),
-          'X-Admin-Step-Up': stepUp,
+          'X-Admin-Step-Up': mintStepUp('home-currency'),
         },
         body: JSON.stringify({ homeCurrency: 'GBP', reason: 'no such user' }),
       },

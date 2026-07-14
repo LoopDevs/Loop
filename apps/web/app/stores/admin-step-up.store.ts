@@ -17,6 +17,32 @@
 import { create } from 'zustand';
 
 /**
+ * SEC-02-stepup: the action-class a step-up token is bound to. Mirrors
+ * the backend `STEP_UP_SCOPES` union (auth/admin-step-up.ts) MINUS the
+ * `'admin-write'` wildcard — the client never mints a wildcard token,
+ * because the gate rejects it. Each protected admin write requests a
+ * token scoped to exactly the class its endpoint guards; the backend
+ * validates the value (`z.enum(STEP_UP_SCOPES)`), so a drift from this
+ * list surfaces as a 400 at mint time. Keep in sync with the backend.
+ */
+export type AdminStepUpScope =
+  | 'credit-adjustment'
+  | 'refund'
+  | 'withdrawal'
+  | 'emission'
+  | 'payout-retry'
+  | 'payout-compensation'
+  | 'home-currency'
+  | 'operator-float'
+  | 'staff-role-grant'
+  | 'staff-role-revoke'
+  | 'cashback-config'
+  | 'deposit-refund'
+  | 'order-redrive'
+  | 'order-refund'
+  | 'vault-redrive';
+
+/**
  * Money amount to echo in the step-up modal (P2-07). A structured
  * fiat-minor pair is formatted with the canonical `formatMinorCurrency`
  * in the modal; Stellar payouts (7-decimal stroops, a different
@@ -37,6 +63,14 @@ export type PendingActionAmount =
 export interface PendingActionSummary {
   /** What is being authorized, e.g. "Queue emission" / "Retry payout". */
   action: string;
+  /**
+   * SEC-02-stepup: the action-CLASS this step-up mints a token for. The
+   * modal threads it to `mintAdminStepUp(otp, scope)` so the minted
+   * token is bound to exactly the write it authorizes (no wildcard) —
+   * the gate rejects a token minted for a different class. Distinct from
+   * `action`, which is the human-readable label.
+   */
+  scope: AdminStepUpScope;
   /** Optional money amount to echo (fiat-minor pair or pre-formatted). */
   amount?: PendingActionAmount;
   /** Optional destination / recipient (Stellar address, user id, …), shown verbatim. */

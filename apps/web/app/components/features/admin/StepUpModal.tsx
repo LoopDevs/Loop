@@ -102,10 +102,19 @@ export function StepUpModal({
       otpInputRef.current?.focus();
       return;
     }
+    // SEC-02-stepup: mint a token bound to the exact action-class this
+    // step-up authorizes. The scope rides on the pending-action summary
+    // (set at initiation by `useAdminStepUp`); without it there is
+    // nothing to scope the single-use token to, so fail rather than mint
+    // an unusable token.
+    if (pendingAction === undefined) {
+      setError('Missing action context for step-up. Re-open and try again.');
+      return;
+    }
     setError(null);
     setStage('confirming');
     try {
-      const res = await mintAdminStepUp(otp.trim());
+      const res = await mintAdminStepUp(otp.trim(), pendingAction.scope);
       onConfirm(res.stepUpToken, res.expiresAt);
     } catch (err) {
       if (err instanceof ApiException && err.status === 503) {

@@ -14,7 +14,7 @@ import type { Context } from 'hono';
 const {
   findLiveOtpMock,
   incrementOtpAttemptsMock,
-  markOtpConsumedMock,
+  tryConsumeOtpMock,
   signMock,
   configuredMock,
   isEmailOtpLockedMock,
@@ -23,7 +23,10 @@ const {
 } = vi.hoisted(() => ({
   findLiveOtpMock: vi.fn(),
   incrementOtpAttemptsMock: vi.fn(async () => undefined),
-  markOtpConsumedMock: vi.fn(async () => undefined),
+  // BK-otpatomic-stepup: the handler now consumes the OTP with the atomic
+  // compare-and-set `tryConsumeOtp` (returns true iff THIS call won the
+  // NULL→now() flip) instead of the racy read-then-`markOtpConsumed`.
+  tryConsumeOtpMock: vi.fn(async () => true),
   signMock: vi.fn(),
   configuredMock: vi.fn(() => true),
   isEmailOtpLockedMock: vi.fn(async () => false),
@@ -40,7 +43,7 @@ vi.mock('../../logger.js', () => ({
 vi.mock('../../auth/otps.js', () => ({
   findLiveOtp: findLiveOtpMock,
   incrementOtpAttempts: incrementOtpAttemptsMock,
-  markOtpConsumed: markOtpConsumedMock,
+  tryConsumeOtp: tryConsumeOtpMock,
 }));
 
 vi.mock('../../auth/otp-attempt-counter.js', () => ({
@@ -98,10 +101,10 @@ const LOOP_ADMIN = { kind: 'loop' as const, userId: 'admin-uuid-1', email: 'admi
 beforeEach(() => {
   findLiveOtpMock.mockReset();
   incrementOtpAttemptsMock.mockReset().mockResolvedValue(undefined);
-  markOtpConsumedMock.mockReset().mockResolvedValue(undefined);
+  tryConsumeOtpMock.mockReset().mockResolvedValue(true);
   signMock.mockReset().mockReturnValue({
     token: 'signed.step.up',
-    claims: { exp: Math.floor(Date.now() / 1000) + 300, scope: 'admin-write' },
+    claims: { exp: Math.floor(Date.now() / 1000) + 300, scope: 'credit-adjustment' },
   });
   configuredMock.mockReset().mockReturnValue(true);
   isEmailOtpLockedMock.mockReset().mockResolvedValue(false);
@@ -155,7 +158,7 @@ describe('adminStepUpHandler', () => {
 
   it('401 on a wrong/expired OTP, and bumps the attempts counter (reuse/brute-force guard)', async () => {
     findLiveOtpMock.mockResolvedValue(null);
-    const res = await adminStepUpHandler(makeCtx({ auth: LOOP_ADMIN, body: { otp: '000000' } }));
+    const res = await adminStepUpHandler(makeCtx({ auth: LOOP_ADMIN, body: { otp: '000000', scope: 'refund' } }));
     expect(res.status).toBe(401);
     const body = (await res.json()) as { code: string };
     expect(body.code).toBe('UNAUTHORIZED');
@@ -164,12 +167,12 @@ describe('adminStepUpHandler', () => {
     expect(registerFailedOtpAttemptMock).toHaveBeenCalledWith({ email: 'admin@loop.test' });
     // A wrong guess must never mint a token or consume anything.
     expect(signMock).not.toHaveBeenCalled();
-    expect(markOtpConsumedMock).not.toHaveBeenCalled();
+    expect(tryConsumeOtpMock).not.toHaveBeenCalled();
   });
 
   it('429 TOO_MANY_ATTEMPTS when the admin email is already locked, before checking any OTP', async () => {
     isEmailOtpLockedMock.mockResolvedValue(true);
-    const res = await adminStepUpHandler(makeCtx({ auth: LOOP_ADMIN, body: { otp: '000000' } }));
+    const res = await adminStepUpHandler(makeCtx({ auth: LOOP_ADMIN, body: { otp: '000000', scope: 'refund' } }));
     expect(res.status).toBe(429);
     expect(res.headers.get('Retry-After')).toBe('900');
     const body = (await res.json()) as { code: string };
@@ -183,12 +186,12 @@ describe('adminStepUpHandler', () => {
   it('429 TOO_MANY_ATTEMPTS when a wrong OTP crosses the per-email threshold', async () => {
     findLiveOtpMock.mockResolvedValue(null);
     registerFailedOtpAttemptMock.mockResolvedValue({ failedAttempts: 10, locked: true });
-    const res = await adminStepUpHandler(makeCtx({ auth: LOOP_ADMIN, body: { otp: '000000' } }));
+    const res = await adminStepUpHandler(makeCtx({ auth: LOOP_ADMIN, body: { otp: '000000', scope: 'refund' } }));
     expect(res.status).toBe(429);
     expect(res.headers.get('Retry-After')).toBe('900');
     expect(incrementOtpAttemptsMock).toHaveBeenCalledWith({ email: 'admin@loop.test' });
     expect(registerFailedOtpAttemptMock).toHaveBeenCalledWith({ email: 'admin@loop.test' });
-    expect(markOtpConsumedMock).not.toHaveBeenCalled();
+    expect(tryConsumeOtpMock).not.toHaveBeenCalled();
     expect(signMock).not.toHaveBeenCalled();
   });
 
@@ -196,7 +199,7 @@ describe('adminStepUpHandler', () => {
     const res = await adminStepUpHandler(
       makeCtx({
         auth: { kind: 'loop', userId: 'admin-uuid-1', email: 'аdmin@loop.test' }, // Cyrillic а
-        body: { otp: '123456' },
+        body: { otp: '123456', scope: 'refund' },
       }),
     );
     expect(res.status).toBe(401);
@@ -207,28 +210,44 @@ describe('adminStepUpHandler', () => {
     expect(findLiveOtpMock).not.toHaveBeenCalled();
   });
 
-  it('mints a step-up token on a correct OTP, consumes it exactly once, and defaults to the wildcard scope', async () => {
-    findLiveOtpMock.mockResolvedValue({ id: 'otp-row-1', attempts: 1 });
+  it('400 VALIDATION_ERROR when scope is omitted (SEC-02-stepup: scope is required, no wildcard default)', async () => {
+    // Pre-SEC-02 an omitted scope minted an all-class wildcard token.
+    // That default WAS the audited privilege — the mint now requires a
+    // concrete class, so a scope-less request never reaches the OTP store
+    // or the signer.
+    findLiveOtpMock.mockResolvedValue({ id: 'otp-row-x', attempts: 1 });
     const res = await adminStepUpHandler(makeCtx({ auth: LOOP_ADMIN, body: { otp: '123456' } }));
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(signMock).not.toHaveBeenCalled();
+    expect(tryConsumeOtpMock).not.toHaveBeenCalled();
+  });
+
+  it('mints a step-up token on a correct OTP + scope, consumes the OTP atomically exactly once', async () => {
+    findLiveOtpMock.mockResolvedValue({ id: 'otp-row-1', attempts: 1 });
+    const res = await adminStepUpHandler(
+      makeCtx({ auth: LOOP_ADMIN, body: { otp: '123456', scope: 'credit-adjustment' } }),
+    );
     expect(res.status).toBe(200);
     const body = (await res.json()) as { stepUpToken: string; expiresAt: string };
     expect(body.stepUpToken).toBe('signed.step.up');
     expect(typeof body.expiresAt).toBe('string');
 
-    expect(markOtpConsumedMock).toHaveBeenCalledTimes(1);
-    expect(markOtpConsumedMock).toHaveBeenCalledWith('otp-row-1');
+    // BK-otpatomic-stepup: OTP consumed via the atomic CAS exactly once.
+    expect(tryConsumeOtpMock).toHaveBeenCalledTimes(1);
+    expect(tryConsumeOtpMock).toHaveBeenCalledWith('otp-row-1');
     expect(clearOtpAttemptsMock).toHaveBeenCalledWith('admin@loop.test');
 
     expect(signMock).toHaveBeenCalledTimes(1);
     const signArgs = signMock.mock.calls[0]?.[0] as { sub: string; email: string; scope?: string };
     expect(signArgs.sub).toBe('admin-uuid-1');
     expect(signArgs.email).toBe('admin@loop.test');
-    // CF-08: omitted scope on the wire → handler must not force a scope,
-    // letting signAdminStepUpToken apply its own wildcard default.
-    expect(signArgs.scope).toBeUndefined();
+    // SEC-02-stepup: the handler threads the REQUIRED concrete class.
+    expect(signArgs.scope).toBe('credit-adjustment');
   });
 
-  it('binds the minted token to an explicit narrower scope when the caller asks for one', async () => {
+  it('binds the minted token to the explicit scope the caller asks for', async () => {
     findLiveOtpMock.mockResolvedValue({ id: 'otp-row-2', attempts: 0 });
     await adminStepUpHandler(
       makeCtx({ auth: LOOP_ADMIN, body: { otp: '123456', scope: 'withdrawal' } }),
@@ -237,9 +256,29 @@ describe('adminStepUpHandler', () => {
     expect(signArgs.scope).toBe('withdrawal');
   });
 
+  it('BK-otpatomic-stepup: the LOSER of a concurrent OTP-consume race gets 401 and mints nothing', async () => {
+    // Two step-up requests present the same live OTP. `findLiveOtp` sees
+    // it unconsumed for both, but the atomic `tryConsumeOtp` lets only one
+    // win (true); the loser (false) must be rejected as if the code were
+    // already spent — never a second token off one OTP.
+    findLiveOtpMock.mockResolvedValue({ id: 'otp-row-race', attempts: 0 });
+    tryConsumeOtpMock.mockResolvedValue(false);
+    const res = await adminStepUpHandler(
+      makeCtx({ auth: LOOP_ADMIN, body: { otp: '123456', scope: 'refund' } }),
+    );
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('UNAUTHORIZED');
+    // The loser mints NOTHING and does not clear the attempt counter.
+    expect(signMock).not.toHaveBeenCalled();
+    expect(clearOtpAttemptsMock).not.toHaveBeenCalled();
+  });
+
   it('500 INTERNAL_ERROR when the OTP lookup throws unexpectedly', async () => {
     findLiveOtpMock.mockRejectedValue(new Error('db unavailable'));
-    const res = await adminStepUpHandler(makeCtx({ auth: LOOP_ADMIN, body: { otp: '123456' } }));
+    const res = await adminStepUpHandler(
+      makeCtx({ auth: LOOP_ADMIN, body: { otp: '123456', scope: 'refund' } }),
+    );
     expect(res.status).toBe(500);
     const body = (await res.json()) as { code: string };
     expect(body.code).toBe('INTERNAL_ERROR');

@@ -30,7 +30,7 @@ import {
   STEP_UP_SCOPES,
 } from '../auth/admin-step-up.js';
 import type { LoopAuthContext } from '../auth/handler.js';
-import { findLiveOtp, incrementOtpAttempts, markOtpConsumed } from '../auth/otps.js';
+import { findLiveOtp, incrementOtpAttempts, tryConsumeOtp } from '../auth/otps.js';
 import { normalizeEmail, NonAsciiEmailError } from '../auth/normalize-email.js';
 import {
   clearOtpAttempts,
@@ -47,13 +47,14 @@ const StepUpBody = z.object({
   /** Reserved for ADR-028 Phase-2 (password / webauthn variants). */
   kind: z.literal('otp').optional().default('otp'),
   /**
-   * CF-08: optional action class to bind the minted token to. Omitted
-   * → the wildcard `'admin-write'` scope (backward-safe; the token
-   * satisfies every gate, matching the prior behaviour the web client
-   * relies on). A narrower value binds the token to one class so it
-   * can't be replayed against a different destructive write.
+   * SEC-02-stepup: REQUIRED action class to bind the minted token to.
+   * Was optional-defaulting-to-wildcard (CF-08); that wildcard default
+   * was the audited all-class privilege — the gate now rejects a
+   * wildcard against a concrete action, and every web caller mints a
+   * fresh token scoped to exactly the write it's about to perform. So
+   * the mint requires the class up front (fail-closed / least-privilege).
    */
-  scope: z.enum(STEP_UP_SCOPES).optional(),
+  scope: z.enum(STEP_UP_SCOPES),
 });
 
 export async function adminStepUpHandler(c: Context): Promise<Response> {
@@ -119,14 +120,24 @@ export async function adminStepUpHandler(c: Context): Promise<Response> {
       }
       return c.json({ code: 'UNAUTHORIZED', message: 'Invalid or expired verification code' }, 401);
     }
-    await markOtpConsumed(hit.id);
+    // BK-otpatomic-stepup: consume the OTP with the atomic compare-and-set
+    // (`consumed_at IS NULL → now()` in one UPDATE) rather than the
+    // read-then-mark `findLiveOtp` + `markOtpConsumed` pair, which raced:
+    // two concurrent step-up requests presenting the same live OTP both
+    // observed it unconsumed and both minted a token. `tryConsumeOtp`
+    // makes exactly one caller win; the loser is rejected as if the code
+    // were already spent (single-use OTP).
+    const won = await tryConsumeOtp(hit.id);
+    if (!won) {
+      return c.json({ code: 'UNAUTHORIZED', message: 'Invalid or expired verification code' }, 401);
+    }
     await clearOtpAttempts(email);
     const { token, claims } = signAdminStepUpToken({
       sub: auth.userId,
       email,
-      // CF-08: undefined → signAdminStepUpToken defaults to the
-      // wildcard scope, preserving the prior "any write" behaviour.
-      ...(parsed.data.scope !== undefined ? { scope: parsed.data.scope } : {}),
+      // SEC-02-stepup: scope is REQUIRED — bind the token to exactly the
+      // action class the caller declared. No wildcard fallback.
+      scope: parsed.data.scope,
     });
     log.info(
       { adminId: auth.userId, expSec: claims.exp, scope: claims.scope },

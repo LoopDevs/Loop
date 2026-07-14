@@ -94,6 +94,7 @@ export function CreditAdjustmentForm({ userId, defaultCurrency }: Props): React.
       // P2-07: echo the signed amount + target user the OTP authorizes.
       stepUp.runWithStepUp(() => applyCreditAdjustment(args), {
         action: 'Apply credit adjustment',
+        scope: 'credit-adjustment',
         amount: { minor: args.amountMinor, currency: args.currency },
         destination: args.userId,
       }),

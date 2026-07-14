@@ -17,16 +17,29 @@
  *     please re-confirm").
  *   - Subject mismatch (step-up token's `sub` ≠ bearer token's
  *     `sub`) → 401 `STEP_UP_SUBJECT_MISMATCH` (defends against
- *     replaying admin A's step-up against admin B's session).
- *   - Scope mismatch (CF-08): the gate was mounted with a specific
- *     `action` but the token's `scope` is a *different* narrow scope
- *     → 401 `STEP_UP_PURPOSE_MISMATCH`. A wildcard-scoped token
- *     (`'admin-write'`, the mint default) satisfies any action, so
- *     this only fires when an admin deliberately narrowed a token to
- *     one class and then replayed it against another class.
+ *     replaying admin A's step-up against admin B's session). Checked
+ *     on the stateless verify BEFORE the single-use consume, so a
+ *     mismatched-subject presentation burns nothing.
+ *   - Scope mismatch (CF-08 / SEC-02-stepup): the token's `scope` is a
+ *     DIFFERENT class than the `action` this gate guards → 401
+ *     `STEP_UP_PURPOSE_MISMATCH`. There is NO wildcard bypass: a
+ *     wildcard-scoped token does NOT satisfy a concrete gate (that was
+ *     the audited all-class privilege). `consumeAdminStepUpToken`
+ *     enforces this.
+ *   - Already consumed (SEC-02-stepup): step-up tokens are SINGLE-USE.
+ *     A second presentation of the same token → 401
+ *     `STEP_UP_ALREADY_USED`. The UI re-mints a fresh scoped token.
+ *   - Not consumable (SEC-02-stepup): a legacy `jti`-less token can't
+ *     be tracked single-use → 401 `STEP_UP_INVALID` (fail closed).
  *   - Backend not configured (`LOOP_ADMIN_STEP_UP_SIGNING_KEY`
  *     unset) → 503 `STEP_UP_UNAVAILABLE`. Fail closed: surface
  *     ships disabled if the operator hasn't generated the key.
+ *
+ * SEC-02-stepup: the gate CONSUMES rather than merely verifies. The
+ * stateless verify (`verifyAdminStepUpToken`) still runs first to pin
+ * the subject; the authoritative authorisation decision — this class,
+ * once — goes through `consumeAdminStepUpToken`, which is DB-backed
+ * (`admin_step_up_consumptions`).
  *
  * The middleware requires a Loop-native auth subject to pin the
  * step-up token against. Legacy CTX-proxy bearer context has no
@@ -37,9 +50,10 @@ import type { Context, MiddlewareHandler } from 'hono';
 import {
   isAdminStepUpConfigured,
   verifyAdminStepUpToken,
-  STEP_UP_SCOPE_WILDCARD,
+  consumeAdminStepUpToken,
   type AdminStepUpScope,
   type AdminStepUpVerifyResult,
+  type AdminStepUpConsumeResult,
 } from './admin-step-up.js';
 import { logger } from '../logger.js';
 
@@ -52,17 +66,16 @@ interface AuthLike {
 
 /**
  * Returns the middleware handler. Exported as a factory rather than a
- * direct middleware export so the per-action scope binding (CF-08)
- * flows through configuration without changing the import shape.
+ * direct middleware export so the per-action scope binding flows
+ * through configuration without changing the import shape.
  *
- * @param action — CF-08 action class this gate guards. Omitted (the
- *   prior call shape) means "any narrow scope is accepted" — the gate
- *   only verifies freshness, not which class the token was minted for,
- *   so existing mounts keep working unchanged. Pass a specific scope
- *   to additionally require that a *narrowed* token was minted for
- *   exactly this class (a wildcard token still satisfies it).
+ * @param action — the action class this gate guards. REQUIRED
+ *   (SEC-02-stepup): the token must have been minted for exactly this
+ *   class, and is consumed single-use against it. There is no longer a
+ *   scope-agnostic mode — the old "accept any narrow scope / wildcard"
+ *   behaviour WAS the audited all-class privilege.
  */
-export function requireAdminStepUp(action?: AdminStepUpScope): MiddlewareHandler {
+export function requireAdminStepUp(action: AdminStepUpScope): MiddlewareHandler {
   const mw: MiddlewareHandler = async (c: Context, next) => {
     if (!isAdminStepUpConfigured()) {
       log.error('admin step-up gate hit but LOOP_ADMIN_STEP_UP_SIGNING_KEY is unset');
@@ -110,9 +123,14 @@ export function requireAdminStepUp(action?: AdminStepUpScope): MiddlewareHandler
       );
     }
 
+    // Stateless verify FIRST — purely to pin the subject before the
+    // single-use consume. Doing subject-pinning here (rather than after
+    // consume) means a token presented on the WRONG admin's session is
+    // rejected without being burned, so a leaked-token replay can't DoS
+    // the legitimate owner's freshly-minted token.
     const verified: AdminStepUpVerifyResult = verifyAdminStepUpToken(tokenHeader);
     if (!verified.ok) {
-      log.warn({ reason: verified.reason }, 'admin step-up token rejected');
+      log.warn({ reason: verified.reason }, 'admin step-up token rejected (verify)');
       // `not_configured` was caught above; if we got here it's a
       // real verify failure (signature / expiry / wrong audience).
       // Collapse them to a single error code so the UI flow is one
@@ -146,35 +164,54 @@ export function requireAdminStepUp(action?: AdminStepUpScope): MiddlewareHandler
       );
     }
 
-    // CF-08 scope binding. If this gate guards a specific action and
-    // the presented token was minted for a *different* narrow scope,
-    // reject — a step-up confirmed for (say) a refund must not be
-    // silently reusable for a withdrawal. A wildcard-scoped token
-    // (`'admin-write'`, the mint default) satisfies every action, so
-    // the common "one generic token, replayed across writes" flow is
-    // unaffected; this only fires for deliberately-narrowed tokens.
-    if (
-      action !== undefined &&
-      verified.claims.scope !== STEP_UP_SCOPE_WILDCARD &&
-      verified.claims.scope !== action
-    ) {
+    // SEC-02-stepup: the authoritative authorisation decision. Consume
+    // the token DB-backed against this gate's concrete action: it must
+    // have been minted for exactly this class (no wildcard bypass) and
+    // it is burned single-use. A scope mismatch is rejected before the
+    // insert (nothing burned); a replay of an already-consumed token
+    // conflicts on the `jti` primary key.
+    const consumed: AdminStepUpConsumeResult = await consumeAdminStepUpToken({
+      token: tokenHeader,
+      action,
+    });
+    if (!consumed.ok) {
       log.warn(
-        { tokenScope: verified.claims.scope, requiredAction: action },
-        'admin step-up scope mismatch',
+        { reason: consumed.reason, requiredAction: action },
+        'admin step-up token rejected (consume)',
       );
+      if (consumed.reason === 'scope_mismatch') {
+        return c.json(
+          {
+            code: 'STEP_UP_PURPOSE_MISMATCH',
+            message: 'Step-up token was confirmed for a different action. Re-confirm to continue.',
+          },
+          401,
+        );
+      }
+      if (consumed.reason === 'already_consumed') {
+        return c.json(
+          {
+            code: 'STEP_UP_ALREADY_USED',
+            message: 'Step-up token was already used. Re-confirm to continue.',
+          },
+          401,
+        );
+      }
+      // `not_consumable` (legacy jti-less token → fail closed) plus any
+      // stateless reason that slipped past the verify above.
       return c.json(
         {
-          code: 'STEP_UP_PURPOSE_MISMATCH',
-          message: 'Step-up token was confirmed for a different action. Re-confirm to continue.',
+          code: 'STEP_UP_INVALID',
+          message: 'Step-up authentication is invalid or expired. Re-confirm your password.',
         },
         401,
       );
     }
 
-    // Stash the verified claims on the request context — the audit
+    // Stash the consumed claims on the request context — the audit
     // middleware reads `stepUp` to populate the audit row's
     // `step_up_at` column.
-    c.set('stepUp', verified.claims);
+    c.set('stepUp', consumed.claims);
     return next();
   };
   // Named so the route-inventory test (staff-route-gating.test.ts)
@@ -183,6 +220,6 @@ export function requireAdminStepUp(action?: AdminStepUpScope): MiddlewareHandler
   // B1: before this, the gate was an anonymous closure the inventory
   // walk couldn't see, so a new money-write route missing step-up
   // passed every structural test.
-  Object.defineProperty(mw, 'name', { value: `requireAdminStepUp(${action ?? 'any'})` });
+  Object.defineProperty(mw, 'name', { value: `requireAdminStepUp(${action})` });
   return mw;
 }

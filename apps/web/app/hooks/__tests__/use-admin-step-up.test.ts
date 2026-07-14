@@ -46,12 +46,48 @@ describe('useAdminStepUp', () => {
     await act(async () => {
       result.current.handleStepUpConfirm('fresh-token', futureExp);
       await pending;
+      // Let the single-use `.finally(clearStepUp)` microtask run.
+      await Promise.resolve();
     });
     expect(result.current.modalOpen).toBe(false);
-    expect(useAdminStepUpStore.getState().token).toBe('fresh-token');
+    // SEC-02-stepup: the minted token is single-use — it's consumed by
+    // the one retried write and then BURNED from the store, so the next
+    // protected write re-mints a fresh scoped token rather than replaying
+    // a now-dead one (re-mint-per-row / least-privilege).
+    expect(useAdminStepUpStore.getState().token).toBeNull();
     expect(mutation).toHaveBeenCalledTimes(2);
     await expect(pending).resolves.toBe('retry-ok');
   });
+
+  // SEC-02-stepup: a single-use token that's already been spent
+  // (STEP_UP_ALREADY_USED) or was minted for a different class
+  // (STEP_UP_PURPOSE_MISMATCH) is recovered the same way — re-open the
+  // modal and mint a fresh scoped token.
+  it.each(['STEP_UP_ALREADY_USED', 'STEP_UP_PURPOSE_MISMATCH'])(
+    'opens the modal on %s (re-mint a fresh scoped token)',
+    async (code) => {
+      const { result } = renderHook(() => useAdminStepUp());
+      const mutation = vi
+        .fn<() => Promise<string>>()
+        .mockRejectedValueOnce(new ApiException(401, { code, message: code }))
+        .mockResolvedValueOnce('retry-ok');
+
+      let pending: Promise<string> | undefined;
+      await act(async () => {
+        pending = result.current.runWithStepUp(mutation);
+        await Promise.resolve();
+      });
+      expect(result.current.modalOpen).toBe(true);
+
+      const futureExp = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+      await act(async () => {
+        result.current.handleStepUpConfirm('fresh-token', futureExp);
+        await pending;
+      });
+      await expect(pending).resolves.toBe('retry-ok');
+      expect(mutation).toHaveBeenCalledTimes(2);
+    },
+  );
 
   it('rejects the queued mutation when the modal is cancelled', async () => {
     const { result } = renderHook(() => useAdminStepUp());
@@ -117,11 +153,15 @@ describe('useAdminStepUp', () => {
     const outcomeB: { settled: boolean; value?: unknown } = { settled: false };
 
     await act(async () => {
-      void result.current.runWithStepUp(mutationA, { action: 'Action A' }).then((v) => {
-        outcomeA.settled = true;
-        outcomeA.value = v;
-      });
-      void result.current.runWithStepUp(mutationB, { action: 'Action B' }).then((v) => {
+      void result.current
+        .runWithStepUp(mutationA, { action: 'Action A', scope: 'credit-adjustment' })
+        .then((v) => {
+          outcomeA.settled = true;
+          outcomeA.value = v;
+        });
+      void result.current
+        .runWithStepUp(mutationB, { action: 'Action B', scope: 'emission' })
+        .then((v) => {
         outcomeB.settled = true;
         outcomeB.value = v;
       });

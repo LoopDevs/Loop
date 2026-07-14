@@ -63,7 +63,7 @@ import { paymentWatcherSkips, adminIdempotencyKeys } from '../../db/schema.js';
 import { upsertUserFromCtx } from '../../db/users.js';
 import { app } from '../../app.js';
 import { signLoopToken } from '../../auth/tokens.js';
-import { signAdminStepUpToken } from '../../auth/admin-step-up.js';
+import { signAdminStepUpToken, type AdminStepUpScope } from '../../auth/admin-step-up.js';
 import { ensureMigrated, truncateAllTables } from './db-test-setup.js';
 
 const describeIf = RUN_INTEGRATION ? describe : describe.skip;
@@ -104,7 +104,9 @@ async function fakeRefundDeposit(
 interface SeededAdmin {
   adminUserId: string;
   bearer: string;
-  stepUp: string;
+  // SEC-02-stepup: mint a FRESH single-use, class-bound token per request
+  // (the deposit-refund endpoint gates on the `deposit-refund` scope).
+  mintStepUp: (scope: AdminStepUpScope) => string;
 }
 
 async function seedAdmin(): Promise<SeededAdmin> {
@@ -115,8 +117,9 @@ async function seedAdmin(): Promise<SeededAdmin> {
     typ: 'access',
     ttlSeconds: 300,
   });
-  const { token: stepUp } = signAdminStepUpToken({ sub: admin.id, email: admin.email });
-  return { adminUserId: admin.id, bearer: token, stepUp };
+  const mintStepUp = (scope: AdminStepUpScope): string =>
+    signAdminStepUpToken({ sub: admin.id, email: admin.email, scope }).token;
+  return { adminUserId: admin.id, bearer: token, mintStepUp };
 }
 
 async function seedAbandonedSkip(paymentId: string): Promise<void> {
@@ -129,12 +132,17 @@ async function seedAbandonedSkip(paymentId: string): Promise<void> {
   });
 }
 
-function headersFor(bearer: string, stepUp: string, key: string): Record<string, string> {
+function headersFor(
+  bearer: string,
+  mintStepUp: (scope: AdminStepUpScope) => string,
+  key: string,
+): Record<string, string> {
   return {
     'Content-Type': 'application/json',
     Authorization: `Bearer ${bearer}`,
     'idempotency-key': key,
-    'X-Admin-Step-Up': stepUp,
+    // SEC-02-stepup: fresh single-use deposit-refund token per call.
+    'X-Admin-Step-Up': mintStepUp('deposit-refund'),
   };
 }
 
@@ -151,18 +159,22 @@ describeIf('admin deposit-refund — ADR-017 envelope (real postgres)', () => {
   });
 
   it('wraps the refund in the envelope: one transition + audit-log row + captured reason + fanout, and a same-key replay is fenced', async () => {
-    const { adminUserId, bearer, stepUp } = await seedAdmin();
+    const { adminUserId, bearer, mintStepUp } = await seedAdmin();
     const paymentId = 'op-refund-1';
     await seedAbandonedSkip(paymentId);
 
     const key = idemKey();
     const reason = 'operator refund — late deposit, order expired';
     const url = `http://localhost/api/admin/deposits/${paymentId}/refund`;
-    const headers = headersFor(bearer, stepUp, key);
     const body = JSON.stringify({ reason });
 
-    // ---- First write ----
-    const first = await app.request(url, { method: 'POST', headers, body });
+    // ---- First write ---- (SEC-02-stepup: fresh single-use token; the
+    // idempotency replay below mints its own, same key.)
+    const first = await app.request(url, {
+      method: 'POST',
+      headers: headersFor(bearer, mintStepUp, key),
+      body,
+    });
     expect(first.status).toBe(200);
     const firstBody = (await first.json()) as {
       result: { paymentId: string; status: string; txHash: string; reason: string };
@@ -210,7 +222,13 @@ describeIf('admin deposit-refund — ADR-017 envelope (real postgres)', () => {
     });
 
     // ---- Replay with the SAME key: the ADR-017 fence dedups ----
-    const second = await app.request(url, { method: 'POST', headers, body });
+    // A fresh single-use step-up token (same idempotency key) so the
+    // replay is decided at the idempotency fence, not the step-up gate.
+    const second = await app.request(url, {
+      method: 'POST',
+      headers: headersFor(bearer, mintStepUp, key),
+      body,
+    });
     expect(second.status).toBe(200);
     const secondBody = (await second.json()) as {
       result: unknown;
@@ -235,7 +253,7 @@ describeIf('admin deposit-refund — ADR-017 envelope (real postgres)', () => {
   });
 
   it('requires an Idempotency-Key header (400) and does not invoke the refund', async () => {
-    const { bearer, stepUp } = await seedAdmin();
+    const { bearer, mintStepUp } = await seedAdmin();
     const paymentId = 'op-refund-2';
     await seedAbandonedSkip(paymentId);
 
@@ -244,7 +262,7 @@ describeIf('admin deposit-refund — ADR-017 envelope (real postgres)', () => {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${bearer}`,
-        'X-Admin-Step-Up': stepUp,
+        'X-Admin-Step-Up': mintStepUp('deposit-refund'),
       },
       body: JSON.stringify({ reason: 'no idempotency key' }),
     });
@@ -259,13 +277,13 @@ describeIf('admin deposit-refund — ADR-017 envelope (real postgres)', () => {
   });
 
   it('requires a captured reason (400) and does not invoke the refund', async () => {
-    const { bearer, stepUp } = await seedAdmin();
+    const { bearer, mintStepUp } = await seedAdmin();
     const paymentId = 'op-refund-3';
     await seedAbandonedSkip(paymentId);
 
     const res = await app.request(`http://localhost/api/admin/deposits/${paymentId}/refund`, {
       method: 'POST',
-      headers: headersFor(bearer, stepUp, idemKey()),
+      headers: headersFor(bearer, mintStepUp, idemKey()),
       body: JSON.stringify({}),
     });
     expect(res.status).toBe(400);

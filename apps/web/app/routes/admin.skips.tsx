@@ -169,6 +169,7 @@ function AdminSkipsRouteInner(): React.JSX.Element {
           }),
         {
           action: 'Refund deposit to sender',
+          scope: 'deposit-refund',
           destination: args.paymentId,
         },
       ),

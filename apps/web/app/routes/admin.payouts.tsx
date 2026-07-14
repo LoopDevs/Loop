@@ -151,6 +151,7 @@ function AdminPayoutsRouteInner(): React.JSX.Element {
       const row = query.data?.payouts.find((p) => p.id === args.id);
       return stepUp.runWithStepUp(() => retryPayout(args), {
         action: 'Retry payout',
+        scope: 'payout-retry',
         ...(row !== undefined
           ? {
               amount: { formatted: fmtStroops(row.amountStroops, row.assetCode) },

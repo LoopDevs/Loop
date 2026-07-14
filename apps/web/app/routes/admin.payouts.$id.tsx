@@ -93,6 +93,7 @@ function AdminPayoutDetailRouteInner(): React.JSX.Element {
       // destination address the OTP re-authorizes for submission.
       stepUp.runWithStepUp(() => retryPayout(args), {
         action: 'Retry payout',
+        scope: 'payout-retry',
         ...(query.data !== undefined
           ? {
               amount: { formatted: fmtStroops(query.data.amountStroops, query.data.assetCode) },

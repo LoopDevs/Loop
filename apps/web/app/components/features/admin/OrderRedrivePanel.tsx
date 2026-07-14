@@ -49,6 +49,7 @@ export function OrderRedrivePanel({
       // the order id is the identifying detail we can surface here.
       stepUp.runWithStepUp(() => redriveOrder({ orderId, ...args }), {
         action: 'Re-drive order',
+        scope: 'order-redrive',
         destination: orderId,
       }),
     onSuccess: (envelope) => {

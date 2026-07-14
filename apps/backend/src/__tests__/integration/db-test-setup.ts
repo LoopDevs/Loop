@@ -107,6 +107,12 @@ export const TABLES_TO_TRUNCATE = [
   'user_favorite_merchants',
   'refresh_tokens',
   'otps',
+  // SEC-02-stepup (migration 0065): the admin step-up single-use
+  // ledger. No FK to anything in this list (an ephemeral per-`jti`
+  // marker), so — like `otp_attempt_counters` / `vault_hot_float`
+  // above — CASCADE never reaches it and a consumed-jti row would leak
+  // across tests unless truncated explicitly.
+  'admin_step_up_consumptions',
   'users',
   'watcher_cursors',
 ] as const;

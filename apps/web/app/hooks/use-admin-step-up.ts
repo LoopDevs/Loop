@@ -27,10 +27,18 @@ import { useAdminStepUpStore, type PendingActionSummary } from '~/stores/admin-s
 
 export type { PendingActionSummary, PendingActionAmount } from '~/stores/admin-step-up.store';
 
+// Codes that mean "re-authenticate for this write": the hook opens the
+// modal, mints a FRESH scoped token, and retries once. SEC-02-stepup
+// added PURPOSE_MISMATCH (token minted for a different class) and
+// ALREADY_USED (token already spent — single-use) to the set, since both
+// are recovered by minting a fresh, correctly-scoped token — the same
+// re-prompt flow as an expired / missing token.
 const STEP_UP_FAILURE_CODES = new Set([
   'STEP_UP_REQUIRED',
   'STEP_UP_INVALID',
   'STEP_UP_SUBJECT_MISMATCH',
+  'STEP_UP_PURPOSE_MISMATCH',
+  'STEP_UP_ALREADY_USED',
 ]);
 
 interface UseAdminStepUpReturn {
@@ -79,20 +87,31 @@ export function useAdminStepUp(): UseAdminStepUpReturn {
       setStepUp(token, expiresAt);
       setModalOpen(false);
       setPendingAction(null);
-      // Drain the whole queue: ONE confirmed step-up token authorizes
-      // every mutation that was waiting on it (consistent with the
-      // store's existing 5-minute token-reuse window — a fresh token in
-      // the store is silently reused by any `withStepUp` call). Replaying
-      // all queued mutations serves each concurrent demand rather than
-      // dropping the losers. Retry runs once per mutation; a second
-      // failure bubbles to that caller via its own reject path.
+      // P2-06: drain the WHOLE queue so every concurrent step-up demand
+      // is served — no loser is left with a promise that never settles.
+      // Each queued mutation is replayed and captures the freshly-minted
+      // token synchronously at dispatch (`authenticatedRequest` reads it
+      // from the store when it builds the request).
       const queued = pendingQueueRef.current;
       pendingQueueRef.current = [];
       for (const pending of queued) {
-        pending.fn().then(pending.resolve).catch(pending.reject);
+        pending
+          .fn()
+          .then(pending.resolve)
+          .catch(pending.reject)
+          .finally(() => {
+            // SEC-02-stepup: step-up tokens are now SINGLE-USE and
+            // class-bound, so this token authorizes exactly one write.
+            // Burn it once the write settles so the next protected write
+            // mints a fresh, correctly-scoped token (re-mint-per-row /
+            // least-privilege) instead of replaying a now-dead one. A
+            // concurrent sibling the single-use server rejects settles via
+            // its own reject path (STEP_UP_ALREADY_USED) — never a hang.
+            clearStepUp();
+          });
       }
     },
-    [setStepUp, setPendingAction],
+    [setStepUp, setPendingAction, clearStepUp],
   );
 
   const handleStepUpCancel = useCallback(() => {

@@ -67,7 +67,7 @@ export function RefundOrderPanel({
         // P2-07: echo which order the OTP refunds. The refund amount is
         // the full order charge, computed server-side, so the order id is
         // the identifying detail available on the client.
-        { action: 'Refund order', destination: orderId },
+        { action: 'Refund order', scope: 'order-refund', destination: orderId },
       ),
     onSuccess: (envelope) => {
       const res = envelope.result;

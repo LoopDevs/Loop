@@ -140,6 +140,7 @@ function AdminCashbackRouteInner(): React.JSX.Element {
         // blank confirmation.
         {
           action: `Set cashback split — wholesale ${wholesalePct}% / user ${userCashbackPct}% / margin ${loopMarginPct}%`,
+          scope: 'cashback-config',
           destination: args.merchantId,
         },
       );

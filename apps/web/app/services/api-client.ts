@@ -79,6 +79,10 @@ const STEP_UP_CHALLENGE_CODES = new Set<string>([
   ApiErrorCode.STEP_UP_INVALID,
   ApiErrorCode.STEP_UP_SUBJECT_MISMATCH,
   ApiErrorCode.STEP_UP_PURPOSE_MISMATCH,
+  // SEC-02-stepup: a single-use step-up token replayed (already consumed)
+  // is its own re-auth dance — the hook mints a fresh scoped token — not
+  // an access-token expiry, so it must also bypass refresh-and-retry.
+  ApiErrorCode.STEP_UP_ALREADY_USED,
 ]);
 
 /**

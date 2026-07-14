@@ -185,6 +185,12 @@ export const ApiErrorCode = {
   // against a different one. The admin UI re-prompts (same flow as
   // STEP_UP_INVALID) but minting for the correct action.
   STEP_UP_PURPOSE_MISMATCH: 'STEP_UP_PURPOSE_MISMATCH',
+  // SEC-02-stepup: a step-up token that was ALREADY consumed was
+  // presented again. Step-up tokens are single-use (one destructive
+  // write per mint) — the DB-backed `admin_step_up_consumptions` ledger
+  // rejects the replay. The admin UI re-prompts + re-mints a fresh
+  // scoped token (same flow as STEP_UP_INVALID / STEP_UP_PURPOSE_MISMATCH).
+  STEP_UP_ALREADY_USED: 'STEP_UP_ALREADY_USED',
   // Admin home-currency change (ADR 015 deferred § support-mediated
   // change). USER_NOT_FOUND is shared with other lookups but the
   // home-currency-set handler is the first to surface it from an

@@ -74,6 +74,7 @@ export function AdminEmissionForm({ userId, defaultCurrency }: Props): React.JSX
       // must see the amount + destination on the OTP surface itself.
       stepUp.runWithStepUp(() => applyAdminEmission(args), {
         action: 'Queue emission',
+        scope: 'emission',
         amount: { minor: args.amountMinor, currency: args.currency },
         destination: args.destinationAddress,
       }),

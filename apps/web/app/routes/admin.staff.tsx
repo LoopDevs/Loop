@@ -70,6 +70,7 @@ function AdminStaffRouteInner(): React.JSX.Element {
       // P2-07: echo the role change the OTP authorizes (not a money path).
       stepUp.runWithStepUp(() => revokeStaffRole(args), {
         action: `Revoke staff role from ${args.userId}`,
+        scope: 'staff-role-revoke',
       }),
     onSuccess: (envelope) => {
       addToast(
@@ -269,6 +270,7 @@ function GrantForm({
       // P2-07: echo the role grant the OTP authorizes (not a money path).
       runWithStepUp(() => setStaffRole(args), {
         action: `Grant ${args.role} role to ${args.userId}`,
+        scope: 'staff-role-grant',
       }),
     onSuccess: (envelope) => {
       setLastReplayed(envelope.audit.replayed);
