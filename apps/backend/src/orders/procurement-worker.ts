@@ -31,11 +31,16 @@ import {
 import { sweepStuckProcurement } from './transitions.js';
 import { runProcurementTick } from './procurement.js';
 import { PROCUREMENT_TIMEOUT_MS } from './procurement-constants.js';
+import {
+  runCtxSettlementStuckWatchdog,
+  CTX_SETTLEMENT_STUCK_WATCHDOG_INTERVAL_MS,
+} from './ctx-settlement-stuck-watchdog.js';
 
 const log = logger.child({ area: 'procurement' });
 
 let procurementTimer: ReturnType<typeof setInterval> | null = null;
 let sweepTimer: ReturnType<typeof setInterval> | null = null;
+let ctxSettlementWatchdogTimer: ReturnType<typeof setInterval> | null = null;
 
 // `PROCUREMENT_TIMEOUT_MS` now lives in `./procurement-constants.js`
 // (A5-6 — see that file's docstring) and is re-exported here so
@@ -74,12 +79,31 @@ export function startProcurementWorker(args: { intervalMs: number; limit?: numbe
       log.error({ err }, 'Stuck-procurement sweep failed');
     }
   };
+  // NS-13: the stuck CTX-settlement watchdog runs on its own cadence,
+  // single-flighted fleet-wide, sharing the procurement worker's lifecycle
+  // like `stuck-payout-watchdog` shares the payout worker's and the
+  // vault-emission stuck watchdog shares the emission sweep's. A settlement
+  // is only ever written by `payCtxOrder` (reached from procurement), so
+  // this worker is its natural home.
+  const ctxSettlementWatchdogTick = async (): Promise<void> => {
+    try {
+      await runCtxSettlementStuckWatchdog();
+    } catch (err) {
+      log.error({ err }, 'Stuck CTX-settlement watchdog tick failed');
+    }
+  };
   void tick();
   void sweep();
+  void ctxSettlementWatchdogTick();
   procurementTimer = setInterval(() => void tick(), args.intervalMs);
   procurementTimer.unref();
   sweepTimer = setInterval(() => void sweep(), SWEEP_INTERVAL_MS);
   sweepTimer.unref();
+  ctxSettlementWatchdogTimer = setInterval(
+    () => void ctxSettlementWatchdogTick(),
+    CTX_SETTLEMENT_STUCK_WATCHDOG_INTERVAL_MS,
+  );
+  ctxSettlementWatchdogTimer.unref();
 }
 
 export function stopProcurementWorker(): void {
@@ -90,6 +114,10 @@ export function stopProcurementWorker(): void {
   if (sweepTimer !== null) {
     clearInterval(sweepTimer);
     sweepTimer = null;
+  }
+  if (ctxSettlementWatchdogTimer !== null) {
+    clearInterval(ctxSettlementWatchdogTimer);
+    ctxSettlementWatchdogTimer = null;
   }
   markWorkerStopped('procurement_worker');
   log.info('Procurement worker stopped');

@@ -148,6 +148,22 @@ export async function tryDrawHotFloat(
  * Used by the SLOW path (`vault-redemptions.ts`'s payout step credits
  * the vault-withdraw proceeds net of the amount it settles, atomically
  * with its own state transition) and by `runHotFloatReplenishTick`.
+ *
+ * `carryStroopsDelta` (MNY-06-REDEMPTION-DUST) folds a NON-NEGATIVE
+ * sub-minor stroop remainder into `carry_stroops`, flushing a whole
+ * minor into `balance_minor` the moment carry crosses STROOPS_PER_MINOR
+ * — the SAME `(carry + stroops) / PER` flush / `(carry + stroops) % PER`
+ * retain idiom `runHotFloatReplenishTick` carries inline for the
+ * replenish path (MNY-06-hotfloat). A caller whose credit lands on a
+ * whole-minor boundary passes the default `0n` and gets the original
+ * plain-delta behaviour (`(carry + 0) / PER == 0`, `(carry + 0) % PER ==
+ * carry`), so this is a strict superset — pre-existing callers are
+ * byte-for-byte unchanged. Because `carryStroopsDelta` is required
+ * non-negative and the stored carry is already in `[0, PER)`, the sum
+ * stays in `[0, 2*PER)` and the retained `% PER` never leaves
+ * `[0, PER)` — the `vault_hot_float_carry_bounded` CHECK holds
+ * regardless of the SIGN of `balanceDelta` (the signed whole-minor part
+ * lands only in `balance_minor`, never in the carry).
  */
 export async function applyHotFloatDeltaInTx(
   tx: HotFloatTx,
@@ -155,12 +171,14 @@ export async function applyHotFloatDeltaInTx(
   network: LoopVaultNetwork,
   balanceDelta: bigint,
   pendingSharesDelta: bigint,
+  carryStroopsDelta: bigint = 0n,
 ): Promise<void> {
   await ensureFloatRowInTx(tx, assetCode, network);
   await tx
     .update(vaultHotFloat)
     .set({
-      balanceMinor: sql`${vaultHotFloat.balanceMinor} + ${balanceDelta}`,
+      balanceMinor: sql`${vaultHotFloat.balanceMinor} + ${balanceDelta} + (${vaultHotFloat.carryStroops} + ${carryStroopsDelta}) / ${STROOPS_PER_MINOR}`,
+      carryStroops: sql`(${vaultHotFloat.carryStroops} + ${carryStroopsDelta}) % ${STROOPS_PER_MINOR}`,
       pendingUnredeemedShares: sql`${vaultHotFloat.pendingUnredeemedShares} + ${pendingSharesDelta}`,
       updatedAt: sql`NOW()`,
     })
@@ -245,27 +263,88 @@ export async function runHotFloatReplenishTick(
       `hot-float replenish: withdrawFromVault returned an empty amountsOut (${vault.assetCode}/${vault.network})`,
     );
   }
-  const amountOutMinor = amountOutStroops / STROOPS_PER_MINOR;
 
-  // Delta subtract on pendingUnredeemedShares (not "set to 0") — safe
-  // if a concurrent fast-path draw added MORE pending shares after our
-  // read above (module header's concurrency note).
-  await db.transaction((tx) =>
-    applyHotFloatDeltaInTx(
+  // MNY-06-hotfloat: the withdraw proceeds (`amountOutStroops`, 7-decimal
+  // underlying stroops) DO NOT generally land on a whole-minor boundary,
+  // so a plain `amountOutStroops / STROOPS_PER_MINOR` would TRUNCATE the
+  // `amountOutStroops % STROOPS_PER_MINOR` sub-minor remainder — real
+  // on-chain USDC dropped from the float on every tick, accumulating over
+  // time into a growing, unaccounted gap (the leak this fix removes).
+  // Instead we carry the remainder forward in `carry_stroops` and flush a
+  // whole minor into `balance_minor` only once carry + this tick's
+  // remainder crosses STROOPS_PER_MINOR — conserving every stroop:
+  // `balance_minor * PER + carry_stroops == Σ amountOutStroops`. Same
+  // carry idiom as `credits/interest-mint.ts` `splitPayable`.
+  //
+  // `creditedMinor` is the whole-minor amount this tick flushes to the
+  // balance, reported to the log / caller. It is derived from the
+  // `carry_stroops` this tick READ (`row`, from the unlocked
+  // `getHotFloatRow`) — telemetry only, in the same best-effort spirit as
+  // `shares` above; the AUTHORITATIVE credit is the pure-SQL
+  // read-modify-write below, which reads the row's CURRENT carry.
+  const creditedMinor = (row.carryStroops + amountOutStroops) / STROOPS_PER_MINOR;
+
+  // Credit the withdraw proceeds and retire the pending shares this
+  // tick redeemed. Two properties matter here:
+  //
+  //   1. Delta subtract on pendingUnredeemedShares (not "set to 0") —
+  //      safe if a concurrent fast-path draw ADDED more pending shares
+  //      after our read above (module header's concurrency note); we
+  //      retire only the `shares` this tick captured, leaving the rest.
+  //   2. The subtract is CLAMPED at zero (`GREATEST(… , 0)`), not a
+  //      blind `- shares`. `shares` came from an UNLOCKED read
+  //      (`getHotFloatRow`) and the on-chain `withdraw` — a network
+  //      round-trip we cannot hold a row lock across — commits before
+  //      we reach here. So a second replenish tick that raced the SAME
+  //      `pending_unredeemed_shares` (module header + hot-float-
+  //      reconciliation.ts §(b)) can have already retired them: a blind
+  //      `pending - shares` would then underflow and trip the
+  //      `vault_hot_float_pending_shares_non_negative` CHECK, ABORTING
+  //      this transaction — which would silently drop THIS tick's real,
+  //      already-landed proceeds credit AND skip the R3-1 movement
+  //      record below (the OPPOSITE of the stated intent). Clamping
+  //      keeps the invariant `pending >= 0` while still crediting every
+  //      landed withdraw; the residual share-level drift (more shares
+  //      burned than one row's pending accounted for) is exactly what
+  //      the R3-1 reconciler exists to surface — and can only surface
+  //      once this credit + its movement below actually commit.
+  await db.transaction(async (tx) => {
+    await ensureFloatRowInTx(
       tx,
       vault.assetCode as LoopVaultAssetCode,
       vault.network as LoopVaultNetwork,
-      amountOutMinor,
-      -shares,
-    ),
-  );
+    );
+    await tx
+      .update(vaultHotFloat)
+      .set({
+        // Flush whole minors, carry the sub-minor remainder. Both
+        // expressions read the row's CURRENT `carry_stroops`, so under
+        // READ COMMITTED a concurrent tick's committed carry is folded in
+        // (Postgres re-evaluates SET against the updated row) — carry
+        // accumulates correctly without a separate FOR UPDATE, matching
+        // the atomic-per-row-UPDATE idiom the balance delta and the
+        // GREATEST pending clamp already rely on. `carry_stroops` stays a
+        // proper sub-minor remainder (0 <= carry < PER, DB-CHECKed).
+        balanceMinor: sql`${vaultHotFloat.balanceMinor} + (${vaultHotFloat.carryStroops} + ${amountOutStroops}) / ${STROOPS_PER_MINOR}`,
+        carryStroops: sql`(${vaultHotFloat.carryStroops} + ${amountOutStroops}) % ${STROOPS_PER_MINOR}`,
+        pendingUnredeemedShares: sql`GREATEST(${vaultHotFloat.pendingUnredeemedShares} - ${shares}, 0)`,
+        updatedAt: sql`NOW()`,
+      })
+      .where(
+        and(
+          eq(vaultHotFloat.assetCode, vault.assetCode as LoopVaultAssetCode),
+          eq(vaultHotFloat.network, vault.network as LoopVaultNetwork),
+        ),
+      );
+  });
 
   log.info(
     {
       assetCode: vault.assetCode,
       network: vault.network,
       shares,
-      amountOutMinor,
+      creditedMinor,
+      amountOutStroops,
       txHash: result.txHash,
     },
     'hot-float replenished',
@@ -294,5 +373,5 @@ export async function runHotFloatReplenishTick(
     reason: `Hot-float replenish withdraw (${vault.assetCode}/${vault.network}, ${shares} shares)`,
   });
 
-  return { replenished: true, amountMinor: amountOutMinor, txHash: result.txHash };
+  return { replenished: true, amountMinor: creditedMinor, txHash: result.txHash };
 }

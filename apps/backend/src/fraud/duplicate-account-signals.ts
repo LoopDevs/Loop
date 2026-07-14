@@ -60,7 +60,17 @@ export async function checkDuplicateFundingSource(args: {
   let relatedRows: Array<{ userId: string; id: string }>;
   try {
     relatedRows = await db
-      .select({ userId: orders.userId, id: orders.id })
+      // `DISTINCT ON (user_id)` so `RELATED_USER_LIMIT` bounds the number
+      // of distinct related USERS, which is the cap's stated intent — not
+      // the raw order-row count. A plain `LIMIT` on the unaggregated rows
+      // lets a SINGLE related user with many orders from this source fill
+      // the limit and crowd out every OTHER related user, silently
+      // under-counting the funding-source-reuse signal (the exact opposite
+      // of what the detector is for). The `ORDER BY user_id, id` both
+      // satisfies Postgres's DISTINCT-ON leading-column rule and makes the
+      // one example order id kept per user deterministic (lowest id) for
+      // the evidence blob.
+      .selectDistinctOn([orders.userId], { userId: orders.userId, id: orders.id })
       .from(orders)
       .where(
         and(
@@ -68,6 +78,7 @@ export async function checkDuplicateFundingSource(args: {
           ne(orders.userId, userId),
         ),
       )
+      .orderBy(orders.userId, orders.id)
       .limit(RELATED_USER_LIMIT);
   } catch (err) {
     log.error(

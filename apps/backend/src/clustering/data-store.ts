@@ -8,20 +8,35 @@ import { scrubUpstreamBody } from '../upstream-body-scrub.js';
 import { getMerchants } from '../merchants/sync.js';
 import { loadCatalogSnapshot, saveCatalogSnapshot } from '../ctx/catalog-snapshots.js';
 
+// Size caps stop a compromised or buggy upstream from blowing memory or
+// injecting unbounded data into the in-memory location store (which we serve
+// to every map client). Mirrors the per-field caps on the merchant upstream
+// schema (`sync-upstream.ts`). Generous vs. real location data, tight enough
+// to catch "upstream returns a 1MB string" or "a 10M-element result page".
+const MAX_ID_LENGTH = 128;
+const MAX_URL_LENGTH = 2048;
+const MAX_COORD_LENGTH = 32;
+// perPage is requested at 1000; cap a single page's array at 5x that so a
+// compromised upstream can't hand us an unbounded array in one response.
+// Combined with MAX_PAGES this bounds total records the whole sync can hold.
+const MAX_RESULT_COUNT = 5000;
+
 /**
  * Zod schema for a single upstream location entry. Required fields are strict;
- * `mapPinUrl` is optional. `.passthrough()` preserves unknown fields.
+ * `mapPinUrl` is optional. `.passthrough()` preserves unknown fields. Every
+ * string field is length-capped (FT-15) so one oversized value is skipped
+ * rather than absorbed into the served store.
  */
 const UpstreamLocationSchema = z
   .object({
-    id: z.string(),
-    merchantId: z.string().min(1),
+    id: z.string().max(MAX_ID_LENGTH),
+    merchantId: z.string().min(1).max(MAX_ID_LENGTH),
     enabled: z.boolean(),
     latLong: z.object({
-      latitude: z.string(),
-      longitude: z.string(),
+      latitude: z.string().max(MAX_COORD_LENGTH),
+      longitude: z.string().max(MAX_COORD_LENGTH),
     }),
-    mapPinUrl: z.string().optional(),
+    mapPinUrl: z.string().max(MAX_URL_LENGTH).optional(),
   })
   .passthrough();
 
@@ -34,8 +49,10 @@ const UpstreamLocationsResponseSchema = z
       total: z.number().int().nonnegative(),
     }),
     // Validate individually inside the loop so one malformed record does not
-    // poison the whole page.
-    result: z.array(z.unknown()),
+    // poison the whole page. Count-cap the array itself (FT-15) so an oversized
+    // page is rejected wholesale — the refresh throws and retains previous data
+    // rather than loading an unbounded array into memory.
+    result: z.array(z.unknown()).max(MAX_RESULT_COUNT),
   })
   .passthrough();
 

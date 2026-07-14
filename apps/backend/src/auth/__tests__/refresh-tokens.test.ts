@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { dbMock, state, deleteSpy } = vi.hoisted(() => {
+const { dbMock, state, deleteSpy, transactionSpy } = vi.hoisted(() => {
   const s: {
     findFirstResult: unknown;
     insertCalls: unknown[];
@@ -17,6 +17,14 @@ const { dbMock, state, deleteSpy } = vi.hoisted(() => {
   m['update'] = vi.fn(() => m);
   const deleteSpy = vi.fn(() => m);
   m['delete'] = deleteSpy;
+  // NS-09: revokeAllRefreshTokensForUser now wraps the refresh-row
+  // revoke AND the token_version bump in one transaction. The tx handle
+  // is the same chainable `m`, so both `.set()` calls land in
+  // `state.updateSetArgs` just like a non-transactional update.
+  const transactionSpy = vi.fn(async (cb: (tx: typeof m) => Promise<void>) => {
+    await cb(m);
+  });
+  m['transaction'] = transactionSpy;
   m['set'] = vi.fn((v: unknown) => {
     s.updateSetArgs.push(v);
     return m;
@@ -37,7 +45,7 @@ const { dbMock, state, deleteSpy } = vi.hoisted(() => {
       findFirst: vi.fn(async () => s.findFirstResult),
     },
   };
-  return { dbMock: { ...m, query }, state: s, deleteSpy };
+  return { dbMock: { ...m, query }, state: s, deleteSpy, transactionSpy };
 });
 
 vi.mock('../../db/client.js', () => ({ db: dbMock }));
@@ -50,6 +58,12 @@ vi.mock('../../db/schema.js', () => ({
     revokedAt: 'revokedAt',
     replacedByJti: 'replacedByJti',
     lastUsedAt: 'lastUsedAt',
+  },
+  // NS-09: revokeAllRefreshTokensForUser also bumps users.token_version.
+  users: {
+    id: 'id',
+    tokenVersion: 'tokenVersion',
+    updatedAt: 'updatedAt',
   },
 }));
 
@@ -142,10 +156,16 @@ describe('revokeRefreshToken', () => {
     expect(s['lastUsedAt']).toBeInstanceOf(Date);
   });
 
-  it('allows replacedByJti to be omitted (null)', async () => {
+  it('COR-11: does NOT write replacedByJti when omitted — preserves rotation-chain lineage', async () => {
     await revokeRefreshToken({ jti: 'jti-1' });
     const s = state.updateSetArgs[0] as Record<string, unknown>;
-    expect(s['replacedByJti']).toBeNull();
+    // Logout revokes by jti with no successor. The update must leave
+    // `replaced_by_jti` untouched, or an already-rotated row's link is
+    // clobbered and the audit chain dead-ends at the logout (COR-11).
+    expect('replacedByJti' in s).toBe(false);
+    // Still a genuine revoke: the terminal marker + last-used stamp.
+    expect(s['revokedAt']).toBeInstanceOf(Date);
+    expect(s['lastUsedAt']).toBeInstanceOf(Date);
   });
 });
 
@@ -214,11 +234,19 @@ describe('tryRevokeIfLive', () => {
 });
 
 describe('revokeAllRefreshTokensForUser', () => {
-  it('issues an update targeting only live rows for the user', async () => {
+  it('revokes the live refresh rows AND bumps the user token_version (NS-09)', async () => {
     await revokeAllRefreshTokensForUser('user-uuid');
-    expect(state.updateSetArgs).toHaveLength(1);
-    const s = state.updateSetArgs[0] as Record<string, unknown>;
-    expect(s['revokedAt']).toBeInstanceOf(Date);
+    // Two updates in one transaction: (1) revoke the live refresh rows,
+    // (2) NS-09 — bump token_version so the user's live access tokens die
+    // alongside their refresh tokens.
+    expect(transactionSpy).toHaveBeenCalledOnce();
+    expect(state.updateSetArgs).toHaveLength(2);
+    const refreshSet = state.updateSetArgs[0] as Record<string, unknown>;
+    expect(refreshSet['revokedAt']).toBeInstanceOf(Date);
+    const userSet = state.updateSetArgs[1] as Record<string, unknown>;
+    // The token_version bump is present (an atomic `+ 1` SQL expression,
+    // not a plain value) — this is the access-token revocation half.
+    expect(userSet['tokenVersion']).toBeDefined();
   });
 });
 

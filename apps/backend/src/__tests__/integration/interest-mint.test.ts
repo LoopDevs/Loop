@@ -407,16 +407,26 @@ describeIf('interest-mint integration — real postgres (Q6-6)', () => {
       carryAfterStroops: 0n,
       mintedMinor: 1000n,
     });
-    await db.insert(creditTransactions).values({
-      userId: userA.id,
-      type: 'interest',
-      amountMinor: 1000n,
-      currency: 'GBP',
-      referenceType: null,
-      referenceId: null,
-      periodCursor: PERIOD_1,
+    // DAT-01-inv1 (migration 0066): the prior-period interest ledger row
+    // and the balance it minted must land in ONE transaction so the
+    // deferred mirror-invariant trigger sees an equal mirror at commit
+    // (the interest row IS the intended crash-recovery ledger content, so
+    // it's seeded directly rather than via the generic opening-balance
+    // helper).
+    await db.transaction(async (tx) => {
+      await tx.insert(creditTransactions).values({
+        userId: userA.id,
+        type: 'interest',
+        amountMinor: 1000n,
+        currency: 'GBP',
+        referenceType: null,
+        referenceId: null,
+        periodCursor: PERIOD_1,
+      });
+      await tx
+        .insert(userCredits)
+        .values({ userId: userA.id, currency: 'GBP', balanceMinor: 1000n });
     });
-    await db.insert(userCredits).values({ userId: userA.id, currency: 'GBP', balanceMinor: 1000n });
     await db.insert(pendingPayouts).values({
       userId: userA.id,
       kind: 'interest_mint',
@@ -521,5 +531,35 @@ describeIf('interest-mint integration — real postgres (Q6-6)', () => {
     const after = await runInterestMintTick({ now: DAY_1, apyBps: 10_000 });
     expect(after.skippedLocked).toBe(false);
     expect(after.minted).toBe(1);
+  });
+
+  it('CON-04: a hung sweep hits the lease deadline, RELEASES the fleet-wide lock, and does NOT advance the cursor', async () => {
+    const user = await seedActivatedUser();
+    trustlineBalances.set(user.walletAddress, 36_500_000_000n);
+
+    // Make the per-user Horizon read hang so the sweep can never
+    // complete — the exact "blackholed Horizon" shape the lease guards
+    // against. `mockImplementationOnce` hangs only THIS call; the base
+    // mock impl is restored for the sanity re-run below and later tests.
+    vi.mocked(getAccountTrustlines).mockImplementationOnce(() => new Promise(() => {}));
+
+    // A short lease: pre-fix (no lease) the fleet-wide lock is held for
+    // the whole run, so this call would never resolve (the hung sweep
+    // holds the lock forever) — the test would time out. Post-fix the
+    // race settles at the lease and the lock is freed.
+    const result = await runInterestMintTick({ now: DAY_1, apyBps: 10_000, leaseMs: 200 });
+
+    expect(result.leaseTimedOut).toBe(true);
+    expect(result.skippedLocked).toBe(false);
+    expect(result.minted).toBe(0);
+    // The hung sweep never reached any DB write, and the cursor is left
+    // unadvanced so the next tick re-runs the period.
+    expect(await snapshotsFor(user.id)).toHaveLength(0);
+    expect(await cursor()).toBeNull();
+
+    // Proof the fleet-wide lock was actually released despite the
+    // orphaned in-flight sweep: a second session can now take it.
+    const reacquired = await withAdvisoryLock(interestMintLockKeyForTest(), async () => 'ok');
+    expect(reacquired).toEqual({ ran: true, value: 'ok' });
   });
 });

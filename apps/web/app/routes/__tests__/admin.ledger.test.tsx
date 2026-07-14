@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import { useAuthStore } from '~/stores/auth.store';
 import { render, screen, fireEvent, cleanup, act, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
@@ -81,6 +82,7 @@ const row2 = {
 
 beforeEach(() => {
   authMock.isAuthenticated = true;
+  useAuthStore.setState({ restoreComplete: false });
   userMock.staffRole = 'support';
   adminMock.listAdminLedger.mockReset();
   adminMock.listAdminLedger.mockResolvedValue({ transactions: [row1, row2] });
@@ -111,6 +113,8 @@ describe('AdminLedgerRoute — staff gate (A5-8)', () => {
 
   it('signed-out visitor gets a sign-in CTA, never calls the endpoint', async () => {
     authMock.isAuthenticated = false;
+    // FE-10: model restore-complete + logged-out so the guard shows sign-in, not the spinner
+    useAuthStore.setState({ restoreComplete: true });
     renderPage();
     expect(await screen.findByRole('button', { name: /sign in/i })).toBeDefined();
     expect(adminMock.listAdminLedger).not.toHaveBeenCalled();

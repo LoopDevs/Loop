@@ -192,6 +192,86 @@ describe('signAdminStepUpToken / verifyAdminStepUpToken', () => {
     });
   });
 
+  describe('SEC-02-stepup jti claim (single-use key)', () => {
+    it('stamps a fresh v4 uuid jti on every mint, and round-trips it', () => {
+      const a = signAdminStepUpToken({ sub: 'a', email: 'a@b.c', scope: 'refund' });
+      const b = signAdminStepUpToken({ sub: 'a', email: 'a@b.c', scope: 'refund' });
+      expect(a.claims.jti).toMatch(/^[0-9a-f-]{36}$/);
+      // Two mints get DISTINCT jtis — this is what makes each token a
+      // single, independently-consumable use.
+      expect(a.claims.jti).not.toBe(b.claims.jti);
+      const verified = verifyAdminStepUpToken(a.token);
+      expect(verified.ok).toBe(true);
+      if (verified.ok) expect(verified.claims.jti).toBe(a.claims.jti);
+    });
+
+    it('honours a pinned jti override (for single-use test assertions)', () => {
+      const { token, claims } = signAdminStepUpToken({
+        sub: 'a',
+        email: 'a@b.c',
+        scope: 'refund',
+        jti: 'fixed-jti-1',
+      });
+      expect(claims.jti).toBe('fixed-jti-1');
+      const verified = verifyAdminStepUpToken(token);
+      if (verified.ok) expect(verified.claims.jti).toBe('fixed-jti-1');
+    });
+
+    it('verifies a jti-less wire token with jti undefined (backward-safe rotation)', () => {
+      // A token minted before the `jti` claim existed has no `jti` field.
+      // It must still VERIFY (so an in-flight token survives the upgrade
+      // window) — but the consume path fails it closed (not_consumable),
+      // covered in the DB-backed consume suite.
+      const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString(
+        'base64url',
+      );
+      const payload = Buffer.from(
+        JSON.stringify({
+          sub: 'a',
+          email: 'a@b.c',
+          purpose: 'admin-step-up',
+          aud: 'admin-write',
+          iss: 'loop-api',
+          scope: 'refund',
+          iat: Math.floor(Date.now() / 1000),
+          exp: Math.floor(Date.now() / 1000) + 60,
+          // no `jti`
+        }),
+      ).toString('base64url');
+      const sig = createHmac('sha256', TEST_KEY).update(`${header}.${payload}`).digest('base64url');
+      const verified = verifyAdminStepUpToken(`${header}.${payload}.${sig}`);
+      expect(verified.ok).toBe(true);
+      if (verified.ok) expect(verified.claims.jti).toBeUndefined();
+    });
+
+    it('rejects a present-but-empty / non-string jti as malformed (not a silent unlimited-use token)', () => {
+      const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString(
+        'base64url',
+      );
+      const mk = (jti: unknown): string => {
+        const payload = Buffer.from(
+          JSON.stringify({
+            sub: 'a',
+            email: 'a@b.c',
+            purpose: 'admin-step-up',
+            aud: 'admin-write',
+            iss: 'loop-api',
+            scope: 'refund',
+            jti,
+            iat: Math.floor(Date.now() / 1000),
+            exp: Math.floor(Date.now() / 1000) + 60,
+          }),
+        ).toString('base64url');
+        const sig = createHmac('sha256', TEST_KEY)
+          .update(`${header}.${payload}`)
+          .digest('base64url');
+        return `${header}.${payload}.${sig}`;
+      };
+      expect(verifyAdminStepUpToken(mk('')).ok).toBe(false);
+      expect(verifyAdminStepUpToken(mk(123)).ok).toBe(false);
+    });
+  });
+
   // Rotation behaviour (current + previous keys both verify) lives in
   // the shared verify path that mirrors `tokens.ts`'s rotation
   // semantics. Not retested here — exercising rotation needs env.ts

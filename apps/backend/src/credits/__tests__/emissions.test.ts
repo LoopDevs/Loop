@@ -112,14 +112,30 @@ vi.mock('../../db/schema.js', () => ({
   },
 }));
 
-import { applyAdminEmission, EmissionAlreadyIssuedError } from '../emissions.js';
+import { PgDialect } from 'drizzle-orm/pg-core';
+import type { SQL } from 'drizzle-orm';
+import {
+  applyAdminEmission,
+  EmissionAlreadyIssuedError,
+  emittedNetMinorFor,
+} from '../emissions.js';
 import { InsufficientBalanceError } from '../adjustments.js';
 
+// MNY-11-EMISSION-HARDENING: `amountStroops` MUST be the whole-minor
+// stroops equivalent of the `amountMinor` these tests pass (500n) —
+// 500 minor × 100_000 stroops/minor = 50_000_000 stroops. The
+// consistency guard at the top of `applyAdminEmission` now rejects a
+// mismatch at entry (a small `amountMinor` with a large `amountStroops`
+// would otherwise satisfy the minor-denominated balance/conservation
+// fences while minting the large stroops). Prior to that guard this
+// fixture was accidentally 10× inconsistent (5_000_000 stroops = 50
+// minor) — harmless only because the mock DB never derived stroops
+// from minor.
 const intent = {
   assetCode: 'USDLOOP',
   assetIssuer: 'GISSUER',
   toAddress: 'GUSER',
-  amountStroops: 5_000_000n,
+  amountStroops: 50_000_000n,
   memoText: 'EMIT1',
 };
 
@@ -159,7 +175,7 @@ describe('applyAdminEmission (A2-901 / ADR-024 re-scoped by ADR 036)', () => {
       assetCode: 'USDLOOP',
       assetIssuer: 'GISSUER',
       toAddress: 'GUSER',
-      amountStroops: 5_000_000n,
+      amountStroops: 50_000_000n,
       memoText: 'EMIT1',
     });
     expect(state.insertPayoutCalls[0]).not.toHaveProperty('orderId');
@@ -233,6 +249,49 @@ describe('applyAdminEmission (A2-901 / ADR-024 re-scoped by ADR 036)', () => {
     ).rejects.toThrow(/Emission amount must be positive/);
   });
 
+  // MNY-11-EMISSION-HARDENING: the caller supplies `amountMinor` and
+  // `intent.amountStroops` independently. The minor drives the balance
+  // + conservation fences; the stroops drive the actual mint + daily
+  // cap. A mismatch must be rejected AT ENTRY, before any fence or DB
+  // work, so a small minor can't wave through a large stroops mint.
+  it('rejects an intent whose amountStroops does not match amountMinor, before any DB work', async () => {
+    // Balance is huge and a payout row is primed: WITHOUT the guard the
+    // small `amountMinor` (1) would clear the balance/conservation
+    // fences and the large `amountStroops` (500 minor) would be minted.
+    state.forUpdateRows = [{ userId: 'u-1', currency: 'USD', balanceMinor: 100_000_000n }];
+    state.selectRows = [];
+    state.returnedPayoutRow = { id: 'p-should-not-exist', createdAt: new Date() };
+    await expect(
+      applyAdminEmission({
+        userId: 'u-1',
+        currency: 'USD',
+        amountMinor: 1n, // clears the minor-denominated fences
+        intent, // 50_000_000 stroops = 500 minor — 500× the checked minor
+      }),
+    ).rejects.toThrow(/inconsistent caller amounts/);
+    // Rejected before the mint: no payout row queued.
+    expect(state.insertPayoutCalls).toHaveLength(0);
+    expect(state.insertCreditCalls).toHaveLength(0);
+  });
+
+  it('rejects a sub-minor (non-integral) stroops amount even when it floors to amountMinor', async () => {
+    // 150_000 stroops = 1.5 minor; floor(150_000 / 100_000) = 1, so the
+    // bare equality check would pass — the whole-minor modulo guard is
+    // what catches the half-minor remainder that would otherwise mint.
+    state.forUpdateRows = [{ userId: 'u-1', currency: 'USD', balanceMinor: 100_000_000n }];
+    state.selectRows = [];
+    state.returnedPayoutRow = { id: 'p-should-not-exist', createdAt: new Date() };
+    await expect(
+      applyAdminEmission({
+        userId: 'u-1',
+        currency: 'USD',
+        amountMinor: 1n,
+        intent: { ...intent, amountStroops: 150_000n },
+      }),
+    ).rejects.toThrow(/whole-minor/);
+    expect(state.insertPayoutCalls).toHaveLength(0);
+  });
+
   it('maps a unique-violation on the active-emission fence to EmissionAlreadyIssuedError', async () => {
     state.forUpdateRows = [{ userId: 'u-1', currency: 'USD', balanceMinor: 2000n }];
     state.selectRows = [];
@@ -304,5 +363,48 @@ describe('applyAdminEmission (A2-901 / ADR-024 re-scoped by ADR 036)', () => {
     ).rejects.toMatchObject({ payoutId: 'p-existing' });
     expect(state.insertPayoutCalls).toHaveLength(0);
     expect(state.insertCreditCalls).toHaveLength(0);
+  });
+});
+
+/**
+ * CONV-MNY-01: the conservation pre-check's "already emitted" SUM must
+ * scope by MIRROR CURRENCY, exactly as the DB trigger
+ * `assert_emission_conservation` does after migration 0061
+ * (`loop_asset_mirror_currency(pp.asset_code) = mirror_currency`), NOT
+ * by the bare `asset_code`. USDLOOP + LOOPUSD share a single USD
+ * mirror headroom; a bare-asset_code pre-check undercounts and passes
+ * a shared-mirror emission the trigger then rejects, turning the
+ * intended 409 EMISSION_EXCEEDS_UNEMITTED_BALANCE into an opaque 500.
+ *
+ * This exercises the real query the code builds (compiled via the
+ * drizzle Pg dialect, no DB) — it fails against the pre-fix
+ * `AND asset_code = $n` scope and passes against the corrected
+ * mirror-currency scope.
+ */
+describe('emittedNetMinorFor — conservation SUM scope (CONV-MNY-01)', () => {
+  it('scopes the aggregation by mirror currency, matching the 0061 trigger', async () => {
+    let captured: SQL | undefined;
+    const tx = {
+      execute: async (query: SQL) => {
+        captured = query;
+        return [] as unknown as never;
+      },
+    } as unknown as Parameters<typeof emittedNetMinorFor>[0];
+
+    await emittedNetMinorFor(tx, { userId: 'u-1', assetCode: 'USDLOOP' });
+
+    expect(captured).toBeDefined();
+    const compiled = new PgDialect().sqlToQuery(captured as SQL);
+    const flat = compiled.sql.replace(/\s+/g, ' ');
+
+    // Corrected scope present: both sides routed through the same
+    // mirror-currency mapping the trigger uses.
+    expect(flat).toContain('loop_asset_mirror_currency(asset_code) = loop_asset_mirror_currency(');
+    // Pre-fix bare-asset_code scope must be gone — this is the exact
+    // predicate that diverged from the trigger.
+    expect(flat).not.toMatch(/\band asset_code =\s*\$/i);
+    // The assetCode arg is bound as a parameter (not string-interpolated).
+    expect(compiled.params).toContain('USDLOOP');
+    expect(compiled.params).toContain('u-1');
   });
 });

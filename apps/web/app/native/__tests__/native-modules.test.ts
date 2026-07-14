@@ -745,6 +745,44 @@ describe('webview', () => {
     messageListener?.({ detail: { type: 'loop:giftcard', code: 'BACK' } });
     expect(onMessage).toHaveBeenCalledTimes(2);
   });
+
+  // P2-04: the OUTBOUND injection (executeScript) must mirror the inbound
+  // origin gate. An injected script can carry a redeem code/PIN; if the
+  // WebView has navigated to a foreign origin, injecting it leaks the secret
+  // cross-origin. Assert injection fires on the intended origin and is
+  // withheld after cross-origin navigation.
+  it('native WebView does NOT inject scripts after cross-origin navigation (P2-04)', async () => {
+    vi.mocked(Capacitor.isNativePlatform).mockReturnValue(true);
+
+    await openWebView({
+      url: 'https://redeem.example.com/start',
+      scripts: ['window.__loopRedeem("SECRET-PIN-1234")'],
+    });
+
+    const pageLoadedListener = inAppBrowserState.listeners.get('browserPageLoaded');
+    const urlListener = inAppBrowserState.listeners.get('urlChangeEvent');
+    expect(pageLoadedListener).toBeDefined();
+    // Origin tracking must exist even when only `scripts` (no onMessage) is set.
+    expect(urlListener).toBeDefined();
+
+    // Intended redeem origin: the script is injected (happy path preserved).
+    pageLoadedListener?.();
+    expect(inAppBrowserState.executeScript).toHaveBeenCalledTimes(1);
+    expect(inAppBrowserState.executeScript).toHaveBeenCalledWith({
+      code: 'window.__loopRedeem("SECRET-PIN-1234")',
+    });
+
+    // WebView navigates to a foreign origin, then a page finishes loading there.
+    urlListener?.({ url: 'https://evil.example.net/relay' });
+    pageLoadedListener?.();
+    // The secret-bearing script must NOT run on the foreign origin.
+    expect(inAppBrowserState.executeScript).toHaveBeenCalledTimes(1);
+
+    // Navigating back to the allowed origin resumes injection.
+    urlListener?.({ url: 'https://redeem.example.com/complete' });
+    pageLoadedListener?.();
+    expect(inAppBrowserState.executeScript).toHaveBeenCalledTimes(2);
+  });
 });
 
 // ────────────────────────────────────────────────────────────

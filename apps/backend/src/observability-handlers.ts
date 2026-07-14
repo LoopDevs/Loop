@@ -16,6 +16,7 @@ import {
   REQUEST_DURATION_BUCKETS_SECONDS,
   WEB_VITAL_BUCKETS,
   WEB_VITAL_NAMES,
+  getMoneyIntegritySignals,
   metrics,
 } from './metrics.js';
 import { getAllCircuitStates } from './circuit-breaker.js';
@@ -177,6 +178,46 @@ export async function metricsHandler(c: Context): Promise<Response> {
   lines.push('# TYPE loop_worker_stale gauge');
   for (const worker of runtime.workers) {
     lines.push(`loop_worker_stale{worker="${worker.name}"} ${worker.stale ? 1 : 0}`);
+  }
+  lines.push('');
+
+  // FT-07 / NS-02: money-integrity breach gauges. Before this the
+  // /metrics surface carried request/latency/worker/circuit signals
+  // but NOT ONE money-integrity gauge — so a live ledger drift, asset
+  // drift, vault solvency breach, or operator-float divergence was a
+  // GREEN dashboard, detectable only if the Discord monitoring channel
+  // happened to be configured AND watched. The drift/solvency/
+  // reconciliation watchers now set `setMoneyIntegrityBreach(signal,
+  // active)` on every tick that actually evaluates their invariant, so
+  // a standing breach is scrapeable/alertable/dashboard-able
+  // independent of Discord. `active` is the STANDING state (a breach
+  // that already paged once but persists still reads 1), not "paged
+  // this tick". A signal only appears once its watcher has evaluated
+  // the invariant at least once (same lazy-registration posture as the
+  // loop_worker_* gauges); the last-evaluated gauge lets an operator
+  // distinguish "checked and clean" (0, fresh timestamp) from "not
+  // being checked" (absent). Alert with `max()` across the fleet — see
+  // the registry doc-comment in metrics.ts for why a follower's stale
+  // 0 can lag the single-flight lock winner's 1.
+  lines.push(
+    '# HELP loop_money_integrity_breach_active Money-integrity invariant breach state per watcher signal (1=standing breach, 0=clean). Independent of Discord delivery (FT-07/NS-02).',
+  );
+  lines.push('# TYPE loop_money_integrity_breach_active gauge');
+  for (const [signal, state] of getMoneyIntegritySignals()) {
+    lines.push(`loop_money_integrity_breach_active{signal="${signal}"} ${state.active ? 1 : 0}`);
+  }
+  lines.push('');
+
+  lines.push(
+    '# HELP loop_money_integrity_last_evaluated_timestamp_ms Unix timestamp in ms of the last tick that actually evaluated this money-integrity signal (absent = never evaluated / not currently being checked).',
+  );
+  lines.push('# TYPE loop_money_integrity_last_evaluated_timestamp_ms gauge');
+  for (const [signal, state] of getMoneyIntegritySignals()) {
+    if (state.lastEvaluatedAtMs !== null) {
+      lines.push(
+        `loop_money_integrity_last_evaluated_timestamp_ms{signal="${signal}"} ${state.lastEvaluatedAtMs}`,
+      );
+    }
   }
   lines.push('');
 

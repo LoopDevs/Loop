@@ -48,6 +48,10 @@ export function registerAdminCsvExportsCashbackOpenApi(
         description: 'CSV body',
         content: { 'text/csv; charset=utf-8': { schema: z.string() } },
       },
+      401: {
+        description: 'Missing or invalid bearer',
+        content: { 'application/json': { schema: errorResponse } },
+      },
       404: {
         description:
           'Not found — also returned to authenticated non-admin callers: requireAdmin masks the admin surface as 404 by design (see src/auth/require-admin.ts).',
@@ -78,6 +82,10 @@ export function registerAdminCsvExportsCashbackOpenApi(
       200: {
         description: 'CSV body',
         content: { 'text/csv; charset=utf-8': { schema: z.string() } },
+      },
+      401: {
+        description: 'Missing or invalid bearer',
+        content: { 'application/json': { schema: errorResponse } },
       },
       404: {
         description:

@@ -17,17 +17,38 @@ import { describe, it, expect } from 'vitest';
 import { generateOpenApiSpec } from '../openapi.js';
 import { RequestOtpBody, VerifyOtpBody, RefreshBody } from '../auth/request-schemas.js';
 import { SocialLoginBody } from '../auth/social-schemas.js';
+import { CreateOrderBody } from '../orders/request-schemas.js';
 
 type SpecSchema = { properties?: Record<string, unknown> };
 
 const spec = generateOpenApiSpec();
 const components = (spec.components?.schemas ?? {}) as Record<string, SpecSchema>;
 
+/**
+ * DOC-06: the request-body components that are REGISTERED FROM a
+ * canonical handler Zod schema — the spec component and the schema the
+ * handler `.parse()`s are the same object, so they cannot drift. This
+ * list is the complete derived set today; the divergence guard below
+ * runs over ALL of it (previously it covered only the four auth bodies
+ * and silently omitted `CreateOrderBody`, which was already derived in
+ * `openapi/orders.ts` but untested).
+ *
+ * FOLLOW-UP (not yet derived — hand-written inline in `openapi/*.ts`,
+ * so they can drift from the handler that validates them): the ~15
+ * admin/user write bodies (credit adjustments, cashback-config upsert,
+ * emission mint, order refund/redrive, staff/role writes, deposit
+ * refund, vault recovery, favorites, profile, discord-notifier config).
+ * Wiring each needs its handler's `.parse()` schema lifted into a
+ * shared schema-only module (the `auth/request-schemas.ts` pattern) —
+ * a handler-side change out of scope for this openapi-only pass. Until
+ * then this test cannot guard them; the count is the follow-up backlog.
+ */
 const cases: Array<{ name: string; schema: { shape: Record<string, unknown> } }> = [
   { name: 'RequestOtpBody', schema: RequestOtpBody },
   { name: 'VerifyOtpBody', schema: VerifyOtpBody },
   { name: 'RefreshBody', schema: RefreshBody },
   { name: 'SocialLoginBody', schema: SocialLoginBody },
+  { name: 'CreateOrderBody', schema: CreateOrderBody },
 ];
 
 describe('D1: OpenAPI request bodies are DERIVED from the handler Zod schemas', () => {
@@ -45,5 +66,6 @@ describe('D1: OpenAPI request bodies are DERIVED from the handler Zod schemas', 
     // Concrete pin so a silent field change is obvious in the diff.
     expect(Object.keys(VerifyOtpBody.shape).sort()).toEqual(['email', 'otp', 'platform']);
     expect(Object.keys(SocialLoginBody.shape).sort()).toEqual(['idToken', 'platform']);
+    expect(Object.keys(CreateOrderBody.shape).sort()).toEqual(['amount', 'merchantId']);
   });
 });

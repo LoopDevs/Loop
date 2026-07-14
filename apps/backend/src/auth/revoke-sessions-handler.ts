@@ -16,10 +16,14 @@
  *     revokes a target user's live refresh tokens. The incident-
  *     response lever for a compromised account.
  *
- * Access tokens are not revocable by design (no `jti`, 15-min TTL,
- * verified in-process — see docs/threat-model.md); revoking refresh
- * tokens stops re-issuance, so the compromised session dies within at
- * most the 15-min access-token window.
+ * NS-09: access tokens are now revocable too. `revokeAllRefreshTokens
+ * ForUser` bumps the user's `token_version` in the same transaction as
+ * the refresh-row revoke, and `requireAuth` rejects any access token
+ * whose `tv` claim no longer matches — so the compromised session's
+ * access tokens die immediately, not after the (previous) up-to-15-min
+ * access-token window. (Historically access tokens were non-revocable
+ * by design — no `jti`, 15-min TTL, verified in-process; NS-09 closed
+ * that gap. See docs/threat-model.md.)
  */
 import type { Context } from 'hono';
 import { UUID_RE } from '../uuid.js';

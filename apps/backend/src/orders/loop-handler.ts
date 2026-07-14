@@ -541,10 +541,10 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
     if (err instanceof IdempotentOrderConflictError) {
       return await replayOrderResponse(c, err.existing);
     }
-    // Balance race between `hasSufficientCredit` check and the FOR
-    // UPDATE debit inside `createOrder` (A2-601 guard). No order
-    // row was persisted (txn rolled back), so the UX is the same as
-    // the pre-check failure — a 400 the client can surface.
+    // Insufficient balance caught by the FOR UPDATE re-read inside
+    // `createOrder`'s credit txn (A2-601 guard) — the sole balance
+    // check on this path. No order row was persisted (txn rolled
+    // back), so this surfaces as a clean 400 the client can handle.
     if (err instanceof InsufficientCreditError) {
       return c.json(
         { code: 'INSUFFICIENT_CREDIT', message: 'Loop credit balance is below the order amount' },

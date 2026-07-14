@@ -11,6 +11,20 @@ vi.mock('../../logger.js', () => ({
   },
 }));
 
+// NS-09: requireAuth now reads the user's current token_version on the
+// Loop-token path to enforce access-token revocation. Mock it so this
+// unit suite doesn't need a live DB; `mockTokenVersion` / `throwOnRead`
+// let each test drive the compare (match → accept, mismatch/null →
+// reject, throw → 500).
+let mockTokenVersion: number | null = 0;
+let throwOnRead = false;
+vi.mock('../../db/users.js', () => ({
+  getUserTokenVersion: vi.fn(async () => {
+    if (throwOnRead) throw new Error('db down');
+    return mockTokenVersion;
+  }),
+}));
+
 import { requireAuth, type LoopAuthContext } from '../handler.js';
 import { signLoopToken } from '../tokens.js';
 
@@ -43,6 +57,10 @@ function makeCtx(headers: Record<string, string | undefined>): FakeCtx {
 
 beforeEach(() => {
   // Ensure the module reads the signing key we set up-front.
+  // NS-09: default the mocked token_version read to a matching value so
+  // the pre-existing accept tests stay green; individual tests override.
+  mockTokenVersion = 0;
+  throwOnRead = false;
 });
 
 describe('requireAuth', () => {
@@ -60,12 +78,14 @@ describe('requireAuth', () => {
     expect(res.status).toBe(401);
   });
 
-  it('accepts a valid Loop access token and sets loop-kind auth', async () => {
+  it('accepts a valid Loop access token whose tv matches and sets loop-kind auth', async () => {
+    mockTokenVersion = 3;
     const { token } = signLoopToken({
       sub: 'user-uuid',
       email: 'a@b.com',
       typ: 'access',
       ttlSeconds: 300,
+      tv: 3,
     });
     const fake = makeCtx({ Authorization: `Bearer ${token}` });
     const next = vi.fn().mockResolvedValue(undefined);
@@ -78,6 +98,75 @@ describe('requireAuth', () => {
       expect(auth.email).toBe('a@b.com');
     }
     expect(fake.store.get('bearerToken')).toBe(token);
+  });
+
+  it('NS-09: rejects a token whose tv is stale (< current token_version) with 401', async () => {
+    // Token minted at tv=0; the user's token_version was since bumped to
+    // 1 (a logout / sign-out-all). The still-signed, still-unexpired
+    // access token must now be rejected — the core NS-09 property.
+    mockTokenVersion = 1;
+    const { token } = signLoopToken({
+      sub: 'user-uuid',
+      email: 'a@b.com',
+      typ: 'access',
+      ttlSeconds: 300,
+      tv: 0,
+    });
+    const fake = makeCtx({ Authorization: `Bearer ${token}` });
+    const next = vi.fn();
+    const res = (await requireAuth(fake.ctx, next)) as Response;
+    expect(res.status).toBe(401);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('NS-09: fails a legacy access token with no tv claim closed (401)', async () => {
+    // Pre-NS-09 token: valid signature + unexpired, but no `tv`. Must be
+    // treated as a version mismatch, not silently honoured.
+    mockTokenVersion = 0;
+    const { token } = signLoopToken({
+      sub: 'user-uuid',
+      email: 'a@b.com',
+      typ: 'access',
+      ttlSeconds: 300,
+      // no tv
+    });
+    const fake = makeCtx({ Authorization: `Bearer ${token}` });
+    const next = vi.fn();
+    const res = (await requireAuth(fake.ctx, next)) as Response;
+    expect(res.status).toBe(401);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('NS-09: rejects a token whose user row no longer exists (401)', async () => {
+    mockTokenVersion = null; // getUserTokenVersion → no row
+    const { token } = signLoopToken({
+      sub: 'ghost-user',
+      email: 'a@b.com',
+      typ: 'access',
+      ttlSeconds: 300,
+      tv: 0,
+    });
+    const fake = makeCtx({ Authorization: `Bearer ${token}` });
+    const next = vi.fn();
+    const res = (await requireAuth(fake.ctx, next)) as Response;
+    expect(res.status).toBe(401);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('NS-09: fails closed with 500 when the token_version read throws', async () => {
+    throwOnRead = true;
+    const { token } = signLoopToken({
+      sub: 'user-uuid',
+      email: 'a@b.com',
+      typ: 'access',
+      ttlSeconds: 300,
+      tv: 0,
+    });
+    const fake = makeCtx({ Authorization: `Bearer ${token}` });
+    const next = vi.fn();
+    const res = (await requireAuth(fake.ctx, next)) as Response;
+    expect(res.status).toBe(500);
+    expect(next).not.toHaveBeenCalled();
   });
 
   it('rejects an expired Loop token with a 401', async () => {

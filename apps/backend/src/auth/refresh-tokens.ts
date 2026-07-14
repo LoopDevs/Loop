@@ -10,9 +10,9 @@
  * signature verifies.
  */
 import { createHash } from 'node:crypto';
-import { and, eq, isNull, isNotNull, gt, lt, or } from 'drizzle-orm';
+import { and, eq, isNull, isNotNull, gt, lt, or, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { refreshTokens } from '../db/schema.js';
+import { refreshTokens, users } from '../db/schema.js';
 
 export type RefreshTokenRow = typeof refreshTokens.$inferSelect;
 
@@ -85,9 +85,19 @@ export async function findRefreshTokenRecord(jti: string): Promise<RefreshTokenR
 }
 
 /**
- * Revokes a refresh token and optionally links it to its successor
- * (for rotation audit). Called inside the refresh handler's txn path
- * before writing the new row.
+ * Revokes a single refresh token by jti. Sole production caller is the
+ * logout handler — rotation goes through `tryRevokeIfLive` (A4-098),
+ * not this. `revoked_at` is the terminal marker: setting it invalidates
+ * the token (`findLiveRefreshToken` filters on `revoked_at IS NULL`).
+ *
+ * COR-11: the rotation link `replaced_by_jti` is (re)written ONLY when
+ * the caller passes an explicit successor. When omitted it is left
+ * untouched, so an already-rotated row keeps the link to the token that
+ * superseded it. Logout revokes with NO successor — coercing `?? null`
+ * here CLOBBERED that link, destroying the rotation-chain audit lineage
+ * (a stolen-token reuse could no longer be traced past the logout). The
+ * revoke's actual effect (the token is invalidated) is unchanged: it is
+ * carried entirely by `revoked_at`.
  */
 export async function revokeRefreshToken(args: {
   jti: string;
@@ -99,8 +109,11 @@ export async function revokeRefreshToken(args: {
     .update(refreshTokens)
     .set({
       revokedAt: now,
-      replacedByJti: args.replacedByJti ?? null,
       lastUsedAt: now,
+      // COR-11: touch `replaced_by_jti` only when a successor is
+      // explicitly supplied; omitting it preserves the existing
+      // rotation lineage rather than nulling it out.
+      ...(args.replacedByJti !== undefined ? { replacedByJti: args.replacedByJti } : {}),
     })
     .where(eq(refreshTokens.jti, args.jti));
 }
@@ -145,16 +158,37 @@ export async function tryRevokeIfLive(args: {
 }
 
 /**
- * Bulk revoke — every live refresh token for a user. Used by
- * `DELETE /api/auth/session/all` and by the security-revoke pathway
- * when we need to invalidate all sessions for a user.
+ * Bulk revoke — every live refresh token for a user, AND (NS-09) a bump
+ * of the user's `token_version` so their live ACCESS tokens die at the
+ * same instant. Used by `DELETE /api/auth/session/all` (self sign-out),
+ * `POST /api/admin/users/:id/revoke-sessions` (admin incident response),
+ * and the refresh-token-reuse family-revoke (A2-1608, a token-theft
+ * signal). All three are "kill this user's sessions" events, so all
+ * three must invalidate the access tokens too — not just the refresh
+ * tokens.
+ *
+ * The refresh-row revoke and the token_version bump run in ONE
+ * transaction so a partial failure can't leave the two revocation
+ * mechanisms out of step (refresh tokens killed but access tokens still
+ * live, or vice versa). The `+ 1` runs in the DB, so it composes with a
+ * concurrent logout bump without a lost update.
  */
 export async function revokeAllRefreshTokensForUser(userId: string): Promise<void> {
   const now = new Date();
-  await db
-    .update(refreshTokens)
-    .set({ revokedAt: now })
-    .where(and(eq(refreshTokens.userId, userId), isNull(refreshTokens.revokedAt)));
+  await db.transaction(async (tx) => {
+    await tx
+      .update(refreshTokens)
+      .set({ revokedAt: now })
+      .where(and(eq(refreshTokens.userId, userId), isNull(refreshTokens.revokedAt)));
+    // NS-09: bump the access-token revocation counter. Access tokens
+    // have no per-token DB row (unlike the refresh rows revoked above),
+    // so this per-user counter is their revocation — requireAuth rejects
+    // any access token whose `tv` claim no longer matches.
+    await tx
+      .update(users)
+      .set({ tokenVersion: sql`${users.tokenVersion} + 1`, updatedAt: sql`NOW()` })
+      .where(eq(users.id, userId));
+  });
 }
 
 /**

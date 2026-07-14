@@ -21,7 +21,7 @@
  * back to a different state (cancelled, refunded) is a separate
  * support-mediated action.
  */
-import { and, eq, gte, inArray, or, sql } from 'drizzle-orm';
+import { and, eq, gte, inArray, like, or, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { creditTransactions, orders, paymentWatcherSkips, userCredits } from '../db/schema.js';
 import { isUniqueViolation } from '../db/errors.js';
@@ -38,14 +38,125 @@ import { HorizonPaymentSchema, type HorizonPayment } from '../payments/horizon.j
  * rows carry `referenceType='order'` (the refunded order, not the
  * acting admin), so — like the fleet-wide payout-compensation cap
  * (A4-020) — there is no per-admin attribution to key on. The cap is
- * therefore fleet-wide per currency per UTC day: the sum of all
- * `type='refund'` magnitudes plus the new attempt must stay under
+ * therefore fleet-wide per currency per UTC day: the summed magnitude
+ * of BOTH refund rails plus the new attempt must stay under
  * `ADMIN_DAILY_ADJUSTMENT_CAP_MINOR`. This closes the gap where the
  * adjustment cap query (filtered on `type='adjustment'`) was blind to
  * refunds, leaving total per-day refund volume unbounded by count of
  * distinct order ids.
  */
 const REFUND_CAP_LOCK_SCOPE = 'refund';
+
+/**
+ * MNY-11-onchainrail: enforce the fleet-wide daily refund cap across
+ * BOTH refund rails, under the shared `REFUND_CAP_LOCK_SCOPE` advisory
+ * lock. The daily total (per currency, per UTC day) is the sum of:
+ *
+ *   1. CREDIT rail — the magnitude of today's `type='refund'`
+ *      `credit_transactions` rows (`applyAdminRefund` and the
+ *      mirror-credit auto-refund that delegates to it).
+ *   2. ON-CHAIN rail — the `charge_minor` of every order whose OWN
+ *      paying deposit was refunded on-chain today. The on-chain rail
+ *      returns the deposit to its sender via `refundDeposit` and writes
+ *      NO `credit_transactions` row, so it is invisible to (1) — before
+ *      this it bypassed the cap ENTIRELY, letting a burst of failed
+ *      on-chain orders refund unbounded value per day. Its magnitude is
+ *      recovered structurally: a `payment_watcher_skips` row whose
+ *      `payment_id` equals the bound order's `payment_received_horizon_id`
+ *      (the same "this order's paying deposit was on-chain-refunded"
+ *      signal the INV-8 mirror-credit exclusion keys on), joined back to
+ *      the order for its fiat charge. A duplicate/late deposit
+ *      (payment_id != the paying id) is NOT a refund of the order and is
+ *      excluded, matching T0-1b.
+ *
+ *      CONCURRENCY — which skip STATUS counts is load-bearing. The
+ *      `refunding`/`refunded` transitions happen in `refundDeposit`,
+ *      which runs OUTSIDE the guard txn, AFTER the advisory lock has
+ *      already released at commit. If we counted only those, a second
+ *      caller would grab the lock the instant the first commits — while
+ *      the first's magnitude is still uncounted — and both could pass a
+ *      near-full budget, refunding past the cap (the exact burst this
+ *      guard exists to stop). So we ALSO count the state the on-chain
+ *      rail writes UNDER the lock: `recordFailedOrderRefundableDeposit`
+ *      records the paying-deposit skip as `abandoned` inside the guard
+ *      txn, stamping the `AUTO_REFUND_SYSTEM_ACTOR` prefix on
+ *      `last_error`. That committed row is visible to the next lock
+ *      holder, so the on-chain rail serialises exactly like the credit
+ *      rail (whose `type='refund'` row is likewise written under the
+ *      lock). A definitively-rejected refund is released back to
+ *      `abandoned` with `last_error` OVERWRITTEN to the submit error
+ *      (prefix dropped), so it correctly STOPS counting — value never
+ *      moved, budget is not permanently consumed.
+ *
+ * Both magnitudes are in the charge currency's minor units, so they add
+ * directly. Adding `attemptMinor` must stay under the cap or the write
+ * is refused with `DailyAdjustmentLimitError` — before any value leaves
+ * the system. Every caller holds the bound order row FOR UPDATE first,
+ * so the lock order (order row -> advisory lock) is identical on both
+ * rails and cannot deadlock. `0` disables the cap (dev / test).
+ */
+async function enforceDailyRefundCap(
+  tx: Pick<typeof db, 'select' | 'execute'>,
+  currency: string,
+  attemptMinor: bigint,
+): Promise<void> {
+  const capMinor = env.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR;
+  if (capMinor <= 0n) return;
+  const dayStart = new Date();
+  dayStart.setUTCHours(0, 0, 0, 0);
+  await tx.execute(
+    sql`SELECT pg_advisory_xact_lock(${adjustmentCapLockKey(REFUND_CAP_LOCK_SCOPE, currency, dayStart)})`,
+  );
+  // Rail 1: credit-rail refund magnitude (type='refund' ledger rows).
+  const [creditRow] = await tx
+    .select({
+      usedMinor: sql<string>`COALESCE(SUM(ABS(${creditTransactions.amountMinor}))::text, '0')`,
+    })
+    .from(creditTransactions)
+    .where(
+      and(
+        eq(creditTransactions.type, 'refund'),
+        eq(creditTransactions.currency, currency),
+        gte(creditTransactions.createdAt, dayStart),
+      ),
+    );
+  // Rail 2: on-chain-rail refund magnitude — orders whose paying deposit
+  // was refunded on-chain today, counted at their fiat charge. Matched
+  // on payment_id = the order's paying deposit id so late/duplicate
+  // deposit refunds (which are not a refund OF the order) are excluded.
+  const [onChainRow] = await tx
+    .select({
+      usedMinor: sql<string>`COALESCE(SUM(${orders.chargeMinor})::text, '0')`,
+    })
+    .from(orders)
+    .innerJoin(
+      paymentWatcherSkips,
+      eq(paymentWatcherSkips.paymentId, orders.paymentReceivedHorizonId),
+    )
+    .where(
+      and(
+        eq(orders.chargeCurrency, currency),
+        gte(paymentWatcherSkips.updatedAt, dayStart),
+        or(
+          // In-progress / landed on-chain refund of the paying deposit.
+          inArray(paymentWatcherSkips.status, ['refunding', 'refunded']),
+          // The under-lock intent state (see doc) — an `abandoned` skip
+          // still carrying the auto-refund prefix. Counting it is what
+          // makes the on-chain rail serialise like the credit rail; a
+          // released (definitively-failed) refund loses the prefix and
+          // drops out, so budget is not consumed for value never moved.
+          and(
+            eq(paymentWatcherSkips.status, 'abandoned'),
+            like(paymentWatcherSkips.lastError, `${AUTO_REFUND_SYSTEM_ACTOR}:%`),
+          ),
+        ),
+      ),
+    );
+  const used = BigInt(creditRow?.usedMinor ?? '0') + BigInt(onChainRow?.usedMinor ?? '0');
+  if (used + attemptMinor > capMinor) {
+    throw new DailyAdjustmentLimitError(currency, dayStart, used, capMinor, attemptMinor);
+  }
+}
 
 export class RefundAlreadyIssuedError extends Error {
   constructor(public readonly orderId: string) {
@@ -167,6 +278,10 @@ export async function applyOrderAutoRefund(args: {
 
 async function applyOnChainOrderAutoRefund(args: {
   orderId: string;
+  /** Order charge currency — the fleet-wide daily refund cap bucket. */
+  currency: string;
+  /** Order charge in minor units — what this refund counts against the cap. */
+  amountMinor: bigint;
   paymentMemo?: string | null;
   paymentReceivedHorizonId?: string | null;
   paymentReceivedPayment?: unknown | null;
@@ -233,6 +348,17 @@ async function applyOnChainOrderAutoRefund(args: {
     if (creditRefund !== undefined) {
       throw new RefundAlreadyIssuedError(args.orderId);
     }
+    // MNY-11-onchainrail: gate the on-chain rail on the SAME fleet-wide
+    // daily refund cap the credit rail enforces. The on-chain refund
+    // returns the order's paying deposit to its sender and writes no
+    // credit_transactions row, so before this it slipped the cap
+    // entirely — a burst of failed on-chain orders could refund
+    // unbounded value per day. Runs under the order-row lock taken
+    // above (so the loser of a duplicate serialises first) and then the
+    // shared refund advisory lock, so both rails count against and are
+    // gated by one budget. Refuses BEFORE any refundable-deposit skip
+    // row is recorded, so nothing is queued for on-chain send.
+    await enforceDailyRefundCap(tx, args.currency, args.amountMinor);
     await recordFailedOrderRefundableDeposit(tx, {
       orderId: args.orderId,
       memo: args.paymentMemo ?? payment.transaction?.memo ?? '',
@@ -361,43 +487,15 @@ export async function applyAdminRefund(args: {
         );
       }
 
-      // CF-06: enforce the daily admin-write cap on refunds. The
-      // adjustment cap query filters on `type='adjustment'`, so refund
-      // rows (`type='refund'`) bypassed the magnitude circuit-breaker
-      // entirely. Apply a fleet-wide refund cap (per currency, per UTC
-      // day, all admins combined) under the same advisory-lock
-      // derivation the adjustment / compensation writers use, so two
-      // concurrent refunds in the same bucket can't jointly exceed it.
-      const capMinor = env.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR;
-      if (capMinor > 0n) {
-        const dayStart = new Date();
-        dayStart.setUTCHours(0, 0, 0, 0);
-        await tx.execute(
-          sql`SELECT pg_advisory_xact_lock(${adjustmentCapLockKey(REFUND_CAP_LOCK_SCOPE, args.currency, dayStart)})`,
-        );
-        const [dayRow] = await tx
-          .select({
-            usedMinor: sql<string>`COALESCE(SUM(ABS(${creditTransactions.amountMinor}))::text, '0')`,
-          })
-          .from(creditTransactions)
-          .where(
-            and(
-              eq(creditTransactions.type, 'refund'),
-              eq(creditTransactions.currency, args.currency),
-              gte(creditTransactions.createdAt, dayStart),
-            ),
-          );
-        const used = BigInt(dayRow?.usedMinor ?? '0');
-        if (used + args.amountMinor > capMinor) {
-          throw new DailyAdjustmentLimitError(
-            args.currency,
-            dayStart,
-            used,
-            capMinor,
-            args.amountMinor,
-          );
-        }
-      }
+      // CF-06 / MNY-11-onchainrail: enforce the daily admin-write cap on
+      // refunds. The adjustment cap query filters on `type='adjustment'`,
+      // so refund rows (`type='refund'`) bypassed the magnitude
+      // circuit-breaker entirely. `enforceDailyRefundCap` applies the
+      // fleet-wide refund cap (per currency, per UTC day, all admins
+      // combined, counting BOTH the credit and on-chain refund rails)
+      // under the shared advisory lock, so two concurrent refunds in the
+      // same bucket can't jointly exceed it.
+      await enforceDailyRefundCap(tx, args.currency, args.amountMinor);
 
       // Lock the (userId, currency) row FOR UPDATE so a concurrent
       // adjustment / accrual doesn't read a stale priorBalance.

@@ -449,6 +449,55 @@
       "when": 1780189400000,
       "tag": "0063_vault_float_reconciliation",
       "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1780189500000,
+      "tag": "0064_ledger_immutability",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1780189600000,
+      "tag": "0065_admin_step_up_consumptions",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1780189700000,
+      "tag": "0066_user_credits_mirror_invariant",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1780189800000,
+      "tag": "0067_mint_insert_conservation",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1780189900000,
+      "tag": "0068_orders_pct_non_negative_and_face_value_positive",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1780190000000,
+      "tag": "0069_vault_hot_float_carry_stroops",
+      "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1780190100000,
+      "tag": "0070_users_token_version",
+      "breakpoints": true
     }
   ]
 }

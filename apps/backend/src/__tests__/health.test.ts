@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Context } from 'hono';
 
 /**
@@ -65,6 +65,36 @@ vi.mock('../discord.js', () => ({
   notifyHealthChange: vi.fn(),
   notifyGeoDbStale: notifyGeoDbStaleMock,
 }));
+
+// CONV-WATCH-02: the health-change page is now routed through the
+// fleet-wide `watchdog_alert_state` dedup gate instead of a per-process
+// notify cooldown. Mock the gate so a transition doesn't touch the DB;
+// the tests assert the gate is invoked with the fleet-wide key/state.
+// (The real gate + real `watchdog_alert_state` persistence/dedup/re-arm
+// is covered end-to-end by
+// `__tests__/integration/health-change-dedup.test.ts`.)
+const applyBinaryWatchdogAlertMock = vi.hoisted(() =>
+  vi.fn<
+    (args: {
+      watchdogName: string;
+      shouldBeActive: boolean;
+      notifyActive: () => Promise<boolean>;
+      notifyRecovered: () => Promise<boolean>;
+    }) => Promise<boolean>
+  >(async () => true),
+);
+vi.mock('../credits/vaults/vault-watchdog-alert.js', () => ({
+  applyBinaryWatchdogAlert: applyBinaryWatchdogAlertMock,
+}));
+
+// Spy on the raw webhook send so the DB-down fallback (a direct,
+// un-deduped send when the gate throws) is observable. Colours/truncate
+// stay real via `...actual`.
+const sendWebhookSpy = vi.hoisted(() => vi.fn(async () => true));
+vi.mock('../discord/shared.js', async (importActual) => {
+  const actual = (await importActual()) as Record<string, unknown>;
+  return { ...actual, sendWebhook: sendWebhookSpy };
+});
 
 vi.mock('../public/geo.js', () => ({
   getGeoDbStatus: () => Promise.resolve(geoDbState),
@@ -134,9 +164,32 @@ beforeEach(() => {
   notifyGeoDbStaleMock.mockReset();
   fleetSizeState.estimate = 1;
   fleetSizeState.source = 'static';
+  applyBinaryWatchdogAlertMock.mockReset().mockResolvedValue(true);
+  sendWebhookSpy.mockReset().mockResolvedValue(true);
   __resetHealthProbeCacheForTests();
   __resetDbProbeCacheForTests();
 });
+
+/**
+ * Drives `/health` from a fresh (seeded-healthy) state through a
+ * critical (DB-down) rolling window until it flips healthy→degraded,
+ * which is the ONLY path that fires a health-change page. The DB probe
+ * caches for 10s, so its cache is cleared before each degraded probe so
+ * the toggled `dbState` is actually observed.
+ */
+async function driveHealthTransitionToDegraded(): Promise<void> {
+  // Seed one healthy reading → lastHealthStatus becomes 'healthy'.
+  dbState.shouldFail = false;
+  __resetDbProbeCacheForTests();
+  await healthHandler(makeCtx().ctx);
+  // 5 of 10 degraded readings flips healthy→degraded (the file's
+  // HEALTH_FLIP_TO_DEGRADED_THRESHOLD). DB unreachable = critical.
+  dbState.shouldFail = true;
+  for (let i = 0; i < 5; i++) {
+    __resetDbProbeCacheForTests();
+    await healthHandler(makeCtx().ctx);
+  }
+}
 
 describe('healthHandler', () => {
   it('200 healthy when everything is up and the operator pool has no exhausted breakers', async () => {
@@ -170,6 +223,45 @@ describe('healthHandler', () => {
     const body = (await res.json()) as { status: string; databaseReachable: boolean };
     expect(body.status).toBe('degraded');
     expect(body.databaseReachable).toBe(false);
+  });
+
+  // CONV-WATCH-02: a shared-dependency outage (e.g. DB down) flips every
+  // machine to critical. The page must be routed through the fleet-wide
+  // `watchdog_alert_state` dedup gate so it fires ONCE fleet-wide, not
+  // once per machine. This pins that the health-change page goes through
+  // the gate (keyed 'health-change', shouldBeActive on degraded) rather
+  // than the old per-process notify. Pre-fix this path called
+  // `notifyHealthChange` directly and never touched the gate.
+  describe('health-change fleet dedup (CONV-WATCH-02)', () => {
+    it('routes the healthy→degraded page through the fleet-wide dedup gate', async () => {
+      await driveHealthTransitionToDegraded();
+      expect(applyBinaryWatchdogAlertMock).toHaveBeenCalledTimes(1);
+      expect(applyBinaryWatchdogAlertMock).toHaveBeenCalledWith(
+        expect.objectContaining({ watchdogName: 'health-change', shouldBeActive: true }),
+      );
+    });
+
+    it('passes the gate a delivery-confirming degraded notifier (fleet at-least-once contract)', async () => {
+      await driveHealthTransitionToDegraded();
+      const arg = applyBinaryWatchdogAlertMock.mock.calls[0]![0];
+      // Both branches must be async delivery-reporting closures — the
+      // gate latches alert_active only on a confirmed (true) delivery.
+      expect(typeof arg.notifyActive).toBe('function');
+      expect(typeof arg.notifyRecovered).toBe('function');
+      await expect(arg.notifyActive()).resolves.toEqual(expect.any(Boolean));
+    });
+
+    // The dedup gate READS the DB, but a DB outage is itself the critical
+    // incident. If the gate throws (DB down), the page must NOT be
+    // dropped — fall back to a direct un-deduped send so the incident
+    // still surfaces on the monitoring channel.
+    it('falls back to a direct send when the dedup gate throws (DB-down incident still pages)', async () => {
+      applyBinaryWatchdogAlertMock.mockRejectedValue(new Error('db unreachable'));
+      await driveHealthTransitionToDegraded();
+      // Let the fire-and-forget .catch fallback settle.
+      await new Promise((r) => setTimeout(r, 10));
+      expect(sendWebhookSpy).toHaveBeenCalledTimes(1);
+    });
   });
 
   // CF2-01 (2026-06-30 cold audit): the operator-pool circuit-breaker
@@ -391,5 +483,119 @@ describe('healthHandler', () => {
         nowSpy.mockRestore();
       }
     });
+  });
+});
+
+// BK-healthrecon: /health leaked a full operational snapshot (per-operator
+// breaker states, internal worker names + degradation, the fleet machine
+// count, raw OTP-delivery error strings, DB/upstream reachability) to any
+// unauthenticated internet caller. The fix gates that detail behind the same
+// ops-probe bearer that already guards /metrics: external callers get only a
+// minimal ok/degraded liveness signal (which is all Fly / CI probes read),
+// authenticated ops callers still get the full snapshot.
+//
+// These run through a fresh module graph with a production env + a configured
+// METRICS_BEARER_TOKEN so the probe gate is CLOSED for a caller with no bearer
+// — the real production posture. (In the default test env the token is unset
+// and the gate stays open, which is why the suite above still sees the full
+// body.) Same resetModules + doMock isolation the email/otp suites use.
+describe('BK-healthrecon: probe-gated /health body', () => {
+  const TOKEN = 'a'.repeat(32);
+
+  async function loadGatedHealthHandler(): Promise<(c: Context) => Promise<Response>> {
+    vi.resetModules();
+    vi.doMock('../env.js', () => ({
+      env: {
+        NODE_ENV: 'production',
+        METRICS_BEARER_TOKEN: TOKEN,
+        REFRESH_INTERVAL_HOURS: 6,
+        LOCATION_REFRESH_INTERVAL_HOURS: 24,
+      },
+    }));
+    vi.doMock('../logger.js', () => ({
+      logger: {
+        child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+      },
+    }));
+    const mod = await import('../health.js');
+    return mod.healthHandler;
+  }
+
+  function makeReqCtx(authorization: string | undefined): {
+    ctx: Context;
+    headers: Map<string, string>;
+  } {
+    const headers = new Map<string, string>();
+    const ctx = {
+      req: { header: (name: string) => (name === 'Authorization' ? authorization : undefined) },
+      header: (k: string, v: string) => headers.set(k, v),
+      json: (body: unknown, status?: number) =>
+        new Response(JSON.stringify(body), {
+          status: status ?? 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    } as unknown as Context;
+    return { ctx, headers };
+  }
+
+  const RECON_FIELDS = [
+    'operatorPool',
+    'operatorPoolExhausted',
+    'workers',
+    'otpDelivery',
+    'rateLimitFleetEstimate',
+    'rateLimitFleetEstimateSource',
+    'databaseReachable',
+    'upstreamReachable',
+    'softDegradedReasons',
+    'softDegraded',
+    'criticalDegraded',
+    'merchantCount',
+    'locationCount',
+    'geoDbBuildEpoch',
+  ] as const;
+
+  afterEach(() => {
+    vi.doUnmock('../env.js');
+    vi.doUnmock('../logger.js');
+    vi.resetModules();
+  });
+
+  it('reduces the UNAUTHENTICATED response to a minimal liveness signal (no recon detail)', async () => {
+    const healthHandlerGated = await loadGatedHealthHandler();
+    const { ctx, headers } = makeReqCtx(undefined); // no Authorization header
+
+    const res = await healthHandlerGated(ctx);
+
+    // Fly still gets its liveness signal: the 200/503 and the status word.
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.status).toBe('healthy');
+
+    // …but none of the operational reconnaissance fields.
+    for (const field of RECON_FIELDS) {
+      expect(body).not.toHaveProperty(field);
+    }
+    // The minimal body is exactly `{ status }` — nothing else rides along.
+    expect(Object.keys(body)).toEqual(['status']);
+
+    // Still uncacheable, and now varies on Authorization since the body
+    // shape depends on the bearer.
+    expect(headers.get('Cache-Control')).toBe('no-store');
+    expect(headers.get('Vary')).toBe('Authorization');
+  });
+
+  it('still returns the full detailed snapshot to an AUTHENTICATED ops caller', async () => {
+    const healthHandlerGated = await loadGatedHealthHandler();
+    const { ctx } = makeReqCtx(`Bearer ${TOKEN}`);
+
+    const res = await healthHandlerGated(ctx);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.status).toBe('healthy');
+    // The bearer unlocks the detail — proves the fix gates, not deletes.
+    for (const field of RECON_FIELDS) {
+      expect(body).toHaveProperty(field);
+    }
   });
 });

@@ -81,14 +81,22 @@ vi.mock('node:dns/promises', () => ({
 }));
 
 import { app } from '../../app.js';
-import { __getImageCacheStatsForTests, __resetImageCacheForTests } from '../proxy.js';
+import {
+  __getImageCacheStatsForTests,
+  __resetImageCacheForTests,
+  __imageUpstream,
+} from '../proxy.js';
 
-// Mock global fetch for upstream image fetches
+// Stub the SSRF-safe upstream transport (production: node core + a
+// connect-time IP-validating `lookup`) with a mock returning synthetic
+// `Response`s. The handler still passes it `{ signal, redirect: 'manual' }`,
+// so the call-shape assertions below are unchanged; the connect-time rebind
+// defence is proven separately in `../ssrf-guard.test.ts`.
 const mockFetch = vi.fn();
-vi.stubGlobal('fetch', mockFetch);
 
 beforeEach(() => {
   mockFetch.mockReset();
+  __imageUpstream.fetch = mockFetch;
   mockDnsLookup.mockReset();
   mockSharpMetadata.mockReset();
   mockSharpMetadata.mockResolvedValue({ hasAlpha: false, format: 'jpeg' });

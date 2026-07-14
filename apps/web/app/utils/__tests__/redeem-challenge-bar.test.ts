@@ -30,4 +30,20 @@ describe('buildChallengeBarScript', () => {
     const script = buildChallengeBarScript('CODE');
     expect(script).toContain('2147483647');
   });
+
+  it('FE-32: exposes an aria-live status region for the copy result', () => {
+    const script = buildChallengeBarScript('CODE');
+    // A dedicated polite/status live node — the button label flip alone is
+    // an unreliable screen-reader announcement inside a merchant WebView.
+    expect(script).toContain("'aria-live', 'polite'");
+    expect(script).toContain("'role', 'status'");
+  });
+
+  it('FE-32: announces both the copied and failed states into the live region', () => {
+    const script = buildChallengeBarScript('CODE');
+    // success and failure each push a message into the live region, not just
+    // the visible button text — so SR users hear the outcome.
+    expect(script).toContain('Code copied to clipboard');
+    expect(script).toContain("live.textContent = 'Copy failed'");
+  });
 });

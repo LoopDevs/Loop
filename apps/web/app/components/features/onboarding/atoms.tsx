@@ -1,22 +1,74 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+
+/**
+ * `true` when the user has asked the OS to minimise non-essential
+ * motion (`prefers-reduced-motion: reduce`). FE-53 (a11y): the
+ * onboarding flow's slide/scale/confetti/count-up animations are
+ * gated on this so reduced-motion users get the same content with
+ * the motion removed (WCAG 2.1 §2.3.3 Animation from Interactions).
+ *
+ * Guarded for environments without `matchMedia` (SSR, the mobile
+ * static export's first paint, jsdom) — those resolve to `false`
+ * (motion on), matching the historical default. Subscribes to
+ * changes so toggling the OS setting live is honoured.
+ */
+export function useReducedMotion(): boolean {
+  const query = '(prefers-reduced-motion: reduce)';
+  const read = (): boolean =>
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia(query).matches;
+  const [reduced, setReduced] = useState(read);
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const mql = window.matchMedia(query);
+    const onChange = (): void => setReduced(mql.matches);
+    onChange();
+    mql.addEventListener('change', onChange);
+    return () => mql.removeEventListener('change', onChange);
+  }, []);
+  return reduced;
+}
 
 /**
  * Six-position dot progress indicator shown at the top of the
  * onboarding screens. Active dot widens; done dots are a darker
  * shade of the resting tone. Dark variant is driven by `html.dark`
  * via Tailwind so no prop is needed.
+ *
+ * A11Y (FE-54): the dots are decorative on their own — position was
+ * conveyed by width/colour only. A `role="group"` with a visually
+ * hidden "Step N of M" status line plus `aria-current="step"` on the
+ * active dot give assistive tech the same progress signal sighted
+ * users get. The width/colour tween is gated on `prefers-reduced-motion`
+ * (FE-53) via `motion-reduce:transition-none`.
  */
 export function Dots({ active, total }: { active: number; total: number }): React.JSX.Element {
+  const { t } = useTranslation('onboarding');
   return (
-    <div className="flex justify-center gap-1.5 pt-3 pb-1">
+    <div
+      className="flex justify-center gap-1.5 pt-3 pb-1"
+      role="group"
+      aria-label={t('progress.label')}
+    >
+      <span className="sr-only">
+        {t('progress.status', { current: Math.min(active, total - 1) + 1, total })}
+      </span>
       {Array.from({ length: total }, (_, i) => {
         const state = i === active ? 'active' : i < active ? 'done' : 'idle';
         const base =
-          'h-1.5 rounded-full transition-all duration-[280ms] ease-[cubic-bezier(0.4,0,0.2,1)]';
+          'h-1.5 rounded-full transition-all duration-[280ms] ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none';
         const width = state === 'active' ? 'w-[22px]' : 'w-1.5';
         const color =
           state === 'active' ? 'bg-blue-600' : state === 'done' ? 'bg-blue-600/40' : 'bg-ink/15';
-        return <div key={i} className={`${base} ${width} ${color}`} />;
+        return (
+          <div
+            key={i}
+            className={`${base} ${width} ${color}`}
+            aria-current={state === 'active' ? 'step' : undefined}
+          />
+        );
       })}
     </div>
   );
@@ -77,9 +129,15 @@ export function MerchantTile({
  */
 export function useCountUp(target: number, active: boolean, duration = 1400): number {
   const [v, setV] = useState(0);
+  const reduced = useReducedMotion();
   useEffect(() => {
     if (!active) {
       setV(0);
+      return;
+    }
+    // FE-53: reduced-motion users get the final figure with no tween.
+    if (reduced) {
+      setV(target);
       return;
     }
     const start = performance.now();
@@ -92,6 +150,6 @@ export function useCountUp(target: number, active: boolean, duration = 1400): nu
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [active, target, duration]);
+  }, [active, target, duration, reduced]);
   return v;
 }

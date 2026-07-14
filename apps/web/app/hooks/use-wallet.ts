@@ -23,6 +23,11 @@ export interface UseWalletResult {
   balanceFor: (assetCode: string) => string;
   isLoading: boolean;
   isError: boolean;
+  /** The load failure, when `isError` — lets callers tell a transient
+   *  blip (offer retry) from a permanent 4xx (stay quiet). */
+  error: Error | null;
+  /** Re-triggers the wallet fetch (e.g. from a retry affordance). */
+  refetch: () => void;
 }
 
 /**
@@ -54,5 +59,9 @@ export function useWallet(): UseWalletResult {
       wallet?.balances.find((b) => b.assetCode === assetCode)?.balance ?? '0',
     isLoading: query.isLoading,
     isError: query.isError,
+    error: query.error,
+    refetch: (): void => {
+      void query.refetch();
+    },
   };
 }

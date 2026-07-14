@@ -16,6 +16,11 @@ const mockHaptic = vi.fn<(type: 'success' | 'warning' | 'error') => Promise<void
 
 vi.mock('~/native/clipboard', () => ({
   copyToClipboard: (t: string) => mockCopy(t),
+  // PurchaseComplete copies the gift-card code/PIN via `copySensitive`
+  // (FE-05 auto-clear); the auto-clear itself is unit-tested in
+  // native/__tests__/clipboard-sensitive.test.ts, so here we just proxy
+  // the write assertion through the same mock.
+  copySensitive: (t: string) => mockCopy(t),
 }));
 vi.mock('~/native/share', () => ({
   nativeShare: (o: { title: string; text: string; imageUrl?: string; imageFilename?: string }) =>

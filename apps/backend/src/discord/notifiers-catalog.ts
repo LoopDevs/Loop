@@ -272,6 +272,24 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
       "Fires when the payment watcher's Horizon cursor has not advanced in >10 min (A2-626). Catches crashed / hung tickers that would otherwise silently stop processing deposits. One-shot per stuck period.",
   },
   {
+    name: 'notifyDepositSkipRecorded',
+    channel: 'monitoring',
+    description:
+      'Fires when the payment watcher skips an incoming deposit for a reason ops should look at immediately (A4-110 missing_credit_row, or an unexpected processing_error). Fired once on first record — the upsert keyed on the Horizon payment id keeps retries from re-paging. Transient skips (amount_insufficient during an oracle blip, asset_mismatch user error) retry quietly under the skip-table budget and only page on abandonment.',
+  },
+  {
+    name: 'notifyUnrecognizedDepositRecorded',
+    channel: 'monitoring',
+    description:
+      'AUDIT-2 finding C: throttled + rolled-up page (at most once per ~15 min) for deposits that landed at the deposit address but matched no order rail (wrong/no memo, or an unrecognized asset). The deposit address is PUBLIC and can be cheaply dust-spammed, so a burst collapses to one count-bearing page; every row is still recorded unconditionally on /admin/skips for manual reconciliation. A genuine lone stranded deposit into a quiet channel still pages promptly (leading edge).',
+  },
+  {
+    name: 'notifyDepositSkipAbandoned',
+    channel: 'monitoring',
+    description:
+      "Fires when a skipped deposit exhausts its retry budget, or its order left `pending_payment` without it — the user's funds sit in the deposit account with no order to credit. Always pages: this is the 'user paid and got nothing' state that needs a manual refund or recovery decision.",
+  },
+  {
     name: 'notifyUsdcBelowFloor',
     channel: 'monitoring',
     description:

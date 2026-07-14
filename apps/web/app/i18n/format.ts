@@ -114,6 +114,40 @@ export function formatNumber(value: number, locale?: string): string {
 }
 
 /**
+ * Date/time in the given locale — the date analogue of `formatCurrency` /
+ * `formatNumber` above, and the reason the header comment can say *every*
+ * user-facing date flows through this seam. A `/gb/en` page renders
+ * `"20 Apr 2026, 10:02"` and a `/de/en` page renders `"20.04.2026, 10:02"` —
+ * driven by the route locale, never the host default (`navigator.language` /
+ * the CI box's `LANG`), the same route-driven contract the money formatters
+ * hold (ADR 034).
+ *
+ * `locale` is threaded in from the caller's `useLocaleTag()` (or a fixed ops
+ * locale like `ADMIN_LOCALE` on locale-stable admin views) — never read a hook
+ * in here; this stays a pure, SSR-safe function. `options` are the usual
+ * `Intl.DateTimeFormat` options and pass straight through, so each call site
+ * keeps its own month/day/time shape.
+ *
+ * A malformed `locale` tag is the only throw path (`toLocaleString` raises a
+ * `RangeError`); on it we degrade to the raw ISO string rather than crash the
+ * page — the same "readable, don't throw" idiom as `formatNumber`'s
+ * `String(value)`. An unparseable `iso` does not throw: it renders the
+ * platform's `"Invalid Date"`, exactly as the former local `formatDate` copies
+ * did.
+ */
+export function formatDateTime(
+  iso: string,
+  locale?: string,
+  options?: Intl.DateTimeFormatOptions,
+): string {
+  try {
+    return new Date(iso).toLocaleString(locale, options);
+  } catch {
+    return iso;
+  }
+}
+
+/**
  * Bigint-exact minor-unit → currency string, localised to the route.
  *
  * Thin re-export of `@loop/shared#formatMinorCurrency` with the locale threaded

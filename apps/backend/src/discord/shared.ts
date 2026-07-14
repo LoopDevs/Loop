@@ -60,20 +60,53 @@ export function escapeMarkdown(value: string): string {
 }
 
 /**
+ * Process-once latch for the "webhook unconfigured" warning. All
+ * three webhook URLs are `.optional()` in the env schema, so an
+ * unset URL is a legitimate dev/test state — we surface it exactly
+ * ONCE per process (visible for ops) rather than on every dropped
+ * send (which would be spam).
+ */
+let warnedUnconfigured = false;
+
+/** Test hook: reset the once-per-process unconfigured-webhook warn latch. */
+export function __resetUnconfiguredWebhookWarningForTests(): void {
+  warnedUnconfigured = false;
+}
+
+/**
  * Sends a message to a Discord webhook. Fails silently — never
- * blocks app logic. Returns whether the send is considered
- * DELIVERED: `true` on a 2xx (or when no webhook is configured —
- * there is nowhere to deliver, so callers tracking delivery must
- * not retry forever), `false` on a non-2xx or network error.
- * Fire-and-forget callers can keep ignoring the result; delivery-
- * tracked callers (the asset-drift watcher's transition pages)
- * await it and re-attempt undelivered pages on later ticks.
+ * blocks app logic. Returns whether the message was actually
+ * DELIVERED: `true` only on a 2xx; `false` on a non-2xx, a network
+ * error, OR when no webhook is configured.
+ *
+ * The unconfigured case returns `false` (FT-06 / A2 detectability).
+ * An unset URL means the message went NOWHERE, so reporting `true`
+ * would be a phantom delivery: a delivery-tracked caller (the
+ * fire-once watchdogs via `vault-watchdog-alert.ts` /
+ * `stuck-payout-watchdog.ts`) flips its persisted `alert_active`
+ * only on a `true`, so a phantom `true` would latch a real
+ * money-integrity breach as "delivered", never re-fire it, and
+ * leave `/health` green — the alert is lost to the void. Returning
+ * `false` instead keeps such alerts un-acked, so the next tick (on
+ * any machine) re-attempts — correct once the webhook is set, and
+ * never latching on a delivery that did not happen. Fire-and-forget
+ * callers (`void sendWebhook`) ignore the result exactly as before;
+ * to keep the misconfiguration OBSERVABLE for them too, the first
+ * unconfigured send in a process emits a single warn.
  */
 export async function sendWebhook(
   webhookUrl: string | undefined,
   embed: DiscordEmbed,
 ): Promise<boolean> {
-  if (!webhookUrl) return true;
+  if (!webhookUrl) {
+    if (!warnedUnconfigured) {
+      warnedUnconfigured = true;
+      log.warn(
+        'Discord webhook URL is not configured — notifications are being dropped, not delivered (set DISCORD_WEBHOOK_* to enable alerting)',
+      );
+    }
+    return false;
+  }
 
   try {
     const response = await fetch(webhookUrl, {
@@ -170,18 +203,32 @@ export function formatAmount(amount: number, currency: string): string {
  * (we don't support 0/3-decimal currencies on Loop today).
  */
 export function formatMinorAmount(minorStr: string, currency: string): string {
-  // A2-1522: BigInt-safe minor-unit rendering with Intl for the
-  // currency symbol. We do the 2-decimal split ourselves (so
-  // cashback totals beyond JS's safe-integer range keep their
-  // precision), then look up the symbol via Intl.
-  const negative = minorStr.startsWith('-');
-  const digits = negative ? minorStr.slice(1) : minorStr;
-  const padded = digits.padStart(3, '0');
-  const whole = padded.slice(0, -2);
-  const fraction = padded.slice(-2);
-  const sign = negative ? '-' : '';
+  // A2-1522 / MNY-05: BigInt-safe minor-unit rendering with Intl for
+  // the currency symbol. Parse the minor amount as a BigInt and split
+  // major/minor by integer division on the bigint (never a `Number`
+  // cast), then GROUP the major units via `Intl.NumberFormat` over the
+  // bigint itself — Intl consumes bigint natively and never routes it
+  // through a Number, so amounts past 2^53 keep full precision. The
+  // prior `Number(whole).toLocaleString(...)` silently rounded large
+  // totals (e.g. 9007199254740993 → …992). This matches @loop/shared's
+  // canonical `formatMinorCurrency` while preserving this notifier's
+  // `<symbol><amount> <CODE>` shape.
   const code = currency.toUpperCase();
-  const wholeWithSeparators = Number(whole).toLocaleString('en-US');
+  let minor: bigint;
+  try {
+    minor = BigInt(minorStr);
+  } catch {
+    // Non-integer input (should never happen for a minor-unit string) —
+    // fall back to the raw value with the code suffix rather than throw
+    // or render `NaN`.
+    return `${escapeMarkdown(minorStr)} ${escapeMarkdown(code)}`;
+  }
+  const negative = minor < 0n;
+  const abs = negative ? -minor : minor;
+  const whole = abs / 100n;
+  const fraction = (abs % 100n).toString().padStart(2, '0');
+  const sign = negative ? '-' : '';
+  const wholeWithSeparators = new Intl.NumberFormat('en-US').format(whole);
   const body = `${wholeWithSeparators}.${fraction}`;
 
   let symbol: string | undefined;

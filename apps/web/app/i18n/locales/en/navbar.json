@@ -1,0 +1,37 @@
+{
+  "skipToContent": "Skip to main content",
+  "nav": {
+    "directory": "Directory",
+    "map": "Map",
+    "rates": "Rates",
+    "orders": "Orders"
+  },
+  "cta": {
+    "logIn": "Log in",
+    "signUp": "Sign up"
+  },
+  "search": {
+    "label": "Search brands",
+    "optionCount": "{{n}} options",
+    "percentOff": "{{pct}}% off",
+    "noResults": "No brands match “{{query}}”",
+    "error": "Search is unavailable right now. Try again in a moment."
+  },
+  "account": {
+    "menuLabel": "Account menu",
+    "signedInAs": "Signed in as",
+    "fallbackName": "Your account",
+    "orders": "Orders",
+    "cashback": "Cashback",
+    "wallet": "Wallet",
+    "signOut": "Sign out"
+  },
+  "country": {
+    "triggerLabel": "Country: {{country}}",
+    "dialogLabel": "Choose your country",
+    "search": "Search countries",
+    "close": "Close country picker",
+    "listLabel": "Countries",
+    "noResults": "No countries match \"{{query}}\"."
+  }
+}

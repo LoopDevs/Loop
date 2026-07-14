@@ -3,9 +3,10 @@ import type { Merchant } from '@loop/shared';
 import { merchantSlug } from '@loop/shared';
 import { getImageProxyUrl } from '~/utils/image';
 import { brandTileStyle } from '~/utils/brand-color';
+import { formatCashbackPct } from '~/utils/format-cashback';
 import { triggerHaptic } from '~/native/haptics';
 import { LazyImage } from '~/components/ui/LazyImage';
-import { currencySymbol } from '~/i18n/format';
+import { currencySymbol, formatNumber, useLocaleTag } from '~/i18n/format';
 import { FavoriteToggleButton } from './FavoriteToggleButton';
 
 /**
@@ -19,22 +20,29 @@ import { FavoriteToggleButton } from './FavoriteToggleButton';
  *
  * Uses the merchant's currency symbol (£ / $ / € / …) and omits the
  * trailing ISO code, which was noisy ("$10–$250 USD").
+ *
+ * The numeric values flow through `formatNumber` (the route-locale
+ * `Intl.NumberFormat` seam, ADR 034) so large denominations render with
+ * grouping separators — "$1,000" not "$1000" — and follow the market's
+ * grouping convention (a `/de/en` page shows "1.000"). Only the number
+ * formatting is localised here; the symbol + dash presentation is unchanged.
  */
 function renderDenominationRange(
   denominations: Merchant['denominations'],
+  locale: string,
 ): React.JSX.Element | null {
   if (denominations === undefined) return null;
 
   const className = 'text-xs text-gray-500 dark:text-gray-400';
-  const sym = currencySymbol(denominations.currency);
+  const sym = currencySymbol(denominations.currency, locale);
 
   if (denominations.type === 'min-max') {
     if (denominations.min === undefined || denominations.max === undefined) return null;
     return (
       <p className={className}>
         {sym}
-        {denominations.min} – {sym}
-        {denominations.max}
+        {formatNumber(denominations.min, locale)} – {sym}
+        {formatNumber(denominations.max, locale)}
       </p>
     );
   }
@@ -54,15 +62,15 @@ function renderDenominationRange(
       return (
         <p className={className}>
           {sym}
-          {min}
+          {formatNumber(min, locale)}
         </p>
       );
     }
     return (
       <p className={className}>
         {sym}
-        {min} – {sym}
-        {max}
+        {formatNumber(min, locale)} – {sym}
+        {formatNumber(max, locale)}
       </p>
     );
   }
@@ -93,23 +101,6 @@ export interface MerchantCardProps {
   displayName?: string;
 }
 
-/**
- * Formats the numeric-string pct for the card badge. Drops trailing
- * zeros so whole-integer rates read as "5% cashback" rather than
- * "5.00% cashback", while partial rates keep their precision ("2.5").
- * Returns `null` when the input can't be made to render sensibly,
- * which the caller should translate to "don't render the badge".
- */
-function formatCashbackPct(pct: string | null | undefined): string | null {
-  if (pct === null || pct === undefined) return null;
-  const n = Number(pct);
-  if (!Number.isFinite(n) || n <= 0) return null;
-  // One decimal place max — rates like 1.25% are rare and would clutter
-  // a small pill; we prefer the slightly-less-precise "1.3%" read.
-  const rounded = Math.round(n * 10) / 10;
-  return rounded.toFixed(1).replace(/\.0$/, '');
-}
-
 export function MerchantCard({
   merchant,
   displayIndex = 0,
@@ -124,6 +115,8 @@ export function MerchantCard({
   const logoImgUrl =
     merchant.logoUrl !== undefined ? getImageProxyUrl(merchant.logoUrl, 160) : undefined;
   const cashbackLabel = formatCashbackPct(userCashbackPct);
+  // Route locale drives the denomination-range grouping separators (ADR 034).
+  const locale = useLocaleTag();
 
   return (
     <Link
@@ -222,7 +215,7 @@ export function MerchantCard({
             {displayName ?? merchant.name}
           </h3>
 
-          {renderDenominationRange(merchant.denominations)}
+          {renderDenominationRange(merchant.denominations, locale)}
         </div>
       </div>
     </Link>

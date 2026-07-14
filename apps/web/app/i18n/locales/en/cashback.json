@@ -14,6 +14,14 @@
       "option": "{{name}} · {{pct}}% cashback"
     }
   },
+  "calculatorWidget": {
+    "heading": "Calculate your cashback",
+    "sub": "Enter a gift-card amount and we’ll show what you’d earn.",
+    "amount": "Amount",
+    "amountAria": "Gift card amount",
+    "rate": "Rate",
+    "youllEarn": "You’ll earn"
+  },
   "index": {
     "heading": "Best cashback rates on Loop",
     "sub": "Earn cashback every time you buy a gift card. Paid in LOOP-asset stablecoin that compounds when you spend it on your next order.",

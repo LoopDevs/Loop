@@ -53,6 +53,10 @@ export function registerAdminCsvExportsTreasuryOpenApi(
         description: 'Unknown `currency`',
         content: { 'application/json': { schema: errorResponse } },
       },
+      401: {
+        description: 'Missing or invalid bearer',
+        content: { 'application/json': { schema: errorResponse } },
+      },
       404: {
         description:
           'Not found — also returned to authenticated non-admin callers: requireAdmin masks the admin surface as 404 by design (see src/auth/require-admin.ts).',

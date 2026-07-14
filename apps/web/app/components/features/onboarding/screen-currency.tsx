@@ -206,8 +206,18 @@ function localeRegion(locale: string): string | null {
   // Fall back to parsing the first segment's language code — not
   // perfect (no region signal), but better than guessing USD
   // when the user has `de` or `fr` set without a country.
+  //
+  // Only languages that overwhelmingly pin a single Eurozone country get the
+  // synthetic EU region. `es` and `pt` are deliberately excluded: a bare
+  // language doesn't pin a country (the same rule `countryFromAcceptLanguage`
+  // in @loop/shared follows), and Spanish is predominantly Latin America while
+  // Portuguese is predominantly Brazil — neither is the Eurozone, so
+  // defaulting them to EUR is wrong. Without a region subtag they fall through
+  // to the USD default (which is where this app already routes MX/BR/LatAm,
+  // since those currencies have no LOOP home-currency asset); with one
+  // (`es-ES`, `pt-PT`) the region branch above still yields EUR.
   const lang = parts[0]?.toLowerCase();
-  if (lang === 'de' || lang === 'fr' || lang === 'es' || lang === 'it' || lang === 'pt') {
+  if (lang === 'de' || lang === 'fr' || lang === 'it') {
     return 'EU'; // synthetic — routes to EUR
   }
   if (lang === 'en') {

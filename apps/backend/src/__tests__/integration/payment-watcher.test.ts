@@ -305,14 +305,69 @@ describeIf('payment-watcher integration — memo match + state transition', () =
     expect(abandoned!.reason).toBe('order_gone');
   });
 
-  it('T0-1 safety: a memo matching NO order is counted only, never recorded (no unattributable refunds)', async () => {
-    vi.mocked(listAccountPayments).mockResolvedValueOnce({
-      records: [xlmPayment({ id: 'unk-1', pagingToken: 'tok-unk-1', memo: 'no-such-order-memo' })],
-      nextCursor: null,
+  it('MNY-20: valid-rail deposit whose memo matches NO order → recorded as unrecognized_deposit (not silently dropped), idempotently', async () => {
+    // A real XLM deposit landed at the deposit account carrying a memo
+    // that resolves to no order at all (no pending, expired, or paid
+    // order). Pre-MNY-20 this was a silent counted-only no-op: no skip
+    // row, the cursor advances past it, and the sender's funds strand at
+    // the operator==deposit account with zero recovery trail. It must now
+    // be recorded so ops can see + reconcile/refund it from /admin/skips.
+    const payment = xlmPayment({
+      id: 'unk-1',
+      pagingToken: 'tok-unk-1',
+      memo: 'no-such-order-memo',
     });
-    const result = await runPaymentWatcherTick({ account: ACCOUNT });
-    expect(result.unmatchedMemo).toBe(1);
-    expect(await db.select().from(paymentWatcherSkips)).toHaveLength(0);
+    vi.mocked(listAccountPayments).mockResolvedValue({ records: [payment], nextCursor: null });
+
+    const t1 = await runPaymentWatcherTick({ account: ACCOUNT });
+    expect(t1.unmatchedMemo).toBe(1);
+
+    const afterFirst = await db.select().from(paymentWatcherSkips);
+    expect(afterFirst).toHaveLength(1);
+    expect(afterFirst[0]!.paymentId).toBe('unk-1');
+    expect(afterFirst[0]!.reason).toBe('unrecognized_deposit');
+    expect(afterFirst[0]!.orderId).toBeNull();
+    expect(afterFirst[0]!.status).toBe('pending');
+
+    // Idempotent: a re-read of the same Horizon record (the next tick's
+    // sweep AND its fresh page both touch payment_id 'unk-1', keyed on the
+    // primary key) never inserts a second row.
+    await runPaymentWatcherTick({ account: ACCOUNT });
+    const afterSecond = await db.select().from(paymentWatcherSkips);
+    expect(afterSecond).toHaveLength(1);
+    expect(afterSecond[0]!.reason).toBe('unrecognized_deposit');
+  });
+
+  it('MNY-20 safety: an unattributable deposit is never promoted to order_gone / auto-refunded on retry', async () => {
+    // Preserves the prior "no unattributable refunds" invariant: the
+    // recovery row must STAY `unrecognized_deposit` across the retry
+    // sweep — never reclassified into the A6-refundable `order_gone` path
+    // (which auto-refunds to the sender when LOOP_DEPOSIT_REFUND_AUTO is
+    // on, and abandons it as refundable otherwise). Refunding an
+    // unattributable deposit is a separate ops decision; the watcher only
+    // makes it visible.
+    const payment = xlmPayment({
+      id: 'unk-2',
+      pagingToken: 'tok-unk-2',
+      memo: 'still-no-order',
+    });
+    vi.mocked(listAccountPayments).mockResolvedValue({ records: [payment], nextCursor: null });
+
+    // Tick 1 records it; tick 2's sweep re-evaluates the pending row.
+    await runPaymentWatcherTick({ account: ACCOUNT });
+    await runPaymentWatcherTick({ account: ACCOUNT });
+
+    const [row] = await db
+      .select()
+      .from(paymentWatcherSkips)
+      .where(eq(paymentWatcherSkips.paymentId, 'unk-2'));
+    // Still unrecognized_deposit + pending — never order_gone, never
+    // abandoned-as-refundable, never a refund tx.
+    expect(row!.reason).toBe('unrecognized_deposit');
+    expect(row!.status).toBe('pending');
+    expect(row!.refundTxHash).toBeNull();
+    // Bumped by the sweep, proving the row WAS re-evaluated (not ignored).
+    expect(row!.attempts).toBeGreaterThanOrEqual(2);
   });
 
   it('T0-1 safety: deposit whose order was PAID is counted only, NOT recorded (double-spend guard)', async () => {
@@ -396,19 +451,25 @@ describeIf('payment-watcher integration — loop_asset redemption (A4-110 + ADR 
 
   it('debits the mirror AND enqueues the issuer-return burn in the same txn', async () => {
     const seeded = await seedLoopAssetOrder('redeem-memo-1');
-    // The redeeming user holds 3000 minor of mirrored USD balance.
-    await db.insert(creditTransactions).values({
-      userId: seeded.userId,
-      type: 'cashback',
-      amountMinor: 3000n,
-      currency: 'USD',
-      referenceType: 'order',
-      referenceId: crypto.randomUUID(),
-    });
-    await db.insert(userCredits).values({
-      userId: seeded.userId,
-      currency: 'USD',
-      balanceMinor: 3000n,
+    // The redeeming user holds 3000 minor of mirrored USD balance —
+    // seeded as a cashback ledger row PLUS its matching balance in ONE
+    // transaction so the DAT-01-inv1 mirror invariant (migration 0066)
+    // holds at commit (the two previously autocommitted separately,
+    // tripping the deferred trigger).
+    await db.transaction(async (tx) => {
+      await tx.insert(creditTransactions).values({
+        userId: seeded.userId,
+        type: 'cashback',
+        amountMinor: 3000n,
+        currency: 'USD',
+        referenceType: 'order',
+        referenceId: crypto.randomUUID(),
+      });
+      await tx.insert(userCredits).values({
+        userId: seeded.userId,
+        currency: 'USD',
+        balanceMinor: 3000n,
+      });
     });
     vi.mocked(listAccountPayments).mockResolvedValueOnce({
       records: [usdloopPayment({ id: 'lp1', pagingToken: 'tok-loop-1', memo: seeded.memo })],

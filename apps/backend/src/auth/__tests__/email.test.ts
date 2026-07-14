@@ -107,7 +107,7 @@ describe('ResendEmailProvider.sendOtpEmail', () => {
     __resetEmailProviderForTests();
   });
 
-  it('POSTs to Resend with bearer auth, default from, code in subject + body', async () => {
+  it('POSTs to Resend with bearer auth, default from, code in body only (never the subject)', async () => {
     const fetchSpy = vi
       .spyOn(global, 'fetch')
       .mockResolvedValue(new Response('{}', { status: 200 }));
@@ -132,7 +132,11 @@ describe('ResendEmailProvider.sendOtpEmail', () => {
     };
     expect(body.from).toBe('Loop <noreply@loopfinance.io>');
     expect(body.to).toBe('user@example.com');
-    expect(body.subject).toContain('654321');
+    // NTF-18: the subject leaks into lock-screen / push-notification
+    // previews, so the OTP code must never appear there — only in the
+    // body, which requires opening the mail.
+    expect(body.subject).toBe('Your Loop verification code');
+    expect(body.subject).not.toContain('654321');
     expect(body.text).toContain('654321');
     expect(body.html).toContain('654321');
     fetchSpy.mockRestore();

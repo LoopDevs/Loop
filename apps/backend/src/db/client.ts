@@ -76,6 +76,60 @@ export const db = drizzle(client, { schema });
 export type DB = typeof db;
 
 /**
+ * FT-12: cap on how many advisory-lock holders may simultaneously hold
+ * a reserved pool connection.
+ *
+ * Each `withAdvisoryLock` holder pins ONE connection for the lock's
+ * whole lifetime (`client.reserve()`), AND its `fn` body draws at least
+ * one MORE connection from the SAME pool (callers run `db` queries
+ * inside `fn`). So without a bound, ~N concurrent holders (the ~15
+ * fleet workers, plus per-request fence locks that scale with traffic)
+ * can reserve EVERY pool member, leaving their `fn` bodies to queue
+ * forever for a connection that never frees. postgres-js queues both
+ * `reserve()` and ordinary queries with NO acquire timeout (an
+ * exhausted pool just pushes onto its internal `queries` list and
+ * awaits), and `statement_timeout` can't help a query that is waiting
+ * for a connection rather than executing — so this is a hard, permanent
+ * deadlock, not a slow query.
+ *
+ * Cap concurrent holders at floor(poolMax / 2): with at most poolMax/2
+ * connections pinned by locks, at least ceil(poolMax/2) always remain
+ * for the holders' `fn` bodies (and other traffic), so every body can
+ * make progress and release — the pool can never deadlock on lock
+ * reservations. The /2 encodes the "each locked worker needs >= 2 pool
+ * connections" derivation directly. Excess holders wait in-process for
+ * a permit WITHOUT pinning a connection, so waiting can't itself starve
+ * the pool; under normal concurrency (< cap holders in flight) this is
+ * a no-op. Exported for the DB-backed regression test.
+ */
+export const maxConcurrentLockHolders = Math.max(1, Math.floor(env.DATABASE_POOL_MAX / 2));
+let availableLockHolderSlots = maxConcurrentLockHolders;
+const lockHolderWaiters: Array<() => void> = [];
+
+/** Take a holder permit, waiting in-process (no pinned connection) if at the cap. */
+async function acquireLockHolderSlot(): Promise<void> {
+  if (availableLockHolderSlots > 0) {
+    availableLockHolderSlots -= 1;
+    return;
+  }
+  // Permit is handed to us directly by `releaseLockHolderSlot` (FIFO).
+  await new Promise<void>((resolve) => {
+    lockHolderWaiters.push(resolve);
+  });
+}
+
+/** Return a holder permit, handing it straight to the next FIFO waiter if any. */
+function releaseLockHolderSlot(): void {
+  const next = lockHolderWaiters.shift();
+  if (next !== undefined) {
+    // Direct handoff: the count stays the same, the waiter proceeds.
+    next();
+    return;
+  }
+  availableLockHolderSlots += 1;
+}
+
+/**
  * Run `fn` while holding a session-scoped Postgres advisory lock,
  * fleet-wide, on a DEDICATED reserved connection (hardening A8).
  *
@@ -91,17 +145,21 @@ export type DB = typeof db;
  * that single-flight a periodic tick treat that as "another instance
  * is the leader this tick" and skip.
  *
- * **Transaction-pooler guard.** Under a transaction-mode pooler
- * (PgBouncer/Supavisor), each statement can land on a different server
- * backend, so `pg_advisory_unlock` may miss the backend that took the
- * lock → the SESSION lock leaks and never releases. `reserve()` only
- * pins the client↔pooler socket, not the pooler↔server backend. So
- * when the URL is a pooler we do NOT take the lock — we run `fn`
- * un-serialised (degrading to the caller's pre-lock behaviour, which
- * for the payout worker is the accepted `SKIP LOCKED` per-machine
- * posture) rather than risk a leaked lock that stalls the queue.
- * Production uses the direct Postgres port (see deployment.md), so
- * this only trips on a misconfigured `DATABASE_URL`.
+ * **Transaction-pooler guard (BK-pooler).** Under a transaction-mode
+ * pooler (PgBouncer/Supavisor), each statement can land on a different
+ * server backend, so `pg_advisory_unlock` may miss the backend that
+ * took the lock → the SESSION lock leaks and never releases (or two
+ * machines both believe they hold it). `reserve()` only pins the
+ * client↔pooler socket, not the pooler↔server backend. This wrapper
+ * used to log a warn and then run `fn` UN-SERIALISED — a SILENT loss of
+ * the fleet-wide fence that every caller relies on. It now FAILS CLOSED
+ * instead: when the URL is a transaction pooler it THROWS rather than
+ * run lock-dependent work without the lock. Callers that keep an
+ * independent per-machine backstop (redeem's in-process fence, the
+ * emission-sweep CAS) still have that backstop; what they no longer get
+ * is a silent downgrade of the fleet-wide guarantee. Production uses the
+ * direct Postgres port (see deployment.md), so this only trips on a
+ * misconfigured `DATABASE_URL` — where failing loud is the safe outcome.
  *
  * **No lease is enforced here** — the CALLER is responsible for
  * bounding how long `fn` runs (e.g. the payout worker races its tick
@@ -115,42 +173,100 @@ export async function withAdvisoryLock<T>(
   fn: () => Promise<T>,
 ): Promise<{ ran: true; value: T } | { ran: false }> {
   if (isPooledPostgresUrl(env.DATABASE_URL)) {
-    // Cannot hold a reliable session lock through a transaction
-    // pooler — run un-serialised rather than leak a lock. Logged so a
-    // misconfiguration is visible.
-    log.warn(
-      'withAdvisoryLock called with a transaction-pooler DATABASE_URL — running fn WITHOUT the advisory lock (session locks are unsafe through a pooler). Use the direct Postgres port for fleet-wide single-flight.',
+    // BK-pooler: fail CLOSED. A session-scoped advisory lock cannot be
+    // held reliably through a transaction-mode pooler, so running `fn`
+    // without it would silently drop the fleet-wide fence. Refuse
+    // instead — a misconfigured pooler URL should crash loud, not run
+    // lock-dependent work un-serialised.
+    throw new Error(
+      'withAdvisoryLock: DATABASE_URL points at a transaction-mode pooler ' +
+        '(PgBouncer/Supavisor). Session-scoped advisory locks are unsafe through a ' +
+        'transaction pooler — the unlock can miss the backend that holds the lock and the ' +
+        'fleet-wide lock leaks. Refusing to run lock-dependent work (fail-closed) rather ' +
+        'than silently running it un-serialised. Use the direct Postgres port for ' +
+        'fleet-wide single-flight (see deployment.md).',
     );
-    return { ran: true, value: await fn() };
   }
-  const reserved = await client.reserve();
+  // FT-12: take a holder permit before reserving a connection so
+  // concurrent holders can never exhaust the pool and deadlock their
+  // own `fn` bodies. Released in the outer `finally`, after the
+  // reserved connection is released.
+  await acquireLockHolderSlot();
   try {
-    const [row] = await reserved<{ locked: boolean }[]>`
-      SELECT pg_try_advisory_lock(${lockKey}) AS locked
-    `;
-    if (row?.locked !== true) {
-      return { ran: false };
-    }
+    const reserved = await client.reserve();
     try {
-      const value = await fn();
-      return { ran: true, value };
+      const [row] = await reserved<{ locked: boolean }[]>`
+        SELECT pg_try_advisory_lock(${lockKey}) AS locked
+      `;
+      if (row?.locked !== true) {
+        return { ran: false };
+      }
+      try {
+        const value = await fn();
+        return { ran: true, value };
+      } finally {
+        await reserved`SELECT pg_advisory_unlock(${lockKey})`;
+      }
     } finally {
-      await reserved`SELECT pg_advisory_unlock(${lockKey})`;
+      reserved.release();
     }
   } finally {
-    reserved.release();
+    releaseLockHolderSlot();
   }
+}
+
+/**
+ * BK-stmttimeout: build a DEDICATED single-connection client for running
+ * migrations that DELIBERATELY omits the app `statement_timeout`.
+ *
+ * The app pool (`client`, above) sets `statement_timeout` as a startup
+ * parameter so a runaway request query can't monopolise a pool slot.
+ * But the migrator runs through a connection too, and a legitimate
+ * migration (a large table rewrite, a `CREATE INDEX` over a big table, a
+ * data backfill) can easily exceed the 30s app default. Applied to the
+ * migrator, that timeout ABORTS the migration mid-flight — blocking the
+ * deploy and potentially leaving the schema half-applied. So migrations
+ * get their own connection with NO app statement_timeout (the server
+ * default, typically 0 = unbounded); scoped to the app pool, the
+ * timeout still protects every ordinary query. Exported so the DB-backed
+ * test can assert the scoping.
+ */
+export function createMigrationClient(): ReturnType<typeof postgres> {
+  return postgres(env.DATABASE_URL, {
+    // One connection is enough — migrations run serially — and avoids
+    // opening a second full-size pool at boot.
+    max: 1,
+    idle_timeout: 20,
+    connect_timeout: 10,
+    // Intentionally NO `connection.statement_timeout`: a long, legitimate
+    // migration must not be aborted by the app query timeout. Also keeps
+    // the migrator pooler-safe (a pooler rejects the startup parameter).
+    types: {
+      bigint: postgres.BigInt,
+    },
+  });
 }
 
 /**
  * Run pending migrations and resolve. Called at backend startup so a
  * fresh deploy applies any schema changes before it starts serving.
  * Safe to call repeatedly — the migrator no-ops on an up-to-date DB.
+ *
+ * Runs on a dedicated connection WITHOUT the app `statement_timeout`
+ * (BK-stmttimeout) so a long migration isn't aborted mid-flight; the
+ * connection is always closed afterwards so boot doesn't leak it.
  */
 export async function runMigrations(): Promise<void> {
   log.info('Applying database migrations');
-  await migrate(db, { migrationsFolder: new URL('./migrations', import.meta.url).pathname });
-  log.info('Migrations up to date');
+  const migrationClient = createMigrationClient();
+  try {
+    await migrate(drizzle(migrationClient, { schema }), {
+      migrationsFolder: new URL('./migrations', import.meta.url).pathname,
+    });
+    log.info('Migrations up to date');
+  } finally {
+    await migrationClient.end({ timeout: 5 });
+  }
 }
 
 /**

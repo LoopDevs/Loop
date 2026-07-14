@@ -7,8 +7,9 @@ import type { BiometricResult } from '~/native/biometrics';
 import { setHomeCurrency } from '~/services/user';
 import { useAppConfig } from '~/hooks/use-app-config';
 import { readCountryCookie } from '~/i18n/locale';
+import { isValidEmail } from '~/utils/email';
 import { ApiException, isSupportedCountryCode } from '@loop/shared';
-import { Dots } from './atoms';
+import { Dots, useReducedMotion } from './atoms';
 import { TrustWelcome, TrustHowItWorks, TrustMerchants } from './screens-trust';
 import { EmailEntry, OtpEntry, WelcomeIn, useOnboardingAuth } from './signup-tail';
 import { BiometricSetup } from './screen-biometric';
@@ -120,6 +121,9 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
   const navigate = useNavigate();
   const { config } = useAppConfig();
   const { t } = useTranslation('onboarding');
+  // FE-53 (a11y): gate the inter-step slide animation on the OS
+  // reduced-motion preference (WCAG 2.1 §2.3.3).
+  const reduced = useReducedMotion();
   // Tranche 1 (MVP) launch: skip steps 5 (CurrencyPicker — needs
   // multi-currency cashback) and 7 (WalletIntro — needs the
   // Stellar passkey wallet that ships in Tranche 2). Auto-advance
@@ -228,7 +232,7 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
   };
 
   // --- step-specific CTA wiring ------------------------------------
-  const emailValid = /.+@.+\..+/.test(email);
+  const emailValid = isValidEmail(email);
   const otpValid = otp.length === 6;
 
   const handleEmailCta = async (): Promise<void> => {
@@ -475,8 +479,9 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
                     : state === 'prev'
                       ? 'translateX(-40px)'
                       : 'translateX(40px)',
-                transition:
-                  'opacity 320ms cubic-bezier(0.4,0,0.2,1), transform 320ms cubic-bezier(0.4,0,0.2,1)',
+                transition: reduced
+                  ? 'none'
+                  : 'opacity 320ms cubic-bezier(0.4,0,0.2,1), transform 320ms cubic-bezier(0.4,0,0.2,1)',
                 pointerEvents: state === 'active' ? 'auto' : 'none',
               }}
               aria-hidden={state !== 'active'}
@@ -500,7 +505,7 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
           type="button"
           onClick={currentCta.act}
           disabled={!currentCta.enabled}
-          className="w-full h-[54px] rounded-2xl border-0 text-[17px] font-semibold cursor-pointer disabled:cursor-not-allowed bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300 disabled:text-white active:scale-[0.98] transition-[transform,background-color]"
+          className="w-full h-[54px] rounded-2xl border-0 text-[17px] font-semibold cursor-pointer disabled:cursor-not-allowed bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300 disabled:text-white active:scale-[0.98] transition-[transform,background-color] motion-reduce:transition-none motion-reduce:active:scale-100"
           style={{ letterSpacing: '-0.01em' }}
         >
           {currentCta.label}

@@ -20,6 +20,21 @@ describe('Avatar', () => {
     expect(screen.queryByAltText('Account')).not.toBeNull();
   });
 
+  it("keeps the img alt as 'Account' when name is an empty string (not decorative)", () => {
+    // `??` would let '' through as alt="", marking a meaningful account
+    // image as decorative and hiding it from AT. The alt must fall back.
+    render(<Avatar name="" src="https://x.test/a.png" />);
+    const img = screen.getByAltText('Account');
+    expect(img.tagName).toBe('IMG');
+    expect(img.getAttribute('alt')).toBe('Account');
+  });
+
+  it("keeps the img alt as 'Account' when name is whitespace-only", () => {
+    render(<Avatar name="   " src="https://x.test/a.png" />);
+    const img = screen.getByAltText('Account');
+    expect(img.getAttribute('alt')).toBe('Account');
+  });
+
   it('renders an initials disc (not an image) when there is no src', () => {
     render(<Avatar name="John Doe" />);
     expect(screen.getByText('JD')).not.toBeNull();

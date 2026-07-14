@@ -112,3 +112,41 @@ export const refreshTokens = pgTable(
     index('refresh_tokens_expires').on(t.expiresAt),
   ],
 );
+
+/**
+ * SEC-02-stepup: single-use ledger for admin step-up tokens (ADR 028).
+ *
+ * The step-up JWT (`auth/admin-step-up.ts`) is otherwise stateless —
+ * its 5-minute `exp` was the ONLY bound, so one minted token could be
+ * replayed for UNLIMITED destructive admin writes inside the window
+ * (and, defaulting to the wildcard scope, for ANY action class). This
+ * table makes the token SINGLE-USE: `consumeAdminStepUpToken` inserts
+ * one row per consumed `jti` with `ON CONFLICT (jti) DO NOTHING`, so
+ * the FIRST presentation wins and every later replay of the same token
+ * is rejected — the same atomic-consume idiom as `refresh_tokens`'
+ * `tryRevokeIfLive` and `otps`' consumed-marker.
+ *
+ * `sub` (the admin's Loop user id) + `scope` (the action class the
+ * token was minted for) are carried for forensics. No FK to `users`:
+ * the row is an ephemeral single-use marker reaped by `expires_at`,
+ * not a join key, and an FK would only complicate the truncate order
+ * (same reasoning as `otps`). `expires_at` mirrors the token's `exp`
+ * so a retention sweep can reap rows once the token can no longer
+ * verify.
+ */
+export const adminStepUpConsumptions = pgTable(
+  'admin_step_up_consumptions',
+  {
+    jti: text('jti').primaryKey(),
+    sub: text('sub').notNull(),
+    scope: text('scope').notNull(),
+    consumedAt: timestamp('consumed_at', { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    // Range scan for the retention sweep that reaps rows past the
+    // token's expiry — mirrors `refresh_tokens_expires` / `otps`'
+    // `expires_at` indexes.
+    index('admin_step_up_consumptions_expires').on(t.expiresAt),
+  ],
+);

@@ -409,6 +409,7 @@ describe('GET /api/merchants/:id', () => {
 
 describe('GET /api/merchants/cashback-rates (bulk)', () => {
   it('returns a rates map keyed by merchantId with bigint-string pcts', async () => {
+    seed([merchant('m-1', 'A'), merchant('m-2', 'B')]);
     dbState.bulkConfigs = [
       { merchantId: 'm-1', userCashbackPct: '2.50' },
       { merchantId: 'm-2', userCashbackPct: '10.00' },
@@ -420,6 +421,23 @@ describe('GET /api/merchants/cashback-rates (bulk)', () => {
       'm-1': '2.50',
       'm-2': '10.00',
     });
+  });
+
+  it('drops configs for merchants absent from the catalog (COR-14 — same guard as single endpoint)', async () => {
+    // m-1 is in the live catalog; m-ghost has an ACTIVE config in the DB but is
+    // NOT in the catalog (de-listed / never-catalogued). The single endpoint
+    // 404s m-ghost and never reads its config; the bulk map must likewise omit
+    // it rather than leak a cashback config for a merchant the catalog hides.
+    seed([merchant('m-1', 'A')]);
+    dbState.bulkConfigs = [
+      { merchantId: 'm-1', userCashbackPct: '2.50' },
+      { merchantId: 'm-ghost', userCashbackPct: '99.00' },
+    ];
+    const res = await app.request('/api/merchants/cashback-rates');
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { rates: Record<string, string> };
+    expect(body.rates).toEqual({ 'm-1': '2.50' });
+    expect(body.rates['m-ghost']).toBeUndefined();
   });
 
   it('returns an empty rates object when no active configs exist', async () => {
@@ -441,6 +459,7 @@ describe('GET /api/merchants/cashback-rates (bulk)', () => {
     // interpreted as a path parameter, `merchantCashbackRateHandler`
     // would run instead — it would 404 on the unknown merchant and
     // never hit the bulk SELECT.
+    seed([merchant('m-1', 'A')]);
     dbState.bulkConfigs = [{ merchantId: 'm-1', userCashbackPct: '3.00' }];
     const res = await app.request('/api/merchants/cashback-rates');
     const body = (await res.json()) as { rates?: Record<string, string> };

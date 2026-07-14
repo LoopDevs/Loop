@@ -92,6 +92,19 @@ vi.mock('../../wallet/provider.js', () => ({
   getWalletProvider: () => ({ name: 'privy' as const, createWallet: vi.fn(), rawSign: vi.fn() }),
 }));
 
+// Mock ONLY the stuck-redemption notifier to a delivery-tracked stub (as
+// the sibling emission suite mocks `notifyVaultEmissionsStuck`) so NO
+// real Discord call happens and `notified===true` genuinely asserts the
+// "delivered once, then don't re-page" behaviour. Every other
+// `../../discord.js` export stays real via `...actual`.
+vi.mock('../../discord.js', async (importActual) => {
+  const actual = (await importActual()) as Record<string, unknown>;
+  return {
+    ...actual,
+    notifyVaultRedemptionsStuck: vi.fn(async () => true),
+  };
+});
+
 import { db } from '../../db/client.js';
 import {
   users,
@@ -102,13 +115,19 @@ import {
   pendingPayouts,
   userCredits,
   creditTransactions,
+  watchdogAlertState,
 } from '../../db/schema.js';
 import { findOrCreateUserByEmail } from '../../db/users.js';
-import { ensureMigrated, truncateAllTables } from './db-test-setup.js';
+import {
+  ensureMigrated,
+  truncateAllTables,
+  seedUserCreditsWithBackingLedger,
+} from './db-test-setup.js';
 import { computeLedgerDriftSql } from '../../credits/ledger-invariant.js';
 import {
   claimVaultRedemption,
   driveOneVaultRedemption,
+  runVaultRedemptionStuckWatchdog,
 } from '../../credits/vaults/vault-redemptions.js';
 
 const describeIf = RUN_INTEGRATION ? describe : describe.skip;
@@ -171,14 +190,15 @@ async function seedUserCreditsBalance(
   currency: string,
   amountMinor: bigint,
 ): Promise<void> {
-  await db.insert(userCredits).values({ userId, currency, balanceMinor: amountMinor });
-  await db.insert(creditTransactions).values({
+  // DAT-01-inv1 (migration 0066): the balance row and its backing
+  // opening-balance ledger row must land in ONE transaction so the
+  // deferred mirror-invariant trigger sees an EQUAL mirror at commit.
+  // (Same shape as before — one adjustment ledger row of `amountMinor`
+  // — just made atomic via the shared helper.)
+  await seedUserCreditsWithBackingLedger(db, {
     userId,
-    type: 'adjustment',
-    amountMinor,
     currency,
-    referenceType: null,
-    referenceId: null,
+    balanceMinor: amountMinor,
     reason: 'integration-test fixture balance',
   });
 }
@@ -664,5 +684,95 @@ describeIf('vault-redemptions integration — real postgres (ADR 031 V4)', () =>
       .where(eq(vaultRedemptions.id, row.id));
     expect(unchanged?.state).toBe('failed');
     expect(unchanged?.lastError).toBe(needsRefundRow?.lastError);
+  });
+
+  // ─── MNY-15 — stuck-redemption watchdog covers the `pending` strand ──────
+  it('MNY-15: the stuck-redemption watchdog DETECTS + pages a stale `pending` strand (deregistered-vault case) but NOT a fresh pending row within the grace window — the state the old watchdog silently skipped', async () => {
+    // A `pending` vault_redemptions row is a user-OWED redemption claimed
+    // at `claimVaultRedemption` with nothing on-chain yet (source order
+    // still `pending_payment`, `user_credits` not yet debited — the user
+    // is owed their money-out). If its vault is deregistered,
+    // `driveOneVaultRedemption` returns `no_vault` and leaves the row in
+    // `pending` forever — a silent money-owed strand. The pre-fix
+    // `VAULT_REDEMPTION_STUCK_STATES` (['collecting','redeemed']) excluded
+    // `pending`, so the old watchdog found ZERO rows for it.
+    const { notifyVaultRedemptionsStuck } = await import('../../discord.js');
+    const notifyMock = vi.mocked(notifyVaultRedemptionsStuck);
+    notifyMock.mockClear();
+
+    // R1: the strand under test. R2: a co-resident FRESH pending row that
+    // must NEVER be surfaced while it is within the grace window — proof
+    // the staleness threshold, not merely the state, is the gate.
+    const user1 = await seedUser();
+    const order1 = await seedOrder({ userId: user1.id, chargeMinor: 500n });
+    const r1 = await claimVaultRedemption({
+      sourceType: 'order_redeem',
+      sourceId: order1,
+      userId: user1.id,
+      assetCode: 'LOOPUSD',
+      network: 'testnet',
+      valueMinor: 500n,
+      fromAddress: user1.walletAddress,
+    });
+    const user2 = await seedUser();
+    const order2 = await seedOrder({ userId: user2.id, chargeMinor: 700n });
+    await claimVaultRedemption({
+      sourceType: 'order_redeem',
+      sourceId: order2,
+      userId: user2.id,
+      assetCode: 'LOOPUSD',
+      network: 'testnet',
+      valueMinor: 700n,
+      fromAddress: user2.walletAddress,
+    });
+
+    // Both are freshly `pending` (never CAS'd to collecting) — the shape a
+    // strand leaves behind, and the shape a HEALTHY row briefly holds
+    // before the next ~30s sweep advances it.
+    const [pre1] = await db
+      .select({ state: vaultRedemptions.state })
+      .from(vaultRedemptions)
+      .where(eq(vaultRedemptions.id, r1.id));
+    expect(pre1?.state).toBe('pending');
+
+    // Step 1 — GRACE WINDOW: both rows are seconds old, well inside the
+    // 15-min threshold. The watchdog must find nothing and must NOT page:
+    // a momentarily-`pending` healthy row is not a strand.
+    const grace = await runVaultRedemptionStuckWatchdog({ thresholdMinutes: 15 });
+    expect(grace.notified).toBe(false);
+    expect(notifyMock).not.toHaveBeenCalled();
+    const [alert0] = await db
+      .select()
+      .from(watchdogAlertState)
+      .where(eq(watchdogAlertState.watchdogName, 'vault-redemption-stuck-watchdog'));
+    expect(alert0?.alertActive ?? false).toBe(false);
+
+    // Backdate ONLY R1 past the threshold (R2 stays fresh). This is the
+    // sole change between step 1 and step 2 — same row, same `pending`
+    // state, only its age crosses the line.
+    await db
+      .update(vaultRedemptions)
+      .set({ createdAt: new Date(Date.now() - 30 * 60_000) })
+      .where(eq(vaultRedemptions.id, r1.id));
+
+    // Step 2 — DETECT + PAGE: the stale `pending` strand fires exactly
+    // once. rowCount===1 proves the FRESH pending R2 was excluded even
+    // while the watchdog was actively firing — the threshold, not the
+    // state, drew the line.
+    const first = await runVaultRedemptionStuckWatchdog({ thresholdMinutes: 15 });
+    expect(first.notified).toBe(true);
+    expect(notifyMock).toHaveBeenCalledTimes(1);
+    expect(notifyMock.mock.calls[0]?.[0]).toMatchObject({ states: 'pending', rowCount: 1 });
+    const [alert1] = await db
+      .select()
+      .from(watchdogAlertState)
+      .where(eq(watchdogAlertState.watchdogName, 'vault-redemption-stuck-watchdog'));
+    expect(alert1?.alertActive).toBe(true);
+
+    // Step 3 — FIRE-ONCE: the strand persists, but the latch holds — no
+    // duplicate page.
+    const second = await runVaultRedemptionStuckWatchdog({ thresholdMinutes: 15 });
+    expect(second.notified).toBe(false);
+    expect(notifyMock).toHaveBeenCalledTimes(1);
   });
 });

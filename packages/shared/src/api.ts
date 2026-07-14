@@ -76,6 +76,10 @@ export const ApiErrorCode = {
   OTP_LOCKOUT_CLEAR_RATE_EXCEEDED: 'OTP_LOCKOUT_CLEAR_RATE_EXCEEDED',
   // A5-3 — clear-otp-lockout fail-closed when the per-target count query errors (503).
   OTP_LOCKOUT_CLEAR_RATE_CHECK_UNAVAILABLE: 'OTP_LOCKOUT_CLEAR_RATE_CHECK_UNAVAILABLE',
+  // SEC-clearotp — concurrent clear-otp-lockout for the SAME target loses
+  // the per-target advisory lock; fail-closed 409 (no clear performed) so a
+  // distinct-idempotency-key burst can't slip extra clears past the cap.
+  OTP_LOCKOUT_CLEAR_CONCURRENT: 'OTP_LOCKOUT_CLEAR_CONCURRENT',
   // Server / upstream
   INTERNAL_ERROR: 'INTERNAL_ERROR',
   UPSTREAM_ERROR: 'UPSTREAM_ERROR',
@@ -181,6 +185,12 @@ export const ApiErrorCode = {
   // against a different one. The admin UI re-prompts (same flow as
   // STEP_UP_INVALID) but minting for the correct action.
   STEP_UP_PURPOSE_MISMATCH: 'STEP_UP_PURPOSE_MISMATCH',
+  // SEC-02-stepup: a step-up token that was ALREADY consumed was
+  // presented again. Step-up tokens are single-use (one destructive
+  // write per mint) — the DB-backed `admin_step_up_consumptions` ledger
+  // rejects the replay. The admin UI re-prompts + re-mints a fresh
+  // scoped token (same flow as STEP_UP_INVALID / STEP_UP_PURPOSE_MISMATCH).
+  STEP_UP_ALREADY_USED: 'STEP_UP_ALREADY_USED',
   // Admin home-currency change (ADR 015 deferred § support-mediated
   // change). USER_NOT_FOUND is shared with other lookups but the
   // home-currency-set handler is the first to surface it from an
@@ -190,6 +200,10 @@ export const ApiErrorCode = {
   HOME_CURRENCY_HAS_LIVE_BALANCE: 'HOME_CURRENCY_HAS_LIVE_BALANCE',
   HOME_CURRENCY_HAS_IN_FLIGHT_PAYOUTS: 'HOME_CURRENCY_HAS_IN_FLIGHT_PAYOUTS',
   CONCURRENT_CHANGE: 'CONCURRENT_CHANGE',
+  // MNY-10: admin emission destination must be the target user's registered
+  // wallet — reject a mismatched destination or a user with no wallet.
+  NO_REGISTERED_WALLET: 'NO_REGISTERED_WALLET',
+  DESTINATION_NOT_REGISTERED: 'DESTINATION_NOT_REGISTERED',
   // User favourites (per-user merchant pin list).
   MERCHANT_NOT_FOUND: 'MERCHANT_NOT_FOUND',
   FAVORITES_LIMIT_EXCEEDED: 'FAVORITES_LIMIT_EXCEEDED',

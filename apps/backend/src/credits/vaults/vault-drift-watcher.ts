@@ -46,12 +46,17 @@
  *     031 §D7's stated model → no share mint, no adjustment), or if it
  *     is share-minted, identify the Fee-Receiver address and subtract
  *     its `balance` in the affected check.
- *  2. **`DISCORD_WEBHOOK_MONITORING` must be set.** An unset webhook
- *     makes `sendWebhook` return `true` (success) without sending, so a
- *     real breach is swallowed: the fire-once alert flips `alertActive`
- *     on a phantom "delivery" and never re-fires, and `/health` stays
- *     green. (A health-degrade-on-standing-breach independent of
- *     delivery is a deferred systemic follow-up shared by all watchers.)
+ *  2. **`DISCORD_WEBHOOK_MONITORING` must be set.** Post-FT-06 an unset
+ *     webhook makes `sendWebhook` return `false` (NON-delivery) — it no
+ *     longer phantom-reports success — so the fire-once alert does NOT
+ *     latch `alertActive` and the breach is re-attempted on every later
+ *     tick (self-heals the instant the webhook is finally configured).
+ *     But an unset webhook still means the page reaches NO ONE: each
+ *     breach is dropped (surfaced once per process as a "webhook not
+ *     configured" warn) and `/health` stays green until a delivery
+ *     actually succeeds — so the URL must be configured before flip.
+ *     (A health-degrade-on-standing-breach independent of delivery is a
+ *     deferred systemic follow-up shared by all watchers.)
  *  3. **Registry/account config invariants.** The underlying is a
  *     7-decimal at-par SAC (USDC/EURC); `share_asset_issuer ==
  *     vault_contract_id` (a DeFindex vault IS its own SEP-41 share
@@ -116,6 +121,7 @@ import { createHash } from 'node:crypto';
 import { withAdvisoryLock } from '../../db/client.js';
 import { env } from '../../env.js';
 import { logger } from '../../logger.js';
+import { setMoneyIntegrityBreach } from '../../metrics.js';
 import {
   markWorkerStarted,
   markWorkerStopped,
@@ -441,6 +447,24 @@ export function startVaultDriftWatcher(args?: {
       if (r.skippedLocked) {
         markWorkerTickSkippedLocked('vault_drift_watcher');
       } else {
+        // NS-02 / FT-07: a tick that actually checked at least one vault
+        // records the STANDING breach state for BOTH INV-V1 (unbacked
+        // shares) and INV-V2 (redemption solvency) on the money-integrity
+        // gauge. markWorkerTickSuccess proves only that the tick ran — a
+        // standing solvency breach that already fired its watchdog page
+        // once would otherwise be a green dashboard. A tick that checked
+        // nothing (vaults disabled, every vault RPC-skipped, or lease
+        // timeout → checked === 0) leaves the last-known values untouched.
+        if (r.checked > 0) {
+          setMoneyIntegrityBreach(
+            'vault_share_drift',
+            r.samples.some((s) => s.sharesOver),
+          );
+          setMoneyIntegrityBreach(
+            'vault_solvency',
+            r.samples.some((s) => s.solvencyOver),
+          );
+        }
         markWorkerTickSuccess('vault_drift_watcher');
       }
     } catch (err) {

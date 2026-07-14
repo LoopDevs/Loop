@@ -42,6 +42,34 @@ describe('GET /.well-known/apple-app-site-association', () => {
     expect(body.code).toBe('WELL_KNOWN_NOT_CONFIGURED');
   });
 
+  // API-02: a present-but-blank / whitespace / malformed value passed
+  // the old `=== undefined` guard and served a broken AASA file with an
+  // empty or mangled appID. It must now read as "not configured" (404).
+  it.each([
+    ['empty string', ''],
+    ['whitespace only', '   '],
+    ['contains internal whitespace', 'ABCDE 12345'],
+    ['contains punctuation', 'ABCDE.12345'],
+  ])('404s when APPLE_TEAM_ID is %s', async (_label, value) => {
+    const app = await appWithEnv({ APPLE_TEAM_ID: value });
+    const res = await app.request('/.well-known/apple-app-site-association');
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('WELL_KNOWN_NOT_CONFIGURED');
+  });
+
+  it('trims surrounding whitespace so a padded APPLE_TEAM_ID yields a clean appID', async () => {
+    // The un-fixed handler interpolated the raw value, producing
+    // `  ABCDE12345  .io.loopfinance.app`. The guard now trims first.
+    const app = await appWithEnv({ APPLE_TEAM_ID: '  ABCDE12345  ' });
+    const res = await app.request('/.well-known/apple-app-site-association');
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      applinks: { details: Array<{ appID: string }> };
+    };
+    expect(body.applinks.details[0]?.appID).toBe('ABCDE12345.io.loopfinance.app');
+  });
+
   it('serves the association document when APPLE_TEAM_ID is set', async () => {
     const app = await appWithEnv({ APPLE_TEAM_ID: 'ABCDE12345' });
     const res = await app.request('/.well-known/apple-app-site-association');
@@ -78,6 +106,22 @@ describe('GET /.well-known/apple-app-site-association', () => {
 describe('GET /.well-known/assetlinks.json', () => {
   it('404s with WELL_KNOWN_NOT_CONFIGURED when ANDROID_CERT_SHA256 is unset', async () => {
     const app = await appWithEnv({});
+    const res = await app.request('/.well-known/assetlinks.json');
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('WELL_KNOWN_NOT_CONFIGURED');
+  });
+
+  // API-02: a value that collapses to no fingerprints (blank,
+  // whitespace, comma-only) passed the old `=== undefined` guard and
+  // served an assetlinks statement with `sha256_cert_fingerprints: []`.
+  // It must now read as "not configured" (404).
+  it.each([
+    ['empty string', ''],
+    ['whitespace only', '   '],
+    ['comma-only', ' , , '],
+  ])('404s when ANDROID_CERT_SHA256 is %s', async (_label, value) => {
+    const app = await appWithEnv({ ANDROID_CERT_SHA256: value });
     const res = await app.request('/.well-known/assetlinks.json');
     expect(res.status).toBe(404);
     const body = (await res.json()) as { code: string };

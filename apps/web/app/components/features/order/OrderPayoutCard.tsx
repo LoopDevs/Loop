@@ -7,6 +7,7 @@ import {
 import { shouldRetry } from '~/hooks/query-retry';
 import { useAuth } from '~/hooks/use-auth';
 import { useAppConfig } from '~/hooks/use-app-config';
+import { formatDateTime, useLocaleTag } from '~/i18n/format';
 import { formatAssetAmount } from '~/components/features/cashback/PendingPayoutsCard';
 
 /**
@@ -48,16 +49,11 @@ const STATE_UI: Record<UserPendingPayoutState, { label: string; classes: string 
   },
 };
 
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
-}
-
 export function OrderPayoutCard({ orderId }: { orderId: string }): React.JSX.Element | null {
+  // Route-locale tag for the timestamp below — threaded into the shared
+  // `formatDateTime` so the settlement date follows the page's market
+  // (`/de/en` → German order), not the host default (ADR 034 / P2-DATE).
+  const locale = useLocaleTag();
   // Audit CF-24: gate on auth (A2-1156 cold-start 401/refresh-storm guard).
   const { isAuthenticated } = useAuth();
   // WUM-05 / CF2-08 (2026-06-30 cold audit): this card tells the user
@@ -111,7 +107,12 @@ export function OrderPayoutCard({ orderId }: { orderId: string }): React.JSX.Ele
             {formatAssetAmount(payout.amountStroops, payout.assetCode)}
           </p>
           <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-            {formatDate(primaryTimestamp)}
+            {formatDateTime(primaryTimestamp, locale, {
+              month: 'short',
+              day: 'numeric',
+              hour: 'numeric',
+              minute: '2-digit',
+            })}
             {explorerHref !== null && (
               <>
                 {' · '}

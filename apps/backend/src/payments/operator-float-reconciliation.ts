@@ -56,7 +56,7 @@
  * non-numeric or negative override fails boot, not a silent fallback.
  */
 import { createHash } from 'node:crypto';
-import { and, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, isNull, sql } from 'drizzle-orm';
 import { db, withAdvisoryLock } from '../db/client.js';
 import {
   ctxSettlements,
@@ -73,6 +73,7 @@ import {
 } from '../db/schema.js';
 import { env } from '../env.js';
 import { logger } from '../logger.js';
+import { setMoneyIntegrityBreach } from '../metrics.js';
 import {
   markWorkerStarted,
   markWorkerStopped,
@@ -555,15 +556,34 @@ async function indexNewMovements(args: {
   return indexed;
 }
 
-async function computeMovementTotals(args: {
+// Exported for the DB-backed MNY-04 regression test (integration
+// suite) — the cursor-vs-observed_at attribution is the exact SQL the
+// finding is about, so the test drives this query directly against
+// real postgres with movements whose observed_at diverges from their
+// paging_token order.
+export async function computeMovementTotals(args: {
   account: string;
   asset: OperatorFloatAsset;
-  baselineCreatedAt: Date;
+  startingCursor: string;
 }): Promise<{
   classifiedMovementDeltaStroops: bigint;
   unclassifiedCount: number;
   indexedMovementCount: number;
 }> {
+  // MNY-04: attribute movements to this baseline's period by the
+  // CANONICAL on-chain cursor (`paging_token`, the Horizon TOID the
+  // indexer already persists), NOT by wall-clock `observed_at`.
+  // `observed_at` is when the indexer SAW the row, not its ledger
+  // ordering — under indexer lag or a cursor replay/re-baseline a
+  // movement can be observed out of order and land in the wrong
+  // reconciliation window (a pre-baseline flow already folded into the
+  // opening balance gets double-counted; a post-baseline flow observed
+  // early gets dropped), so the reconciled float for the period is off.
+  // The baseline's `starting_horizon_cursor` is snapshotted from the
+  // SAME Horizon moment as `opening_balance_stroops`, so the period is
+  // exactly the movements strictly after that anchor. Horizon
+  // paging_tokens are TOIDs (decimal strings, monotonic but NOT
+  // lexically ordered across differing lengths) — compare as `numeric`.
   const rows = await db.execute<{
     classified_delta: bigint | null;
     unclassified_count: number;
@@ -582,7 +602,7 @@ async function computeMovementTotals(args: {
     FROM operator_wallet_movements
     WHERE account = ${args.account}
       AND asset = ${args.asset}
-      AND observed_at >= ${args.baselineCreatedAt}
+      AND paging_token::numeric > ${args.startingCursor}::numeric
   `);
   const normalized = rows as
     | Array<{
@@ -605,7 +625,11 @@ async function computeMovementTotals(args: {
   };
 }
 
-async function computeUnlinkedManualDelta(args: {
+// Exported for the DB-backed regression test (integration suite) —
+// the `effective_at >= baselineCreatedAt` bound is the exact query the
+// OPFLOAT-DATEFRAG finding is about, so the test drives it directly
+// against real postgres with an active baseline present.
+export async function computeUnlinkedManualDelta(args: {
   account: string;
   asset: OperatorFloatAsset;
   baselineCreatedAt: Date;
@@ -621,7 +645,15 @@ async function computeUnlinkedManualDelta(args: {
         eq(operatorManualMovements.account, args.account),
         eq(operatorManualMovements.asset, args.asset),
         isNull(operatorManualMovements.movementPaymentId),
-        sql`${operatorManualMovements.effectiveAt} >= ${args.baselineCreatedAt}`,
+        // A2-1610: must use the typed `gte()` operator, not a raw sql
+        // template with the `Date` interpolated — postgres-js can't
+        // bind a `Date` instance at the wire level ("The \"string\"
+        // argument must be of type string ... Received an instance of
+        // Date"), so the raw fragment threw and errored the whole
+        // reconciliation the moment an active baseline existed.
+        // `gte()` lets drizzle's column mapper convert the Date through
+        // the timestamptz column's mode. Same boundary, same column.
+        gte(operatorManualMovements.effectiveAt, args.baselineCreatedAt),
       ),
     );
   return rows.reduce(
@@ -698,7 +730,9 @@ export async function runOperatorFloatReconciliationForAsset(
       const movementTotals = await computeMovementTotals({
         account: args.account,
         asset: args.asset,
-        baselineCreatedAt: baseline.createdAt,
+        // MNY-04: canonical cursor anchor, not `baseline.createdAt`
+        // wall-clock — see computeMovementTotals.
+        startingCursor: baseline.startingHorizonCursor,
       });
       const manualDelta = await computeUnlinkedManualDelta({
         account: args.account,
@@ -817,7 +851,21 @@ export function startOperatorFloatReconciliationWatcher(args?: { intervalMs?: nu
       // A lost advisory lock is a HEALTHY tick — another machine owns
       // the sweep this round. Marking it success keeps the losing
       // machine's worker-staleness monitor quiet on a 2-machine fleet.
-      await runOperatorFloatReconciliationTick();
+      const r = await runOperatorFloatReconciliationTick();
+      // NS-02 / FT-07: a tick that actually reconciled (won the lock and
+      // produced per-asset runs) records the STANDING breach state on
+      // the money-integrity gauge — markWorkerTickSuccess proves only
+      // that the tick ran. Any non-`ok` run (drift / unclassified /
+      // needs_baseline / error — the same states that page Discord) is
+      // a standing R3-1 breach that must be visible on /metrics even
+      // after its at-least-once page has fired. A lock-skip or an
+      // unconfigured account (runs === []) leaves the last value as-is.
+      if (!r.skippedLocked && r.runs.length > 0) {
+        setMoneyIntegrityBreach(
+          'operator_float',
+          r.runs.some((run) => run.state !== 'ok'),
+        );
+      }
       markWorkerTickSuccess('operator_float_reconciliation');
     } catch (err) {
       markWorkerTickFailure('operator_float_reconciliation', err);

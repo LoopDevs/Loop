@@ -38,13 +38,54 @@ const ANDROID_PACKAGE_NAME = 'io.loopfinance.app';
 const CACHE_CONTROL = 'public, max-age=300';
 
 /**
+ * API-02: the gating env vars are `z.string().optional()`, so a blank
+ * or whitespace-only value (`APPLE_TEAM_ID=""`, a stray space,
+ * `ANDROID_CERT_SHA256=" , "`) is present-but-useless yet still passes a
+ * bare `=== undefined` guard. That served a structurally-broken
+ * verification file — an AASA `appID` of `".io.loopfinance.app"` (empty
+ * Team ID) or an assetlinks statement with `sha256_cert_fingerprints:
+ * []` — which Apple/Google reject and iOS negatively caches. The
+ * "not configured → 404" state must therefore key on a USABLE value,
+ * not merely a defined one.
+ *
+ * Apple's App ID Prefix / Team ID is a fixed-alphabet identifier (10
+ * uppercase alphanumerics in practice); we require it to be non-empty
+ * and alphanumeric so a value carrying whitespace or punctuation — which
+ * would mangle the `appID` — is treated as unconfigured rather than
+ * served.
+ */
+function configuredAppleTeamId(): string | null {
+  const raw = env.APPLE_TEAM_ID;
+  if (raw === undefined) return null;
+  const trimmed = raw.trim();
+  return /^[A-Za-z0-9]+$/.test(trimmed) ? trimmed : null;
+}
+
+/**
+ * Parses `ANDROID_CERT_SHA256` into its non-empty, trimmed fingerprints.
+ * Returns `[]` when the value is unset, blank, whitespace-only, or
+ * collapses to nothing after splitting (e.g. `","`) — the caller treats
+ * an empty result as "not configured" so it never serves an assetlinks
+ * file with an empty fingerprint list.
+ */
+function configuredAndroidFingerprints(): string[] {
+  const raw = env.ANDROID_CERT_SHA256;
+  if (raw === undefined) return [];
+  return raw
+    .split(',')
+    .map((fingerprint) => fingerprint.trim())
+    .filter((fingerprint) => fingerprint.length > 0);
+}
+
+/**
  * Serves `apple-app-site-association` (iOS Universal Links, M-3).
  * No file extension and no `Content-Type` sniffing on Apple's side —
  * `c.json` sets `application/json`, which is what Apple's association
  * fetcher expects.
  */
 export function appleAppSiteAssociationHandler(c: Context): Response {
-  if (env.APPLE_TEAM_ID === undefined) {
+  const teamId = configuredAppleTeamId();
+  if (teamId === null) {
     return c.json(
       {
         code: 'WELL_KNOWN_NOT_CONFIGURED',
@@ -60,7 +101,7 @@ export function appleAppSiteAssociationHandler(c: Context): Response {
       apps: [],
       details: [
         {
-          appID: `${env.APPLE_TEAM_ID}.${IOS_BUNDLE_ID}`,
+          appID: `${teamId}.${IOS_BUNDLE_ID}`,
           paths: ['*'],
         },
       ],
@@ -70,7 +111,8 @@ export function appleAppSiteAssociationHandler(c: Context): Response {
 
 /** Serves `assetlinks.json` (Android App Links, M-3). */
 export function assetlinksHandler(c: Context): Response {
-  if (env.ANDROID_CERT_SHA256 === undefined) {
+  const fingerprints = configuredAndroidFingerprints();
+  if (fingerprints.length === 0) {
     return c.json(
       {
         code: 'WELL_KNOWN_NOT_CONFIGURED',
@@ -79,10 +121,6 @@ export function assetlinksHandler(c: Context): Response {
       404,
     );
   }
-
-  const fingerprints = env.ANDROID_CERT_SHA256.split(',')
-    .map((fingerprint) => fingerprint.trim())
-    .filter((fingerprint) => fingerprint.length > 0);
 
   c.header('Cache-Control', CACHE_CONTROL);
   return c.json([

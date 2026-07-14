@@ -76,6 +76,24 @@ describe('friendlyError', () => {
       expect(msg).toContain('home currency is locked');
     });
 
+    it('INSUFFICIENT_BALANCE uses customer-voiced, second-person copy (AUD-11)', () => {
+      const msg = friendlyError(apiErr(400, 'INSUFFICIENT_BALANCE', 'balance too low'), 'Fallback');
+      expect(msg).toContain('Your balance is below');
+      // Regression guard against the old developer-voiced third-person
+      // string ("The user's balance is below the requested amount.").
+      expect(msg).not.toMatch(/user's/i);
+    });
+
+    it('TOO_MANY_ATTEMPTS renders distinct hard-lockout copy, not the transient throttle (ONB-4)', () => {
+      const lockout = friendlyError(apiErr(429, 'TOO_MANY_ATTEMPTS', 'locked'), 'Fallback');
+      const throttle = friendlyError(apiErr(429, 'RATE_LIMITED', 'slow down'), 'Fallback');
+      // The lockout names its longer, security-driven window...
+      expect(lockout).toMatch(/15 minutes/);
+      expect(lockout.toLowerCase()).toContain('locked');
+      // ...and is no longer identical to the transient per-IP throttle copy.
+      expect(lockout).not.toBe(throttle);
+    });
+
     it('RATE_LIMITED maps from the 429 code (not just status)', () => {
       const msg = friendlyError(apiErr(429, 'RATE_LIMITED', 'too many'), 'Fallback');
       expect(msg).toContain('Too many attempts');

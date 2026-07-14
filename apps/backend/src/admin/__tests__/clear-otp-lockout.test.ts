@@ -27,6 +27,10 @@ const state = vi.hoisted(() => ({
   priorClearCount: 0,
   countThrow: null as Error | null,
   countCalls: [] as Array<{ path: string; windowMs: number }>,
+  // SEC-clearotp: result of the per-target `pg_try_advisory_xact_lock`.
+  // false simulates a concurrent clear for the same target already holding
+  // the lock (the burst-loser path).
+  tryLockLocked: true,
   priorSnapshot: null as null | { status: number; body: Record<string, unknown> },
   storedSnapshot: null as null | Record<string, unknown>,
   discordCalls: [] as Array<Record<string, unknown>>,
@@ -62,6 +66,12 @@ vi.mock('../../db/client.js', () => ({
       chain['limit'] = () => Promise.resolve(state.lockRows);
       return chain;
     },
+    // SEC-clearotp: the handler now wraps the guard in an outer txn that
+    // acquires a per-target `pg_try_advisory_xact_lock`. Passthrough that
+    // hands the callback an `outerTx` whose `execute` returns the rigged
+    // lock result.
+    transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
+      fn({ execute: async () => [{ locked: state.tryLockLocked }] }),
   },
 }));
 
@@ -158,6 +168,7 @@ beforeEach(() => {
   state.priorClearCount = 0;
   state.countThrow = null;
   state.countCalls = [];
+  state.tryLockLocked = true;
   state.priorSnapshot = null;
   state.storedSnapshot = null;
   state.discordCalls = [];
@@ -443,6 +454,28 @@ describe('adminClearOtpLockoutHandler — per-target velocity cap (A5-3 P1)', ()
     // Fail-closed: the counter was NOT cleared, so an attacker gets no
     // free pass on a transient DB error.
     expect(state.clearCalls).toHaveLength(0);
+    expect(state.discordCalls).toHaveLength(0);
+    expect(state.storedSnapshot).toBeNull();
+  });
+
+  // SEC-clearotp: the count→check→clear must be atomic against a concurrent
+  // distinct-idempotency-key burst aimed at the SAME target. This wiring
+  // test proves the handler HONOURS the per-target advisory lock: a burst
+  // loser (try-lock returns false) is rejected 409 and performs no clear,
+  // never even reaching the cap count. (The real serialisation — that only
+  // one of N concurrent requests wins the lock — is proven in the
+  // admin-writes integration suite against real postgres.)
+  it('SEC-clearotp: 409 without clearing when the per-target advisory lock is already held', async () => {
+    state.tryLockLocked = false;
+    const res = await adminClearOtpLockoutHandler(
+      makeCtx({ headers: { 'idempotency-key': validKey }, body }),
+    );
+    expect(res.status).toBe(409);
+    const errBody = (await res.json()) as { code: string };
+    expect(errBody.code).toBe('OTP_LOCKOUT_CLEAR_CONCURRENT');
+    // Fail-closed: no clear, no cap count consumed, no audit, no snapshot.
+    expect(state.clearCalls).toHaveLength(0);
+    expect(state.countCalls).toHaveLength(0);
     expect(state.discordCalls).toHaveLength(0);
     expect(state.storedSnapshot).toBeNull();
   });

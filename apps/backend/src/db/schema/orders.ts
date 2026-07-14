@@ -129,9 +129,16 @@ export const orders = pgTable(
     // the column stays `text`, holding `enc:v1:<base64url>` ciphertext
     // instead of plaintext. `redeem_url` is the redemption landing
     // page, not the secret, so it stays plaintext. Migration 0035 also
-    // revokes `loop_readonly`'s SELECT on the two secret columns. Key
-    // unset → plaintext storage (legacy), backward-safe on read. Fly
-    // volume at-rest encryption remains the disk-theft backstop.
+    // revokes `loop_readonly`'s SELECT on the two secret columns. NS-10:
+    // the key is now REQUIRED in production (env.ts fails closed at
+    // boot when unset), so prod rows are always ciphertext; dev/test
+    // key-unset → plaintext storage (legacy), backward-safe on read.
+    // The `enc:v1:` prefix is the sole ciphertext↔plaintext
+    // discriminator (no schema marker column) — an unambiguous
+    // discriminator for CTX-issued codes, and the same tag
+    // `scripts/backfill-redeem-encryption.ts` keys off to encrypt any
+    // pre-existing plaintext idempotently. Fly volume at-rest
+    // encryption remains the disk-theft backstop.
     redeemCode: text('redeem_code'),
     redeemPin: text('redeem_pin'),
     redeemUrl: text('redeem_url'),
@@ -274,6 +281,23 @@ export const orders = pgTable(
       'orders_percentages_sum',
       sql`${t.wholesalePct} + ${t.userCashbackPct} + ${t.loopMarginPct} <= 100`,
     ),
+    // BK-pctcheck: non-negative guard on the pinned cashback-split
+    // percentages. `orders_percentages_sum` above caps the sum at 100
+    // but admits a NEGATIVE pct, which would invert the split math
+    // (cashback / margin flowing the wrong way). The sibling
+    // `merchant_cashback_configs` — the source these three columns are
+    // pinned FROM at creation (ADR 011) — carries the identical
+    // `_non_negative` guard; mirror it onto the pinned copy. `>= 0`, not
+    // `> 0`: each pct is legitimately 0 (a zero-cashback / zero-margin
+    // merchant, the env fallback split, and Tranche-1 mode which zeroes
+    // `user_cashback_pct` on the row). Together with the sum check this
+    // pins every pct into [0, 100]. Migration 0068.
+    check(
+      'orders_percentages_non_negative',
+      sql`
+        ${t.wholesalePct} >= 0 AND ${t.userCashbackPct} >= 0 AND ${t.loopMarginPct} >= 0
+      `,
+    ),
     // Nonneg guards across the minor-unit columns. A negative face
     // value or charge is a bug; so is any split going the wrong way.
     check(
@@ -286,6 +310,17 @@ export const orders = pgTable(
         AND ${t.loopMarginMinor} >= 0
       `,
     ),
+    // NS-16: a zero-value order is not a real product. `face_value_minor`
+    // is the gift-card face value — what the order IS FOR — and both
+    // create paths already forbid zero at the edge (loop-native
+    // `amountMinor` is positive-only; the CTX-proxy `amount` is
+    // `.min(0.01)`), so `orders_minor_amounts_non_negative`'s `>= 0` on
+    // this column is looser than the app contract. Tighten it to `> 0`.
+    // Scoped to `face_value_minor` ONLY: `charge_minor` can legitimately
+    // reach 0 via the Tranche-1 instant-discount path at 100% cashback
+    // (orders/repo.ts), and the split minor columns can each be 0, so
+    // those keep `>= 0` above. Migration 0068.
+    check('orders_face_value_positive', sql`${t.faceValueMinor} > 0`),
     // A2-714: payment_memo nullability is correlated with payment
     // method. On-chain methods (xlm / usdc / loop_asset) all
     // require a memo so the payment watcher can match incoming

@@ -6,6 +6,30 @@
 import { z } from 'zod';
 import { envBoolean } from '../schema-helpers.js';
 
+/**
+ * CFG-06 (A4-047 alignment): kill-switch value parser. UNLIKE
+ * `envBoolean`, an UNRECOGNISED value must NOT reject at boot. The
+ * `LOOP_KILL_*` switches are flipped live via
+ * `fly secrets set LOOP_KILL_* … `, which triggers a rolling restart
+ * that re-runs `parseEnv`. Under `envBoolean` a mis-typed kill value
+ * (e.g. `disbaled`) throws at boot, so the machine carrying the
+ * operator's kill crash-loops and Fly keeps the OLD, un-killed machine
+ * serving — the subsystem the operator tried to disable stays OPEN.
+ * That is the exact silent fail-OPEN that A4-047 (`kill-switches.ts`)
+ * documents as fixed. Map an unrecognised value to `true` (ENGAGED) so
+ * the machine boots AND the frozen value agrees with `kill-switches.ts`'s
+ * runtime fail-CLOSED. Recognised falsy spellings (and empty) stay
+ * `false` (open); recognised truthy AND any unrecognised typo → engaged.
+ * The runtime authority remains `kill-switches.ts` (reads `process.env`
+ * live); nothing consumes the frozen `env.LOOP_KILL_*` value.
+ */
+const killSwitchBoolean = z.union([z.boolean(), z.string()]).transform((v) => {
+  if (typeof v === 'boolean') return v;
+  const s = v.trim().toLowerCase();
+  if (s === 'false' || s === '0' || s === 'no' || s === 'off' || s === '') return false;
+  return true;
+});
+
 export const infraEnvFields = {
   // Interest pool depletion threshold (days of cover).
   //
@@ -187,22 +211,28 @@ export const infraEnvFields = {
   // SUBSYSTEM_DISABLED without redeploying. Toggle via:
   //   `fly secrets set LOOP_KILL_<NAME>=true -a loopfinance-api`
   // The Fly secret-set triggers a rolling restart picking up the new
-  // value. Default false on every switch — fail-open posture, no
-  // surprise blackout if an env var is mis-set.
-  LOOP_KILL_ORDERS: envBoolean.default(false),
+  // value. Default false on every switch — an UNSET switch is open.
+  //
+  // CFG-06: parsed with `killSwitchBoolean` (not `envBoolean`) so an
+  // UNRECOGNISED/mis-typed value maps to ENGAGED (fail CLOSED) instead
+  // of rejecting at boot. A boot reject would crash-loop the machine
+  // carrying the operator's kill and leave Fly serving the old,
+  // un-killed machine (fail OPEN) — see the `killSwitchBoolean` header
+  // and A4-047 in kill-switches.ts. Recognised falsy/unset stay open.
+  LOOP_KILL_ORDERS: killSwitchBoolean.default(false),
   // Per-path order switches (comprehensive-audit 2026-06-11, P10):
   // when set they override LOOP_KILL_ORDERS for their path; when
   // UNSET they fall back to it — fully backward compatible. No
   // `.default(false)` on purpose: the unset/false distinction is the
   // fallback semantic (kill-switches.ts reads process.env directly;
-  // these entries exist for validation + .env.example parity).
-  LOOP_KILL_ORDERS_LEGACY: envBoolean.optional(),
-  LOOP_KILL_ORDERS_LOOP: envBoolean.optional(),
-  LOOP_KILL_AUTH: envBoolean.default(false),
+  // these entries exist for boot-parse + .env.example parity).
+  LOOP_KILL_ORDERS_LEGACY: killSwitchBoolean.optional(),
+  LOOP_KILL_ORDERS_LOOP: killSwitchBoolean.optional(),
+  LOOP_KILL_AUTH: killSwitchBoolean.default(false),
   // Pre-ADR-036 name: LOOP_KILL_WITHDRAWALS (renamed with the
   // withdrawal→emission re-scope; gates admin emissions + the
   // payout-compensation endpoint).
-  LOOP_KILL_EMISSIONS: envBoolean.default(false),
+  LOOP_KILL_EMISSIONS: killSwitchBoolean.default(false),
 
   // Worker tick intervals (seconds). Defaults tuned for a moderate
   // order volume: watcher every 10s to keep deposit latency low;
@@ -286,6 +316,25 @@ export const infraEnvFields = {
   // advisory lock. Runs under LOOP_WORKERS_ENABLED.
   LOOP_LEDGER_INVARIANT_INTERVAL_HOURS: z.coerce.number().int().positive().default(24),
   LOOP_AUTH_ROW_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
+
+  // NS-03: retention window for the durable admin money-move AUDIT
+  // trail. `admin_idempotency_keys` is both the idempotency-replay
+  // store AND the sole durable record of every admin money-move
+  // (refunds, emissions, credit-adjustments — read by
+  // `admin/audit-tail.ts` + `admin/user-audit-timeline.ts`). Its sweep
+  // (`sweepStaleIdempotencyKeys`) previously reaped rows at the 24h
+  // REPLAY TTL, so the forensic/regulatory audit self-deleted after a
+  // day. Retention is now decoupled from replay: the replay-hit window
+  // stays 24h (IDEMPOTENCY_TTL_HOURS) while the sweep keeps rows for
+  // this many days.
+  //
+  // Default 2555 days (~7 years) is a CONSERVATIVE, defensible baseline
+  // for financial audit records (the SOX / typical financial-records
+  // retention horizon). NEEDS-DECISION (compliance): the exact
+  // jurisdiction-specific period is a legal/compliance call, not an
+  // engineering one — tune this var to the value your regulator
+  // mandates. Prefer keeping data (longer) over losing it.
+  LOOP_ADMIN_AUDIT_RETENTION_DAYS: z.coerce.number().int().positive().default(2555),
 
   // ADR 031 §Detailed design D4, V5: vault drift + solvency watcher
   // (`credits/vaults/vault-drift-watcher.ts`) — the Soroban

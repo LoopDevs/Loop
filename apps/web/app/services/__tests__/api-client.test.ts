@@ -22,7 +22,7 @@ vi.mock('~/native/platform', () => ({
   getPlatform: () => mockGetPlatform(),
 }));
 
-import { apiRequest, authenticatedRequest, tryRefresh } from '../api-client';
+import { apiRequest, authenticatedRequest, tryRefresh, onSessionExpired } from '../api-client';
 import { ApiException } from '@loop/shared';
 import { useAuthStore } from '~/stores/auth.store';
 
@@ -520,5 +520,252 @@ describe('authenticatedRequest — admin step-up header (ADR 028)', () => {
     const retryHeaders = retryInit.headers as Record<string, string>;
     expect(retryHeaders['X-Admin-Step-Up']).toBe('fresh-step-up-jwt');
     expect(retryHeaders.Authorization).toBe('Bearer at-fresh');
+  });
+});
+
+/**
+ * FE-40: centralized session-expiry handler. When an authenticated
+ * request's session is definitively dead (a 401 whose silent refresh
+ * also fails), the transport emits a session-expiry event so the app
+ * can render a "sign in again" re-auth prompt — instead of leaving each
+ * call site to surface a generic error. Step-up 401s (STEP_UP_*) are
+ * exempt: they own their own re-auth flow and must not be hijacked.
+ */
+describe('authenticatedRequest — session-expiry handler (FE-40)', () => {
+  beforeEach(async () => {
+    vi.restoreAllMocks();
+    mockGetRefreshToken.mockReset();
+    mockStoreRefreshToken.mockReset();
+    mockClearRefreshToken.mockReset();
+    mockGetPlatform.mockReturnValue('web');
+    useAuthStore.getState().clearSession();
+    const { useAdminStepUpStore } = await import('~/stores/admin-step-up.store');
+    useAdminStepUpStore.getState().clear();
+  });
+
+  it('fires the session-expiry handler when a 401 refresh also fails (not a generic error)', async () => {
+    useAuthStore.getState().setAccessToken('at-stale');
+    mockGetRefreshToken.mockResolvedValue('rt-stored');
+    vi.spyOn(globalThis, 'fetch')
+      // First: 401 with a stale access token
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ code: 'UNAUTHORIZED', message: 'expired' }), {
+          status: 401,
+        }),
+      )
+      // Refresh: also 401 → refresh token is dead → session is gone
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ code: 'UNAUTHORIZED', message: 'revoked' }), {
+          status: 401,
+        }),
+      );
+
+    const onExpired = vi.fn();
+    const unsubscribe = onSessionExpired(onExpired);
+    try {
+      await expect(authenticatedRequest('/api/orders/loop')).rejects.toMatchObject({
+        status: 401,
+      });
+    } finally {
+      unsubscribe();
+    }
+
+    expect(onExpired).toHaveBeenCalledTimes(1);
+    expect(onExpired).toHaveBeenCalledWith(expect.objectContaining({ code: 'UNAUTHORIZED' }));
+    // Session was torn down as part of the same path.
+    expect(useAuthStore.getState().accessToken).toBeNull();
+  });
+
+  it('does NOT fire the session-expiry handler for a step-up 401 (own re-auth flow)', async () => {
+    useAuthStore.getState().setAccessToken('at-memory');
+    // Null refresh token so tryRefresh returns null and control reaches
+    // the same session-teardown branch the genuine-expiry case hits —
+    // proving the exemption is the STEP_UP_REQUIRED code, not a
+    // different code path.
+    mockGetRefreshToken.mockResolvedValue(null);
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ code: 'STEP_UP_REQUIRED', message: 'step-up required' }), {
+        status: 401,
+      }),
+    );
+
+    const onExpired = vi.fn();
+    const unsubscribe = onSessionExpired(onExpired);
+    try {
+      await expect(
+        authenticatedRequest('/api/admin/users/u1/credit-adjustments', {
+          method: 'POST',
+          withStepUp: true,
+        }),
+      ).rejects.toMatchObject({ code: 'STEP_UP_REQUIRED' });
+    } finally {
+      unsubscribe();
+    }
+
+    expect(onExpired).not.toHaveBeenCalled();
+  });
+
+  it('unsubscribe() stops further session-expiry notifications', async () => {
+    useAuthStore.getState().setAccessToken('at-stale');
+    mockGetRefreshToken.mockResolvedValue('rt-stored');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ code: 'UNAUTHORIZED', message: 'expired' }), { status: 401 }),
+    );
+
+    const onExpired = vi.fn();
+    onSessionExpired(onExpired)(); // subscribe then immediately unsubscribe
+
+    await expect(authenticatedRequest('/api/orders/loop')).rejects.toMatchObject({ status: 401 });
+    expect(onExpired).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * FE-06: a step-up 401 challenge (STEP_UP_*) must NOT be misclassified as
+ * an access-token expiry. The backend runs `requireAuth` before the
+ * step-up gate, so a STEP_UP_* code proves the access token was valid —
+ * routing it through the refresh-and-retry path burns a round-trip,
+ * needlessly rotates the refresh token, and (if that refresh transiently
+ * fails) tears down a live admin session. It must surface unchanged so the
+ * step-up flow handles it. Distinct from FE-40 (which exempted only the
+ * session-expiry EMIT); FE-06 exempts the refresh itself.
+ */
+describe('authenticatedRequest — step-up 401 is not a token-expiry (FE-06)', () => {
+  beforeEach(async () => {
+    vi.restoreAllMocks();
+    mockGetRefreshToken.mockReset();
+    mockStoreRefreshToken.mockReset();
+    mockClearRefreshToken.mockReset();
+    mockGetPlatform.mockReturnValue('web');
+    useAuthStore.getState().clearSession();
+    const { useAdminStepUpStore } = await import('~/stores/admin-step-up.store');
+    useAdminStepUpStore.getState().clear();
+  });
+
+  it('does NOT refresh the access token or clear the session on a step-up 401', async () => {
+    useAuthStore.getState().setAccessToken('at-live');
+    // A refresh token IS available: if the (buggy) refresh path runs, it
+    // will fetch /api/auth/refresh. Proving it doesn't proves the step-up
+    // 401 is classified as a challenge, not an access-token expiry.
+    mockGetRefreshToken.mockResolvedValue('rt-stored');
+
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      // The gated admin write is answered with a step-up challenge.
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ code: 'STEP_UP_REQUIRED', message: 'step-up required' }), {
+          status: 401,
+        }),
+      )
+      // Only reachable if the code wrongly refreshes: a fresh access token…
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ accessToken: 'at-fresh' }), { status: 200 }),
+      )
+      // …then the wrong retry, which would 401 on step-up again.
+      .mockResolvedValue(
+        new Response(JSON.stringify({ code: 'STEP_UP_REQUIRED', message: 'still' }), {
+          status: 401,
+        }),
+      );
+
+    await expect(
+      authenticatedRequest('/api/admin/users/u1/credit-adjustments', {
+        method: 'POST',
+        withStepUp: true,
+      }),
+    ).rejects.toMatchObject({ status: 401, code: 'STEP_UP_REQUIRED' });
+
+    // The challenge surfaced directly: exactly ONE fetch (the write), no
+    // /api/auth/refresh round-trip.
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    // The refresh path never even read the stored refresh token.
+    expect(mockGetRefreshToken).not.toHaveBeenCalled();
+    // The live admin session is intact — not torn down.
+    expect(useAuthStore.getState().accessToken).toBe('at-live');
+  });
+
+  it('still refreshes and retries a genuine access-expiry 401 (UNAUTHORIZED)', async () => {
+    // Guards against an over-broad fix that skips refresh for ALL 401s.
+    useAuthStore.getState().setAccessToken('at-stale');
+    mockGetRefreshToken.mockResolvedValue('rt-stored');
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ code: 'UNAUTHORIZED', message: 'expired' }), { status: 401 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ accessToken: 'at-fresh' }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+
+    const res = await authenticatedRequest<{ ok: boolean }>('/api/orders');
+    expect(res).toEqual({ ok: true });
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(useAuthStore.getState().accessToken).toBe('at-fresh');
+  });
+});
+
+/**
+ * FE-07: the cached step-up token is reused ONLY while the store's
+ * `isFresh()` guard vouches for it. A stale-but-not-yet-expired token
+ * (inside the 5s freshness skew) must be dropped so a fresh challenge is
+ * forced, rather than replayed into a guaranteed mid-flight 401. This wires
+ * the previously-dead `isFresh()` guard into the reuse gate (fail-closed).
+ */
+describe('authenticatedRequest — step-up freshness gate (FE-07)', () => {
+  beforeEach(async () => {
+    vi.restoreAllMocks();
+    mockGetRefreshToken.mockReset();
+    mockGetPlatform.mockReturnValue('web');
+    useAuthStore.getState().clearSession();
+    useAuthStore.getState().setAccessToken('at-memory');
+    const { useAdminStepUpStore } = await import('~/stores/admin-step-up.store');
+    useAdminStepUpStore.getState().clear();
+  });
+
+  it('does NOT reuse a stale (within-skew, not-yet-expired) cached step-up token', async () => {
+    const { useAdminStepUpStore } = await import('~/stores/admin-step-up.store');
+    // exp is 2s in the future: past the store's 5s freshness skew but not
+    // yet expired by raw `exp`. isFresh() is false while the raw token is
+    // non-null/non-empty (all the old gate checked), so an unguarded reuse
+    // would replay this into a guaranteed mid-flight 401.
+    const nearExp = new Date(Date.now() + 2_000).toISOString();
+    useAdminStepUpStore.getState().setStepUp('stale-but-unexpired-jwt', nearExp);
+    // Sanity: this token IS stale by the freshness guard.
+    expect(useAdminStepUpStore.getState().isFresh()).toBe(false);
+
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+
+    await authenticatedRequest('/api/admin/users/u1/credit-adjustments', {
+      method: 'POST',
+      withStepUp: true,
+    });
+
+    const init = fetchSpy.mock.calls[0]![1] as RequestInit;
+    const headers = init.headers as Record<string, string>;
+    // Fail closed: the stale token is dropped, forcing a fresh challenge.
+    expect(headers['X-Admin-Step-Up']).toBeUndefined();
+  });
+
+  it('still reuses a genuinely fresh cached step-up token', async () => {
+    // Guards against an over-broad fix that drops every cached token.
+    const { useAdminStepUpStore } = await import('~/stores/admin-step-up.store');
+    const futureExp = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+    useAdminStepUpStore.getState().setStepUp('fresh-jwt', futureExp);
+
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+
+    await authenticatedRequest('/api/admin/users/u1/credit-adjustments', {
+      method: 'POST',
+      withStepUp: true,
+    });
+
+    const init = fetchSpy.mock.calls[0]![1] as RequestInit;
+    const headers = init.headers as Record<string, string>;
+    expect(headers['X-Admin-Step-Up']).toBe('fresh-jwt');
   });
 });

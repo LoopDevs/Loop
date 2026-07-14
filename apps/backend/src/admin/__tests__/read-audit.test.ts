@@ -70,6 +70,30 @@ describe('countAdminListRows (CF-10)', () => {
       BULK_LIST_ROW_THRESHOLD,
     );
   });
+
+  // PRV-read-audit: a huge list nested under an object key (a wrapped
+  // envelope / grouped response) must still be counted — before the
+  // fix only TOP-LEVEL arrays were inspected, so a `{ data: { users:
+  // [...] } }` shaped body reported 0 and slipped past the tripwire no
+  // matter how many PII rows it returned.
+  it('counts a list nested under an object key, not just the top level', () => {
+    const rows = Array.from({ length: BULK_LIST_ROW_THRESHOLD + 10 }, (_, i) => ({
+      id: String(i),
+    }));
+    const body = JSON.stringify({ data: { users: rows } });
+    expect(countAdminListRows(body, JSON_CT)).toBe(BULK_LIST_ROW_THRESHOLD + 10);
+  });
+
+  it('takes the largest array at any depth (deeply nested), not a shallow one', () => {
+    const big = Array.from({ length: 120 }, (_, i) => i);
+    const body = JSON.stringify({ page: { meta: [1, 2], groups: { a: { rows: big } } } });
+    expect(countAdminListRows(body, JSON_CT)).toBe(120);
+  });
+
+  it('still returns 0 when a nested object carries no array (single-row drill)', () => {
+    const body = JSON.stringify({ result: { id: 'p-1', state: { code: 'failed', attempts: 2 } } });
+    expect(countAdminListRows(body, JSON_CT)).toBe(0);
+  });
 });
 
 // ADMIN-02 (2026-06-30 cold audit): admin/users/search hard-caps its own

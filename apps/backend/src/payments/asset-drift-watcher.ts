@@ -68,6 +68,7 @@ import {
   notifyDriftFailedRowsCleared,
 } from '../discord.js';
 import { logger } from '../logger.js';
+import { setMoneyIntegrityBreach } from '../metrics.js';
 import {
   markWorkerStarted,
   markWorkerStopped,
@@ -643,6 +644,21 @@ export function startAssetDriftWatcher(args: {
       if (r.skippedLocked) {
         markWorkerTickSkippedLocked('asset_drift_watcher');
       } else {
+        // NS-02 / FT-07: a tick that actually reconciled at least one
+        // asset records the STANDING drift state on the money-integrity
+        // gauge — markWorkerTickSuccess proves only that the tick ran,
+        // not that the assets reconcile. A tick where every asset was
+        // Horizon-skipped (checked === 0) or that hit the lease timeout
+        // (also checked === 0) leaves the last-known value untouched.
+        // The per-asset paged state is authoritative in the DB (A3);
+        // this gauge is the fleet-wide "is anything drifted right now"
+        // roll-up, visible independent of Discord.
+        if (r.checked > 0) {
+          setMoneyIntegrityBreach(
+            'asset_drift',
+            r.samples.some((s) => s.over),
+          );
+        }
         markWorkerTickSuccess('asset_drift_watcher');
       }
     } catch (err) {

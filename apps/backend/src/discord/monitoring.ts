@@ -49,6 +49,7 @@ import {
   sendWebhook,
   truncate,
 } from './shared.js';
+import { scrubUpstreamBody } from '../upstream-body-scrub.js';
 import type { OperatorFloatRunSummary } from '../payments/operator-float-reconciliation.js';
 
 /** Notify: health status changed */
@@ -100,11 +101,20 @@ export function notifyGeoDbStale(args: {
 /** Notify: operator XLM/USDC float conservation drifted or cannot classify wallet flow. */
 export function notifyOperatorFloatDrift(args: OperatorFloatRunSummary): void {
   const suffix = args.state === 'error' ? 'check failed' : args.state;
+  // NTF-16: on the `state: 'error'` path `args.error` is a caught
+  // exception's raw message (operator-float-reconciliation.ts:
+  // `message.slice(0, 500)`). Embedding it verbatim can leak internals
+  // (a bearer token / Stellar secret / email / URL that surfaced in the
+  // thrown message) straight into the monitoring channel. Scrub it the
+  // same way `sendWebhook` scrubs upstream error bodies, then escape it
+  // the way every other notifier renders an untrusted error/reason
+  // string, before it reaches the embed.
   void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
     title: `🔴 Operator Float Reconciliation — ${suffix}`,
     description: truncate(
-      args.error ??
-        `Operator ${args.asset.toUpperCase()} wallet does not reconcile from its active baseline. Triage /api/admin/treasury and unclassified operator wallet movements before treating the float as healthy.`,
+      args.error !== null
+        ? escapeMarkdown(scrubUpstreamBody(args.error))
+        : `Operator ${args.asset.toUpperCase()} wallet does not reconcile from its active baseline. Triage /api/admin/treasury and unclassified operator wallet movements before treating the float as healthy.`,
       DESCRIPTION_MAX,
     ),
     color: RED,

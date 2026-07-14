@@ -33,11 +33,21 @@ function stubFeed(body: unknown): ReturnType<typeof vi.spyOn> {
 const COINGECKO_OVERRIDE =
   'https://api.coingecko.com/api/v3/simple/price?ids=stellar&vs_currencies=usd,gbp,eur';
 
+// MNY-22 (B): per-asset absolute floor env vars — cleared around every
+// test so an unset default (no floor) is the baseline and no floor test
+// can leak into an unrelated one.
+const MIN_PRICE_ENV = [
+  'LOOP_XLM_MIN_PRICE_USD',
+  'LOOP_XLM_MIN_PRICE_GBP',
+  'LOOP_XLM_MIN_PRICE_EUR',
+];
+
 beforeEach(() => {
   __resetPriceFeedForTests();
   __resetFxFeedForTests();
   process.env['LOOP_XLM_PRICE_FEED_URL'] = COINGECKO_OVERRIDE;
   delete process.env['LOOP_FX_FEED_URL'];
+  for (const k of MIN_PRICE_ENV) delete process.env[k];
 });
 afterEach(() => {
   fetchSpy?.mockRestore();
@@ -46,6 +56,7 @@ afterEach(() => {
   __resetFxFeedForTests();
   delete process.env['LOOP_XLM_PRICE_FEED_URL'];
   delete process.env['LOOP_FX_FEED_URL'];
+  for (const k of MIN_PRICE_ENV) delete process.env[k];
 });
 
 describe('stroopsPerCent', () => {
@@ -254,6 +265,297 @@ describe('stroopsPerCent — CTX rates adapter', () => {
       fetchSpy = stubCtxFeed({ USD: '50.0000' });
       await expect(stroopsPerCent('USD')).resolves.not.toThrow();
     });
+  });
+
+  // MNY-22: the sanity bound's two money-path holes, exercised end-to-end
+  // through the real CTX refresh path (the pure-logic coverage lives in
+  // rate-sanity.test.ts). These use only the public feed exports, so they
+  // are behavioural red-on-unfixed proofs against a full source revert.
+  describe('MNY-22: recovery-from-wedge + cold-cache backstops', () => {
+    it('settlement RECOVERS from a legit large gap over MULTIPLE capped cycles (not one jump)', async () => {
+      vi.useFakeTimers();
+      try {
+        // Cold start pins the anchor at $0.2400/XLM.
+        // 1 XLM = $0.24 → 24 cents → ceil(1e13 / 24_000_000) = 416_667.
+        fetchSpy = stubCtxFeed({ USD: '0.2400' });
+        expect(await stroopsPerCent('USD')).toBe(416_667n);
+
+        // The market genuinely gaps to $0.6000/XLM (a 2.5× move, past the
+        // 0.5 bound) and STAYS there. MNY-22-wedge (round 2): the anchor
+        // must NOT leap straight to $0.60 (that unbounded jump was the
+        // vulnerability) — it ratchets ONE capped 1.5× step per corroborated
+        // cycle: 0.24 → 0.36 → 0.54 → 0.60.
+        fetchSpy.mockRestore();
+        fetchSpy = stubCtxFeed({ USD: '0.6000' });
+
+        // Cycle 1: two rejects, then a capped advance to $0.36 — NOT $0.60.
+        // ceil(1e13 / 36_000_000) = 277_778.
+        vi.advanceTimersByTime(60_001);
+        await expect(stroopsPerCent('USD')).rejects.toThrow(/exceeds sanity bound/);
+        vi.advanceTimersByTime(60_001);
+        await expect(stroopsPerCent('USD')).rejects.toThrow(/exceeds sanity bound/);
+        vi.advanceTimersByTime(60_001);
+        expect(await stroopsPerCent('USD')).toBe(277_778n);
+
+        // Cycle 2: from $0.36, $0.60 is still > one step (1.667×) — two
+        // rejects, then a capped advance to $0.54.
+        // ceil(1e13 / 54_000_000) = 185_186.
+        vi.advanceTimersByTime(60_001);
+        await expect(stroopsPerCent('USD')).rejects.toThrow(/exceeds sanity bound/);
+        vi.advanceTimersByTime(60_001);
+        await expect(stroopsPerCent('USD')).rejects.toThrow(/exceeds sanity bound/);
+        vi.advanceTimersByTime(60_001);
+        expect(await stroopsPerCent('USD')).toBe(185_186n);
+
+        // Cycle 3: from $0.54, $0.60 is within one step (1.111×) — the very
+        // next observation is accepted directly. Recovery lands exactly on
+        // $0.60; it neither oscillates nor re-wedges short of the target.
+        // ceil(1e13 / 60_000_000) = 166_667.
+        vi.advanceTimersByTime(60_001);
+        expect(await stroopsPerCent('USD')).toBe(166_667n);
+
+        // And it stays healthy at the new level (cache serves it).
+        expect(await stroopsPerCent('USD')).toBe(166_667n);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('a spoofed feed serving a huge target does NOT walk the anchor there in one cycle (anti-manipulation)', async () => {
+      vi.useFakeTimers();
+      try {
+        // Cold start pins the anchor at $0.2000/XLM.
+        // ceil(1e13 / 20_000_000) = 500_000.
+        fetchSpy = stubCtxFeed({ USD: '0.2000' });
+        expect(await stroopsPerCent('USD')).toBe(500_000n);
+
+        // A sustained-compromise / spoofed feed now serves $200/XLM (a
+        // 1000× target) on EVERY refresh — the verifier's counterexample.
+        // On the round-1 code the 3rd corroborating observation set the
+        // anchor straight to $200 (ceil(1e13 / 20_000_000_000) = 500), a
+        // catastrophic single-cycle jump. With the ratchet, one corroborated
+        // cycle advances the anchor by at most ONE 1.5× step — to $0.30, NOT
+        // $200. ceil(1e13 / 30_000_000) = 333_334.
+        fetchSpy.mockRestore();
+        fetchSpy = stubCtxFeed({ USD: '200.0000' });
+
+        vi.advanceTimersByTime(60_001);
+        await expect(stroopsPerCent('USD')).rejects.toThrow(/exceeds sanity bound/);
+        vi.advanceTimersByTime(60_001);
+        await expect(stroopsPerCent('USD')).rejects.toThrow(/exceeds sanity bound/);
+        vi.advanceTimersByTime(60_001);
+        const afterOneCycle = await stroopsPerCent('USD');
+        expect(afterOneCycle).toBe(333_334n); // $0.30 anchor, capped
+        // NOT the $200-target value the round-1 code would have cached.
+        expect(afterOneCycle).not.toBe(500n);
+
+        // A SECOND corroborated cycle advances only one more capped step,
+        // to $0.45 — still three orders of magnitude below the $200 the
+        // feed is pushing. Reaching $200 would take ~18 such cycles, each
+        // paging: the walk is slow AND loud, never a single-cycle jump.
+        // ceil(1e13 / 45_000_000) = 222_223.
+        vi.advanceTimersByTime(60_001);
+        await expect(stroopsPerCent('USD')).rejects.toThrow(/exceeds sanity bound/);
+        vi.advanceTimersByTime(60_001);
+        await expect(stroopsPerCent('USD')).rejects.toThrow(/exceeds sanity bound/);
+        vi.advanceTimersByTime(60_001);
+        expect(await stroopsPerCent('USD')).toBe(222_223n);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('a single transient outlier does NOT advance the anchor (no manipulation)', async () => {
+      vi.useFakeTimers();
+      try {
+        fetchSpy = stubCtxFeed({ USD: '0.1610' });
+        expect(await stroopsPerCent('USD')).toBe(621_119n);
+
+        // One out-of-bound outlier — rejected, opens a streak.
+        fetchSpy.mockRestore();
+        fetchSpy = stubCtxFeed({ USD: '0.6000' });
+        vi.advanceTimersByTime(60_001);
+        await expect(stroopsPerCent('USD')).rejects.toThrow(/exceeds sanity bound/);
+
+        // A normal reading returns — clears the streak, anchor now ~0.17.
+        fetchSpy.mockRestore();
+        fetchSpy = stubCtxFeed({ USD: '0.1700' });
+        vi.advanceTimersByTime(60_001);
+        await expect(stroopsPerCent('USD')).resolves.toBeTypeOf('bigint');
+
+        // The outlier reappearing is a fresh breach (streak was reset), so
+        // it is rejected again — two non-consecutive outliers can't
+        // corroborate the anchor up to $0.60.
+        fetchSpy.mockRestore();
+        fetchSpy = stubCtxFeed({ USD: '0.6000' });
+        vi.advanceTimersByTime(60_001);
+        await expect(stroopsPerCent('USD')).rejects.toThrow(/exceeds sanity bound/);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('rejects a stale cold-cache rate whose upstream timestamp is too old', async () => {
+      // Cold cache, no prior value — the relative bound cannot fire, but
+      // a CTX response stamped ~20 minutes ago (past the 10-minute
+      // staleness bound) is a frozen feed and must be rejected. On the
+      // un-fixed code this cold rate is accepted.
+      const staleRetrieved = new Date(Date.now() - 20 * 60_000).toISOString();
+      fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
+        const match = /symbol=xlm(usd|gbp|eur)/i.exec(String(url));
+        const quote = (match?.[1] ?? 'usd').toUpperCase();
+        return new Response(
+          JSON.stringify([
+            {
+              baseCurrency: 'XLM',
+              price: '0.1610',
+              quoteCurrency: quote,
+              retrieved: staleRetrieved,
+              source: 'ctx-average',
+              symbol: `XLM${quote}`,
+            },
+          ]),
+          { status: 200 },
+        );
+      });
+      await expect(stroopsPerCent('USD')).rejects.toThrow(/is stale/);
+    });
+
+    it('rejects a cold-cache rate below the configured per-asset floor', async () => {
+      // Floor of $0.05/XLM; the feed returns an absurd $0.01/XLM on a cold
+      // cache. The relative bound cannot catch it (no prior value); the
+      // floor does. On the un-fixed code this is accepted.
+      process.env['LOOP_XLM_MIN_PRICE_USD'] = '0.05';
+      fetchSpy = stubCtxFeed({ USD: '0.0100' });
+      await expect(stroopsPerCent('USD')).rejects.toThrow(/below absolute floor/);
+    });
+
+    it("the floor is fail-open: unset → a low rate is still accepted (today's behaviour)", async () => {
+      // No floor env set (default) — the same $0.01 cold rate is accepted,
+      // proving the mechanism never silently rejects legit rates when the
+      // money-policy value is unconfigured.
+      fetchSpy = stubCtxFeed({ USD: '0.0100' });
+      // 1 XLM = $0.01 → 1 cent → ceil(1e13 / 1_000_000) = 10_000_000.
+      expect(await stroopsPerCent('USD')).toBe(10_000_000n);
+    });
+
+    it('accepts a cold-cache rate at or above the floor', async () => {
+      process.env['LOOP_XLM_MIN_PRICE_USD'] = '0.05';
+      fetchSpy = stubCtxFeed({ USD: '0.1610' });
+      expect(await stroopsPerCent('USD')).toBe(621_119n);
+    });
+  });
+});
+
+// BK-ctxrates: the CTX rates base URL is now overridable via
+// `LOOP_XLM_CTX_RATES_URL` (default unchanged) and validated at the call
+// site, so an operator can repoint the feed when CTX moves the endpoint
+// instead of shipping a code change — and a malformed override fails
+// loudly rather than silently building a broken fetch URL.
+describe('CTX rates base URL override (BK-ctxrates)', () => {
+  beforeEach(() => {
+    // Exercise the default CTX adapter (no CoinGecko-shape override).
+    delete process.env['LOOP_XLM_PRICE_FEED_URL'];
+    delete process.env['LOOP_XLM_CTX_RATES_URL'];
+    __resetPriceFeedForTests();
+  });
+  afterEach(() => {
+    delete process.env['LOOP_XLM_CTX_RATES_URL'];
+  });
+
+  function stubValidCtx(): ReturnType<typeof vi.spyOn> {
+    return vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
+      const u = String(url);
+      const match = /symbol=xlm(usd|gbp|eur)/i.exec(u);
+      const quote = (match?.[1] ?? 'usd').toUpperCase();
+      return new Response(
+        JSON.stringify([
+          {
+            baseCurrency: 'XLM',
+            price: '0.1610',
+            quoteCurrency: quote,
+            retrieved: new Date().toISOString(),
+            source: 'ctx-average',
+            symbol: `XLM${quote}`,
+          },
+        ]),
+        { status: 200 },
+      );
+    });
+  }
+
+  it('routes CTX fetches through LOOP_XLM_CTX_RATES_URL when it is set', async () => {
+    process.env['LOOP_XLM_CTX_RATES_URL'] = 'https://rates.internal.example/v2/rates';
+    const captured: string[] = [];
+    fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
+      captured.push(String(url));
+      const u = String(url);
+      const match = /symbol=xlm(usd|gbp|eur)/i.exec(u);
+      const quote = (match?.[1] ?? 'usd').toUpperCase();
+      return new Response(
+        JSON.stringify([
+          {
+            baseCurrency: 'XLM',
+            price: '0.1610',
+            quoteCurrency: quote,
+            retrieved: new Date().toISOString(),
+            source: 'ctx-average',
+            symbol: `XLM${quote}`,
+          },
+        ]),
+        { status: 200 },
+      );
+    });
+    await stroopsPerCent('USD');
+    expect(captured).toContain('https://rates.internal.example/v2/rates?source=ctx&symbol=xlmusd');
+    // Nothing should still be hitting the hardcoded default host.
+    expect(captured.every((u) => u.startsWith('https://rates.internal.example/v2/rates'))).toBe(
+      true,
+    );
+  });
+
+  it('falls back to the historical rates.ctx.com default when the override is unset', async () => {
+    const captured: string[] = [];
+    fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
+      captured.push(String(url));
+      const u = String(url);
+      const match = /symbol=xlm(usd|gbp|eur)/i.exec(u);
+      const quote = (match?.[1] ?? 'usd').toUpperCase();
+      return new Response(
+        JSON.stringify([
+          {
+            baseCurrency: 'XLM',
+            price: '0.1610',
+            quoteCurrency: quote,
+            retrieved: new Date().toISOString(),
+            source: 'ctx-average',
+            symbol: `XLM${quote}`,
+          },
+        ]),
+        { status: 200 },
+      );
+    });
+    await stroopsPerCent('USD');
+    expect(captured).toContain('https://rates.ctx.com/rates?source=ctx&symbol=xlmusd');
+  });
+
+  it('rejects a malformed LOOP_XLM_CTX_RATES_URL loudly instead of fetching a broken URL', async () => {
+    process.env['LOOP_XLM_CTX_RATES_URL'] = 'not-a-url';
+    // The stub returns VALID data: on the un-fixed code (which ignores
+    // the override) the USD fetch would succeed and resolve — so the
+    // assertion below only holds because the guard throws BEFORE fetch.
+    fetchSpy = stubValidCtx();
+    await expect(stroopsPerCent('USD')).rejects.toThrow(
+      /LOOP_XLM_CTX_RATES_URL is not a valid URL/,
+    );
+  });
+
+  it('rejects a non-http(s) LOOP_XLM_CTX_RATES_URL scheme', async () => {
+    process.env['LOOP_XLM_CTX_RATES_URL'] = 'ftp://rates.internal.example/rates';
+    fetchSpy = stubValidCtx();
+    await expect(stroopsPerCent('USD')).rejects.toThrow(
+      /LOOP_XLM_CTX_RATES_URL must be an http\(s\) URL/,
+    );
   });
 });
 

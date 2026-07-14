@@ -114,6 +114,42 @@ export async function getUserById(id: string): Promise<User | null> {
 }
 
 /**
+ * NS-09: reads a user's CURRENT access-token-revocation counter.
+ * `requireAuth` calls this on every authenticated request and rejects
+ * a token whose `tv` claim differs from this value (or that carries no
+ * `tv` at all). Returns `null` when no such user row exists — the
+ * caller fails closed (a token pointing at a deleted user is invalid).
+ *
+ * Column-scoped read (only `token_version`) — this runs on the hot
+ * per-request auth path, so it must not drag the full row over the
+ * wire. It is the one DB round-trip NS-09 adds to `requireAuth`.
+ */
+export async function getUserTokenVersion(id: string): Promise<number | null> {
+  const row = await db.query.users.findFirst({
+    columns: { tokenVersion: true },
+    where: eq(users.id, id),
+  });
+  return row?.tokenVersion ?? null;
+}
+
+/**
+ * NS-09: atomically bumps a user's access-token-revocation counter
+ * (`token_version = token_version + 1`). Every access token minted
+ * before this bump (its `tv` claim now stale) is rejected on its next
+ * `requireAuth` check. Called on logout (auth/logout-handler.ts); the
+ * bulk sign-out / admin-revoke / refresh-reuse paths bump it inline
+ * inside `revokeAllRefreshTokensForUser` (auth/refresh-tokens.ts) so
+ * the increment is atomic with the refresh-row revoke. The `+ 1` runs
+ * in the DB, so concurrent bumps compose correctly (no lost update).
+ */
+export async function bumpUserTokenVersion(id: string): Promise<void> {
+  await db
+    .update(users)
+    .set({ tokenVersion: sql`${users.tokenVersion} + 1`, updatedAt: sql`NOW()` })
+    .where(eq(users.id, id));
+}
+
+/**
  * Find-or-create a Loop user by email (ADR 013 — Loop-native signup).
  * Loop-native users have no `ctx_user_id` mapping, so the partial
  * unique index on `users.ctx_user_id` does not apply; we find by

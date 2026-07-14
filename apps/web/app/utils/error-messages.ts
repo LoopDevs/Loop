@@ -22,7 +22,8 @@ const CODE_MESSAGES: Record<string, string | null> = {
   // server-speak; give the user the action-oriented copy.
   INSUFFICIENT_CREDIT:
     "Your cashback balance doesn't cover this order. Pay another way or earn more first.",
-  INSUFFICIENT_BALANCE: "The user's balance is below the requested amount.",
+  INSUFFICIENT_BALANCE:
+    'Your balance is below the requested amount. Try a smaller amount, or add funds first.',
   HOME_CURRENCY_LOCKED:
     'Your home currency is locked after your first order — contact support if you need it changed.',
   REFUND_ALREADY_ISSUED: 'A refund has already been issued for this order.',
@@ -39,7 +40,17 @@ const CODE_MESSAGES: Record<string, string | null> = {
   IMAGE_TOO_LARGE: 'That image is too large to proxy (server cap is 10 MB).',
 
   // Generic client-surfaced codes.
+  // ONB-4: a transient per-IP throttle (RATE_LIMITED, clears in
+  // seconds) and a hard per-email verify lockout (TOO_MANY_ATTEMPTS,
+  // ~15 min — docs/error-codes.md rate-limit family) previously
+  // collapsed to the same "wait a moment" copy. TOO_MANY_ATTEMPTS now
+  // gets distinct, actionable lockout copy so users know it isn't a
+  // wait-a-second throttle. (RATE_LIMITED keeps its wording — several
+  // call-site suites assert the exact string; the differentiation is
+  // carried by the new entry, not by re-wording the throttle.)
   RATE_LIMITED: 'Too many attempts. Please wait a moment.',
+  TOO_MANY_ATTEMPTS:
+    'Too many incorrect attempts. For your security, this is locked for about 15 minutes — please try again later.',
   SERVICE_UNAVAILABLE: 'Service temporarily unavailable. Please try again shortly.',
   UPSTREAM_UNAVAILABLE: 'Our provider is temporarily unavailable. Please try again shortly.',
   UPSTREAM_ERROR: 'Our provider is having trouble. Please try again.',

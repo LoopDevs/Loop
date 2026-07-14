@@ -48,6 +48,16 @@ export interface LoopTokenClaims {
   // Refresh-token opaque id — lets us revoke an individual refresh
   // without invalidating the whole key. Access tokens omit this.
   jti?: string;
+  // NS-09: token-version (revocation) claim. Stamped on ACCESS tokens
+  // as a snapshot of the user's `users.token_version` at mint time.
+  // `requireAuth` compares it to the row's CURRENT value on every
+  // request and rejects a stale token (a logout / sign-out-all /
+  // compromise bumps the counter). Refresh tokens omit it — they have
+  // their own per-row DB revocation. A token minted before NS-09 has
+  // no `tv`; requireAuth treats that absence as a version mismatch
+  // (fail-closed). This module only mints/parses it — the DB compare
+  // is `requireAuth`'s job (verify stays pure, no DB).
+  tv?: number;
 }
 
 export interface SignOptions {
@@ -59,6 +69,12 @@ export interface SignOptions {
   now?: number;
   /** Optional jti (refresh tokens). Generated if omitted. */
   jti?: string;
+  /**
+   * NS-09: token-version to stamp as the `tv` claim (ACCESS tokens).
+   * The caller passes the user's current `users.token_version`; omit
+   * for refresh tokens (they revoke via their DB row).
+   */
+  tv?: number;
 }
 
 const ACCESS_TTL_SECONDS = 15 * 60; // 15 min
@@ -103,6 +119,12 @@ export function signLoopToken(opts: SignOptions): { token: string; claims: LoopT
     // 16 random bytes → 22-char base64url. Enough entropy to survive
     // a straight-up brute force of the revocation table.
     claims.jti = opts.jti ?? randomBytes(16).toString('base64url');
+  }
+  // NS-09: stamp the token-version snapshot when supplied (access
+  // tokens). Kept out of the refresh branch by the caller — refresh
+  // tokens revoke via their `refresh_tokens` row, not `tv`.
+  if (opts.tv !== undefined) {
+    claims.tv = opts.tv;
   }
   const headerObj: Record<string, string> = { alg: signer.alg, typ: 'JWT' };
   if (signer.kid !== undefined) headerObj['kid'] = signer.kid;
@@ -222,6 +244,13 @@ export function verifyLoopToken(token: string, expectedType: TokenType): VerifyR
     aud: obj['aud'],
   };
   if (typeof obj['jti'] === 'string') claims.jti = obj['jti'];
+  // NS-09: surface the token-version claim (access tokens) so the
+  // enforcement point (`requireAuth`) can compare it to the user's
+  // current `token_version`. Optional + type-guarded: a token minted
+  // before NS-09 (or a refresh token) simply has no `tv`, and
+  // requireAuth fails that closed. Verify itself does NOT reject on
+  // `tv` — it has no DB access and stays pure.
+  if (typeof obj['tv'] === 'number') claims.tv = obj['tv'];
   return { ok: true, claims };
 }
 

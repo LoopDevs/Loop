@@ -74,6 +74,10 @@ export function registerAdminPerUserDrillOpenApi(
         description: 'Malformed userId',
         content: { 'application/json': { schema: errorResponse } },
       },
+      401: {
+        description: 'Missing or invalid bearer',
+        content: { 'application/json': { schema: errorResponse } },
+      },
       404: {
         description: 'User not found',
         content: { 'application/json': { schema: errorResponse } },
@@ -119,6 +123,10 @@ export function registerAdminPerUserDrillOpenApi(
       },
       400: {
         description: 'Malformed userId',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      401: {
+        description: 'Missing or invalid bearer',
         content: { 'application/json': { schema: errorResponse } },
       },
       404: {
@@ -184,6 +192,10 @@ export function registerAdminPerUserDrillOpenApi(
       },
       400: {
         description: 'Malformed userId or invalid ?state',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      401: {
+        description: 'Missing or invalid bearer',
         content: { 'application/json': { schema: errorResponse } },
       },
       404: {

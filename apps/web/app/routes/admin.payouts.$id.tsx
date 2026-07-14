@@ -89,7 +89,18 @@ function AdminPayoutDetailRouteInner(): React.JSX.Element {
   const stepUp = useAdminStepUp();
   const retryMutation = useMutation({
     mutationFn: (args: { id: string; reason: string; idempotencyKey: string }) =>
-      stepUp.runWithStepUp(() => retryPayout(args)),
+      // P2-07: echo the payout amount (Stellar stroops → fmtStroops) +
+      // destination address the OTP re-authorizes for submission.
+      stepUp.runWithStepUp(() => retryPayout(args), {
+        action: 'Retry payout',
+        scope: 'payout-retry',
+        ...(query.data !== undefined
+          ? {
+              amount: { formatted: fmtStroops(query.data.amountStroops, query.data.assetCode) },
+              destination: query.data.toAddress,
+            }
+          : {}),
+      }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['admin-payout'] });
       void queryClient.invalidateQueries({ queryKey: ['admin-payouts'] });

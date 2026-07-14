@@ -17,6 +17,7 @@ import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import type { Route } from './+types/settings.cashback';
 import i18n from '~/i18n/i18next';
+import { formatDateTime, formatMinorCurrency, useLocaleTag } from '~/i18n/format';
 import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
@@ -39,6 +40,32 @@ export function meta(): Route.MetaDescriptors {
   return [{ title: i18n.t('settings:cashback.meta.title') }];
 }
 
+/**
+ * FE-41: route-level error boundary for the cashback-history money screen.
+ * Without one, an unhandled render/loader error here bubbles to the root
+ * boundary (root.tsx), which replaces the whole `App` — including
+ * `NativeShell` and its `NativeTabBar` — leaving the native user on a blank
+ * screen with no tab bar and no way to navigate away (hard stuck in the
+ * Capacitor webview). Exported at the route level, React Router renders this
+ * in place of the route's element inside `NativeShell`'s `<Outlet />`, so the
+ * chrome/tab-bar stays mounted and the user keeps a recoverable error state
+ * (message + retry). Same idiom as `routes/orders.tsx`.
+ */
+export function ErrorBoundary(): React.JSX.Element {
+  const { t } = useTranslation(['settings', 'common']);
+  return (
+    <main className="max-w-2xl mx-auto px-6 py-12 text-center">
+      <h1 className="text-2xl font-semibold text-gray-900 dark:text-white mb-4">
+        {t('common:errorBoundary.heading')}
+      </h1>
+      <p className="text-gray-600 dark:text-gray-300 mb-6">{t('settings:errorBoundary.body')}</p>
+      <a href="/settings/cashback" className="text-blue-600 underline">
+        {t('settings:errorBoundary.retry')}
+      </a>
+    </main>
+  );
+}
+
 const PAGE_SIZE = 25;
 
 /**
@@ -58,32 +85,46 @@ function ledgerLabel(t: TFunction, type: CashbackHistoryEntry['type']): string {
   return labels[type];
 }
 
-function formatAmount(minor: string, currency: string): string {
-  try {
-    // Bigint split per the `@loop/shared` money-format convention
-    // (`formatMinorCurrency`): divide/modulo in bigint space and
-    // Number-cast only the whole + fraction components, so a minor
-    // amount beyond 2^53 can't silently round before the division.
-    // (We format locally rather than calling the shared helper
-    // because this is a user-facing surface — browser locale +
-    // signDisplay, vs the helper's pinned en-US admin locale.)
-    const big = BigInt(minor);
-    const neg = big < 0n;
-    const abs = neg ? -big : big;
-    const major = (neg ? -1 : 1) * (Number(abs / 100n) + Number(abs % 100n) / 100);
-    return new Intl.NumberFormat(undefined, {
-      style: 'currency',
-      currency,
-      maximumFractionDigits: 2,
-      signDisplay: 'always',
-    }).format(major);
-  } catch {
-    return '—';
-  }
+/**
+ * Ledger amount for one credit-history row. Delegates the money math
+ * to the canonical `i18n/format#formatMinorCurrency` (bigint-exact
+ * minor-unit split, `@loop/shared`) threaded with the **route** locale
+ * — not the browser's — so a `/de/en` reader sees `+2,50 $`, not the
+ * visitor's `navigator.language` guess (ADR 034).
+ *
+ * The ledger convention is `signDisplay: 'always'`: credits render with
+ * a leading `+`, debits with `-` (paired with the green/grey colour
+ * coding below). The shared formatter already emits the `-` for
+ * negatives and the `—` parse-failure sentinel; we only add the `+`
+ * the shared helper deliberately omits. Output is byte-identical to the
+ * former local formatter for any fixed locale — the locale is the fix.
+ */
+function formatAmount(minor: string, currency: string, locale: string): string {
+  const formatted = formatMinorCurrency(minor, currency, locale);
+  if (formatted === '—' || formatted.startsWith('-')) return formatted;
+  return `+${formatted}`;
 }
 
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
+/**
+ * Ledger row timestamp, formatted in the **route** locale — not the
+ * browser's — so a `/de/en` reader sees the German month/order, not the
+ * visitor's `navigator.language` guess (ADR 034). Plain helper (not a
+ * component): `locale` is threaded in from the caller's `useLocaleTag()`,
+ * same pattern as `formatAmount` above (the AUD-12 fix in this file).
+ *
+ * The date-format OPTIONS are unchanged — only the locale *source* moved
+ * from the host default (`undefined`) to the active route tag — so output
+ * is byte-identical to the former local formatter for any fixed locale;
+ * the locale is the fix.
+ *
+ * Now delegates to the shared `i18n/format#formatDateTime` seam rather than
+ * re-implementing `new Date(iso).toLocaleString(locale, options)` locally
+ * (P2-DATE-SWEEP2 DRY consolidation): same body, so output is unchanged for
+ * a fixed locale; the shared seam adds only its malformed-locale/ISO
+ * degrade-don't-throw guard.
+ */
+function formatDate(iso: string, locale: string): string {
+  return formatDateTime(iso, locale, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
@@ -222,6 +263,7 @@ function HistoryPage({
   onLoadMore: (nextCursor: string) => void;
 }): React.JSX.Element {
   const { t } = useTranslation('settings');
+  const locale = useLocaleTag();
   const query = useQuery<CashbackHistoryResponse>({
     queryKey: ['me', 'cashback-history', cursor ?? null, PAGE_SIZE],
     queryFn: () =>
@@ -279,7 +321,7 @@ function HistoryPage({
                 {ledgerLabel(t, entry.type)}
               </p>
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                {formatDate(entry.createdAt)}
+                {formatDate(entry.createdAt, locale)}
                 {entry.referenceType !== null ? (
                   <>
                     {' · '}
@@ -309,7 +351,7 @@ function HistoryPage({
                   : 'text-green-600 dark:text-green-500'
               }`}
             >
-              {formatAmount(entry.amountMinor, entry.currency)}
+              {formatAmount(entry.amountMinor, entry.currency, locale)}
             </p>
           </li>
         ))}

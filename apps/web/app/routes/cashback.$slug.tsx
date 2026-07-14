@@ -3,7 +3,7 @@ import { useParams } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import { ApiException } from '@loop/shared';
-import type { Route } from './+types/cashback.$slug';
+import type { MetaDescriptor } from 'react-router';
 import { canonicalHref } from '~/i18n/seo';
 import { getPublicMerchant } from '~/services/public-stats';
 import { CashbackCalculator } from '~/components/features/cashback/CashbackCalculator';
@@ -42,7 +42,17 @@ function niceName(slug: string): string {
   return slug.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-export function meta({ params }: Route.MetaArgs): Route.MetaDescriptors {
+// P2-10/P2-11: this is now the component-only (mobile / SPA) variant — the SSR
+// build wires `cashback.$slug-ssr.tsx` (loader throws a real 404 for an unknown
+// merchant), so SSR typegen never sees this route and `./+types/cashback.$slug`
+// doesn't exist under it. Inline the meta types instead of importing them, the
+// same pattern `not-found.tsx` / `locale-layout.tsx` use for their mobile-only
+// files. `cashback.$slug-ssr.tsx` re-exports this `meta`.
+export function meta({
+  params,
+}: {
+  params: { slug?: string | undefined; country?: string | undefined; lang?: string | undefined };
+}): MetaDescriptor[] {
   let slug = params.slug ?? '';
   try {
     slug = decodeURIComponent(slug);
@@ -117,7 +127,7 @@ function CashbackMerchantLandingBody(): React.JSX.Element {
             name={query.data?.name ?? fallbackName}
             logoUrl={query.data?.logoUrl ?? null}
             userCashbackPct={query.data?.userCashbackPct ?? null}
-            merchantId={query.data?.id ?? slug}
+            merchantSlug={query.data?.slug ?? slug}
             isPending={query.isPending}
           />
         )}
@@ -162,13 +172,13 @@ function HeroCopy({
   name,
   logoUrl,
   userCashbackPct,
-  merchantId,
+  merchantSlug,
   isPending,
 }: {
   name: string;
   logoUrl: string | null;
   userCashbackPct: string | null;
-  merchantId: string;
+  merchantSlug: string;
   isPending: boolean;
 }): React.JSX.Element {
   const { t } = useTranslation('cashback');
@@ -203,7 +213,7 @@ function HeroCopy({
         </p>
       )}
       <Link
-        to={`/gift-card/${encodeURIComponent(merchantId)}`}
+        to={`/gift-card/${encodeURIComponent(merchantSlug)}`}
         className="inline-block rounded-lg bg-blue-600 px-6 py-3 text-base font-semibold text-white hover:bg-blue-700"
       >
         {t('merchant.hero.shopCta', { name })}

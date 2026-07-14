@@ -165,8 +165,29 @@ export async function adminCreditAdjustmentHandler(c: Context): Promise<Response
       // A2-1610: per-admin per-currency daily cap hit. Bodies carry
       // the numbers so an operator can see "you've already done ±X
       // today, cap is Y" and escalate or wait rather than retrying
-      // blind. Discord audit fanout below still fires for the
-      // attempted write so the compromised-session signal is visible.
+      // blind.
+      //
+      // OBS-01: a cap trip is itself the compromised-session signal —
+      // a stolen admin session draining the treasury via many
+      // sub-per-request writes hits this cap — so it MUST reach
+      // #admin-audit. The fire-and-forget fanout below the try/catch
+      // only runs for COMMITTED writes; this path returns early, so
+      // the trip would otherwise be silently 429'd with no Discord
+      // ping (the previous comment here claimed the fanout "still
+      // fires" for the attempt, but the early return meant it never
+      // did). Fire the notifier here for the BLOCKED attempt, clearly
+      // marked as rejected in the reason so it can't be misread as a
+      // successful write.
+      notifyAdminAudit({
+        actorUserId: actor.id,
+        endpoint: `POST /api/admin/users/${userId}/credit-adjustments`,
+        targetUserId: userId,
+        amountMinor: err.attemptedDelta.toString(),
+        currency: err.currency,
+        reason: `BLOCKED — daily ${err.currency} adjustment cap hit (${err.usedMinor}/${err.capMinor} minor used today, attempted ${err.attemptedDelta}). Original reason: ${parsed.data.reason}`,
+        idempotencyKey,
+        replayed: false,
+      });
       return c.json(
         {
           code: 'DAILY_LIMIT_EXCEEDED',

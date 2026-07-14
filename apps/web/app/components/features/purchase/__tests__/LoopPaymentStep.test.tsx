@@ -5,12 +5,25 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
 
 import type * as OrdersLoopModule from '~/services/orders-loop';
+import type * as PlatformModule from '~/native/platform';
 const getLoopOrderMock = vi.fn();
 vi.mock('~/services/orders-loop', async () => {
   const actual = await vi.importActual<typeof OrdersLoopModule>('~/services/orders-loop');
   return {
     ...actual,
     getLoopOrder: (id: string) => getLoopOrderMock(id),
+  };
+});
+
+// PAYMENTURI-UNGATED: the native body (single "Open in wallet" deep-link)
+// only renders when isNativePlatform() is true. Drive it from a mutable flag
+// that defaults to false so every existing test keeps the web variant.
+let mockNativePlatform = false;
+vi.mock('~/native/platform', async () => {
+  const actual = await vi.importActual<typeof PlatformModule>('~/native/platform');
+  return {
+    ...actual,
+    isNativePlatform: () => mockNativePlatform,
   };
 });
 
@@ -92,6 +105,7 @@ function mkOrder(overrides: Partial<LoopOrderView> = {}): LoopOrderView {
 
 beforeEach(() => {
   getLoopOrderMock.mockReset();
+  mockNativePlatform = false;
 });
 afterEach(cleanup);
 
@@ -153,6 +167,76 @@ describe('LoopPaymentStep — stellar (xlm/usdc)', () => {
   });
 });
 
+// PAYMENTURI-UNGATED (XSS): `paymentUri` is a server/upstream-supplied field
+// on the create-order response — Loop builds it via buildSep7PayUri, but it
+// can also be threaded straight through from CTX's `paymentUrls`. Dropped
+// into an `<a href>` unvalidated, a `javascript:`/`data:` scheme executes on
+// tap — with app privileges inside the Capacitor native WebView. The scheme
+// must be gated so a dangerous URI never becomes a live href, while a
+// legitimate SEP-7 `web+stellar:` URI passes through.
+describe('LoopPaymentStep — paymentUri XSS gate', () => {
+  const LEGIT_URI =
+    'web+stellar:pay?destination=GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW&amount=10.0000000&memo=MEMO-ABCDEFGHIJKLMN';
+  const MALICIOUS: Array<[string, string]> = [
+    ['javascript:', 'javascript:alert(document.cookie)'],
+    ['data:', 'data:text/html,<script>alert(1)</script>'],
+    ['vbscript:', 'vbscript:msgbox(1)'],
+  ];
+
+  describe('web (stellar) body', () => {
+    it('passes a legitimate web+stellar: paymentUri through to the href', async () => {
+      getLoopOrderMock.mockResolvedValue(mkOrder());
+      render(wrap(<LoopPaymentStep create={mkStellarCreate({ paymentUri: LEGIT_URI })} />));
+      const link = await waitFor(() => screen.getByRole('link', { name: /Open in wallet/i }));
+      expect(link.getAttribute('href')).toBe(LEGIT_URI);
+    });
+
+    it.each(MALICIOUS)(
+      'does NOT render a %s paymentUri as a live href',
+      async (_scheme, paymentUri) => {
+        getLoopOrderMock.mockResolvedValue(mkOrder());
+        render(wrap(<LoopPaymentStep create={mkStellarCreate({ paymentUri })} />));
+        // The address/memo copy path still renders (the user can still pay),
+        // but the dangerous URI is dropped — no "Open in wallet" anchor.
+        await waitFor(() => screen.getByText(/GABCDEFGHIJKLMNOPQRSTUVWXYZ234567/));
+        expect(screen.queryByRole('link', { name: /Open in wallet/i })).toBeNull();
+        // Belt-and-braces: the raw payload never reaches any href attribute.
+        for (const anchor of document.querySelectorAll('a')) {
+          expect(anchor.getAttribute('href')).not.toBe(paymentUri);
+        }
+      },
+    );
+  });
+
+  describe('native body', () => {
+    beforeEach(() => {
+      mockNativePlatform = true;
+    });
+
+    it('passes a legitimate web+stellar: paymentUri through to the href', async () => {
+      getLoopOrderMock.mockResolvedValue(mkOrder());
+      render(wrap(<LoopPaymentStep create={mkStellarCreate({ paymentUri: LEGIT_URI })} />));
+      const link = await waitFor(() => screen.getByRole('link', { name: /Open in wallet/i }));
+      expect(link.getAttribute('href')).toBe(LEGIT_URI);
+    });
+
+    it.each(MALICIOUS)(
+      'collapses a %s paymentUri to a disabled state, never a live href',
+      async (_scheme, paymentUri) => {
+        getLoopOrderMock.mockResolvedValue(mkOrder());
+        render(wrap(<LoopPaymentStep create={mkStellarCreate({ paymentUri })} />));
+        // Native body has no copy path — the dangerous URI collapses to a
+        // disabled "Payment link unavailable" state, not a clickable anchor.
+        await waitFor(() => screen.getByText(/Payment link unavailable/i));
+        expect(screen.queryByRole('link', { name: /Open in wallet/i })).toBeNull();
+        for (const anchor of document.querySelectorAll('a')) {
+          expect(anchor.getAttribute('href')).not.toBe(paymentUri);
+        }
+      },
+    );
+  });
+});
+
 describe('LoopPaymentStep — fulfilled redemption', () => {
   it('shows the code + PIN with copy buttons when both are present', async () => {
     getLoopOrderMock.mockResolvedValue(
@@ -186,6 +270,36 @@ describe('LoopPaymentStep — fulfilled redemption', () => {
     const link = await waitFor(() => screen.getByRole('link', { name: /Open redemption link/i }));
     expect(link.getAttribute('href')).toBe('https://redeem.example.com/abc');
     expect(link.getAttribute('rel')).toMatch(/noopener/);
+  });
+
+  // P2-03 (XSS): a redeemUrl is server/upstream-supplied. Dropped into an
+  // `<a href>` unvalidated, a `javascript:` scheme executes on click —
+  // with app privileges inside the Capacitor native WebView. The scheme
+  // must be gated so a dangerous URL is neutralized to "no live link".
+  it.each([
+    ['javascript:', 'javascript:alert(document.cookie)'],
+    ['data:', 'data:text/html,<script>alert(1)</script>'],
+    ['vbscript:', 'vbscript:msgbox(1)'],
+  ])('does NOT render a %s redeemUrl as a live href', async (_scheme, redeemUrl) => {
+    getLoopOrderMock.mockResolvedValue(
+      mkOrder({
+        state: 'fulfilled',
+        redeemCode: null,
+        redeemPin: null,
+        redeemUrl,
+        ctxOrderId: 'ctx-abc',
+        fulfilledAt: new Date().toISOString(),
+      }),
+    );
+    render(wrap(<LoopPaymentStep create={mkStellarCreate()} />));
+    // The fulfilled panel renders (fallback banner) but NO redemption
+    // anchor — the dangerous scheme is dropped, not passed through.
+    await waitFor(() => screen.getByText(/still coming through/i));
+    expect(screen.queryByRole('link', { name: /Open redemption link/i })).toBeNull();
+    // Belt-and-braces: the raw payload never reaches any href attribute.
+    for (const anchor of document.querySelectorAll('a')) {
+      expect(anchor.getAttribute('href')).not.toBe(redeemUrl);
+    }
   });
 
   it('renders a fallback banner when all redemption fields are null', async () => {
@@ -258,5 +372,127 @@ describe('LoopPaymentStep — credit', () => {
     );
     render(wrap(<LoopPaymentStep create={mkCreditCreate()} onTerminal={spy} />));
     await waitFor(() => expect(spy).toHaveBeenCalledOnce());
+  });
+});
+
+// FE-05 (round 2): the fulfilled RedemptionBody renders the gift-card CODE
+// and PIN as copyable Rows — this IS the fulfilled-redemption view for the
+// Loop-native flow (ADR-010 keeps it visible over PurchaseComplete), so the
+// user copies their secret from here on a primary path. Copying a redemption
+// secret must route through `copySensitive` so the clipboard auto-clears
+// after ~60s. The deposit address / memo Rows are NOT secrets and must stay
+// on the clipboard. We drive the REAL clipboard module (copySensitive is not
+// mocked) under fake timers and assert the auto-clear (an empty-string write)
+// fires for the code/PIN Row but never for the address / memo Row.
+describe('LoopPaymentStep — FE-05 sensitive copy auto-clear', () => {
+  const CLEAR_MS = 60_000;
+  let writeText: ReturnType<typeof vi.fn>;
+  let readText: ReturnType<typeof vi.fn>;
+
+  /** True iff the clipboard was cleared (an empty-string write) at any point. */
+  function wasCleared(): boolean {
+    return writeText.mock.calls.some((call) => call[0] === '');
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    writeText = vi.fn().mockResolvedValue(undefined);
+    // Read-back guard in `copySensitive` reads the clipboard back before
+    // clearing; model a clipboard that still holds whatever we last wrote,
+    // so a scheduled sensitive clear is allowed to fire.
+    readText = vi.fn().mockImplementation(async () => {
+      const calls = writeText.mock.calls;
+      return calls.length > 0 ? String(calls[calls.length - 1]![0]) : '';
+    });
+    Object.assign(navigator, { clipboard: { writeText, readText } });
+  });
+
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  // Flush the react-query mount fetch (resolved-promise microtasks + its
+  // internal 0ms batch) under fake timers so the polled body renders.
+  async function settle(): Promise<void> {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20);
+    });
+  }
+
+  it('routes the fulfilled gift-card CODE Row through copySensitive (schedules the auto-clear)', async () => {
+    getLoopOrderMock.mockResolvedValue(
+      mkOrder({
+        state: 'fulfilled',
+        redeemCode: 'CARD-123-XYZ',
+        redeemPin: null,
+        ctxOrderId: 'ctx-abc',
+        fulfilledAt: new Date().toISOString(),
+      }),
+    );
+    render(wrap(<LoopPaymentStep create={mkStellarCreate()} />));
+    await settle();
+    const copyBtn = screen.getByRole('button', { name: /Copy gift card code/i });
+    await act(async () => {
+      fireEvent.click(copyBtn);
+    });
+    // The secret is written immediately, and not cleared before the delay.
+    expect(writeText).toHaveBeenCalledWith('CARD-123-XYZ');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(CLEAR_MS - 1);
+    });
+    expect(wasCleared()).toBe(false);
+    // Once the auto-clear delay elapses the secret is wiped. This assertion
+    // is RED against the pre-fix Row (plain writeText, no scheduled clear).
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(wasCleared()).toBe(true);
+  });
+
+  it('routes the fulfilled PIN Row through copySensitive (schedules the auto-clear)', async () => {
+    getLoopOrderMock.mockResolvedValue(
+      mkOrder({
+        state: 'fulfilled',
+        redeemCode: null,
+        redeemPin: '4242',
+        ctxOrderId: 'ctx-abc',
+        fulfilledAt: new Date().toISOString(),
+      }),
+    );
+    render(wrap(<LoopPaymentStep create={mkStellarCreate()} />));
+    await settle();
+    const copyBtn = screen.getByRole('button', { name: /Copy pin/i });
+    await act(async () => {
+      fireEvent.click(copyBtn);
+    });
+    expect(writeText).toHaveBeenCalledWith('4242');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(CLEAR_MS);
+    });
+    expect(wasCleared()).toBe(true);
+  });
+
+  it('does NOT schedule an auto-clear for the deposit address / memo Rows (they must persist)', async () => {
+    // pending_payment → StellarPaymentBody renders the deposit address + memo
+    // as copyable, NON-sensitive Rows. A user pastes these into their wallet,
+    // so wiping them after 60s would break the payment flow — they stay put.
+    getLoopOrderMock.mockResolvedValue(mkOrder({ state: 'pending_payment' }));
+    render(wrap(<LoopPaymentStep create={mkStellarCreate()} />));
+    await settle();
+    const copyAddress = screen.getByRole('button', { name: /Copy to address/i });
+    await act(async () => {
+      fireEvent.click(copyAddress);
+    });
+    expect(writeText).toHaveBeenCalledWith(
+      'GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW',
+    );
+    // Long past any sensitive-clear delay: nothing is cleared. (This is the
+    // control — it passes both pre-fix and post-fix.)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(CLEAR_MS * 2);
+    });
+    expect(wasCleared()).toBe(false);
   });
 });

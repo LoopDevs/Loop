@@ -17,6 +17,30 @@ import { FavoritesStrip } from '~/components/features/FavoritesStrip';
 import { RecentlyPurchasedStrip } from '~/components/features/RecentlyPurchasedStrip';
 import { MerchantCardSkeleton } from '~/components/ui/Skeleton';
 import { MobileHome } from '~/components/features/home/MobileHome';
+import { useWindowedGrid } from '~/components/features/home/use-windowed-grid';
+
+// FE-25-DESKTOP-GRID: config for windowing the desktop "All merchants" directory
+// grid (mechanism shared with MobileHome — see
+// ~/components/features/home/use-windowed-grid). The grid is responsive
+// (`grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4`) and only visible
+// at md+ (its wrapper is `hidden md:block`), so the column count is resolved from
+// the viewport width at the Tailwind lg (1024px) / xl (1280px) breakpoints. Row
+// gap is `sm:gap-6` (24px) at every width the grid is shown (md ≥ sm). The row
+// pitch is estimated for SSR / first paint / jsdom and replaced by a real cell
+// measurement at runtime.
+const DESKTOP_GRID_ROW_GAP_PX = 24;
+const DESKTOP_ESTIMATED_ROW_PITCH_PX = 320;
+const DESKTOP_GRID_OVERSCAN_ROWS = 4;
+function desktopDirectoryColumns(): number {
+  // SSR / pre-hydration: the grid is empty (visibleMerchants gates on `hydrated`),
+  // so this value is unused until the client re-resolves it on mount; return the
+  // widest breakpoint as a sane default.
+  if (typeof window === 'undefined') return 4;
+  const w = window.innerWidth;
+  if (w >= 1280) return 4; // xl:grid-cols-4
+  if (w >= 1024) return 3; // lg:grid-cols-3
+  return 2; // md:grid-cols-2
+}
 
 export function meta({ params }: Route.MetaArgs): Route.MetaDescriptors {
   // Per-country title + self-canonical (ADR 034 §5): the localized URL ranks in
@@ -108,6 +132,17 @@ function HomeContent(): React.JSX.Element {
   // x69, …) into one brand tile in the directory. Featured stays
   // ungrouped — it's a curated top-cashback strip, not the full list.
   const groupedMerchants = useMemo(() => groupMerchants(visibleMerchants), [visibleMerchants]);
+  // FE-25-DESKTOP-GRID: window the desktop directory grid (shared mechanism with
+  // MobileHome — see use-windowed-grid.ts) so the ~982-group "All merchants" grid
+  // mounts only viewport-adjacent cells instead of every card at once. Every
+  // group is still reachable by scrolling and the full count is unchanged; only
+  // the number of DOM nodes rendered at any one time drops.
+  const { containerRef: directoryRef, gridWindow } = useWindowedGrid(groupedMerchants.length, {
+    columns: desktopDirectoryColumns,
+    rowGapPx: DESKTOP_GRID_ROW_GAP_PX,
+    estimatedRowPitchPx: DESKTOP_ESTIMATED_ROW_PITCH_PX,
+    overscanRows: DESKTOP_GRID_OVERSCAN_ROWS,
+  });
 
   useEffect(() => {
     setHydrated(true);
@@ -301,28 +336,59 @@ function HomeContent(): React.JSX.Element {
                   {t('directory.subheading')}
                 </p>
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
-                {visibleLoading
-                  ? Array.from({ length: 8 }).map((_, i) => <MerchantCardSkeleton key={i} />)
-                  : groupedMerchants.map((g, i) =>
-                      g.isGroup ? (
-                        <MerchantGroupCard
-                          key={`g:${g.key}`}
-                          group={g}
-                          displayIndex={i + 6}
-                          eager={i < 4}
-                          lookupCashback={lookupCashback}
-                        />
-                      ) : (
-                        <MerchantCard
-                          key={g.members[0]!.id}
-                          merchant={g.members[0]!}
-                          displayIndex={i + 6}
-                          eager={i < 4}
-                          userCashbackPct={lookupCashback(g.members[0]!.id)}
-                        />
-                      ),
+              <div
+                ref={directoryRef}
+                className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6"
+              >
+                {visibleLoading ? (
+                  Array.from({ length: 8 }).map((_, i) => <MerchantCardSkeleton key={i} />)
+                ) : (
+                  // FE-25-DESKTOP-GRID: full-width spacer rows reserve the scroll
+                  // height of the un-mounted rows above/below the window, so only
+                  // viewport-adjacent cells are in the DOM while the scrollbar and
+                  // every card's scroll position match the full ~982-group list.
+                  <>
+                    {gridWindow.topPad > 0 && (
+                      <div
+                        aria-hidden="true"
+                        className="col-span-full"
+                        style={{ height: gridWindow.topPad }}
+                      />
                     )}
+                    {groupedMerchants
+                      .slice(gridWindow.startIndex, gridWindow.endIndex)
+                      .map((g, j) => {
+                        // Absolute catalog index — preserves the original displayIndex
+                        // (+6 for the featured strip above) and the eager-load flag for
+                        // the first cards, independent of the window offset.
+                        const i = gridWindow.startIndex + j;
+                        return g.isGroup ? (
+                          <MerchantGroupCard
+                            key={`g:${g.key}`}
+                            group={g}
+                            displayIndex={i + 6}
+                            eager={i < 4}
+                            lookupCashback={lookupCashback}
+                          />
+                        ) : (
+                          <MerchantCard
+                            key={g.members[0]!.id}
+                            merchant={g.members[0]!}
+                            displayIndex={i + 6}
+                            eager={i < 4}
+                            userCashbackPct={lookupCashback(g.members[0]!.id)}
+                          />
+                        );
+                      })}
+                    {gridWindow.bottomPad > 0 && (
+                      <div
+                        aria-hidden="true"
+                        className="col-span-full"
+                        style={{ height: gridWindow.bottomPad }}
+                      />
+                    )}
+                  </>
+                )}
               </div>
             </section>
           </div>

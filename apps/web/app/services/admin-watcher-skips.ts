@@ -85,14 +85,26 @@ export interface DepositRefundResult {
 /**
  * A6: refund an abandoned late deposit back to its on-chain sender.
  * `POST /api/admin/deposits/:paymentId/refund` — admin-tier + step-up
- * (`withStepUp` runs the ADR-028 dance). Idempotent server-side, so a
- * step-up retry / re-click never double-pays.
+ * (`withStepUp` runs the ADR-028 dance). Full ADR-017 admin-write
+ * contract (mirrors `refundOrder`): a required `Idempotency-Key`
+ * header (defaulted per-call, or pass `idempotencyKey` to reuse one
+ * verbatim across a step-up retry — CF-09) and a required 2..500 char
+ * `reason` body field; returns the `{ result, audit }` envelope. A
+ * same-key replay returns the stored snapshot (`already_refunded`),
+ * so a step-up retry / re-click never double-pays.
  */
-export async function refundDeposit(paymentId: string): Promise<DepositRefundResult> {
-  return authenticatedRequest<DepositRefundResult>(
-    `/api/admin/deposits/${encodeURIComponent(paymentId)}/refund`,
+export async function refundDeposit(args: {
+  paymentId: string;
+  reason: string;
+  idempotencyKey?: string;
+}): Promise<AdminWriteEnvelope<DepositRefundResult>> {
+  return authenticatedRequest<AdminWriteEnvelope<DepositRefundResult>>(
+    `/api/admin/deposits/${encodeURIComponent(args.paymentId)}/refund`,
     {
       method: 'POST',
+      headers: { 'Idempotency-Key': args.idempotencyKey ?? generateIdempotencyKey() },
+      body: { reason: args.reason },
+      // ADR-028 / A4-063: gated by step-up auth.
       withStepUp: true,
     },
   );

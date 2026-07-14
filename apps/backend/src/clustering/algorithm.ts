@@ -80,12 +80,26 @@ export function clusterLocations(
 
   // Group locations into grid cells keyed by floor(coord * invGridSize).
   //
-  // We multiply by the reciprocal instead of dividing because float precision
-  // in IEEE-754 bites on the divide: `0.3 / 0.1 === 2.9999999999999996`, so
+  // We multiply by the reciprocal instead of dividing because for the
+  // common small cell sizes the divide carries a visible IEEE-754
+  // boundary error: `0.3 / 0.1 === 2.9999999999999996`, so
   // `Math.floor(0.3 / 0.1)` is `2` — putting a merchant at exactly 0.3°
-  // into cell 2 instead of cell 3. Multiplying by 10 gives an exact result
-  // for every cell size we actually use (0.03, 0.1, 0.5, 1.5, 5, 10, 20).
-  // Verified by node -e 'Math.floor(0.3 * 10) === 3'.
+  // into cell 2 instead of cell 3. For gridSize 0.1 the reciprocal is
+  // exactly 10 (`1 / 0.1 === 10`), so `0.3 * 10 === 3` bins that
+  // boundary the way the divide did not (locked by the "exactly 0.3°"
+  // test in __tests__/algorithm.test.ts).
+  //
+  // This is a heuristic, NOT an exact result. `1 / gridSize` is only
+  // exactly representable for two of the sizes we use — 0.1 (→10) and
+  // 0.5 (→2); for 0.03, 1.5, 5, 10 and 20 the reciprocal is itself a
+  // repeating binary fraction, so `coord * invGridSize` still rounds. A
+  // coordinate lying within a rounding-error of an exact cell boundary
+  // can therefore fall into the adjacent cell (e.g. at gridSize 0.03 the
+  // boundary -179.4° floors to cell -5981 rather than -5980). That is
+  // acceptable for map clustering — a merchant sitting exactly on a
+  // boundary may join the neighbouring cluster — but it is not the
+  // "exact for every cell size" guarantee an earlier version of this
+  // comment claimed.
   const invGridSize = 1 / gridSize;
   const cells = new Map<string, Location[]>();
   for (const loc of locations) {

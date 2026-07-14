@@ -13,13 +13,31 @@ vi.hoisted(() => {
 import { Keypair } from '@stellar/stellar-sdk';
 import { parseEnv, CANONICAL_MAINNET_USDC_ISSUER } from '../env.js';
 
+// A valid HTTPS Discord webhook URL (SEC-10 schema shape). Reused as
+// the production monitoring webhook that CFG-01 now requires.
+const MONITORING_WEBHOOK = 'https://discord.com/api/webhooks/123456789012345678/AbCdEf-gh_Ij';
+
 // Minimum viable env — everything else is optional or has a default.
 // `DATABASE_URL` is required (ADR 012) so every parse run needs it;
 // the value is a valid shape so the .url() + protocol check passes
-// without opening a real connection.
+// without opening a real connection. `DISCORD_WEBHOOK_MONITORING` is
+// carried here so the production-success fixtures below (which spread
+// `...base`) satisfy the CFG-01 required-in-prod boot guard; it's
+// optional in dev/test, so its presence is inert for the dev parses.
+// NS-10 (CF-25 / X-PRIV-03): production boots require
+// LOOP_REDEEM_ENCRYPTION_KEY (or the explicit opt-out). A 32-byte key
+// (base64 of "0123456789abcdef0123456789abcdef") that also clears the
+// 32-byte length validation. Carried in `base` — same pattern as
+// DISCORD_WEBHOOK_MONITORING above — so every production-success
+// fixture that spreads `...base` satisfies the guard; it's optional in
+// dev/test, so its presence is inert for the dev parses.
+const REDEEM_KEY = 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=';
+
 const base = {
   GIFT_CARD_API_BASE_URL: 'https://upstream.example.com',
   DATABASE_URL: 'postgres://user:pass@localhost:5433/loop',
+  DISCORD_WEBHOOK_MONITORING: MONITORING_WEBHOOK,
+  LOOP_REDEEM_ENCRYPTION_KEY: REDEEM_KEY,
 };
 
 // Hardening B3: production boots require LOOP_ADMIN_STEP_UP_SIGNING_KEY
@@ -836,6 +854,309 @@ describe('parseEnv', () => {
           LOOP_SOROBAN_RPC_URL: RPC,
           LOOP_WORKERS_ENABLED: 'false',
         }),
+      ).not.toThrow();
+    });
+  });
+
+  // SEC-10: DISCORD_WEBHOOK_* must be real HTTPS Discord webhook URLs,
+  // not merely well-formed URLs. A non-Discord / non-HTTPS host would
+  // exfiltrate every alert/audit embed off-platform.
+  describe('SEC-10: Discord webhook URL host/scheme constraint', () => {
+    const VALID = 'https://discord.com/api/webhooks/123456789012345678/tok-EN_value';
+
+    it('accepts a canonical HTTPS Discord webhook URL', () => {
+      const env = parseEnv({ ...base, DISCORD_WEBHOOK_ORDERS: VALID });
+      expect(env.DISCORD_WEBHOOK_ORDERS).toBe(VALID);
+    });
+
+    it('accepts the versioned webhook path and ptb/canary hosts', () => {
+      expect(() =>
+        parseEnv({
+          ...base,
+          DISCORD_WEBHOOK_ORDERS: 'https://discord.com/api/v10/webhooks/1/abc',
+          DISCORD_WEBHOOK_ADMIN_AUDIT: 'https://canary.discord.com/api/webhooks/2/def',
+        }),
+      ).not.toThrow();
+    });
+
+    it('rejects a well-formed URL on a non-Discord host', () => {
+      expect(() =>
+        parseEnv({ ...base, DISCORD_WEBHOOK_ORDERS: 'https://evil.example.com/api/webhooks/1/2' }),
+      ).toThrow(/DISCORD_WEBHOOK_ORDERS/);
+    });
+
+    it('rejects an http (non-TLS) Discord URL', () => {
+      expect(() =>
+        parseEnv({ ...base, DISCORD_WEBHOOK_MONITORING: 'http://discord.com/api/webhooks/1/2' }),
+      ).toThrow(/DISCORD_WEBHOOK_MONITORING/);
+    });
+
+    it('rejects a Discord host with a non-webhook path', () => {
+      expect(() =>
+        parseEnv({ ...base, DISCORD_WEBHOOK_ADMIN_AUDIT: 'https://discord.com/login' }),
+      ).toThrow(/DISCORD_WEBHOOK_ADMIN_AUDIT/);
+    });
+
+    it('rejects a look-alike host (discord.com.evil.test)', () => {
+      expect(() =>
+        parseEnv({
+          ...base,
+          DISCORD_WEBHOOK_ORDERS: 'https://discord.com.evil.test/api/webhooks/1/2',
+        }),
+      ).toThrow(/DISCORD_WEBHOOK_ORDERS/);
+    });
+  });
+
+  // CFG-01 (FT-06 follow-up): DISCORD_WEBHOOK_MONITORING is required in
+  // production — an unset webhook silently drops every monitoring alert.
+  describe('CFG-01: production DISCORD_WEBHOOK_MONITORING boot guard', () => {
+    const prodMinusMonitoring = {
+      ...base,
+      DISCORD_WEBHOOK_MONITORING: undefined,
+      NODE_ENV: 'production' as const,
+      IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
+      LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
+      DISABLE_NATIVE_AUTH_ENFORCEMENT: '1' as const,
+      LOOP_STELLAR_USDC_ISSUER: USDC_ISSUER,
+    };
+
+    it('refuses production when DISCORD_WEBHOOK_MONITORING is unset', () => {
+      expect(() => parseEnv(prodMinusMonitoring)).toThrow(/DISCORD_WEBHOOK_MONITORING must be set/);
+    });
+
+    it('also fires when only LOOP_ENV marks production (NODE_ENV=development)', () => {
+      expect(() =>
+        parseEnv({ ...base, DISCORD_WEBHOOK_MONITORING: undefined, LOOP_ENV: 'production' }),
+      ).toThrow(/DISCORD_WEBHOOK_MONITORING must be set/);
+    });
+
+    it('accepts production once the monitoring webhook is set', () => {
+      expect(() =>
+        parseEnv({ ...prodMinusMonitoring, DISCORD_WEBHOOK_MONITORING: MONITORING_WEBHOOK }),
+      ).not.toThrow();
+    });
+
+    it('allows DISABLE_MONITORING_WEBHOOK_ENFORCEMENT=1 as the explicit opt-out', () => {
+      expect(() =>
+        parseEnv({ ...prodMinusMonitoring, DISABLE_MONITORING_WEBHOOK_ENFORCEMENT: '1' }),
+      ).not.toThrow();
+    });
+
+    it('rejects any opt-out value other than "1" at parse time', () => {
+      expect(() =>
+        parseEnv({ ...prodMinusMonitoring, DISABLE_MONITORING_WEBHOOK_ENFORCEMENT: 'true' }),
+      ).toThrow(/DISABLE_MONITORING_WEBHOOK_ENFORCEMENT/);
+    });
+
+    it('does not require the monitoring webhook outside production', () => {
+      expect(() =>
+        parseEnv({ ...base, DISCORD_WEBHOOK_MONITORING: undefined, NODE_ENV: 'development' }),
+      ).not.toThrow();
+      expect(() =>
+        parseEnv({ ...base, DISCORD_WEBHOOK_MONITORING: undefined, NODE_ENV: 'test' }),
+      ).not.toThrow();
+    });
+  });
+
+  // NS-10 (CF-25 / X-PRIV-03 follow-up): production must ENCRYPT the
+  // gift-card redeem code + PIN at rest. Before this guard the key was
+  // opt-in and its absence only WARNed at boot, so a prod deploy that
+  // forgot LOOP_REDEEM_ENCRYPTION_KEY silently stored every spendable
+  // bearer secret in PLAINTEXT. parseEnv now fails closed in production
+  // when the key is unset — same shape as the USDC-issuer / step-up
+  // guards above, with a `"1"`-only opt-out. Dev/test keep warn-and-allow.
+  describe('NS-10: production redeem-encryption-key boot guard', () => {
+    // A production config that clears every OTHER prod boot guard, so a
+    // test can isolate the redeem-key check (parseEnv throws on the FIRST
+    // failing guard, and this one runs late). `base` carries the redeem
+    // key, so we explicitly UNSET it here to exercise the guard.
+    const prodMinusRedeem = {
+      ...base,
+      NODE_ENV: 'production' as const,
+      IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
+      LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
+      LOOP_AUTH_NATIVE_ENABLED: 'true' as const,
+      LOOP_JWT_SIGNING_KEY: JWT_KEY,
+      LOOP_STELLAR_USDC_ISSUER: USDC_ISSUER,
+      LOOP_REDEEM_ENCRYPTION_KEY: undefined,
+    };
+
+    it('refuses to start in production when LOOP_REDEEM_ENCRYPTION_KEY is unset', () => {
+      expect(() => parseEnv(prodMinusRedeem)).toThrow(
+        /LOOP_REDEEM_ENCRYPTION_KEY must be set in production/,
+      );
+    });
+
+    it('refuses to start in production when LOOP_REDEEM_ENCRYPTION_KEY is empty', () => {
+      expect(() => parseEnv({ ...prodMinusRedeem, LOOP_REDEEM_ENCRYPTION_KEY: '' })).toThrow(
+        /LOOP_REDEEM_ENCRYPTION_KEY must be set in production/,
+      );
+    });
+
+    it('accepts production once LOOP_REDEEM_ENCRYPTION_KEY is set', () => {
+      const env = parseEnv({ ...prodMinusRedeem, LOOP_REDEEM_ENCRYPTION_KEY: REDEEM_KEY });
+      expect(env.LOOP_REDEEM_ENCRYPTION_KEY).toBe(REDEEM_KEY);
+    });
+
+    it('allows DISABLE_REDEEM_ENCRYPTION_ENFORCEMENT=1 as the explicit opt-out', () => {
+      expect(() =>
+        parseEnv({ ...prodMinusRedeem, DISABLE_REDEEM_ENCRYPTION_ENFORCEMENT: '1' }),
+      ).not.toThrow();
+    });
+
+    it('rejects any opt-out value other than "1" at parse time', () => {
+      expect(() =>
+        parseEnv({ ...prodMinusRedeem, DISABLE_REDEEM_ENCRYPTION_ENFORCEMENT: 'true' }),
+      ).toThrow(/DISABLE_REDEEM_ENCRYPTION_ENFORCEMENT/);
+    });
+
+    it('does not enforce the redeem key outside production (dev/test boot with the key unset)', () => {
+      expect(() =>
+        parseEnv({ ...base, LOOP_REDEEM_ENCRYPTION_KEY: undefined, NODE_ENV: 'development' }),
+      ).not.toThrow();
+      expect(() =>
+        parseEnv({ ...base, LOOP_REDEEM_ENCRYPTION_KEY: undefined, NODE_ENV: 'test' }),
+      ).not.toThrow();
+    });
+  });
+
+  // CFG-02: an admin daily money cap of 0 DISABLES the cap. A fat-finger
+  // 0 in production silently removes the treasury safeguard, so warn.
+  describe('CFG-02: admin daily money cap = 0 in production', () => {
+    const prodOk = {
+      ...base,
+      NODE_ENV: 'production' as const,
+      IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
+      LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
+      DISABLE_NATIVE_AUTH_ENFORCEMENT: '1' as const,
+      LOOP_STELLAR_USDC_ISSUER: USDC_ISSUER,
+    };
+
+    it('warns (does not throw) when the adjustment cap is 0 in production', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      parseEnv({ ...prodOk, ADMIN_DAILY_ADJUSTMENT_CAP_MINOR: '0' });
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('ADMIN_DAILY_ADJUSTMENT_CAP_MINOR=0 in production DISABLES'),
+      );
+      warn.mockRestore();
+    });
+
+    it('warns when the withdrawal/emission cap is 0 in production', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      parseEnv({ ...prodOk, ADMIN_DAILY_WITHDRAWAL_CAP_MINOR: '0' });
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('ADMIN_DAILY_WITHDRAWAL_CAP_MINOR=0 in production DISABLES'),
+      );
+      warn.mockRestore();
+    });
+
+    it('stays quiet in production with the default (non-zero) caps', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      parseEnv(prodOk);
+      expect(warn).not.toHaveBeenCalledWith(
+        expect.stringContaining('DISABLES the per-admin daily'),
+      );
+      warn.mockRestore();
+    });
+
+    it('does not warn on a 0 cap outside production (documented dev/test hatch)', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const env = parseEnv({ ...base, ADMIN_DAILY_ADJUSTMENT_CAP_MINOR: '0' });
+      expect(env.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR).toBe(0n);
+      expect(warn).not.toHaveBeenCalled();
+      warn.mockRestore();
+    });
+  });
+
+  // CFG-05: an unrecognised LOOP_STELLAR_NETWORK_PASSPHRASE (typo) warns
+  // — it silently points the payout signer / watcher at the wrong chain.
+  describe('CFG-05: unrecognised Stellar network passphrase', () => {
+    it('warns on a passphrase that is neither pubnet, testnet, nor futurenet', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      parseEnv({ ...base, LOOP_STELLAR_NETWORK_PASSPHRASE: 'Public Global Stellar Netwrok' });
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('is not a recognised Stellar network passphrase'),
+      );
+      warn.mockRestore();
+    });
+
+    it('stays quiet for the recognised pubnet / testnet / futurenet passphrases', () => {
+      for (const passphrase of [
+        'Public Global Stellar Network ; September 2015',
+        'Test SDF Network ; September 2015',
+        'Test SDF Future Network ; October 2022',
+      ]) {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        parseEnv({ ...base, LOOP_STELLAR_NETWORK_PASSPHRASE: passphrase });
+        expect(warn).not.toHaveBeenCalledWith(
+          expect.stringContaining('is not a recognised Stellar network passphrase'),
+        );
+        warn.mockRestore();
+      }
+    });
+  });
+
+  // CFG-06: a mis-typed LOOP_KILL_* value must fail CLOSED (engaged), not
+  // reject at boot (which crash-loops the machine and leaves Fly serving
+  // the old, un-killed machine = fail OPEN). See killSwitchBoolean.
+  describe('CFG-06: kill-switch schema fails CLOSED on an unrecognised value', () => {
+    it('accepts an unrecognised value at boot and maps it to engaged (true)', () => {
+      // envBoolean REJECTED these — a boot crash on the kill-carrying
+      // machine leaves Fly serving the old, un-killed machine.
+      expect(parseEnv({ ...base, LOOP_KILL_AUTH: 'disbaled' }).LOOP_KILL_AUTH).toBe(true);
+      expect(parseEnv({ ...base, LOOP_KILL_ORDERS: 'kill' }).LOOP_KILL_ORDERS).toBe(true);
+      expect(parseEnv({ ...base, LOOP_KILL_EMISSIONS: 'banana' }).LOOP_KILL_EMISSIONS).toBe(true);
+      expect(parseEnv({ ...base, LOOP_KILL_ORDERS_LEGACY: 'nope' }).LOOP_KILL_ORDERS_LEGACY).toBe(
+        true,
+      );
+    });
+
+    it('still parses recognised booleans normally (truthy → engaged, falsy/unset → open)', () => {
+      expect(parseEnv({ ...base, LOOP_KILL_AUTH: 'true' }).LOOP_KILL_AUTH).toBe(true);
+      expect(parseEnv({ ...base, LOOP_KILL_AUTH: 'on' }).LOOP_KILL_AUTH).toBe(true);
+      expect(parseEnv({ ...base, LOOP_KILL_AUTH: 'false' }).LOOP_KILL_AUTH).toBe(false);
+      expect(parseEnv({ ...base, LOOP_KILL_AUTH: 'off' }).LOOP_KILL_AUTH).toBe(false);
+      expect(parseEnv(base).LOOP_KILL_AUTH).toBe(false);
+      expect(parseEnv(base).LOOP_KILL_ORDERS_LEGACY).toBeUndefined();
+    });
+  });
+
+  // FT-09: EMAIL_PROVIDER=resend without RESEND_API_KEY is a silent login
+  // outage (every OTP swallowed into a fake 200). Fail at boot in prod.
+  describe('FT-09: production RESEND_API_KEY boot guard', () => {
+    const prodResend = {
+      ...base,
+      NODE_ENV: 'production' as const,
+      IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
+      LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
+      DISABLE_NATIVE_AUTH_ENFORCEMENT: '1' as const,
+      LOOP_STELLAR_USDC_ISSUER: USDC_ISSUER,
+      EMAIL_PROVIDER: 'resend' as const,
+    };
+
+    it('refuses production when EMAIL_PROVIDER=resend but RESEND_API_KEY is unset', () => {
+      expect(() => parseEnv(prodResend)).toThrow(/EMAIL_PROVIDER=resend requires RESEND_API_KEY/);
+    });
+
+    it('refuses production when RESEND_API_KEY is empty', () => {
+      expect(() => parseEnv({ ...prodResend, RESEND_API_KEY: '' })).toThrow(
+        /EMAIL_PROVIDER=resend requires RESEND_API_KEY/,
+      );
+    });
+
+    it('accepts production once RESEND_API_KEY is set', () => {
+      expect(() => parseEnv({ ...prodResend, RESEND_API_KEY: 're_test_key_value' })).not.toThrow();
+    });
+
+    it('does not require RESEND_API_KEY when EMAIL_PROVIDER is not resend', () => {
+      // Native auth is disabled here (opt-out), so no email provider is
+      // needed at all — the guard must not fire on an unset provider.
+      expect(() => parseEnv({ ...prodResend, EMAIL_PROVIDER: undefined })).not.toThrow();
+    });
+
+    it('does not enforce the RESEND key outside production', () => {
+      expect(() =>
+        parseEnv({ ...base, NODE_ENV: 'development', EMAIL_PROVIDER: 'resend' }),
       ).not.toThrow();
     });
   });

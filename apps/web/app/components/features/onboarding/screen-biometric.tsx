@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { authenticateWithBiometrics } from '~/native/biometrics';
 import { setAppLockEnabled, markAppLockJustVerified } from '~/native/app-lock';
+import { useReducedMotion } from './atoms';
 
 interface BiometricSetupProps {
   active: boolean;
@@ -43,6 +44,7 @@ export function BiometricSetup({
   triggerRef,
 }: BiometricSetupProps): React.JSX.Element {
   const { t } = useTranslation('onboarding');
+  const reduced = useReducedMotion();
   const [scanning, setScanning] = useState(false);
   const [done, setDone] = useState(false);
 
@@ -147,7 +149,10 @@ export function BiometricSetup({
           <div
             className={
               'absolute inset-0 rounded-full transition-[opacity,border-color] duration-300 ' +
-              (scanning ? 'animate-[loop-onboard-biometric-spin_2s_linear_infinite] ' : '') +
+              // FE-53: suppress the continuous scan spin under reduced motion.
+              (scanning && !reduced
+                ? 'animate-[loop-onboard-biometric-spin_2s_linear_infinite] '
+                : '') +
               (done ? 'opacity-100 ' : scanning ? 'opacity-100 ' : 'opacity-25 ')
             }
             style={{

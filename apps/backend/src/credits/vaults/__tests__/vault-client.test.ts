@@ -33,11 +33,15 @@ const {
     mutableEnv: {
       LOOP_VAULTS_ENABLED: true,
       LOOP_STELLAR_HORIZON_URL: 'https://horizon-testnet.stellar.org',
+      // Networks.TESTNET literal — kept as a string literal because this
+      // vi.hoisted() factory runs BEFORE the top-level SDK import binds.
+      LOOP_STELLAR_NETWORK_PASSPHRASE: 'Test SDF Network ; September 2015',
     } as {
       LOOP_VAULTS_ENABLED: boolean;
       LOOP_SOROBAN_RPC_URL?: string;
       LOOP_STELLAR_OPERATOR_SECRET?: string;
       LOOP_STELLAR_HORIZON_URL: string;
+      LOOP_STELLAR_NETWORK_PASSPHRASE: string;
     },
     vaultsEnabledMock: vi.fn(() => true),
     submitMock: vi.fn(),
@@ -121,6 +125,7 @@ beforeEach(() => {
   mutableEnv.LOOP_SOROBAN_RPC_URL = 'https://rpc.example.test';
   mutableEnv.LOOP_STELLAR_OPERATOR_SECRET = OPERATOR_SECRET;
   mutableEnv.LOOP_STELLAR_HORIZON_URL = 'https://horizon-testnet.stellar.org';
+  mutableEnv.LOOP_STELLAR_NETWORK_PASSPHRASE = Networks.TESTNET;
   vaultsEnabledMock.mockReset();
   vaultsEnabledMock.mockReturnValue(true);
   submitMock.mockReset();
@@ -738,5 +743,92 @@ describe('getShareBalance', () => {
     await expect(getShareBalance({ vault: VAULT, address: USER_ADDRESS })).rejects.toThrow(
       VaultDisabledError,
     );
+  });
+});
+
+describe('MNY-19: signs for the env-configured network passphrase, not a hardcoded one', () => {
+  // A custom / self-hosted network passphrase — deliberately NEITHER
+  // Networks.TESTNET nor Networks.PUBLIC, and it does NOT match what
+  // the vault row (`network: 'testnet'`) would map to under the old
+  // hardcoded `networkPassphraseFor`. This is exactly the divergence
+  // the finding is about: the operator's env is configured for a
+  // network whose passphrase the SDK constants don't cover, while the
+  // registry row still says `testnet`.
+  const CUSTOM_PASSPHRASE = 'Standalone Network ; February 2017';
+
+  it('operator-signed deposit uses env.LOOP_STELLAR_NETWORK_PASSPHRASE (not vault.network) as the signature-base network', async () => {
+    mutableEnv.LOOP_STELLAR_NETWORK_PASSPHRASE = CUSTOM_PASSPHRASE;
+    submitMock.mockResolvedValue({
+      txHash: 'dep-hash',
+      returnValue: depositReturn([5_000_000n], 4_800_000n),
+      deduped: false,
+    });
+
+    await depositToVault({
+      // network: 'testnet' — would select Networks.TESTNET under the old code.
+      vault: VAULT,
+      underlyingAmount: 5_000_000n,
+      minShares: 4_000_000n,
+      onSigned: noopOnSigned,
+    });
+
+    // The network passphrase is the network component of the Stellar
+    // signature payload that `submitSorobanInvocation` signs under. It
+    // MUST be the env value, not the hardcoded Networks.TESTNET the
+    // vault row would otherwise pin.
+    const call = submitMock.mock.calls[0]![0];
+    expect(call.networkPassphrase).toBe(CUSTOM_PASSPHRASE);
+    expect(call.networkPassphrase).not.toBe(Networks.TESTNET);
+  });
+
+  it('provider-path operator fee-bump signature validates ONLY under the env passphrase, never the hardcoded Networks.TESTNET', async () => {
+    mutableEnv.LOOP_STELLAR_NETWORK_PASSPHRASE = CUSTOM_PASSPHRASE;
+    const preparedTx = buildPreparedTx(USER_ADDRESS);
+    prepareMock.mockResolvedValue({ tx: preparedTx });
+    submitPreSignedMock.mockResolvedValue({ txHash: 'landed-hash', ledger: 7 });
+    const fakeProvider: WalletProvider = {
+      name: 'privy',
+      createWallet: vi.fn(),
+      rawSign: vi.fn(),
+    };
+
+    await transferShares({
+      vault: VAULT,
+      from: USER_ADDRESS,
+      to: OPERATOR_PUBLIC,
+      amount: 250_000n,
+      signWith: 'provider',
+      userWallet: { provider: fakeProvider, walletId: 'wallet-1' },
+      onSigned: noopOnSigned,
+    });
+
+    // The REAL, operator-signed fee-bump envelope handed to submit —
+    // built + signed by `TransactionBuilder.buildFeeBumpTransaction` /
+    // `.sign()` (unmocked SDK) inside `transferSharesViaProvider`.
+    const submitted = submitPreSignedMock.mock.calls[0]![0] as { tx: FeeBumpTransaction };
+    const feeBump = submitted.tx;
+    expect(feeBump.networkPassphrase).toBe(CUSTOM_PASSPHRASE);
+
+    // Cryptographic proof, not a field check: the network passphrase is
+    // NOT carried in the envelope bytes — it only enters at `.hash()`
+    // time — so the operator's signature can validate under AT MOST one
+    // candidate network. Re-parse the identical envelope under each and
+    // confirm the signature is bound to the env-configured network and
+    // NOT the hardcoded Networks.TESTNET that vault.network: 'testnet'
+    // would have selected.
+    const operatorKp = Keypair.fromSecret(OPERATOR_SECRET);
+    const sig = feeBump.signatures[0]!.signature();
+    const envelopeXdr = feeBump.toEnvelope().toXDR('base64');
+    const underEnv = TransactionBuilder.fromXDR(
+      envelopeXdr,
+      CUSTOM_PASSPHRASE,
+    ) as FeeBumpTransaction;
+    const underHardcoded = TransactionBuilder.fromXDR(
+      envelopeXdr,
+      Networks.TESTNET,
+    ) as FeeBumpTransaction;
+
+    expect(operatorKp.verify(underEnv.hash(), sig)).toBe(true);
+    expect(operatorKp.verify(underHardcoded.hash(), sig)).toBe(false);
   });
 });

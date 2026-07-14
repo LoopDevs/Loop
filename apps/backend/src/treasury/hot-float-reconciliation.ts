@@ -123,6 +123,7 @@ import { db, withAdvisoryLock } from '../db/client.js';
 import { env } from '../env.js';
 import { MAINNET_NETWORK_PASSPHRASE } from '../env/schema-helpers.js';
 import { logger } from '../logger.js';
+import { setMoneyIntegrityBreach } from '../metrics.js';
 import {
   markWorkerStarted,
   markWorkerStopped,
@@ -392,7 +393,21 @@ export function startVaultFloatReconciliationWatcher(args?: { intervalMs?: numbe
     try {
       // A lost advisory lock is a HEALTHY tick — another machine owns
       // the sweep this round (mirrors operator-float-reconciliation.ts).
-      await runVaultFloatReconciliationTick();
+      const r = await runVaultFloatReconciliationTick();
+      // NS-02 / FT-07: a tick that actually reconciled at least one
+      // vault records the STANDING float-desync state on the money-
+      // integrity gauge — markWorkerTickSuccess proves only that the
+      // tick ran. A `drift` (the double-withdraw signature this
+      // reconciler exists to catch) or `error` sample is a standing
+      // breach that must stay visible on /metrics between its
+      // at-least-once daily pages. A lock-skip or vaults-disabled tick
+      // (samples === []) leaves the last-known value untouched.
+      if (!r.skippedLocked && r.samples.length > 0) {
+        setMoneyIntegrityBreach(
+          'vault_float',
+          r.samples.some((s) => s.state === 'drift' || s.state === 'error'),
+        );
+      }
       markWorkerTickSuccess('vault_float_reconciliation');
     } catch (err) {
       markWorkerTickFailure('vault_float_reconciliation', err);

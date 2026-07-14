@@ -37,6 +37,13 @@ const { state } = vi.hoisted(() => {
      */
     pendingPayoutsScrubSet: Record<string, unknown> | null;
     pendingPayoutsScrubFired: boolean;
+    /**
+     * CON-02: set true when the per-user advisory lock (tx.execute of
+     * `pg_advisory_xact_lock`) is acquired inside the delete
+     * transaction — proves the preconditions are re-checked under the
+     * lock rather than on the pooled handle outside the txn.
+     */
+    advisoryLockAcquired: boolean;
   } = {
     payoutBlockingRows: [],
     failedUncompensatedRows: [],
@@ -50,6 +57,7 @@ const { state } = vi.hoisted(() => {
     txnRan: false,
     pendingPayoutsScrubSet: null,
     pendingPayoutsScrubFired: false,
+    advisoryLockAcquired: false,
   };
   return { state: s };
 });
@@ -131,6 +139,11 @@ vi.mock('../../db/client.js', () => {
     };
   }
   function tx(): {
+    // CON-02: the preconditions now run through the transaction handle,
+    // guarded by tx.execute(pg_advisory_xact_lock). Mirror the pooled
+    // `db.select` routing on `tx` and record the lock acquisition.
+    execute: (query: unknown) => Promise<unknown>;
+    select: () => ReturnType<typeof selectChain>;
     delete: (t: { __tag: string }) => {
       where: (where: { value?: string }) => Promise<void>;
     };
@@ -141,6 +154,11 @@ vi.mock('../../db/client.js', () => {
     };
   } {
     return {
+      execute: async () => {
+        state.advisoryLockAcquired = true;
+        return [];
+      },
+      select: () => selectChain(),
       delete: (t) => ({
         where: async (where) => {
           if (t.__tag === 'userIdentities') {
@@ -189,6 +207,7 @@ beforeEach(() => {
   state.txnRan = false;
   state.pendingPayoutsScrubSet = null;
   state.pendingPayoutsScrubFired = false;
+  state.advisoryLockAcquired = false;
 });
 
 describe('deleteUserViaAnonymisation (A2-1905)', () => {
@@ -196,7 +215,12 @@ describe('deleteUserViaAnonymisation (A2-1905)', () => {
     state.payoutBlockingRows = [{ id: 'p-1' }];
     const out = await deleteUserViaAnonymisation('u-1');
     expect(out).toEqual({ ok: false, blockedBy: 'pending_payouts' });
-    expect(state.txnRan).toBe(false);
+    // CON-02: the transaction opens so the per-user advisory lock can
+    // be taken and the preconditions re-checked under it — but a block
+    // does NO writes and never revokes sessions.
+    expect(state.advisoryLockAcquired).toBe(true);
+    expect(state.deletedFromIdentitiesUserId).toBeNull();
+    expect(state.updatedUserSet).toBeNull();
     expect(state.revokedForUserId).toBeNull();
   });
 
@@ -204,7 +228,12 @@ describe('deleteUserViaAnonymisation (A2-1905)', () => {
     state.orderBlockingRows = [{ id: 'o-1' }];
     const out = await deleteUserViaAnonymisation('u-1');
     expect(out).toEqual({ ok: false, blockedBy: 'in_flight_orders' });
-    expect(state.txnRan).toBe(false);
+    // CON-02: the transaction opens so the per-user advisory lock can
+    // be taken and the preconditions re-checked under it — but a block
+    // does NO writes and never revokes sessions.
+    expect(state.advisoryLockAcquired).toBe(true);
+    expect(state.deletedFromIdentitiesUserId).toBeNull();
+    expect(state.updatedUserSet).toBeNull();
     expect(state.revokedForUserId).toBeNull();
   });
 
@@ -219,7 +248,12 @@ describe('deleteUserViaAnonymisation (A2-1905)', () => {
     state.failedUncompensatedRows = [{ id: 'p-failed-1' }];
     const out = await deleteUserViaAnonymisation('u-1');
     expect(out).toEqual({ ok: false, blockedBy: 'failed_uncompensated_withdrawals' });
-    expect(state.txnRan).toBe(false);
+    // CON-02: the transaction opens so the per-user advisory lock can
+    // be taken and the preconditions re-checked under it — but a block
+    // does NO writes and never revokes sessions.
+    expect(state.advisoryLockAcquired).toBe(true);
+    expect(state.deletedFromIdentitiesUserId).toBeNull();
+    expect(state.updatedUserSet).toBeNull();
     expect(state.revokedForUserId).toBeNull();
   });
 
@@ -231,7 +265,12 @@ describe('deleteUserViaAnonymisation (A2-1905)', () => {
     state.nonZeroBalanceRows = [{ currency: 'GBP' }];
     const out = await deleteUserViaAnonymisation('u-1');
     expect(out).toEqual({ ok: false, blockedBy: 'non_zero_credit_balance' });
-    expect(state.txnRan).toBe(false);
+    // CON-02: the transaction opens so the per-user advisory lock can
+    // be taken and the preconditions re-checked under it — but a block
+    // does NO writes and never revokes sessions.
+    expect(state.advisoryLockAcquired).toBe(true);
+    expect(state.deletedFromIdentitiesUserId).toBeNull();
+    expect(state.updatedUserSet).toBeNull();
     expect(state.revokedForUserId).toBeNull();
   });
 
@@ -239,6 +278,9 @@ describe('deleteUserViaAnonymisation (A2-1905)', () => {
     const out = await deleteUserViaAnonymisation('u-1');
     expect(out).toEqual({ ok: true });
     expect(state.txnRan).toBe(true);
+    // CON-02: the anonymisation runs under the per-user advisory lock,
+    // taken inside the same transaction as the re-checked preconditions.
+    expect(state.advisoryLockAcquired).toBe(true);
     expect(state.deletedFromIdentitiesUserId).toBe('u-1');
     expect(state.updatedUserSet).toMatchObject({
       email: 'deleted-u-1@deleted.loopfinance.io',

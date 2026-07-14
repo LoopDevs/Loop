@@ -73,6 +73,9 @@ async function seedUser(email: string): Promise<SeededUser> {
     email: user.email,
     typ: 'access',
     ttlSeconds: DEFAULT_ACCESS_TTL_SECONDS,
+    // NS-09: stamp the seeded user's current token_version (0) so
+    // requireAuth's revocation check admits the token.
+    tv: user.tokenVersion,
   });
   return { userId: user.id, email: user.email, bearer: access.token };
 }
@@ -287,5 +290,55 @@ describeIf('user favourites — real postgres', () => {
   it('401 without a bearer token', async () => {
     const res = await app.request('http://localhost/api/users/me/favorites');
     expect(res.status).toBe(401);
+  });
+
+  // FT-11: the cap-check + insert must be atomic per user. This test
+  // fires genuinely concurrent HTTP adds (separate pool connections,
+  // transactions overlapping) at the cap boundary — only the per-user
+  // advisory lock inside addFavoriteHandler keeps them from all reading
+  // the same pre-insert count and each slipping past the cap.
+  //
+  // (A same-merchant idempotency-under-concurrency case is deliberately
+  // omitted: reproducing the loser's PK-23505 requires both
+  // transactions to run their existence SELECT before either commits
+  // its INSERT, which the fast local DB does not interleave reliably —
+  // a timing-dependent test would be vacuous on the un-fixed code as
+  // often as it is red. The sequential-re-add idempotency contract is
+  // already pinned by 'POST /favorites adds a row and is idempotent on
+  // re-add' above; the advisory lock this cap test exercises is the
+  // same mechanism that closes the same-merchant race.)
+  it('FT-11: concurrent adds at the cap boundary cannot exceed the 50-favourite cap', async () => {
+    const me = await seedUser('fav-race-cap@test.local');
+    // Seed 49 so EXACTLY ONE more add is allowed (49 → 50).
+    for (let i = 0; i < 49; i++) {
+      await db.insert(userFavoriteMerchants).values({
+        userId: me.userId,
+        merchantId: `seeded-${i}`,
+      });
+    }
+    const url = 'http://localhost/api/users/me/favorites';
+    const headers = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${me.bearer}`,
+    };
+    // Five distinct catalog merchants raced at the boundary.
+    const merchants = ['amazon', 'starbucks', 'home-depot', 'target', 'best-buy'];
+    const results = await Promise.all(
+      merchants.map(async (merchantId) =>
+        app.request(url, { method: 'POST', headers, body: JSON.stringify({ merchantId }) }),
+      ),
+    );
+    const statuses = results.map((r) => r.status);
+
+    // Without the lock several concurrent adds each read count=49, each
+    // pass the `< 50` check, and each insert → the cap is blown.
+    expect(statuses.filter((s) => s === 200)).toHaveLength(1);
+    expect(statuses.filter((s) => s === 409)).toHaveLength(4);
+
+    const rows = await db
+      .select()
+      .from(userFavoriteMerchants)
+      .where(eq(userFavoriteMerchants.userId, me.userId));
+    expect(rows).toHaveLength(50);
   });
 });

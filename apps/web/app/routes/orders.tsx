@@ -196,6 +196,22 @@ export default function OrdersRoute(): React.JSX.Element {
   const orders = allOrders.filter((o) => o.status !== 'pending');
   const errorText = errorMessage(t, error);
 
+  // The list is paginated server-side over ALL statuses, then `pending`
+  // orders are dropped client-side (above). A page can therefore filter
+  // down to zero *visible* rows while later pages — holding the user's
+  // completed orders — still exist. So the terminal "No orders yet" empty
+  // state must key off the RAW page being empty with no page either side
+  // (`noOrdersAtAll`), NOT off the post-filter `orders` list; otherwise an
+  // all-pending page renders a false empty state and, with pagination
+  // hidden, traps the user on it. When the visible list is empty but
+  // `hasOtherPages`, we show a neutral notice + keep Prev/Next alive so
+  // the user can always page through to their completed orders.
+  // NOTE: the proper fix is to server-paginate over the filtered set —
+  // that needs a backend list-handler + external CTX upstream change and
+  // is tracked as a separate follow-up.
+  const noOrdersAtAll = allOrders.length === 0 && !hasNext && !hasPrev;
+  const hasOtherPages = hasNext || hasPrev;
+
   // Single fetch of the user's pending-payouts, mapped by orderId
   // so each OrderRow gets a cheap O(1) lookup for its settlement
   // state. 100-row cap is generous for any single /orders page;
@@ -307,7 +323,7 @@ export default function OrdersRoute(): React.JSX.Element {
           </div>
         )}
 
-        {isAuthenticated && !isLoading && errorText === null && orders.length === 0 && (
+        {isAuthenticated && !isLoading && errorText === null && noOrdersAtAll && (
           <div className="text-center py-12">
             <p className="text-gray-500 dark:text-gray-400 mb-4">{t('list.empty')}</p>
             <Button
@@ -320,34 +336,49 @@ export default function OrdersRoute(): React.JSX.Element {
           </div>
         )}
 
-        {orders.length > 0 && (
+        {!noOrdersAtAll && (
           <>
-            <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden">
-              {orders.map((order) => (
-                <OrderRow
-                  key={order.id}
-                  order={order}
-                  payoutState={payoutByOrderId.get(order.id) ?? null}
-                />
-              ))}
-            </div>
+            {orders.length > 0 ? (
+              <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden">
+                {orders.map((order) => (
+                  <OrderRow
+                    key={order.id}
+                    order={order}
+                    payoutState={payoutByOrderId.get(order.id) ?? null}
+                  />
+                ))}
+              </div>
+            ) : (
+              // Every row on this page is a hidden `pending` order (or the
+              // raw page is empty) but more pages exist — a neutral notice,
+              // NOT the terminal "No orders yet" state, so the pagination
+              // below stays the way out to the user's completed orders.
+              <div className="text-center py-12">
+                <p className="text-gray-500 dark:text-gray-400">{t('list.emptyPage')}</p>
+              </div>
+            )}
 
-            <div className="flex justify-between mt-4">
-              <Button
-                variant="secondary"
-                disabled={!hasPrev || isLoading}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-              >
-                {t('list.previous')}
-              </Button>
-              <Button
-                variant="secondary"
-                disabled={!hasNext || isLoading}
-                onClick={() => setPage((p) => p + 1)}
-              >
-                {t('list.next')}
-              </Button>
-            </div>
+            {/* Pagination is rendered whenever another page exists — even
+                when this page's visible list is empty — so an all-pending
+                page is never a dead end. */}
+            {hasOtherPages && (
+              <div className="flex justify-between mt-4">
+                <Button
+                  variant="secondary"
+                  disabled={!hasPrev || isLoading}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  {t('list.previous')}
+                </Button>
+                <Button
+                  variant="secondary"
+                  disabled={!hasNext || isLoading}
+                  onClick={() => setPage((p) => p + 1)}
+                >
+                  {t('list.next')}
+                </Button>
+              </div>
+            )}
           </>
         )}
       </main>

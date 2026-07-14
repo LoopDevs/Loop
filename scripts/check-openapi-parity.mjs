@@ -13,7 +13,11 @@
  * gate runs without a DB or env):
  *   - mounts:        apps/backend/src/app.ts +
  *                    apps/backend/src/routes/**.ts
- *                    (`app.get/post/put/delete('<path>', …)`)
+ *                    (`app.<method>('<path>', …)` for every HTTP verb
+ *                    Hono exposes with the `(path, …handlers)` shape:
+ *                    get/post/put/patch/delete/options/head — not just
+ *                    get/post/put/delete, so a future `app.patch(...)`
+ *                    admin route can't slip the gate unregistered)
  *   - registrations: apps/backend/src/openapi.ts +
  *                    apps/backend/src/openapi/*.ts
  *                    (`registry.registerPath({ method, path, responses })`)
@@ -26,6 +30,14 @@
  *                         masks non-admin access as 404 (see
  *                         src/auth/require-admin.ts), so every admin
  *                         path can return it
+ *   admin-missing-401     /api/admin/* must declare 401 — the namespace
+ *                         blanket runs requireAuth + requireStaff, which
+ *                         401s an unauthenticated / non-loop / invalid-
+ *                         token caller before any handler runs
+ *   admin-missing-500     /api/admin/* must declare 500 — requireStaff
+ *                         500s when the user lookup throws and the global
+ *                         app.onError maps any unhandled error to a 500
+ *                         envelope, so every admin path can return it
  *   admin-403             /api/admin/* must NOT declare 403 — nothing on
  *                         the admin middleware stack (requireAuth 401,
  *                         requireAdmin 404, step-up 401/503, kill-switch
@@ -108,7 +120,7 @@ const mountFiles = [path.join(BACKEND_SRC, 'app.ts'), ...tsFiles(path.join(BACKE
 const mounts = [];
 for (const file of mountFiles) {
   const source = readFileSync(file, 'utf8');
-  const re = /\bapp\.(get|post|put|delete)\s*\(/g;
+  const re = /\bapp\.(get|post|put|patch|delete|options|head)\s*\(/g;
   let m;
   while ((m = re.exec(source)) !== null) {
     const openParen = m.index + m[0].length - 1;
@@ -212,6 +224,22 @@ for (const reg of registrations) {
         method: reg.method,
         path: reg.path,
         detail: `${reg.where}: requireAdmin returns 404 for non-admins by design — every /api/admin path must declare it`,
+      });
+    }
+    if (!reg.statuses.has(401)) {
+      violations.push({
+        rule: 'admin-missing-401',
+        method: reg.method,
+        path: reg.path,
+        detail: `${reg.where}: the /api/admin/* blanket runs requireAuth + requireStaff, which 401s an unauthenticated / non-loop / invalid-token caller — every admin path must declare it`,
+      });
+    }
+    if (!reg.statuses.has(500)) {
+      violations.push({
+        rule: 'admin-missing-500',
+        method: reg.method,
+        path: reg.path,
+        detail: `${reg.where}: requireStaff 500s when the user lookup throws and app.onError maps any unhandled error to 500 — every admin path must declare it`,
       });
     }
     if (reg.statuses.has(403)) {

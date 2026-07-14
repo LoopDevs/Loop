@@ -52,6 +52,18 @@ export const users = pgTable(
     ctxUserId: text('ctx_user_id'),
     email: text('email').notNull(),
     isAdmin: boolean('is_admin').notNull().default(false),
+    // NS-09 — access-token revocation counter (migration 0070). Access
+    // tokens are 15-min, signature-only, and carry no per-token DB row,
+    // so before this they were NON-REVOCABLE until natural expiry: a
+    // logout / password-reset / compromise could not invalidate an
+    // already-issued, still-signed access token. This monotonic per-user
+    // counter closes that gap — it is embedded as the `tv` claim in every
+    // minted access token, compared against this column on EVERY
+    // authenticated request (`requireAuth`), and bumped (atomic +1) on
+    // logout / sign-out-all / refresh-reuse-detected so all prior access
+    // tokens are rejected at once. Refresh tokens keep their own DB-row
+    // revocation (`refresh_tokens`); this is the access-token equivalent.
+    tokenVersion: integer('token_version').notNull().default(0),
     homeCurrency: char('home_currency', { length: 3 }).notNull().default('USD'),
     // ADR 015 — Stellar address the user wants their cashback paid
     // to (when on-chain payout is available for their home currency).

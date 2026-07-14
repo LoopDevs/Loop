@@ -8,7 +8,13 @@
  */
 import type { Context } from 'hono';
 import { logger } from '../logger.js';
-import { findLiveOtp, incrementOtpAttempts, markOtpConsumed } from './otps.js';
+import {
+  findLiveOtp,
+  incrementOtpAttempts,
+  tryConsumeOtp,
+  countRecentOtpsForEmail,
+  OTP_TTL_MS,
+} from './otps.js';
 import {
   isEmailOtpLocked,
   registerFailedOtpAttempt,
@@ -18,7 +24,7 @@ import {
 import { enqueueWalletProvisioning } from '../wallet/provisioning.js';
 import { normalizeEmail, NonAsciiEmailError } from './normalize-email.js';
 import { verifyLoopToken, isLoopAuthConfigured } from './tokens.js';
-import { findOrCreateUserByEmail } from '../db/users.js';
+import { findOrCreateUserByEmail, getUserTokenVersion } from '../db/users.js';
 import {
   findLiveRefreshToken,
   findRefreshTokenRecord,
@@ -106,23 +112,69 @@ export async function nativeVerifyOtpHandler(c: Context): Promise<Response> {
       // Bump the per-row attempts counter on any guess so brute force
       // against a specific row gets squeezed. No-ops if no live row.
       await incrementOtpAttempts({ email });
-      // B5: the authoritative per-email ceiling. If this guess tips the
-      // email over the threshold, surface the lockout immediately.
-      const { locked } = await registerFailedOtpAttempt({ email });
-      if (locked) {
-        c.header('Retry-After', String(Math.ceil(OTP_EMAIL_LOCKOUT_MS / 1000)));
-        return c.json(
-          { code: 'TOO_MANY_ATTEMPTS', message: 'Too many attempts. Try again later.' },
-          429,
-        );
+      // SEC-15: only arm the per-EMAIL lockout when the email actually has
+      // a live OTP that a wrong guess could be brute-forcing. A "wrong"
+      // guess against an email with NO outstanding code is not brute force
+      // — there is nothing to find — so counting it toward the lockout lets
+      // an UNAUTHENTICATED attacker trip B5 on any account (incl. admins)
+      // just by POSTing wrong codes for an idle email, silently and for
+      // free; and because admin step-up (`admin/step-up-handler.ts`) reads
+      // the SAME per-email lockout, that also denies the victim's step-up.
+      // Gating on live-OTP existence removes that free, silent unauth DoS
+      // WITHOUT weakening brute-force protection: a wrong guess against a
+      // genuinely-pending code still counts in full (the ceiling is
+      // unchanged for real login/attack traffic), and an attacker who wants
+      // to arm the lock must now keep a live OTP present — which only
+      // `request-otp` can create (per-email 3/min + per-IP capped, and it
+      // emails the victim, so the attack is no longer silent or free).
+      //
+      // `countRecentOtpsForEmail(windowMs = OTP_TTL_MS)` is a one-directional
+      // proxy: an OTP row's `expires_at = created_at + OTP_TTL_MS`, so
+      // `count === 0` means every row for this email is already expired
+      // (definitely no live code) — the only case we skip. `count > 0` may
+      // include consumed / attempt-maxed rows, so we still arm (fail toward
+      // counting), never skipping when a real live code exists.
+      const recentOtps = await countRecentOtpsForEmail({ email, windowMs: OTP_TTL_MS });
+      if (recentOtps > 0) {
+        // B5: the authoritative per-email ceiling. If this guess tips the
+        // email over the threshold, surface the lockout immediately.
+        const { locked } = await registerFailedOtpAttempt({ email });
+        if (locked) {
+          c.header('Retry-After', String(Math.ceil(OTP_EMAIL_LOCKOUT_MS / 1000)));
+          return c.json(
+            { code: 'TOO_MANY_ATTEMPTS', message: 'Too many attempts. Try again later.' },
+            429,
+          );
+        }
       }
       return c.json({ code: 'UNAUTHORIZED', message: 'Invalid or expired verification code' }, 401);
     }
-    await markOtpConsumed(hit.id);
+    // BK-otpatomic: single-use is enforced by an ATOMIC compare-and-set,
+    // not a read-then-mark. `findLiveOtp` above only READ the row as
+    // unconsumed; two concurrent verifies with the same valid code both
+    // pass that read. `tryConsumeOtp` flips `consumed_at` NULL → now() in
+    // ONE `UPDATE ... WHERE consumed_at IS NULL RETURNING`, so exactly one
+    // caller gets the row back (`won === true`) and proceeds to mint; the
+    // loser gets 0 rows and must NOT issue a second pair. Mirrors the
+    // refresh path's `tryRevokeIfLive` CAS (A4-098).
+    const won = await tryConsumeOtp(hit.id);
+    if (!won) {
+      // A concurrent verify already consumed this OTP — it is now spent.
+      // Surface the same generic 401 a wrong / expired / already-consumed
+      // code returns, without minting tokens or clearing the counter (the
+      // winner already did the latter).
+      return c.json({ code: 'UNAUTHORIZED', message: 'Invalid or expired verification code' }, 401);
+    }
     // B5: legitimate verify clears the email's failed-attempt counter.
     await clearOtpAttempts(email);
     const user = await findOrCreateUserByEmail(email);
-    const pair = await issueTokenPair({ id: user.id, email: user.email });
+    // NS-09: stamp the user's current token_version on the fresh access
+    // token so a later logout / revoke-all can invalidate it.
+    const pair = await issueTokenPair({
+      id: user.id,
+      email: user.email,
+      tokenVersion: user.tokenVersion,
+    });
     // ADR 030 Phase C1 — fire-and-forget embedded-wallet
     // provisioning. Synchronous + never throws; signup must not
     // block on Stellar or the wallet provider. Failures are picked
@@ -207,7 +259,18 @@ export async function nativeRefreshHandler(c: Context): Promise<Response> {
     // live successor row that nothing would ever revoke (it isn't
     // the `replaced_by_jti` of any row, and the loser's 401 left
     // it behind as a live orphaned credential).
-    const minted = mintTokenPair({ id: claims.sub, email: claims.email });
+    // NS-09: the rotated access token must carry the user's CURRENT
+    // token_version — a bump may have landed (e.g. a logout on another
+    // device) between this refresh token's issuance and now, and the new
+    // access token must reflect it. Read the live value rather than
+    // trusting the refresh token's issuance-time state. A missing row
+    // (user deleted) fails the refresh closed.
+    const tokenVersion = await getUserTokenVersion(claims.sub);
+    if (tokenVersion === null) {
+      log.warn({ sub: claims.sub }, 'Refresh for a user row that no longer exists');
+      return c.json({ code: 'UNAUTHORIZED', message: 'Invalid refresh token' }, 401);
+    }
+    const minted = mintTokenPair({ id: claims.sub, email: claims.email, tokenVersion });
     const won = await tryRevokeIfLive({ jti: claims.jti, replacedByJti: minted.refreshJti });
     if (!won) {
       // Concurrent rotation lost the race. The other caller already

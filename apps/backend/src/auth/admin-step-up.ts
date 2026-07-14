@@ -8,11 +8,22 @@
  * signing key so a `LOOP_JWT_SIGNING_KEY` compromise doesn't widen
  * to step-up.
  *
- * The step-up token is stateless — no DB row per issued token; the
- * 5-minute TTL is enforced by the `exp` claim. Verification accepts
- * either `LOOP_ADMIN_STEP_UP_SIGNING_KEY` or
+ * ISSUANCE is stateless — no DB row per issued token; the 5-minute
+ * TTL is enforced by the `exp` claim. Verification accepts either
+ * `LOOP_ADMIN_STEP_UP_SIGNING_KEY` or
  * `LOOP_ADMIN_STEP_UP_SIGNING_KEY_PREVIOUS` so a rotation overlaps
  * for the TTL without a flag-day.
+ *
+ * SEC-02-stepup (auth privilege): the stateless `exp` is not the only
+ * bound. `consumeAdminStepUpToken` is the DB-backed, security-
+ * authoritative check a destructive write uses: it binds the token to
+ * a SINGLE action-class (no wildcard bypass) and records the token's
+ * `jti` in `admin_step_up_consumptions` atomically so the token is
+ * SINGLE-USE — a token minted for "queue emission" can neither be
+ * replayed for a refund nor reused after it's consumed. `signAdmin…`
+ * therefore stamps a unique `jti` on every minted token, and the
+ * middleware (`admin-step-up-middleware.ts`) consumes rather than
+ * merely verifies.
  *
  * Claim shape diverges from access/refresh tokens by intent:
  * `purpose: 'admin-step-up'` + `aud: 'admin-write'` make a stolen
@@ -23,15 +34,22 @@
  *
  * CF-08 (cold audit 2026-06-15): the token also carries a `scope`
  * claim binding it to an action class. A token minted for a
- * *specific* action (e.g. `'refund'`) cannot be silently replayed
- * against a *different* destructive write — the gate middleware
- * rejects a scope mismatch. The default `'admin-write'` scope is a
- * wildcard that satisfies every gate, so a caller that doesn't ask
- * for a narrower scope keeps the prior "one token, any write"
- * behaviour (backward-safe). Narrowing is opt-in at mint time.
+ * *specific* action (e.g. `'refund'`) cannot be replayed against a
+ * *different* destructive write.
+ *
+ * SEC-02-stepup tightened CF-08: the `'admin-write'` wildcard scope is
+ * `signAdminStepUpToken`'s issuance DEFAULT (so a mint that omits a
+ * scope still produces a well-formed token), but `consumeAdminStepUp
+ * Token` — the authoritative gate — REJECTS a wildcard against a
+ * concrete action (`scope_mismatch`). The old "one wildcard token,
+ * any write" escape hatch WAS the all-class privilege this finding
+ * removes; every live mint now requests a concrete class.
  */
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
+import { lt } from 'drizzle-orm';
 import { env } from '../env.js';
+import { db } from '../db/client.js';
+import { adminStepUpConsumptions } from '../db/schema.js';
 
 /**
  * 5 minutes — short enough that a stolen token can't be used for a
@@ -120,6 +138,16 @@ export interface AdminStepUpClaims {
    * binds the token to a single destructive-write class.
    */
   scope: AdminStepUpScope;
+  /**
+   * SEC-02-stepup: per-token unique id (a v4 UUID) — the single-use
+   * key `consumeAdminStepUpToken` records atomically so a token can't
+   * be replayed after it's consumed. Optional on the wire for
+   * backward-safety: a legacy token minted before this claim existed
+   * verifies with `jti` absent, and the consume path fails such a
+   * token closed (`not_consumable`) rather than treating it as
+   * unlimited-use.
+   */
+  jti?: string;
   iat: number;
   exp: number;
 }
@@ -129,29 +157,56 @@ export interface SignAdminStepUpOptions {
   email: string;
   /**
    * CF-08: action class this token is minted for. Defaults to the
-   * wildcard `'admin-write'` so existing callers keep "any write"
-   * semantics. Pass a narrower scope to bind the token to one class.
+   * wildcard `'admin-write'` so a scope-less mint still produces a
+   * well-formed token — but SEC-02-stepup's `consumeAdminStepUpToken`
+   * rejects a wildcard against a concrete gate, so every live mint
+   * passes a narrower scope. Pass one to bind the token to a class.
    */
   scope?: AdminStepUpScope;
+  /**
+   * SEC-02-stepup: override the single-use `jti`. Defaults to a fresh
+   * v4 UUID; a test may pin it to assert single-use consumption.
+   */
+  jti?: string;
   /** Override `now` for tests; seconds since epoch. */
   now?: number;
   /** Override TTL for tests; defaults to ADMIN_STEP_UP_TTL_SECONDS. */
   ttlSeconds?: number;
 }
 
+export type AdminStepUpVerifyReason =
+  | 'malformed'
+  | 'bad_signature'
+  | 'expired'
+  | 'wrong_purpose'
+  | 'wrong_audience'
+  | 'wrong_issuer'
+  | 'not_configured';
+
 export type AdminStepUpVerifyResult =
   | { ok: true; claims: AdminStepUpClaims }
-  | {
-      ok: false;
-      reason:
-        | 'malformed'
-        | 'bad_signature'
-        | 'expired'
-        | 'wrong_purpose'
-        | 'wrong_audience'
-        | 'wrong_issuer'
-        | 'not_configured';
-    };
+  | { ok: false; reason: AdminStepUpVerifyReason };
+
+/**
+ * SEC-02-stepup: reasons `consumeAdminStepUpToken` can reject. Extends
+ * the stateless verify reasons with the authorisation properties this
+ * finding adds:
+ *   - `scope_mismatch`   — the token was minted for a DIFFERENT
+ *     action-class than the gate guards (no wildcard bypass).
+ *   - `already_consumed` — the token has been used once already
+ *     (single-use).
+ *   - `not_consumable`   — the token carries no `jti`, so single-use
+ *     can't be tracked; fail closed.
+ */
+export type AdminStepUpConsumeReason =
+  | AdminStepUpVerifyReason
+  | 'scope_mismatch'
+  | 'already_consumed'
+  | 'not_consumable';
+
+export type AdminStepUpConsumeResult =
+  | { ok: true; claims: AdminStepUpClaims }
+  | { ok: false; reason: AdminStepUpConsumeReason };
 
 function b64urlEncode(input: Buffer | string): string {
   const buf = typeof input === 'string' ? Buffer.from(input, 'utf8') : input;
@@ -204,6 +259,9 @@ export function signAdminStepUpToken(opts: SignAdminStepUpOptions): {
     aud: STEP_UP_AUDIENCE,
     iss: STEP_UP_ISSUER,
     scope: opts.scope ?? STEP_UP_SCOPE_WILDCARD,
+    // SEC-02-stepup: every freshly-minted token carries a unique `jti`
+    // so it can be consumed single-use at the gate.
+    jti: opts.jti ?? randomUUID(),
     iat: nowSec,
     exp: nowSec + (opts.ttlSeconds ?? ADMIN_STEP_UP_TTL_SECONDS),
   };
@@ -292,6 +350,19 @@ export function verifyAdminStepUpToken(token: string): AdminStepUpVerifyResult {
   } else {
     return { ok: false, reason: 'malformed' };
   }
+  // SEC-02-stepup: `jti` is optional on the wire (a legacy token minted
+  // before the claim existed has none). A *present* jti must be a
+  // non-empty string; a non-string / empty string is a malformed token.
+  // An absent jti leaves the claim undefined — the consume path fails
+  // such a token closed rather than treating it as unlimited-use.
+  let jti: string | undefined;
+  if (obj['jti'] === undefined) {
+    jti = undefined;
+  } else if (typeof obj['jti'] === 'string' && obj['jti'].length > 0) {
+    jti = obj['jti'];
+  } else {
+    return { ok: false, reason: 'malformed' };
+  }
   return {
     ok: true,
     claims: {
@@ -301,8 +372,100 @@ export function verifyAdminStepUpToken(token: string): AdminStepUpVerifyResult {
       aud: STEP_UP_AUDIENCE,
       iss: STEP_UP_ISSUER,
       scope,
+      ...(jti !== undefined ? { jti } : {}),
       iat: obj['iat'],
       exp: obj['exp'],
     },
   };
+}
+
+/**
+ * SEC-02-stepup: the SECURITY-authoritative step-up check for a
+ * destructive admin write. Where `verifyAdminStepUpToken` is the
+ * stateless signature/claims check, this is the DB-backed gate that
+ * closes the audited "one OTP → 5-minute, unlimited-use, all-class
+ * token" hole by additionally enforcing:
+ *
+ *   1. ACTION-CLASS BINDING. The token authorises exactly the class it
+ *      was minted for: `claims.scope` must equal the concrete `action`
+ *      the caller guards. A wildcard-scoped token does NOT satisfy a
+ *      concrete action here — the wildcard-satisfies-everything escape
+ *      hatch IS the all-class privilege this finding removes. So a
+ *      token minted to "queue an emission" cannot be replayed for a
+ *      refund. A scope mismatch is rejected BEFORE the consume insert,
+ *      so a wrong-class presentation burns nothing.
+ *
+ *   2. SINGLE-USE. The token's `jti` is recorded atomically on first
+ *      consumption (`INSERT ... ON CONFLICT (jti) DO NOTHING`) — the
+ *      first presentation wins and returns a row; every replay of the
+ *      same token conflicts, returns no row, and is rejected. This is
+ *      the same atomic-consume idiom as `refresh_tokens`'
+ *      `tryRevokeIfLive`.
+ *
+ * Callers pass the concrete `action` the route guards — the same class
+ * they already declare to `requireAdminStepUp(action)`.
+ */
+export async function consumeAdminStepUpToken(opts: {
+  token: string;
+  action: AdminStepUpScope;
+}): Promise<AdminStepUpConsumeResult> {
+  const verified = verifyAdminStepUpToken(opts.token);
+  if (!verified.ok) {
+    return { ok: false, reason: verified.reason };
+  }
+  const { claims } = verified;
+
+  // (1) Action-class binding. Exact match, no wildcard bypass. Checked
+  // before the insert so a wrong-class presentation consumes nothing.
+  if (claims.scope !== opts.action) {
+    return { ok: false, reason: 'scope_mismatch' };
+  }
+
+  // A jti is required to bound uses. A legacy token minted before the
+  // claim existed can't be tracked — fail closed rather than silently
+  // grant unlimited use.
+  if (claims.jti === undefined) {
+    return { ok: false, reason: 'not_consumable' };
+  }
+
+  // (2) Atomic single-use consume. The FIRST insert of this jti wins
+  // and returns the row; a concurrent or later replay conflicts on the
+  // primary key, returns nothing, and is rejected.
+  const inserted = await db
+    .insert(adminStepUpConsumptions)
+    .values({
+      jti: claims.jti,
+      sub: claims.sub,
+      scope: claims.scope,
+      expiresAt: new Date(claims.exp * 1000),
+    })
+    .onConflictDoNothing({ target: adminStepUpConsumptions.jti })
+    .returning({ jti: adminStepUpConsumptions.jti });
+
+  if (inserted.length === 0) {
+    return { ok: false, reason: 'already_consumed' };
+  }
+  return { ok: true, claims };
+}
+
+/**
+ * SEC-02-stepup: retention sweep for the single-use ledger. Deletes
+ * `admin_step_up_consumptions` rows whose `expires_at` is older than
+ * `now - retentionMs`. Once a token's `exp` has passed it can no longer
+ * verify (so its consumption marker can never block a live replay), and
+ * the row carries `sub` — an unbounded table is a slowly-growing PII
+ * store with no lawful retention basis. Mirrors `purgeExpiredOtps` /
+ * `purgeDeadRefreshTokens`; keyed on the `admin_step_up_consumptions_
+ * expires` index. Returns the number of rows deleted.
+ */
+export async function purgeExpiredAdminStepUpConsumptions(args: {
+  retentionMs: number;
+  now?: Date;
+}): Promise<number> {
+  const cutoff = new Date((args.now ?? new Date()).getTime() - args.retentionMs);
+  const deleted = await db
+    .delete(adminStepUpConsumptions)
+    .where(lt(adminStepUpConsumptions.expiresAt, cutoff))
+    .returning({ jti: adminStepUpConsumptions.jti });
+  return deleted.length;
 }

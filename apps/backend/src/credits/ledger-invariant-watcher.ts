@@ -41,6 +41,7 @@ import { env } from '../env.js';
 import { logger } from '../logger.js';
 import { computeLedgerDriftSql, type DriftEntry } from './ledger-invariant.js';
 import { notifyLedgerDrift } from '../discord.js';
+import { setMoneyIntegrityBreach } from '../metrics.js';
 import {
   markWorkerStarted,
   markWorkerStopped,
@@ -141,6 +142,16 @@ export function startLedgerInvariantWatcher(args?: { intervalMs?: number }): voi
       const r = await runLedgerInvariantTick();
       if (r.notified) {
         log.error({ driftCount: r.drift.length }, 'Ledger-invariant tick paged Discord');
+      }
+      // NS-02 / FT-07: markWorkerTickSuccess below only proves the tick
+      // RAN — it must NOT be the only signal, or a live ledger drift
+      // reads as a healthy worker. A tick that actually computed the
+      // check (not lock-skipped) records the STANDING breach state on
+      // the money-integrity gauge, so a persisting drift stays visible
+      // on /metrics independent of the Discord page. A lock-skip leaves
+      // the last-known value untouched (this machine has no fresh read).
+      if (!r.skipped) {
+        setMoneyIntegrityBreach('ledger_invariant', r.drift.length > 0);
       }
       markWorkerTickSuccess('ledger_invariant_watcher');
     } catch (err) {

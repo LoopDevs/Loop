@@ -66,6 +66,10 @@ export function registerAdminDiscordMgmtOpenApi(
         description: 'Rate limit exceeded (60/min per IP)',
         content: { 'application/json': { schema: errorResponse } },
       },
+      500: {
+        description: 'Internal error',
+        content: { 'application/json': { schema: errorResponse } },
+      },
     },
   });
 
@@ -119,6 +123,10 @@ export function registerAdminDiscordMgmtOpenApi(
       },
       429: {
         description: 'Rate limit exceeded (10/min per IP)',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      500: {
+        description: 'Internal error',
         content: { 'application/json': { schema: errorResponse } },
       },
     },

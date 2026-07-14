@@ -292,6 +292,10 @@ export function registerAdminTreasuryAssetsOpenApi(
         description: 'Rate limit exceeded (60/min per IP)',
         content: { 'application/json': { schema: errorResponse } },
       },
+      500: {
+        description: 'Internal error',
+        content: { 'application/json': { schema: errorResponse } },
+      },
     },
   });
 

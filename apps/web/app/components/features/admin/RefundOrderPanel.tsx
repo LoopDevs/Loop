@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ApiException, type AdminOrderRefundResult } from '@loop/shared';
 import { useAdminStepUp } from '~/hooks/use-admin-step-up';
+import { useOnline } from '~/hooks/use-online';
 import { useStaffRole } from '~/hooks/use-staff-role';
 import { generateIdempotencyKey, refundOrder } from '~/services/admin';
 import { useUiStore } from '~/stores/ui.store';
@@ -46,21 +47,34 @@ export function RefundOrderPanel({
   const { isAdminRole } = useStaffRole();
   const queryClient = useQueryClient();
   const addToast = useUiStore((s) => s.addToast);
+  // FE-43: a refund is a non-idempotent-feeling money write. Offline the POST
+  // can only fail (or, worse, double-submit on a connectivity flap), so gate
+  // the entry into the refund dialog on connectivity — matching the
+  // PayWithLoopBalance offline-guard pattern.
+  const online = useOnline();
+  const offlineHintId = useId();
   const [last, setLast] = useState<AdminOrderRefundResult | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
 
   const stepUp = useAdminStepUp();
   const refund = useMutation({
     mutationFn: (args: { reason: string; attestationNote?: string; idempotencyKey: string }) =>
-      stepUp.runWithStepUp(() =>
-        refundOrder({
-          orderId,
-          reason: args.reason,
-          ...(args.attestationNote !== undefined
-            ? { attestation: { codeUnused: true as const, attestationNote: args.attestationNote } }
-            : {}),
-          idempotencyKey: args.idempotencyKey,
-        }),
+      stepUp.runWithStepUp(
+        () =>
+          refundOrder({
+            orderId,
+            reason: args.reason,
+            ...(args.attestationNote !== undefined
+              ? {
+                  attestation: { codeUnused: true as const, attestationNote: args.attestationNote },
+                }
+              : {}),
+            idempotencyKey: args.idempotencyKey,
+          }),
+        // P2-07: echo which order the OTP refunds. The refund amount is
+        // the full order charge, computed server-side, so the order id is
+        // the identifying detail available on the client.
+        { action: 'Refund order', scope: 'order-refund', destination: orderId },
       ),
     onSuccess: (envelope) => {
       const res = envelope.result;
@@ -118,10 +132,16 @@ export function RefundOrderPanel({
           type="button"
           variant="destructive"
           onClick={() => setDialogOpen(true)}
-          disabled={refund.isPending}
+          disabled={refund.isPending || !online}
+          aria-describedby={!online ? offlineHintId : undefined}
         >
           {refund.isPending ? 'Refunding…' : 'Refund order'}
         </Button>
+        {!online && (
+          <p id={offlineHintId} className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+            You’re offline — reconnect to refund this order.
+          </p>
+        )}
       </div>
 
       <RefundDialog

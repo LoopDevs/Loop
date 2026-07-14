@@ -26,11 +26,19 @@ import { useLocale } from '~/i18n/locale';
 import { shouldRetry } from '~/hooks/query-retry';
 import { getCashbackSummary } from '~/services/user';
 import { getImageProxyUrl } from '~/utils/image';
-import { formatMinorCurrency, formatMoney, useLocaleTag } from '~/i18n/format';
+import { formatCashbackPct } from '~/utils/format-cashback';
+import { formatDateTime, formatMinorCurrency, formatMoney, useLocaleTag } from '~/i18n/format';
 import { MerchantCardSkeleton } from '~/components/ui/Skeleton';
 import { FavoritesStrip } from '~/components/features/FavoritesStrip';
 import { RecentlyPurchasedStrip } from '~/components/features/RecentlyPurchasedStrip';
 import { WalletCard } from '~/components/features/wallet/WalletCard';
+import { useWindowedGrid } from './use-windowed-grid';
+// FE-25 windowing primitives now live in ./use-windowed-grid (shared with the
+// desktop directory grid in routes/home.tsx). Re-exported here so the existing
+// MobileHome.virtualization.test.tsx import path (`computeGridWindow` from this
+// module) stays stable.
+export { computeGridWindow } from './use-windowed-grid';
+export type { GridWindow } from './use-windowed-grid';
 
 /**
  * S4-7 §3 tail (go-live-plan §P3): the search-mode directory grid used
@@ -43,6 +51,30 @@ import { WalletCard } from '~/components/features/wallet/WalletCard';
  * then by savings) instead of every match.
  */
 const MOBILE_SEARCH_RESULT_LIMIT = 50;
+
+/**
+ * FE-25 (PRF) — mobile directory-grid windowing config.
+ *
+ * The directory maps the full brand catalog (~1,134 listings → ~982 groups,
+ * ADR 032). Mounting every cell at once inflates the DOM node count regardless
+ * of viewport, which janks first interaction and bloats memory — worst inside
+ * the Capacitor native webview, which is the *only* place this component paints
+ * full-screen. The windowing mechanism (`computeGridWindow` + `useWindowedGrid`)
+ * lives in ./use-windowed-grid, shared with the desktop directory grid in
+ * routes/home.tsx (FE-25-DESKTOP-GRID); the constants below are this grid's
+ * config — a fixed 2-column layout with a `gap-2.5` (10px) row gap.
+ */
+const GRID_COLUMNS = 2;
+// Tailwind `gap-2.5` → 0.625rem → 10px of row gap between grid rows.
+const GRID_ROW_GAP_PX = 10;
+// Fallback row pitch (one cell's height + the row gap) for the initial paint,
+// SSR, and layout-less test environments (jsdom reports 0 for
+// getBoundingClientRect). Replaced at runtime by a real measurement so
+// device/font-scale differences self-correct.
+const ESTIMATED_ROW_PITCH_PX = 132;
+// Extra rows mounted above and below the viewport so a fast flick doesn't
+// expose an unpainted gap before the scroll handler catches up.
+const GRID_OVERSCAN_ROWS = 4;
 
 /**
  * Mobile home — native and web narrow widths. Combines the dashboard
@@ -234,6 +266,15 @@ export function MobileHome(): React.JSX.Element {
   // prior result set is already on screen.
   const directoryLoading =
     (isSearching ? searchLoading : visibleMerchantsLoading) && grid.length === 0;
+  // FE-25: window the directory grid so only the rows near the viewport are
+  // mounted. Transparent to correctness — every group is still counted in the
+  // section meta below and reachable by scrolling.
+  const { containerRef, gridWindow } = useWindowedGrid(groupedGrid.length, {
+    columns: GRID_COLUMNS,
+    rowGapPx: GRID_ROW_GAP_PX,
+    estimatedRowPitchPx: ESTIMATED_ROW_PITCH_PX,
+    overscanRows: GRID_OVERSCAN_ROWS,
+  });
 
   useEffect(() => {
     setHydrated(true);
@@ -439,7 +480,11 @@ export function MobileHome(): React.JSX.Element {
           to the nearest content, and the search bar appears to hop
           back under the hero. The tab bar clearance below sits
           inside NativeShell, so this min-h is clean content. */}
-      <div id="mobile-home-grid" className="px-5 pb-6 grid grid-cols-2 gap-2.5 min-h-[70vh]">
+      <div
+        id="mobile-home-grid"
+        ref={containerRef}
+        className="px-5 pb-6 grid grid-cols-2 gap-2.5 min-h-[70vh]"
+      >
         {directoryLoading ? (
           Array.from({ length: 6 }).map((_, i) => <MerchantCardSkeleton key={i} />)
         ) : isSearching && searchErrored ? (
@@ -449,17 +494,39 @@ export function MobileHome(): React.JSX.Element {
             {t('directory.searchUnavailable')}
           </div>
         ) : groupedGrid.length > 0 ? (
-          groupedGrid.map((g) =>
-            g.isGroup ? (
-              <DirectoryGroupCell key={`g:${g.key}`} group={g} />
-            ) : (
-              <DirectoryCell
-                key={g.members[0]!.id}
-                merchant={g.members[0]!}
-                userCashbackPct={lookupCashback(g.members[0]!.id)}
+          // FE-25: full-width spacer rows reserve the scroll height of the
+          // un-mounted rows above/below the window, so only viewport-adjacent
+          // cells are in the DOM while the scrollbar and item positions match
+          // the full list.
+          <>
+            {gridWindow.topPad > 0 && (
+              <div
+                aria-hidden="true"
+                className="col-span-2"
+                style={{ height: gridWindow.topPad }}
               />
-            ),
-          )
+            )}
+            {groupedGrid
+              .slice(gridWindow.startIndex, gridWindow.endIndex)
+              .map((g) =>
+                g.isGroup ? (
+                  <DirectoryGroupCell key={`g:${g.key}`} group={g} />
+                ) : (
+                  <DirectoryCell
+                    key={g.members[0]!.id}
+                    merchant={g.members[0]!}
+                    userCashbackPct={lookupCashback(g.members[0]!.id)}
+                  />
+                ),
+              )}
+            {gridWindow.bottomPad > 0 && (
+              <div
+                aria-hidden="true"
+                className="col-span-2"
+                style={{ height: gridWindow.bottomPad }}
+              />
+            )}
+          </>
         ) : (
           <div className="col-span-2 text-center py-10 text-sm text-gray-500 dark:text-gray-400">
             {t('directory.noMatch', { query })}
@@ -669,20 +736,6 @@ function PctPill({
   );
 }
 
-/**
- * Formats the numeric(5,2) cashback string into the compact pill
- * label. Drops a trailing `.0` so integer rates read as "5%" rather
- * than "5.0%" on the small pill. Returns `null` when the rate parses
- * to 0 / negative / unparseable — the caller hides the pill.
- */
-function formatCashbackPct(pct: string | null | undefined): string | null {
-  if (pct === null || pct === undefined) return null;
-  const n = Number(pct);
-  if (!Number.isFinite(n) || n <= 0) return null;
-  const rounded = Math.round(n * 10) / 10;
-  return rounded.toFixed(1).replace(/\.0$/, '');
-}
-
 function DirectoryCell({
   merchant,
   userCashbackPct = null,
@@ -783,7 +836,7 @@ function ActivityRow({
 }): React.JSX.Element {
   const { t } = useTranslation('mobileHome');
   const back = savingsPercentage !== undefined ? amount * (savingsPercentage / 100) : 0;
-  const when = formatWhen(createdAt, t);
+  const when = formatWhen(createdAt, t, locale);
   return (
     <button
       type="button"
@@ -827,7 +880,7 @@ function ActivityRow({
   );
 }
 
-function formatWhen(iso: string, t: TFunction<'mobileHome'>): string {
+function formatWhen(iso: string, t: TFunction<'mobileHome'>, locale: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   const now = new Date();
@@ -835,7 +888,12 @@ function formatWhen(iso: string, t: TFunction<'mobileHome'>): string {
     d.getFullYear() === now.getFullYear() &&
     d.getMonth() === now.getMonth() &&
     d.getDate() === now.getDate();
-  const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  // Route locale, not the host default (`navigator.language` / the CI box's
+  // `LANG`) — a /de/en reader sees the German time/day shape (ADR 034,
+  // P2-DATE-SWEEP2). A time-only options object makes `formatDateTime`
+  // (`toLocaleString`) emit exactly the time the former `toLocaleTimeString`
+  // did, and a date-only object the same date `toLocaleDateString` did.
+  const time = formatDateTime(iso, locale, { hour: 'numeric', minute: '2-digit' });
   if (sameDay) return t('activity.today', { time });
   const yesterday = new Date(now);
   yesterday.setDate(now.getDate() - 1);
@@ -844,5 +902,5 @@ function formatWhen(iso: string, t: TFunction<'mobileHome'>): string {
     d.getMonth() === yesterday.getMonth() &&
     d.getDate() === yesterday.getDate();
   if (isYesterday) return t('activity.yesterday', { time });
-  return d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+  return formatDateTime(iso, locale, { weekday: 'short', day: 'numeric', month: 'short' });
 }

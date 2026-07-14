@@ -25,6 +25,7 @@ import {
 } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { useStaffRole } from '~/hooks/use-staff-role';
+import { formatDateTime } from '~/i18n/format';
 import { ADMIN_LOCALE } from '~/utils/locale';
 import { AdminNav } from '~/components/features/admin/AdminNav';
 import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
@@ -59,14 +60,18 @@ const PAYMENT_METHODS: ReadonlyArray<AdminPaymentMethod> = ['xlm', 'usdc', 'cred
 
 const PAGE_SIZE = 50;
 
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleString(ADMIN_LOCALE, {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
-}
+// Admin dates route through the shared `i18n/format#formatDateTime` seam like
+// every other user-facing date, but stay pinned to `ADMIN_LOCALE` (en-US) —
+// admin/ops views are deliberately locale-stable across the ops team (A2-1521),
+// NOT route-driven. So this is a DRY consolidation, not the P2-DATE host-locale
+// fix: the local `undefined`-locale copies elsewhere leaked the host locale;
+// this one already passed `ADMIN_LOCALE`, so its output is byte-identical.
+const ADMIN_DATE_OPTIONS: Intl.DateTimeFormatOptions = {
+  month: 'short',
+  day: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
+};
 
 // Bigint-minor → admin-locale currency (e.g. `"5000"` GBP → `"£50.00"`).
 // The promised follow-up to the old local copy: `formatMinorCurrency`
@@ -441,7 +446,7 @@ function OrderRow({ row }: { row: AdminOrderView }): React.JSX.Element {
           {formatMinor(row.chargeMinor, row.chargeCurrency)}
         </p>
         <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">
-          {formatDate(row.createdAt)}
+          {formatDateTime(row.createdAt, ADMIN_LOCALE, ADMIN_DATE_OPTIONS)}
         </p>
       </div>
       <div className="min-w-0 text-xs text-gray-700 dark:text-gray-300 space-y-0.5">

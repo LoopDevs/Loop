@@ -7,6 +7,47 @@ import { z } from 'zod';
 import { envBoolean } from '../schema-helpers.js';
 import { DEFAULT_CLIENT_IDS } from '@loop/shared';
 
+// SEC-10: Discord webhook URLs are secrets that, if pointed at an
+// attacker-controlled host, leak every alert/audit embed (order data,
+// admin-action metadata, drift figures) off-platform. `z.string().url()`
+// alone accepts ANY scheme/host — `http://evil.example/x`, a `file://`
+// URL, a look-alike domain — so a copy-paste error or a malicious
+// override silently exfiltrates. Constrain to a real HTTPS Discord
+// webhook endpoint: https scheme, an official Discord host, and the
+// `/api/webhooks/` (optionally version-prefixed) path. Self-hosted
+// Discord is not a thing, so there is no legitimate non-Discord value.
+const DISCORD_WEBHOOK_HOSTS = new Set([
+  'discord.com',
+  'discordapp.com',
+  'ptb.discord.com',
+  'canary.discord.com',
+  'ptb.discordapp.com',
+  'canary.discordapp.com',
+]);
+const DISCORD_WEBHOOK_PATH = /^\/api\/(v\d+\/)?webhooks\//;
+const discordWebhookUrl = z
+  .string()
+  .url()
+  .refine(
+    (raw) => {
+      let u: URL;
+      try {
+        u = new URL(raw);
+      } catch {
+        return false;
+      }
+      return (
+        u.protocol === 'https:' &&
+        DISCORD_WEBHOOK_HOSTS.has(u.hostname.toLowerCase()) &&
+        DISCORD_WEBHOOK_PATH.test(u.pathname)
+      );
+    },
+    {
+      message:
+        'must be an https Discord webhook URL (https://discord.com/api/webhooks/<id>/<token>)',
+    },
+  );
+
 export const coreEnvFields = {
   // Coerce + bound: process.env.PORT is always a string, but downstream code
   // treats it as a number. Rejecting non-numeric input here gives a clear
@@ -119,6 +160,27 @@ export const coreEnvFields = {
   // configured — matches nothing rather than "any issuer" — so this
   // is a launch-readiness override, not a security override).
   DISABLE_USDC_ISSUER_ENFORCEMENT: z.enum(['1']).optional(),
+
+  // CFG-01: emergency opt-out for the production DISCORD_WEBHOOK_MONITORING
+  // boot guard below (env.ts). Same `"1"`-only shape as its siblings so a
+  // deploy typo fails at parse time. Setting it ships production with the
+  // monitoring/alert tier deliberately un-wired — every drift / circuit /
+  // stuck-sweeper / ledger-invariant page is dropped silently. For a
+  // staging or throwaway deploy that genuinely wants no alerting, never
+  // for a real production launch.
+  DISABLE_MONITORING_WEBHOOK_ENFORCEMENT: z.enum(['1']).optional(),
+
+  // NS-10 (CF-25 / X-PRIV-03 follow-up): emergency opt-out for the
+  // production LOOP_REDEEM_ENCRYPTION_KEY boot guard below (env.ts).
+  // Same `"1"`-only shape as its siblings so a deploy typo fails at
+  // parse time. Setting it ships production storing gift-card redeem
+  // codes/PINs (spendable bearer secrets) as PLAINTEXT at rest — the
+  // very exposure the guard exists to prevent. For a deliberate,
+  // audited rollback / staging deploy ONLY; never for a real
+  // production launch with live redemption data. Unlike a forgotten
+  // key (which now fails boot), turning encryption off must be an
+  // explicit, conspicuous act.
+  DISABLE_REDEEM_ENCRYPTION_ENFORCEMENT: z.enum(['1']).optional(),
 
   // Rate-limiter trust boundary (audit A-023). When `true` the rate limiter
   // reads the client IP from the first value in X-Forwarded-For (required
@@ -234,14 +296,17 @@ export const coreEnvFields = {
   LOOP_ORDER_VELOCITY_WINDOW_HOURS: z.coerce.number().int().positive().default(24),
   LOOP_ORDER_VELOCITY_MAX_VALUE_MINOR: z.coerce.bigint().nonnegative().default(500_000n),
 
-  // Discord webhooks (optional — for notifications)
-  DISCORD_WEBHOOK_ORDERS: z.string().url().optional(),
-  DISCORD_WEBHOOK_MONITORING: z.string().url().optional(),
+  // Discord webhooks (optional — for notifications). SEC-10: each must
+  // be a real HTTPS Discord webhook URL, not merely a well-formed URL —
+  // see `discordWebhookUrl` above. DISCORD_WEBHOOK_MONITORING is
+  // additionally REQUIRED in production (CFG-01 boot guard in env.ts).
+  DISCORD_WEBHOOK_ORDERS: discordWebhookUrl.optional(),
+  DISCORD_WEBHOOK_MONITORING: discordWebhookUrl.optional(),
   // Admin audit fanout (ADR 017 / 018). Every successful admin write
   // posts here fire-and-forget AFTER the DB commit. Unset in dev;
   // set in production so a leaked admin token produces visible
   // Discord noise rather than silent ledger drift.
-  DISCORD_WEBHOOK_ADMIN_AUDIT: z.string().url().optional(),
+  DISCORD_WEBHOOK_ADMIN_AUDIT: discordWebhookUrl.optional(),
 
   // Error tracking (optional — get DSN from sentry.io)
   SENTRY_DSN: z.string().url().optional(),

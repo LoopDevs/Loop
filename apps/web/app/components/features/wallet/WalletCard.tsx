@@ -1,5 +1,7 @@
 import { isLoopAssetCode, currencyForLoopAsset } from '@loop/shared';
 import { useWallet } from '~/hooks/use-wallet';
+import { isTransientError } from '~/hooks/query-retry';
+import { Button } from '~/components/ui/Button';
 import { formatCurrency, useLocaleTag } from '~/i18n/format';
 import { VaultApyRow } from './VaultApyRow';
 
@@ -33,18 +35,58 @@ export function fmtApyBps(bps: number): string {
  * the user's authoritative balance — the off-chain mirror is never
  * user-visible.
  *
- * Self-gating: renders nothing while signed out, while the query is
- * in flight, or on error (the endpoint ships in a sibling backend PR;
- * a deploy-order gap must not break the account screen). Provisioning
- * states (`none` / `wallet_created`) render a quiet "setting up" line
- * — they never block browsing or buying.
+ * Self-gating: renders nothing while signed out or while the query is
+ * in flight. A PERMANENT load failure (4xx — most importantly the 404
+ * during the deploy-order gap before the endpoint's sibling backend PR
+ * ships; also auth) stays quiet too: a retry could never succeed, so a
+ * retry button would lie and an error banner would needlessly alarm.
+ * A TRANSIENT failure (5xx / network blip) instead keeps the card on
+ * screen with a retry (AUD-10) — silently unmounting the balance reads
+ * as "my money vanished", which is worse than an honest hiccup notice.
+ * Provisioning states (`none` / `wallet_created`) render a quiet
+ * "setting up" line — they never block browsing or buying.
  */
 export function WalletCard(): React.JSX.Element | null {
-  const { wallet, isActivated, isLoading, isError } = useWallet();
+  const { wallet, isActivated, isLoading, isError, error, refetch } = useWallet();
   const locale = useLocaleTag();
 
-  // Quiet on loading/error/unauthenticated (the hook disables the
-  // query when signed out, which surfaces here as perpetual loading).
+  // A transient load failure must not silently unmount the balance —
+  // keep the surface visible with a clear, reassuring retry (AUD-10).
+  if (isError && isTransientError(error)) {
+    return (
+      <section
+        aria-labelledby="wallet-balance-heading"
+        className="mb-6 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-4 text-left"
+      >
+        <h2
+          id="wallet-balance-heading"
+          className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400"
+        >
+          Your Loop balance
+        </h2>
+        <p role="alert" className="mt-1 text-sm font-medium text-red-600 dark:text-red-400">
+          We couldn’t load your balance just now.
+        </p>
+        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+          Your money is safe — this is only a display hiccup.
+        </p>
+        <Button
+          variant="secondary"
+          size="sm"
+          className="mt-3"
+          onClick={() => {
+            refetch();
+          }}
+        >
+          Retry
+        </Button>
+      </section>
+    );
+  }
+
+  // Quiet on loading, a permanent (4xx) error, or when signed out (the
+  // hook disables the query when signed out, which surfaces here as
+  // perpetual loading).
   if (isLoading || isError || wallet === undefined) return null;
 
   const loopRows = wallet.balances.filter((b) => isLoopAssetCode(b.assetCode));

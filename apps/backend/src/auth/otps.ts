@@ -122,6 +122,34 @@ export async function markOtpConsumed(id: string, now?: Date): Promise<void> {
 }
 
 /**
+ * BK-otpatomic: atomic single-use consume — the compare-and-set half of
+ * verify-otp. Flips `consumed_at` from NULL → now() in ONE conditional
+ * UPDATE and reports whether THIS call was the one that did it (`true`
+ * iff exactly one row went unconsumed → consumed here).
+ *
+ * `markOtpConsumed` above is an UNCONDITIONAL update: paired with a prior
+ * `findLiveOtp` read it forms a read-then-mark gap where two concurrent
+ * verify calls both observe the row unconsumed and both mark it, so both
+ * succeed — breaking single-use (an OTP replay / double-consume). This
+ * closes the gap: the `consumed_at IS NULL` predicate is evaluated inside
+ * the UPDATE under a row lock, so of two concurrent callers exactly one
+ * matches the live row (rowCount === 1 → returns `true`, wins) while the
+ * other re-reads the now-consumed row and matches nothing (0 rows →
+ * `false`, loses). No read-then-mark window remains.
+ *
+ * Mirrors the refresh path's `tryRevokeIfLive` CAS (A4-098): an
+ * `UPDATE ... WHERE <still-live> RETURNING` whose result gates the mint.
+ */
+export async function tryConsumeOtp(id: string, now?: Date): Promise<boolean> {
+  const rows = await db
+    .update(otps)
+    .set({ consumedAt: now ?? new Date() })
+    .where(and(eq(otps.id, id), isNull(otps.consumedAt)))
+    .returning({ id: otps.id });
+  return rows.length === 1;
+}
+
+/**
  * Bumps the `attempts` counter on every live (unconsumed, unexpired) OTP
  * row for the email. Called on a bad code guess so each outstanding row
  * locks itself out after `OTP_MAX_ATTEMPTS`.

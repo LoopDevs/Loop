@@ -13,11 +13,11 @@
  * balance (re-read FOR UPDATE inside the same txn that would
  * debit it) is below the charge amount.
  *
- * The caller's prior `hasSufficientCredit` fast-path check is a UX
- * nicety, not a guard — a concurrent admin adjustment or a
- * just-captured spend between the check and the insert can leave
- * the balance insufficient. In that case the txn aborts and nothing
- * is written; callers translate this to a 400.
+ * This in-txn re-read is the authoritative balance guard — there is
+ * no separate handler pre-check ahead of it. A concurrent admin
+ * adjustment or a just-captured spend can leave the balance
+ * insufficient at debit time; when it does the txn aborts and nothing
+ * is written, and callers translate this to a 400.
  */
 export class InsufficientCreditError extends Error {
   constructor() {

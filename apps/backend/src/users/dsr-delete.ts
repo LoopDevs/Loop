@@ -45,6 +45,7 @@
  * code path that does `select(u where email=?)` keeps working
  * without special-casing the deletion sentinel.
  */
+import { createHash } from 'node:crypto';
 import { and, eq, inArray, ne, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import {
@@ -135,6 +136,28 @@ export function deletedEmailFor(userId: string): string {
 export const SCRUBBED_TO_ADDRESS = `G${'A'.repeat(55)}`;
 
 /**
+ * CON-02: per-user advisory-lock key that serialises the DSR
+ * precondition re-check + anonymisation for a given user. sha256(
+ * namespaced userId) → signed int64 — the same derivation
+ * `orders/redeem.ts` (`redeemFenceLockKey`) and `admin/idempotency.ts`
+ * (`idempotencyLockKey`) use. Namespaced with `loop:dsr-delete:` so it
+ * can't collide with another subsystem's per-user lock.
+ */
+function dsrDeleteLockKey(userId: string): bigint {
+  const digest = createHash('sha256').update(`loop:dsr-delete:${userId}`).digest();
+  const raw =
+    (BigInt(digest[0]!) << 56n) |
+    (BigInt(digest[1]!) << 48n) |
+    (BigInt(digest[2]!) << 40n) |
+    (BigInt(digest[3]!) << 32n) |
+    (BigInt(digest[4]!) << 24n) |
+    (BigInt(digest[5]!) << 16n) |
+    (BigInt(digest[6]!) << 8n) |
+    BigInt(digest[7]!);
+  return BigInt.asIntN(64, raw);
+}
+
+/**
  * Anonymises the user identified by `userId`. Refuses (returns
  * `ok: false`) when there's money or a fulfilment in flight.
  *
@@ -142,102 +165,119 @@ export const SCRUBBED_TO_ADDRESS = `G${'A'.repeat(55)}`;
  * so a partial failure doesn't leave a half-deleted row.
  */
 export async function deleteUserViaAnonymisation(userId: string): Promise<DsrDeleteResult> {
-  // Block: any pending or submitted payout means money in flight.
-  // We can't guarantee the right end-state for that money post-
-  // anonymisation (e.g. an `op_no_trust` failure that needs the
-  // user's Stellar address — which we just nulled).
-  const blockingPayouts = await db
-    .select({ id: pendingPayouts.id })
-    .from(pendingPayouts)
-    .where(
-      and(
-        eq(pendingPayouts.userId, userId),
-        inArray(pendingPayouts.state, [
-          'pending',
-          'submitted',
-        ] satisfies (typeof PAYOUT_STATES)[number][]),
-      ),
-    )
-    .limit(1);
-  if (blockingPayouts.length > 0) {
-    return { ok: false, blockedBy: 'pending_payouts' };
-  }
+  // CON-02 (TOCTOU): the block preconditions and the anonymisation
+  // writes MUST be one atomic critical section. Previously the four
+  // preconditions were read on the pooled `db` handle OUTSIDE the write
+  // transaction, so state could change in the window between "checked
+  // clear" and "anonymised" — e.g. an order fulfilment enqueues a fresh
+  // `pending_payouts` row (or credits a balance) right after the check
+  // passes, and the delete then nulls `stellar_address` out from under
+  // an in-flight payout / orphans a live balance. Re-checking every
+  // precondition INSIDE the write transaction, under a per-user
+  // transaction-scoped advisory lock, collapses that window: the checks
+  // and the writes now commit atomically, and concurrent DSR deletes
+  // for the same user serialise on the lock instead of both proceeding.
+  const txnResult = await db.transaction<DsrDeleteResult>(async (tx) => {
+    // Per-user lock — auto-released at COMMIT/ROLLBACK. Concurrent DSR
+    // deletes for this user queue here; the second one, once it
+    // acquires, re-reads the (now-anonymised) state and no-ops.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(${dsrDeleteLockKey(userId)})`);
 
-  // A4-078 (narrowed by ADR 036): a failed LEGACY withdrawal-era
-  // payout with compensated_at IS NULL means the at-send
-  // user_credits debit landed but the on-chain payout never did,
-  // and no admin compensation has re-credited the balance yet. The
-  // user owes themselves money. Anonymising in this window severs
-  // the recovery path: admin compensation re-credits the
-  // (now-anonymised) user_id; if the user re-signs up with the same
-  // email they get a fresh user_id and can't see the recovered
-  // balance. Block until either the compensation lands
-  // (compensated_at != NULL) or ops decides to write the balance
-  // off via a separate admin path.
-  //
-  // The legacy discriminator is the at-send debit ledger row
-  // (`type='withdrawal'` referencing the payout) — post-ADR-036
-  // emissions never debit, are not compensable, and must not block
-  // deletion.
-  const failedUncompensated = await db
-    .select({ id: pendingPayouts.id })
-    .from(pendingPayouts)
-    .where(
-      and(
-        eq(pendingPayouts.userId, userId),
-        eq(pendingPayouts.state, 'failed' as (typeof PAYOUT_STATES)[number]),
-        eq(pendingPayouts.kind, 'emission'),
-        sql`${pendingPayouts.compensatedAt} IS NULL`,
-        sql`EXISTS (
-          SELECT 1 FROM ${creditTransactions}
-          WHERE ${creditTransactions.type} = 'withdrawal'
-            AND ${creditTransactions.referenceType} = 'payout'
-            AND ${creditTransactions.referenceId} = ${pendingPayouts.id}::text
-        )`,
-      ),
-    )
-    .limit(1);
-  if (failedUncompensated.length > 0) {
-    return { ok: false, blockedBy: 'failed_uncompensated_withdrawals' };
-  }
+    // Block: any pending or submitted payout means money in flight.
+    // We can't guarantee the right end-state for that money post-
+    // anonymisation (e.g. an `op_no_trust` failure that needs the
+    // user's Stellar address — which we just nulled).
+    const blockingPayouts = await tx
+      .select({ id: pendingPayouts.id })
+      .from(pendingPayouts)
+      .where(
+        and(
+          eq(pendingPayouts.userId, userId),
+          inArray(pendingPayouts.state, [
+            'pending',
+            'submitted',
+          ] satisfies (typeof PAYOUT_STATES)[number][]),
+        ),
+      )
+      .limit(1);
+    if (blockingPayouts.length > 0) {
+      return { ok: false, blockedBy: 'pending_payouts' };
+    }
 
-  // Block: orders mid-fulfilment. ADR 010 transitions are
-  // pending_payment → paid → procuring → fulfilled / failed.
-  // Anonymising during procurement could drop the email the CTX
-  // proxy flow relies on for order-attribution.
-  const blockingOrders = await db
-    .select({ id: orders.id })
-    .from(orders)
-    .where(
-      and(
-        eq(orders.userId, userId),
-        inArray(orders.state, [
-          'pending_payment',
-          'paid',
-          'procuring',
-        ] satisfies (typeof ORDER_STATES)[number][]),
-      ),
-    )
-    .limit(1);
-  if (blockingOrders.length > 0) {
-    return { ok: false, blockedBy: 'in_flight_orders' };
-  }
+    // A4-078 (narrowed by ADR 036): a failed LEGACY withdrawal-era
+    // payout with compensated_at IS NULL means the at-send
+    // user_credits debit landed but the on-chain payout never did,
+    // and no admin compensation has re-credited the balance yet. The
+    // user owes themselves money. Anonymising in this window severs
+    // the recovery path: admin compensation re-credits the
+    // (now-anonymised) user_id; if the user re-signs up with the same
+    // email they get a fresh user_id and can't see the recovered
+    // balance. Block until either the compensation lands
+    // (compensated_at != NULL) or ops decides to write the balance
+    // off via a separate admin path.
+    //
+    // The legacy discriminator is the at-send debit ledger row
+    // (`type='withdrawal'` referencing the payout) — post-ADR-036
+    // emissions never debit, are not compensable, and must not block
+    // deletion.
+    const failedUncompensated = await tx
+      .select({ id: pendingPayouts.id })
+      .from(pendingPayouts)
+      .where(
+        and(
+          eq(pendingPayouts.userId, userId),
+          eq(pendingPayouts.state, 'failed' as (typeof PAYOUT_STATES)[number]),
+          eq(pendingPayouts.kind, 'emission'),
+          sql`${pendingPayouts.compensatedAt} IS NULL`,
+          sql`EXISTS (
+            SELECT 1 FROM ${creditTransactions}
+            WHERE ${creditTransactions.type} = 'withdrawal'
+              AND ${creditTransactions.referenceType} = 'payout'
+              AND ${creditTransactions.referenceId} = ${pendingPayouts.id}::text
+          )`,
+        ),
+      )
+      .limit(1);
+    if (failedUncompensated.length > 0) {
+      return { ok: false, blockedBy: 'failed_uncompensated_withdrawals' };
+    }
 
-  // PLAT-30-03: block on any non-zero user_credits balance, in any
-  // currency (a user can hold rows in more than one currency after a
-  // home-currency change) — see DsrDeleteBlockReason's docs for why
-  // the three preconditions above don't catch a never-linked-wallet
-  // user's cashback.
-  const nonZeroBalances = await db
-    .select({ currency: userCredits.currency })
-    .from(userCredits)
-    .where(and(eq(userCredits.userId, userId), ne(userCredits.balanceMinor, 0n)))
-    .limit(1);
-  if (nonZeroBalances.length > 0) {
-    return { ok: false, blockedBy: 'non_zero_credit_balance' };
-  }
+    // Block: orders mid-fulfilment. ADR 010 transitions are
+    // pending_payment → paid → procuring → fulfilled / failed.
+    // Anonymising during procurement could drop the email the CTX
+    // proxy flow relies on for order-attribution.
+    const blockingOrders = await tx
+      .select({ id: orders.id })
+      .from(orders)
+      .where(
+        and(
+          eq(orders.userId, userId),
+          inArray(orders.state, [
+            'pending_payment',
+            'paid',
+            'procuring',
+          ] satisfies (typeof ORDER_STATES)[number][]),
+        ),
+      )
+      .limit(1);
+    if (blockingOrders.length > 0) {
+      return { ok: false, blockedBy: 'in_flight_orders' };
+    }
 
-  await db.transaction(async (tx) => {
+    // PLAT-30-03: block on any non-zero user_credits balance, in any
+    // currency (a user can hold rows in more than one currency after a
+    // home-currency change) — see DsrDeleteBlockReason's docs for why
+    // the three preconditions above don't catch a never-linked-wallet
+    // user's cashback.
+    const nonZeroBalances = await tx
+      .select({ currency: userCredits.currency })
+      .from(userCredits)
+      .where(and(eq(userCredits.userId, userId), ne(userCredits.balanceMinor, 0n)))
+      .limit(1);
+    if (nonZeroBalances.length > 0) {
+      return { ok: false, blockedBy: 'non_zero_credit_balance' };
+    }
+
     // OAuth identity links — deleting these means a re-auth via
     // Google/Apple under the same provider_sub spawns a fresh user
     // row instead of resolving to the anonymised one.
@@ -285,7 +325,15 @@ export async function deleteUserViaAnonymisation(userId: string): Promise<DsrDel
           ] satisfies (typeof PAYOUT_STATES)[number][]),
         ),
       );
+
+    return { ok: true };
   });
+
+  // Any block short-circuits here — the transaction committed with no
+  // writes (an empty, lock-only txn) and we surface the reason.
+  if (!txnResult.ok) {
+    return txnResult;
+  }
 
   // Sessions: revoke after the txn so a partial failure doesn't
   // leave the user logged-out without their data anonymised. The

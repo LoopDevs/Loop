@@ -149,6 +149,36 @@ export const ONCHAIN_MINT_ELIGIBLE_ASSETS: ReadonlySet<LoopAssetCode> = new Set(
  */
 export const INTEREST_MINT_TICK_INTERVAL_MS = 10 * 60_000;
 
+/**
+ * CON-04: hard lease on how long the fleet-wide mint lock may be held.
+ *
+ * `withAdvisoryLock` takes a SESSION lock on a dedicated reserved
+ * connection and holds it for the whole `fn`, and its own docstring
+ * warns that "the CALLER is responsible for bounding how long `fn`
+ * runs … because a lock held across unbounded network I/O by a
+ * hung-but-alive leader would otherwise stall the whole fleet." The
+ * mint sweep interleaves a per-user Horizon trustline read (network,
+ * only 30s-cached — cold across the 10-minute tick cadence) with each
+ * user's DB write, so a blackholed Horizon that accepts TCP and never
+ * responds would pin the fleet-wide lock indefinitely and stall
+ * interest minting fleet-wide for the rest of the UTC day. The payout
+ * worker (`runPayoutTick`) already solves the identical shape by racing
+ * its locked tick body against a lease deadline; this is that pattern.
+ *
+ * On lease expiry we release the lock and return WITHOUT advancing the
+ * cursor, so the next tick simply re-runs the period and the per-user
+ * idempotency fences (snapshot + credit-transactions unique indexes)
+ * skip everyone already minted — a cut-off sweep still makes forward
+ * progress and NEVER double-mints. Chosen generous enough (5 min, well
+ * under the 10-min tick cadence so ticks can't overlap) that a healthy
+ * sweep completes in one pass, while capping a hung leader's fleet
+ * stall at one lease instead of forever.
+ */
+export const INTEREST_MINT_TICK_LEASE_MS = 5 * 60_000;
+
+/** Sentinel resolved by the lease timer when the mint sweep overruns. */
+const TICK_LEASE_TIMED_OUT = Symbol('interest-mint-tick-lease-timeout');
+
 /** Fiat backing each LOOP code — 1:1 by design (ADR 015). */
 function fiatOf(code: LoopAssetCode): HomeCurrency {
   switch (code) {
@@ -359,6 +389,13 @@ export interface InterestMintTickResult {
   period: string;
   /** True when another machine held the fleet-wide mint lock. */
   skippedLocked: boolean;
+  /**
+   * CON-04: true when the sweep exceeded `INTEREST_MINT_TICK_LEASE_MS`
+   * and the fleet-wide lock was force-released mid-run. The cursor is
+   * left unadvanced so the next tick re-runs the period (fences skip
+   * anyone already minted).
+   */
+  leaseTimedOut: boolean;
   /** True when the cursor already covered the period (cheap no-op tick). */
   alreadyProcessed: boolean;
   /** Activated-wallet users considered. */
@@ -386,15 +423,55 @@ let tickInFlight = false;
 export async function runInterestMintTick(args?: {
   now?: Date;
   apyBps?: number;
+  /** Test seam / override for the CON-04 lease (default `INTEREST_MINT_TICK_LEASE_MS`). */
+  leaseMs?: number;
 }): Promise<InterestMintTickResult> {
   const period = utcPeriodCursor(args?.now ?? new Date());
+  const leaseMs = args?.leaseMs ?? INTEREST_MINT_TICK_LEASE_MS;
+
+  // CON-04: race the locked sweep against a lease deadline so the
+  // fleet-wide lock can never be held past `leaseMs`. On timeout the
+  // race settles, `withAdvisoryLock` runs its `finally` and releases
+  // the lock, and we return without advancing the cursor. The orphaned
+  // sweep may keep running in the background (JS can't cancel it) — but
+  // it only ever writes behind the per-user idempotency fences, so a
+  // second machine acquiring the freed lock cannot double-mint. Mirrors
+  // `runPayoutTick`.
+  let leaseTimer: ReturnType<typeof setTimeout> | undefined;
   const locked = await withAdvisoryLock(interestMintLockKey(), () =>
-    runInterestMintTickLocked({ ...args, period }),
+    Promise.race([
+      runInterestMintTickLocked({ ...args, period }),
+      new Promise<typeof TICK_LEASE_TIMED_OUT>((resolve) => {
+        leaseTimer = setTimeout(() => resolve(TICK_LEASE_TIMED_OUT), leaseMs);
+      }),
+    ]),
   );
+  if (leaseTimer !== undefined) clearTimeout(leaseTimer);
+
   if (!locked.ran) {
     return {
       period,
       skippedLocked: true,
+      leaseTimedOut: false,
+      alreadyProcessed: false,
+      eligibleUsers: 0,
+      minted: 0,
+      accruedOnly: 0,
+      skippedZeroBalance: 0,
+      skippedAlready: 0,
+      errors: 0,
+      totalsMinor: {},
+    };
+  }
+  if (locked.value === TICK_LEASE_TIMED_OUT) {
+    log.error(
+      { period, leaseMs },
+      'Interest-mint sweep exceeded its lease deadline — releasing the fleet-wide lock so a hung leader cannot stall interest minting fleet-wide. The cursor is NOT advanced; the next tick re-runs this period and the per-user idempotency fences skip everyone already minted.',
+    );
+    return {
+      period,
+      skippedLocked: false,
+      leaseTimedOut: true,
       alreadyProcessed: false,
       eligibleUsers: 0,
       minted: 0,
@@ -418,6 +495,7 @@ async function runInterestMintTickLocked(args: {
   const result: InterestMintTickResult = {
     period,
     skippedLocked: false,
+    leaseTimedOut: false,
     alreadyProcessed: false,
     eligibleUsers: 0,
     minted: 0,

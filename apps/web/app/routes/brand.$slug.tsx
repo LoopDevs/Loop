@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { LocaleLink as Link } from '~/components/ui/LocaleLink';
-import type { Route } from './+types/brand.$slug';
+import type { MetaDescriptor } from 'react-router';
 import { brandSlug, groupMerchants, merchantInCountry, variantLabel } from '@loop/shared';
 import { useLocale } from '~/i18n/locale';
 import { useAllMerchants, useMerchantsCashbackRatesMap } from '~/hooks/use-merchants';
@@ -13,7 +13,12 @@ import { MerchantCard } from '~/components/features/MerchantCard';
 import { Spinner } from '~/components/ui/Spinner';
 import i18n from '~/i18n/i18next';
 
-export function meta({ params }: Route.MetaArgs): Route.MetaDescriptors {
+// P2-10/P2-11: component-only (mobile / SPA) variant — the SSR build wires
+// `brand.$slug-ssr.tsx` (loader throws a real 404 for an unknown brand), so SSR
+// typegen never sees this route and `./+types/brand.$slug` doesn't exist under
+// it. Inline the meta types (same pattern as `not-found.tsx` /
+// `locale-layout.tsx`); `brand.$slug-ssr.tsx` re-exports this `meta`.
+export function meta({ params }: { params: { slug?: string | undefined } }): MetaDescriptor[] {
   let name = params.slug ?? '';
   try {
     name = decodeURIComponent(name);

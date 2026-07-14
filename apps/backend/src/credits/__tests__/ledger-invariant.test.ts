@@ -81,8 +81,58 @@ describe('computeLedgerDriftFromRows', () => {
         balanceMinor: '0',
         ledgerSumMinor: '500',
         deltaMinor: '-500',
+        orphan: true,
       },
     ]);
+  });
+
+  // DAT-06: an orphan (transactions with no `user_credits` row) whose
+  // rows net to zero used to surface as `{balance:0, ledger:0, delta:0}`
+  // — numerically identical to a clean ledger, so it read as clean and
+  // got dismissed. The missing balance row is the ADR-009 violation
+  // regardless of the net sum; the `orphan` flag is the non-collapsing
+  // signal that qualifies it as drift.
+  it('flags a ZERO-SUM orphan (offsetting rows, no balance row) as drift via the orphan flag', () => {
+    const drift = computeLedgerDriftFromRows(
+      [],
+      [
+        { userId: 'u1', currency: 'GBP', amountMinor: 100n },
+        { userId: 'u1', currency: 'GBP', amountMinor: -100n },
+      ],
+    );
+    expect(drift).toEqual([
+      {
+        userId: 'u1',
+        currency: 'GBP',
+        balanceMinor: '0',
+        ledgerSumMinor: '0',
+        deltaMinor: '0',
+        orphan: true,
+      },
+    ]);
+    // The delta collapses to zero, so the flag — not the delta — is what
+    // keeps this row from reading as clean.
+    expect(drift[0]?.orphan).toBe(true);
+  });
+
+  // DAT-06: an orphan and a genuine `balance_minor = 0` mismatch both
+  // carry `balanceMinor: "0"`. Only the orphan is missing its balance
+  // row, so only it gets `orphan: true` — the flag disambiguates them.
+  it('does NOT flag a real balance-row-of-zero mismatch as an orphan', () => {
+    const drift = computeLedgerDriftFromRows(
+      [{ userId: 'u1', currency: 'GBP', balanceMinor: 0n }],
+      [{ userId: 'u1', currency: 'GBP', amountMinor: 50n }],
+    );
+    expect(drift).toEqual([
+      {
+        userId: 'u1',
+        currency: 'GBP',
+        balanceMinor: '0',
+        ledgerSumMinor: '50',
+        deltaMinor: '-50',
+      },
+    ]);
+    expect(drift[0]?.orphan).toBeUndefined();
   });
 
   it('scopes the sum per (user, currency) — multi-currency drift is reported per row', () => {

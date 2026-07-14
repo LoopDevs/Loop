@@ -11,7 +11,9 @@ import {
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
 import { isNativePlatform } from '~/native/platform';
+import { safeRedeemHref, safePaymentUriHref } from '~/native/webview';
 import { formatMinorCurrency, useLocaleTag } from '~/i18n/format';
+import { copySensitive } from '~/native/clipboard';
 import { PayWithLoopBalance } from './PayWithLoopBalance';
 
 export interface LoopPaymentStepProps {
@@ -205,7 +207,13 @@ function RedemptionBody({ order }: { order: LoopOrderView }): React.JSX.Element 
   const locale = useLocaleTag();
   const hasCode = order.redeemCode !== null && order.redeemCode.length > 0;
   const hasPin = order.redeemPin !== null && order.redeemPin.length > 0;
-  const hasUrl = order.redeemUrl !== null && order.redeemUrl.length > 0;
+  // P2-03: scheme-gate the upstream redeemUrl before it reaches an
+  // `<a href>`. `safeRedeemHref` returns null for anything that isn't a
+  // safe http(s) URL — a `javascript:`/`data:` value is neutralized to
+  // "no link" rather than a clickable XSS payload in the native WebView.
+  const redeemHref =
+    order.redeemUrl !== null && order.redeemUrl.length > 0 ? safeRedeemHref(order.redeemUrl) : null;
+  const hasUrl = redeemHref !== null;
 
   if (!hasCode && !hasPin && !hasUrl) {
     return (
@@ -220,15 +228,17 @@ function RedemptionBody({ order }: { order: LoopOrderView }): React.JSX.Element 
 
   return (
     <div className="rounded-xl border border-green-200 dark:border-green-900/40 bg-green-50/50 dark:bg-green-900/10 p-4 space-y-3">
-      {hasCode ? <Row label="Gift card code" value={order.redeemCode!} copyable mono /> : null}
-      {hasPin ? <Row label="PIN" value={order.redeemPin!} copyable mono /> : null}
-      {hasUrl ? (
+      {hasCode ? (
+        <Row label="Gift card code" value={order.redeemCode!} copyable mono sensitive />
+      ) : null}
+      {hasPin ? <Row label="PIN" value={order.redeemPin!} copyable mono sensitive /> : null}
+      {redeemHref !== null ? (
         <div>
           <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
             Redeem online
           </div>
           <a
-            href={order.redeemUrl!}
+            href={redeemHref}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center justify-center w-full rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2"
@@ -293,6 +303,12 @@ function StellarPaymentBody({
 }: StellarPaymentBodyProps): React.JSX.Element {
   const locale = useLocaleTag();
   const showSpinner = order === undefined || order.state === 'pending_payment';
+  // PAYMENTURI-UNGATED (XSS): `paymentUri` is server/upstream-supplied (see
+  // safePaymentUriHref). A `javascript:`/`data:` scheme dropped into this
+  // anchor would execute on tap inside the native WebView. Gate it to the
+  // SEP-7 allow-list; a rejected URI yields null and we render no live link
+  // — the address + memo copy path below still lets the user pay.
+  const paymentHref = safePaymentUriHref(paymentUri);
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 space-y-3">
@@ -301,12 +317,14 @@ function StellarPaymentBody({
         <Row label="To address" value={address} copyable mono />
         <Row label="Memo (required)" value={memo} copyable mono />
       </div>
-      <a
-        href={paymentUri}
-        className="block w-full rounded-lg bg-gray-900 hover:bg-gray-800 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-200 px-4 py-3 text-center text-sm font-semibold text-white"
-      >
-        Open in wallet
-      </a>
+      {paymentHref !== null ? (
+        <a
+          href={paymentHref}
+          className="block w-full rounded-lg bg-gray-900 hover:bg-gray-800 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-200 px-4 py-3 text-center text-sm font-semibold text-white"
+        >
+          Open in wallet
+        </a>
+      ) : null}
       {/*
         TODO(adr-pending): integrate Stellar Wallets Kit v2 here for an
         in-app "Connect wallet" flow. Adding `@creit.tech/stellar-wallets-kit`
@@ -359,6 +377,11 @@ function NativePaymentBody({
 }: NativePaymentBodyProps): React.JSX.Element {
   const locale = useLocaleTag();
   const showSpinner = order === undefined || order.state === 'pending_payment';
+  // PAYMENTURI-UNGATED (XSS): same gate as the web body. On native this is
+  // the only payment affordance, so a rejected URI (javascript:/data:/…)
+  // collapses to a disabled state — never a live href that would execute
+  // on tap inside the WebView.
+  const paymentHref = safePaymentUriHref(paymentUri);
   return (
     <div className="space-y-5">
       <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 text-center space-y-1">
@@ -372,15 +395,25 @@ function NativePaymentBody({
           ≈ {assetAmount} {assetLabel}
         </div>
       </div>
-      <a
-        href={paymentUri}
-        className="block w-full rounded-lg bg-gray-900 hover:bg-gray-800 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-200 px-4 py-4 text-center text-base font-semibold text-white"
-      >
-        Open in wallet
-      </a>
+      {paymentHref !== null ? (
+        <a
+          href={paymentHref}
+          className="block w-full rounded-lg bg-gray-900 hover:bg-gray-800 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-200 px-4 py-4 text-center text-base font-semibold text-white"
+        >
+          Open in wallet
+        </a>
+      ) : (
+        <div
+          role="alert"
+          className="block w-full rounded-lg bg-gray-200 dark:bg-gray-800 px-4 py-4 text-center text-base font-semibold text-gray-500 dark:text-gray-400"
+        >
+          Payment link unavailable
+        </div>
+      )}
       <p className="text-xs text-gray-500 dark:text-gray-400 text-center px-4">
-        Tap to open your installed Stellar wallet. Your order updates automatically once the payment
-        confirms.
+        {paymentHref !== null
+          ? 'Tap to open your installed Stellar wallet. Your order updates automatically once the payment confirms.'
+          : "We couldn't prepare a secure wallet link for this order. Please contact support before sending any payment."}
       </p>
       {showSpinner ? (
         <div className="flex justify-center">
@@ -396,15 +429,28 @@ function Row({
   value,
   copyable,
   mono,
+  sensitive = false,
 }: {
   label: string;
   value: string;
   copyable?: boolean;
   mono?: boolean;
+  /**
+   * When true the value is a redemption secret (gift-card code / PIN):
+   * copy via `copySensitive` so the clipboard auto-clears after a short
+   * delay (FE-05). Non-sensitive rows (payment address / memo / amounts)
+   * copy plainly and are deliberately left on the clipboard so the user
+   * can paste them into their wallet.
+   */
+  sensitive?: boolean;
 }): React.JSX.Element {
   const [copied, setCopied] = useState(false);
   const onCopy = (): void => {
-    void navigator.clipboard.writeText(value);
+    if (sensitive) {
+      void copySensitive(value);
+    } else {
+      void navigator.clipboard.writeText(value);
+    }
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1500);
   };

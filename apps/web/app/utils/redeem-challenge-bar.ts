@@ -48,9 +48,22 @@ export function buildChallengeBarScript(code: string): string {
     btn.type = 'button';
     btn.textContent = 'Copy';
     btn.style.cssText = 'margin-left:auto;background:#3b82f6;color:#fff;border:0;border-radius:8px;padding:7px 12px;font-size:12px;font-weight:600;cursor:pointer;flex-shrink:0;';
+    // A visually-hidden live region so the copy result is announced to
+    // screen readers. The button's own label flip ("Copy" -> "Copied") is
+    // an unreliable announcement across WebView AT, so we push an explicit
+    // polite message into a dedicated status node instead.
+    var live = document.createElement('span');
+    live.setAttribute('role', 'status');
+    live.setAttribute('aria-live', 'polite');
+    live.style.cssText = 'position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0;';
+    btn.setAttribute('aria-label', 'Copy code');
     btn.addEventListener('click', function(){
+      // Clear first so an identical follow-up message still registers as a
+      // change and re-announces on a second copy.
+      live.textContent = '';
       var done = function(){
         btn.textContent = 'Copied';
+        live.textContent = 'Code copied to clipboard';
         setTimeout(function(){ btn.textContent = 'Copy'; }, 2000);
       };
       // A4-071: surface a visible failure label when neither path
@@ -60,6 +73,7 @@ export function buildChallengeBarScript(code: string): string {
       // saw nothing change.
       var failed = function(){
         btn.textContent = 'Copy failed';
+        live.textContent = 'Copy failed';
         setTimeout(function(){ btn.textContent = 'Copy'; }, 2500);
       };
       try {
@@ -86,6 +100,7 @@ export function buildChallengeBarScript(code: string): string {
     bar.appendChild(eyebrow);
     bar.appendChild(value);
     bar.appendChild(btn);
+    bar.appendChild(live);
     document.body.appendChild(bar);
     // Push the merchant page content down so the bar doesn't overlap
     // the page's own header / nav.

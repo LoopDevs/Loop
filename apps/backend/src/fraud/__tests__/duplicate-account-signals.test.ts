@@ -18,17 +18,25 @@ const { dbState, dbMock } = vi.hoisted(() => {
     insertReturns: Array<Array<{ id: string }>>;
     insertThrows: Error | null;
     insertCalls: Array<{ values: unknown; target: unknown }>;
+    /** Columns passed to `.selectDistinctOn([...])`, for assertions. */
+    distinctOnArgs: unknown;
   } = {
     selectRows: [],
     selectThrows: null,
     insertReturns: [],
     insertThrows: null,
     insertCalls: [],
+    distinctOnArgs: undefined,
   };
   const selectChain: Record<string, unknown> = {};
   selectChain['select'] = vi.fn(() => selectChain);
+  selectChain['selectDistinctOn'] = vi.fn((cols: unknown) => {
+    s.distinctOnArgs = cols;
+    return selectChain;
+  });
   selectChain['from'] = vi.fn(() => selectChain);
   selectChain['where'] = vi.fn(() => selectChain);
+  selectChain['orderBy'] = vi.fn(() => selectChain);
   selectChain['limit'] = vi.fn(async () => {
     if (s.selectThrows !== null) throw s.selectThrows;
     return s.selectRows;
@@ -78,6 +86,7 @@ beforeEach(() => {
   dbState.insertReturns = [];
   dbState.insertThrows = null;
   dbState.insertCalls = [];
+  dbState.distinctOnArgs = undefined;
   notifyMock.mockClear();
 });
 
@@ -140,6 +149,23 @@ describe('checkDuplicateFundingSource', () => {
       sourceAccount: 'GSOURCE',
     });
     expect(notifyMock).not.toHaveBeenCalled();
+  });
+
+  it('caps DISTINCT related users, not raw order rows — queries with DISTINCT ON (user_id)', async () => {
+    // The RELATED_USER_LIMIT cap is meant to bound distinct related
+    // USERS. A plain `LIMIT` on the unaggregated order rows lets one
+    // related user with many orders from the source fill the limit and
+    // hide the others. The fix is a `SELECT DISTINCT ON (user_id)` — this
+    // asserts the query is built that way (the schema mock maps
+    // `orders.userId` → 'user_id'). Fails against the pre-fix plain
+    // `.select().limit()` query, which never calls `selectDistinctOn`.
+    dbState.selectRows = [{ userId: USER_B, id: 'order-related' }];
+    await checkDuplicateFundingSource({
+      userId: USER_A,
+      orderId: 'order-1',
+      sourceAccount: 'GSOURCE',
+    });
+    expect(dbState.distinctOnArgs).toEqual(['user_id']);
   });
 
   it('dedupes to distinct related userIds before writing', async () => {

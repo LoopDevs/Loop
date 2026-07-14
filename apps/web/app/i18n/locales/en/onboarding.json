@@ -90,10 +90,17 @@
   },
   "resend": {
     "code": "Resend code",
-    "in": "Resend code in {{seconds}}s"
+    "in": "Resend code in {{seconds}}s",
+    "announce": "A new code is on its way."
   },
   "otp": {
-    "pastePrefix": "Paste "
+    "pastePrefix": "Paste ",
+    "groupLabel": "Verification code",
+    "digitLabel": "Digit {{index}} of {{total}}"
+  },
+  "progress": {
+    "label": "Onboarding progress",
+    "status": "Step {{current}} of {{total}}"
   },
   "desktop": {
     "slideshow": {

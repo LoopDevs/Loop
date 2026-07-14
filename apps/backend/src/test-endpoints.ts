@@ -131,7 +131,14 @@ export function mountTestEndpoints(app: Hono): void {
       return c.json({ error: 'invalid body', detail: parsed.error.format() }, 400);
     }
     const user = await findOrCreateUserByEmail(parsed.data.email);
-    const pair = await issueTokenPair({ id: user.id, email: user.email });
+    // NS-09: mint with the user's current token_version so the test-
+    // harness session behaves like a real one (revocable via the
+    // token_version bump; requireAuth compares `tv` on every request).
+    const pair = await issueTokenPair({
+      id: user.id,
+      email: user.email,
+      tokenVersion: user.tokenVersion,
+    });
     return c.json({
       userId: user.id,
       email: user.email,

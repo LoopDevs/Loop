@@ -1,7 +1,7 @@
 import { useParams, useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { LocaleLink as Link } from '~/components/ui/LocaleLink';
-import type { Route } from './+types/gift-card.$name';
+import type { MetaDescriptor } from 'react-router';
 import i18n from '~/i18n/i18next';
 import { useMerchantBySlug, useMerchant, useMerchantCashbackRate } from '~/hooks/use-merchants';
 import { useAuth } from '~/hooks/use-auth';
@@ -15,7 +15,12 @@ import { getImageProxyUrl } from '~/utils/image';
 import { brandTileStyle } from '~/utils/brand-color';
 import { currencySymbol, useLocaleTag } from '~/i18n/format';
 
-export function meta({ params }: Route.MetaArgs): Route.MetaDescriptors {
+// P2-10/P2-11: component-only (mobile / SPA) variant — the SSR build wires
+// `gift-card.$name-ssr.tsx` (loader throws a real 404 for an unknown merchant),
+// so SSR typegen never sees this route and `./+types/gift-card.$name` doesn't
+// exist under it. Inline the meta types (same pattern as `not-found.tsx` /
+// `locale-layout.tsx`); `gift-card.$name-ssr.tsx` re-exports this `meta`.
+export function meta({ params }: { params: { name?: string | undefined } }): MetaDescriptor[] {
   // decodeURIComponent throws on malformed percent escapes (e.g. "%ZZ"). A
   // crawler hitting a junk URL like /gift-card/%ZZ would otherwise 500 the
   // SSR render. Fall back to the raw slug on malformed input.

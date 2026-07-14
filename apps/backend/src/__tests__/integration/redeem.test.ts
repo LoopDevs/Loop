@@ -165,7 +165,10 @@ async function seedRedeemableOrder(): Promise<{ orderId: string; userId: string 
 }
 
 function bearerFor(userId: string, email: string): string {
-  return signLoopToken({ sub: userId, email, typ: 'access', ttlSeconds: 300 }).token;
+  // NS-09: the seeded user's token_version is 0 (findOrCreateUserByEmail
+  // default; the seed update above doesn't touch it), so stamp tv=0 to
+  // satisfy requireAuth's revocation check.
+  return signLoopToken({ sub: userId, email, typ: 'access', ttlSeconds: 300, tv: 0 }).token;
 }
 
 describeIf('wallet-spend (redeem) integration — real postgres advisory lock (Q6-6)', () => {

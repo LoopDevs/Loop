@@ -22,11 +22,16 @@ const SOFT: Record<Tone, string> = {
   danger: 'bg-red-50 text-red-700',
 };
 
+// Solid fills carry white text, so each needs >=4.5:1 (WCAG 1.4.3 AA).
+// `green-600` (3.22:1) and `amber-500` (2.15:1) failed; `amber-600` still
+// fails (3.19:1), so warning drops to `amber-700` (5.05:1) and success to
+// `green-700` (4.94:1). `gray-800`, `blue-600`, and `red-600` (4.77:1)
+// already clear it and are unchanged.
 const SOLID: Record<Tone, string> = {
   neutral: 'bg-gray-800 text-white',
   brand: 'bg-blue-600 text-white',
-  success: 'bg-green-600 text-white',
-  warning: 'bg-amber-500 text-white',
+  success: 'bg-green-700 text-white',
+  warning: 'bg-amber-700 text-white',
   danger: 'bg-red-600 text-white',
 };
 

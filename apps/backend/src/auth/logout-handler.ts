@@ -19,6 +19,7 @@ import { getUpstreamCircuit, CircuitOpenError } from '../circuit-breaker.js';
 import { upstreamUrl } from '../upstream.js';
 import { verifyLoopToken, isLoopAuthConfigured } from './tokens.js';
 import { revokeRefreshToken } from './refresh-tokens.js';
+import { bumpUserTokenVersion } from '../db/users.js';
 import { PlatformEnum } from './request-schemas.js';
 
 const log = logger.child({ handler: 'auth' });
@@ -60,14 +61,47 @@ export async function logoutHandler(c: Context): Promise<Response> {
   // falls through harmlessly.
   if (isLoopAuthConfigured()) {
     const verified = verifyLoopToken(parsed.data.refreshToken, 'refresh');
-    if (verified.ok && verified.claims.jti !== undefined) {
+    if (verified.ok) {
+      // NS-09: bump the user's token_version so every already-issued
+      // ACCESS token (15-min TTL, no per-token DB row) is rejected on
+      // its next requireAuth check. Without this a logout revoked only
+      // the refresh token, leaving the still-signed access token valid
+      // for up to its full TTL — the exact gap NS-09 closes. Per-user
+      // granularity: this bump invalidates the access tokens of ALL the
+      // user's devices, but a device that is NOT logging out still holds
+      // a live refresh token and transparently re-mints an access token
+      // carrying the new `tv` — so other devices see one silent refresh,
+      // not a logout. (A true "sign out everywhere" is
+      // DELETE /api/auth/session/all, which revokes every refresh row
+      // AND bumps token_version.) Done off the verified refresh token's
+      // `sub` — this route is not behind requireAuth, so the refresh
+      // token is the only authenticated identity available here.
       try {
-        await revokeRefreshToken({ jti: verified.claims.jti });
+        await bumpUserTokenVersion(verified.claims.sub);
       } catch (err) {
-        // Revocation failure is not fatal — the signed token still
-        // expires at its exp regardless. Log and continue so the
-        // upstream call still gets made.
-        log.warn({ err, jti: verified.claims.jti }, 'Loop refresh-token revocation failed');
+        // Non-fatal: the client still clears local state, and the access
+        // token expires at its exp regardless. Log and continue.
+        log.warn(
+          { err, userId: verified.claims.sub },
+          'NS-09: token_version bump on logout failed',
+        );
+      }
+      if (verified.claims.jti !== undefined) {
+        try {
+          // COR-11: revoke by jti WITHOUT passing a successor. The token
+          // presented here may already be mid-chain (a stale device or a
+          // rotated-out token still within its signature TTL — verify
+          // above checks the signature, not DB liveness). Passing no
+          // `replacedByJti` leaves the row's rotation link intact, so the
+          // audit chain stays traceable past the logout; `revoked_at`
+          // alone invalidates the token.
+          await revokeRefreshToken({ jti: verified.claims.jti });
+        } catch (err) {
+          // Revocation failure is not fatal — the signed token still
+          // expires at its exp regardless. Log and continue so the
+          // upstream call still gets made.
+          log.warn({ err, jti: verified.claims.jti }, 'Loop refresh-token revocation failed');
+        }
       }
     }
   }

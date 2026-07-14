@@ -158,8 +158,17 @@ vi.mock('../../env.js', () => ({
 vi.mock('../../payments/horizon-balances.js', () => ({
   getAccountBalances: getBalancesMock,
 }));
+// MNY-22: the CTX payment-amount band prices the expected wholesale in
+// the SAME asset CTX settles in. The picker defaults to USDC in this
+// suite (phase-1 off, no floor), so the band now goes through
+// `usdcStroopsPerCent` (USD-static 100_000 stroops/cent), NOT the XLM
+// oracle. The XLM multiplier here (1_000_000/cent) stays wired for the
+// XLM branch; the ~10× gap between the two mirrors production (USDC
+// pricing is tighter than XLM), which is what makes the denomination
+// test below non-vacuous.
 vi.mock('../../payments/price-feed.js', () => ({
   requiredStroopsForCharge: vi.fn(async (chargeMinor: bigint) => chargeMinor * 1_000_000n),
+  usdcStroopsPerCent: vi.fn(async () => 100_000n),
 }));
 
 const { discordMock } = vi.hoisted(() => ({
@@ -526,6 +535,44 @@ describe('runProcurementTick', () => {
     );
     expect(discordMock.notifyOrderFailedAfterCtxPaid).toHaveBeenCalledWith(
       expect.objectContaining({ orderId: 'o-1', ctxOrderId: 'ctx-1', ctxPaid: false }),
+    );
+  });
+
+  it('MNY-22: a USDC settlement is banded against the USDC-denominated expected, not the XLM one', async () => {
+    // The picker selects USDC here (phase-1 off, no floor). Before the
+    // denomination fix the band priced the expected wholesale in XLM
+    // (`requiredStroopsForCharge`, mocked at 1_000_000 stroops/cent) and
+    // compared it to a USDC-stroop amount — making the ceiling ~10×/
+    // (≈6× in prod) too loose. This amount is engineered to sit BETWEEN
+    // the two ceilings: 500 USDC = 5e9 stroops is UNDER the (buggy)
+    // XLM ceiling 1.25 × (10_000 × 1e6) = 1.25e10 but OVER the correct
+    // USDC ceiling 1.25 × (10_000 × 1e5) = 1.25e9. The old band accepted
+    // it and paid CTX; the fixed band rejects it before the pay hop.
+    state.paid = [makeOrder({ id: 'o-1', wholesaleMinor: 10_000n, chargeCurrency: 'GBP' })];
+    const overpayUsdcUri = 'web+stellar:pay?destination=GTESTCTXDEST&amount=500.0000000&memo=ctx-1';
+    operatorFetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          id: 'ctx-1',
+          paymentUrls: { USDC: overpayUsdcUri },
+          paymentCryptoAmount: '500.0000000',
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    const r = await runProcurementTick();
+    expect(r.failed).toBe(1);
+    // Must fail-closed BEFORE paying CTX.
+    expect(payCtxOrderMock).not.toHaveBeenCalled();
+    expect(markFailedMock).toHaveBeenCalledWith(
+      'o-1',
+      expect.stringContaining('exceeds 12500 bps ceiling'),
+    );
+    // The rejection is denominated in the settlement asset.
+    expect(markFailedMock).toHaveBeenCalledWith('o-1', expect.stringContaining('USDC stroops'));
+    // FT-03 posture holds on the band-reject path too: user refunded.
+    expect(refundsMock.applyOrderAutoRefund).toHaveBeenCalledWith(
+      expect.objectContaining({ orderId: 'o-1' }),
     );
   });
 

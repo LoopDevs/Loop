@@ -65,11 +65,8 @@ import { healthHandler } from './health.js';
 // truth for which origins can hit the prod API).
 app.use('*', corsMiddleware);
 // `secureHeaders` (CSP + cross-origin policy) lives in
-// `./middleware/secure-headers.ts`. `bodyLimit` (1 MiB cap with the
-// 413 PAYLOAD_TOO_LARGE envelope from A2-1005) lives in
-// `./middleware/body-limit.ts`.
+// `./middleware/secure-headers.ts`.
 app.use('*', secureHeadersMiddleware);
-app.use('*', bodyLimitMiddleware);
 // A4-008: server-mints the request id and ignores any inbound
 // X-Request-Id header. Hono's stock `requestId()` honours the
 // client-supplied value when it matches a permissive shape, which
@@ -113,6 +110,22 @@ app.use('*', requestCounterMiddleware);
 // the backstop, not the primary control. Mounted after the request
 // counter so a 429'd request is still observed in metrics.
 app.use('*', globalRateLimit());
+
+// `bodyLimit` (1 MiB cap with the 413 PAYLOAD_TOO_LARGE envelope from
+// A2-1005) lives in `./middleware/body-limit.ts`. Mounted AFTER
+// `globalRateLimit` (BK-bodylimit): the body-size check short-circuits
+// with a 413 and never calls `next()`, so if it ran first an attacker
+// flooding oversized bodies would slip past the volumetric backstop
+// entirely — every oversized request rejected by size before the rate
+// limiter ever counted it, leaving the flood unthrottled. Keeping the
+// limiter (and the access-log + request-counter observers above it)
+// ahead of the size check means oversized-body requests are still
+// counted/throttled — and observed in metrics/logs — before they're
+// rejected. This still sits before every route handler, so handlers
+// keep their 1 MiB cap; the limiter keys only on IP/route and never
+// reads the body, so ordering it ahead introduces no dependency on the
+// (still-unread) request body.
+app.use('*', bodyLimitMiddleware);
 
 // `/metrics` (Prometheus exposition) + `/openapi.json` (static
 // spec) handlers live in `./observability-handlers.ts`. Both are

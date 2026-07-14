@@ -347,4 +347,65 @@ describe('refreshLocations', () => {
     // No throw propagated; store retains whatever it had before.
     expect(Array.isArray(getLocations().locations)).toBe(true);
   });
+
+  it('rejects an oversized result array wholesale — a compromised upstream cannot blow memory (FT-15)', async () => {
+    // Load one good page first so we can prove the oversized refresh is
+    // REJECTED (previous data retained), not merely that it ended up empty.
+    mockFetch.mockResolvedValueOnce(
+      makePage(1, 1, [
+        {
+          id: 'loc-good',
+          merchantId: 'm-good',
+          enabled: true,
+          latLong: { latitude: '40.0', longitude: '-74.0' },
+        },
+      ]),
+    );
+    await refreshLocations();
+    expect(getLocations().locations).toHaveLength(1);
+
+    // A compromised/buggy upstream hands back an unbounded result array
+    // (> MAX_RESULT_COUNT = 5000) in a single page. The count cap must reject
+    // the whole response before it is loaded into the served store.
+    const flood: MockLocation[] = Array.from({ length: 5001 }, (_, i) => ({
+      id: `loc-${i}`,
+      merchantId: `m-${i}`,
+      enabled: true,
+      latLong: { latitude: '40.0', longitude: '-74.0' },
+    }));
+    mockFetch.mockResolvedValueOnce(makePage(1, 1, flood));
+    await refreshLocations();
+
+    // Whole response rejected by the count cap → previous good data retained,
+    // NOT the 5001-element flood.
+    expect(getLocations().locations).toHaveLength(1);
+    expect(getLocations().locations[0]!.merchantId).toBe('m-good');
+  });
+
+  it('skips a location whose merchantId exceeds the size cap — unbounded field rejected (FT-15)', async () => {
+    mockFetch.mockResolvedValueOnce(
+      makePage(1, 1, [
+        {
+          id: 'loc-ok',
+          merchantId: 'm-ok',
+          enabled: true,
+          latLong: { latitude: '40.0', longitude: '-74.0' },
+        },
+        {
+          // 200-char merchantId > MAX_ID_LENGTH (128): a compromised upstream
+          // injecting an oversized string. Per-item safeParse must skip it
+          // without poisoning the rest of the page.
+          id: 'loc-huge',
+          merchantId: 'x'.repeat(200),
+          enabled: true,
+          latLong: { latitude: '41.0', longitude: '-75.0' },
+        },
+      ]),
+    );
+
+    await refreshLocations();
+
+    const ids = getLocations().locations.map((l) => l.merchantId);
+    expect(ids).toEqual(['m-ok']);
+  });
 });

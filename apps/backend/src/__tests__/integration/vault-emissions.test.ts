@@ -87,6 +87,25 @@ vi.mock('../../credits/vaults/vault-client.js', () => ({
   resolveOperatorPublicKey: () => vaultClientMocks.resolveOperatorPublicKey(),
 }));
 
+// The stuck-emission watchdog pages via `notifyVaultEmissionsStuck`
+// (→ `sendWebhook(env.DISCORD_WEBHOOK_MONITORING)`). No webhook is set
+// in the integration env, and post-FT-06 an UNSET webhook reports
+// NON-delivery (`false`) — it no longer phantom-reports success — so
+// the watchdog would never latch its fire-once `alert_active`. Stub the
+// delivery-tracked notifier to report a successful delivery (matching
+// how the sibling watcher suite `asset-drift-watcher.test.ts` mocks its
+// own notifiers) so NO real Discord call happens and `notified===true`
+// genuinely asserts the "delivered once, then don't re-page" behaviour
+// rather than the old phantom-true. Every other `../../discord.js`
+// export (e.g. `notifyVaultEmissionFailed`) stays real via `...actual`.
+vi.mock('../../discord.js', async (importActual) => {
+  const actual = (await importActual()) as Record<string, unknown>;
+  return {
+    ...actual,
+    notifyVaultEmissionsStuck: vi.fn(async () => true),
+  };
+});
+
 import { db, withAdvisoryLock } from '../../db/client.js';
 import {
   users,
@@ -99,7 +118,11 @@ import {
   watchdogAlertState,
 } from '../../db/schema.js';
 import { findOrCreateUserByEmail } from '../../db/users.js';
-import { ensureMigrated, truncateAllTables } from './db-test-setup.js';
+import {
+  ensureMigrated,
+  truncateAllTables,
+  seedUserCreditsWithBackingLedger,
+} from './db-test-setup.js';
 import { computeLedgerDriftSql } from '../../credits/ledger-invariant.js';
 import { generatePayoutMemo } from '../../credits/payout-builder.js';
 import {
@@ -167,14 +190,15 @@ async function seedUserCreditsBalance(
   currency: string,
   amountMinor: bigint,
 ): Promise<void> {
-  await db.insert(userCredits).values({ userId, currency, balanceMinor: amountMinor });
-  await db.insert(creditTransactions).values({
+  // DAT-01-inv1 (migration 0066): the balance row and its backing
+  // opening-balance ledger row must land in ONE transaction so the
+  // deferred mirror-invariant trigger sees an EQUAL mirror at commit.
+  // (Same shape as before — one adjustment ledger row of `amountMinor`
+  // — just made atomic via the shared helper.)
+  await seedUserCreditsWithBackingLedger(db, {
     userId,
-    type: 'adjustment',
-    amountMinor,
     currency,
-    referenceType: null,
-    referenceId: null,
+    balanceMinor: amountMinor,
     reason: 'integration-test fixture balance',
   });
 }
@@ -472,9 +496,13 @@ describeIf('vault-emissions integration — real postgres (ADR 031 V3)', () => {
       toAddress: user.walletAddress,
     });
     // Make it a STUCK in-flight row: state='deposited', created 30 min
-    // ago (older than the 15-min threshold below). No DISCORD webhook
-    // is configured in the integration env, so notifyVaultEmissionsStuck
-    // → sendWebhook(undefined) → resolves `true` (delivery confirmed).
+    // ago (older than the 15-min threshold below). Delivery is stubbed
+    // to SUCCEED (`notifyVaultEmissionsStuck` → true, mocked at the top
+    // of this file) so the watchdog's fire-once latch actually engages —
+    // this exercises the real "a page WAS delivered, now don't re-page"
+    // semantics. Post-FT-06 an unset webhook makes sendWebhook resolve
+    // `false` (non-delivery), so relying on an unset webhook here (the
+    // old phantom-true contract) would latch nothing and test nothing.
     await db
       .update(vaultEmissions)
       .set({
@@ -515,6 +543,65 @@ describeIf('vault-emissions integration — real postgres (ADR 031 V3)', () => {
       .from(watchdogAlertState)
       .where(eq(watchdogAlertState.watchdogName, 'vault-emission-stuck-watchdog'));
     expect(alert3?.alertActive).toBe(false);
+  });
+
+  it('MNY-15: the stuck-emission watchdog DETECTS + pages a stale `pending` strand (disabled/deregistered-vault case) — the state the old watchdog silently skipped', async () => {
+    // A `pending` vault_emissions row is user-OWED cashback claimed at
+    // fulfillment with nothing on-chain yet. If its vault is
+    // deregistered, `driveOneVaultEmission` returns `no_vault` and
+    // leaves the row in `pending` forever — a silent money-owed strand.
+    // Seed exactly that (a `pending` row backdated past the threshold,
+    // NOTHING advanced past `pending`) and prove the watchdog now pages.
+    const { notifyVaultEmissionsStuck } = await import('../../discord.js');
+    const notifyMock = vi.mocked(notifyVaultEmissionsStuck);
+    notifyMock.mockClear();
+
+    const user = await seedUser();
+    const orderId = await seedOrder({ userId: user.id, cashbackMinor: 400n });
+    await claimVaultEmission(db as never, {
+      orderId,
+      userId: user.id,
+      assetCode: 'LOOPUSD',
+      network: 'testnet',
+      cashbackMinor: 400n,
+      toAddress: user.walletAddress,
+    });
+    // Strand it: still `pending` (never deposited — no depositTxHash,
+    // no sharesMinted), created 30 min ago (older than the 15-min
+    // threshold below). This is the shape a disabled-vault strand
+    // leaves behind.
+    await db
+      .update(vaultEmissions)
+      .set({ createdAt: new Date(Date.now() - 30 * 60_000) })
+      .where(eq(vaultEmissions.orderId, orderId));
+
+    // Precondition: the strand is genuinely in `pending` — the state the
+    // pre-fix `VAULT_EMISSION_STUCK_STATES` (['depositing','deposited',
+    // 'transferred']) excluded, so the old watchdog found ZERO rows here.
+    const [pre] = await db
+      .select({ state: vaultEmissions.state })
+      .from(vaultEmissions)
+      .where(eq(vaultEmissions.orderId, orderId));
+    expect(pre?.state).toBe('pending');
+
+    // First run: DETECTS the pending strand and pages exactly once.
+    const first = await runVaultEmissionStuckWatchdog({ thresholdMinutes: 15 });
+    expect(first.notified).toBe(true);
+    expect(notifyMock).toHaveBeenCalledTimes(1);
+    // The page's `states` summary names `pending` — proof it is the
+    // pending strand that fired, not some other in-flight row.
+    expect(notifyMock.mock.calls[0]?.[0]).toMatchObject({ states: 'pending' });
+    const [alert1] = await db
+      .select()
+      .from(watchdogAlertState)
+      .where(eq(watchdogAlertState.watchdogName, 'vault-emission-stuck-watchdog'));
+    expect(alert1?.alertActive).toBe(true);
+
+    // Second run while the strand persists: fire-once holds — no
+    // duplicate page.
+    const second = await runVaultEmissionStuckWatchdog({ thresholdMinutes: 15 });
+    expect(second.notified).toBe(false);
+    expect(notifyMock).toHaveBeenCalledTimes(1);
   });
 
   // ─── ADR 031 V7 — admin re-drive support ────────────────────────────────

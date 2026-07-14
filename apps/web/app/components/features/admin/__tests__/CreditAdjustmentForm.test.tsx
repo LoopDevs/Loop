@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ApiException } from '@loop/shared';
 import type * as AdminModule from '~/services/admin';
 import { useAuthStore } from '~/stores/auth.store';
+import { useAdminStepUpStore } from '~/stores/admin-step-up.store';
 import { CreditAdjustmentForm, parseAmountMajor } from '../CreditAdjustmentForm';
 
 afterEach(cleanup);
@@ -35,6 +36,9 @@ beforeEach(() => {
   stepUpMock.mintAdminStepUp.mockReset();
   // StepUpModal reads the admin email from the auth store to send the OTP.
   useAuthStore.setState({ email: 'admin@loop.test' });
+  // P2-07: the modal reads the pending-action summary from this store —
+  // reset it so no stale summary leaks between tests.
+  useAdminStepUpStore.setState({ pendingAction: null, token: null, expiresAtMs: null });
 
   // jsdom doesn't ship a complete <dialog> implementation.
   const proto = HTMLDialogElement.prototype as any;
@@ -239,6 +243,27 @@ describe('<CreditAdjustmentForm /> — step-up retry (CF-09)', () => {
     await waitFor(() => {
       expect(screen.getByText(/Confirm with your verification code/)).toBeDefined();
     });
+  });
+
+  it('the step-up modal echoes the amount + target user it authorizes (P2-07)', async () => {
+    adminMock.applyCreditAdjustment.mockRejectedValue(
+      new ApiException(401, { code: 'STEP_UP_REQUIRED', message: 'Step-up required' }),
+    );
+    renderForm();
+    await submitAndConfirm('+12.34', 'goodwill credit');
+
+    const stepUpDialog = await waitFor(() => {
+      const d = Array.from(document.querySelectorAll('dialog[open]')).find((el) =>
+        /Confirm with your verification code/.test(el.textContent ?? ''),
+      );
+      if (!(d instanceof HTMLElement)) throw new Error('step-up dialog not open yet');
+      return d;
+    });
+
+    // Amount (canonical formatMinorCurrency) + the target user + action.
+    expect(within(stepUpDialog).getByText('$12.34')).toBeDefined();
+    expect(within(stepUpDialog).getByText('user-1')).toBeDefined();
+    expect(within(stepUpDialog).getByText('Apply credit adjustment')).toBeDefined();
   });
 
   it('reuses the same Idempotency-Key across the step-up retry — no double-credit risk', async () => {

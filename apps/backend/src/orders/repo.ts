@@ -106,9 +106,10 @@ export interface CreateOrderArgs {
  * If the user's live balance (re-read `FOR UPDATE` inside the txn)
  * is below `chargeMinor`, the function throws
  * `InsufficientCreditError` and the txn rolls back — no order row
- * is persisted. The caller's prior `hasSufficientCredit` fast-path
- * is a UX check, not a guard; a concurrent admin adjustment could
- * drain the balance between check and insert.
+ * is persisted. This in-txn re-read is the sole balance guard on the
+ * credit path (there is no handler pre-check ahead of it): serialising
+ * every debit through the row lock means a concurrent admin
+ * adjustment or credit order can't oversell the balance.
  *
  * Payment memo is generated for on-chain methods (xlm / usdc) and
  * left null for `credit` — a balance debit doesn't cross the chain.

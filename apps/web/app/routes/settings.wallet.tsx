@@ -25,6 +25,32 @@ export function meta(): Route.MetaDescriptors {
   return [{ title: i18n.t('settings:wallet.meta.title') }];
 }
 
+/**
+ * FE-41: route-level error boundary for the wallet money screen. Without
+ * one, an unhandled render/loader error here bubbles to the root boundary
+ * (root.tsx), which replaces the whole `App` — including `NativeShell` and
+ * its `NativeTabBar` — so the native user is left on a blank screen with no
+ * tab bar and no way to navigate away (hard stuck in the Capacitor webview).
+ * Exported at the route level, React Router renders this in place of the
+ * route's element inside `NativeShell`'s `<Outlet />`, so the chrome/tab-bar
+ * stays mounted and the user keeps a recoverable error state (message +
+ * retry). Same idiom as `routes/orders.tsx`.
+ */
+export function ErrorBoundary(): React.JSX.Element {
+  const { t } = useTranslation(['settings', 'common']);
+  return (
+    <main className="max-w-2xl mx-auto px-6 py-12 text-center">
+      <h1 className="text-2xl font-semibold text-gray-900 dark:text-white mb-4">
+        {t('common:errorBoundary.heading')}
+      </h1>
+      <p className="text-gray-600 dark:text-gray-300 mb-6">{t('settings:errorBoundary.body')}</p>
+      <a href="/settings/wallet" className="text-blue-600 underline">
+        {t('settings:errorBoundary.retry')}
+      </a>
+    </main>
+  );
+}
+
 // `STELLAR_PUBKEY_REGEX` (ADR 015/016) + `loopAssetForCurrency`
 // (ADR 015) both come from `@loop/shared` — one source of truth
 // for the home-currency ↔ LOOP-asset mapping and the Stellar

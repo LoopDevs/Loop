@@ -90,7 +90,12 @@ class ResendEmailProvider implements EmailProvider {
   ) {}
 
   async sendOtpEmail(input: OtpEmailInput): Promise<void> {
-    const subject = `Your Loop verification code: ${input.code}`;
+    // NTF-18: the OTP code must NOT appear in the subject line. Mail
+    // clients surface the subject in lock-screen / push notification
+    // previews, so an interpolated code (`… code: 123456`) is
+    // shoulder-surfable and leaks via notification mirroring without
+    // the device ever being unlocked. Keep the code in the body only.
+    const subject = 'Your Loop verification code';
     const expiresAtIso = input.expiresAt.toISOString();
     const minutes = Math.max(1, Math.round((input.expiresAt.getTime() - Date.now()) / 60_000));
     const text = [

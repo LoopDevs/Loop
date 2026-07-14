@@ -22,13 +22,7 @@
  * wallet-provider-signed user→operator transfer, which is V4's job,
  * not V2's.
  */
-import {
-  Keypair,
-  Networks,
-  TransactionBuilder,
-  scValToNative,
-  type xdr,
-} from '@stellar/stellar-sdk';
+import { Keypair, TransactionBuilder, scValToNative, type xdr } from '@stellar/stellar-sdk';
 import { env } from '../../env.js';
 import { vaultsEnabled, type LoopVaultRow } from './registry.js';
 import {
@@ -137,8 +131,29 @@ function assertPositiveBigint(value: unknown, label: string): asserts value is b
   }
 }
 
-function networkPassphraseFor(network: LoopVaultRow['network']): string {
-  return network === 'mainnet' ? Networks.PUBLIC : Networks.TESTNET;
+/**
+ * The Stellar network passphrase every vault Soroban tx is signed
+ * under. Read from `LOOP_STELLAR_NETWORK_PASSPHRASE` — the SINGLE
+ * source of truth `payments/payout-submit.ts`, `payments/payout-
+ * worker.ts`, `orders/redeem.ts` and `wallet/provisioning.ts` already
+ * sign under, and the one the sibling vault read-path modules
+ * (`vault-drift-watcher.ts`, `vault-apy.ts`, `vault-emissions.ts`)
+ * derive `network` FROM.
+ *
+ * MNY-19: this used to map `vault.network` back to a HARDCODED
+ * `Networks.PUBLIC`/`Networks.TESTNET` SDK literal. Because the
+ * passphrase is hashed into the transaction's signature payload, a
+ * hardcoded value that ever diverged from the operator's actually-
+ * deployed network — a self-hosted/standalone passphrase, or a
+ * `loop_vaults.network` row out of step with the configured env — would
+ * sign for the WRONG network: valid-looking signatures that the
+ * intended network rejects (or, worse, a tx signed against a different
+ * network than the one the RPC/operator key point at). The RPC URL and
+ * operator secret are already single env values (not per-vault), so the
+ * passphrase must come from the same env, not from the row.
+ */
+function resolveNetworkPassphrase(): string {
+  return env.LOOP_STELLAR_NETWORK_PASSPHRASE;
 }
 
 function resolveRpcUrl(): string {
@@ -254,7 +269,7 @@ export async function depositToVault(args: DepositToVaultArgs): Promise<DepositT
 
   const result = await submitSorobanInvocation({
     rpcUrl: resolveRpcUrl(),
-    networkPassphrase: networkPassphraseFor(args.vault.network),
+    networkPassphrase: resolveNetworkPassphrase(),
     signerSecret: operatorSecret,
     contractId: args.vault.vaultContractId,
     functionName: 'deposit',
@@ -338,7 +353,7 @@ export async function withdrawFromVault(
 
   const result = await submitSorobanInvocation({
     rpcUrl: resolveRpcUrl(),
-    networkPassphrase: networkPassphraseFor(args.vault.network),
+    networkPassphrase: resolveNetworkPassphrase(),
     signerSecret: operatorSecret,
     contractId: args.vault.vaultContractId,
     functionName: 'withdraw',
@@ -456,7 +471,7 @@ export async function transferShares(args: TransferSharesArgs): Promise<Transfer
 
   const result = await submitSorobanInvocation({
     rpcUrl: resolveRpcUrl(),
-    networkPassphrase: networkPassphraseFor(args.vault.network),
+    networkPassphrase: resolveNetworkPassphrase(),
     signerSecret: operatorSecret,
     contractId: args.vault.shareAssetIssuer,
     functionName: 'transfer',
@@ -502,7 +517,7 @@ async function transferSharesViaProvider(args: TransferSharesArgs): Promise<Tran
     );
   }
   const rpcUrl = resolveRpcUrl();
-  const networkPassphrase = networkPassphraseFor(args.vault.network);
+  const networkPassphrase = resolveNetworkPassphrase();
 
   // CF-18 pre-check — a prior attempt's landed hash wins over building
   // anything new (mirrors `submitSorobanInvocation`'s own pre-check;
@@ -602,7 +617,7 @@ export async function readVaultState(args: ReadVaultStateArgs): Promise<VaultSta
   requireVaultsEnabled();
 
   const rpcUrl = resolveRpcUrl();
-  const networkPassphrase = networkPassphraseFor(args.vault.network);
+  const networkPassphrase = resolveNetworkPassphrase();
   const operatorSecret = resolveOperatorSecret();
 
   const supplyRetval = await simulateSorobanCall({
@@ -659,7 +674,7 @@ export async function getShareBalance(args: GetShareBalanceArgs): Promise<bigint
   const operatorSecret = resolveOperatorSecret();
   const retval = await simulateSorobanCall({
     rpcUrl: resolveRpcUrl(),
-    networkPassphrase: networkPassphraseFor(args.vault.network),
+    networkPassphrase: resolveNetworkPassphrase(),
     sourceSecret: operatorSecret,
     contractId: args.vault.shareAssetIssuer,
     functionName: 'balance',

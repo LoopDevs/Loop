@@ -2,11 +2,12 @@
  * Per-IP per-route rate limiter pulled out of `app.ts`. Three
  * exports:
  *
- * - `clientIpFor(c)` — resolves the IP the limiter keys on, with
- *   `env.TRUST_PROXY` deciding whether `X-Forwarded-For` is
- *   trusted (audit A-023, A2-1526). Exported so the trust-proxy
- *   tests can drive the predicate end-to-end without spinning up
- *   a real rate-limited endpoint.
+ * - `clientIpFor(c)` — resolves the IP the limiter keys on. When
+ *   `env.TRUST_PROXY` is set we key on the spoof-proof
+ *   `Fly-Client-IP` header (audit A-023, A2-1526, FT-08), NOT the
+ *   client-controllable leftmost `X-Forwarded-For`. Exported so the
+ *   trust-proxy tests can drive the predicate end-to-end without
+ *   spinning up a real rate-limited endpoint.
  * - `rateLimit(name, max, windowMs)` — Hono middleware factory.
  *   Returns 429 with `Retry-After` when the per-IP-per-route
  *   budget is exceeded, bumping `incrementRateLimitHit()` so the
@@ -41,22 +42,34 @@ const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 const RATE_LIMIT_MAP_MAX = 10_000;
 
 /**
- * Resolves the client IP the rate limiter should key on. Audit
- * A-023: previously `c.req.header('x-forwarded-for')?.split(',')[0]`
- * was used unconditionally, meaning any client could send an
- * `X-Forwarded-For` with an arbitrary value and bypass per-IP
- * limits by rotating that value.
+ * Resolves the client IP the rate limiter should key on. The IP MUST
+ * come from a source the client cannot forge, or the per-IP limit —
+ * and the OTP-lockout it feeds — collapses.
+ *
+ * Audit A-023: originally `c.req.header('x-forwarded-for')?.split(',')[0]`
+ * was used unconditionally, so any client could set `X-Forwarded-For`
+ * to an arbitrary value and rotate their per-IP bucket at will.
+ *
+ * FT-08: that leftmost-XFF read is *still* spoofable when
+ * `TRUST_PROXY=true` behind Fly. Fly's edge does not replace
+ * `X-Forwarded-For`; it *appends* the real peer, so the leftmost
+ * entry is whatever the client sent. Keying on it lets an attacker
+ * (a) rotate the leftmost value per request to dodge their own
+ * bucket, and (b) pin a victim's IP into the leftmost slot to burn
+ * down that victim's request-otp budget and force the OTP lockout.
  *
  * Policy:
- *   - `env.TRUST_PROXY === true`: we're behind a trusted edge
- *     proxy (Fly.io, nginx, Cloud Run, etc.) that writes
- *     X-Forwarded-For. Use the leftmost value — that's the
- *     original client the edge saw.
- *   - `env.TRUST_PROXY === false`: no trusted proxy in front of
- *     us. Use the TCP socket's remote address. Ignores
- *     X-Forwarded-For entirely.
+ *   - `env.TRUST_PROXY === true`: we're behind Fly's edge. Key on
+ *     `Fly-Client-IP` — Fly overwrites it with the true edge-observed
+ *     peer, so a client cannot forge it. `X-Forwarded-For` is NOT
+ *     consulted at all. If `Fly-Client-IP` is somehow absent we fall
+ *     through to the TCP socket peer — never to the spoofable XFF.
+ *   - `env.TRUST_PROXY === false`: no trusted proxy in front of us.
+ *     Use the TCP socket's remote address; ignore every forwarding
+ *     header (a direct attacker could forge any of them, including
+ *     `Fly-Client-IP`).
  *
- * Returns the string `'unknown'` only if both sources fail — rate
+ * Returns the string `'unknown'` only if all sources fail — rate
  * limits still apply but everyone lands in the same bucket, which
  * is conservative.
  */
@@ -67,11 +80,12 @@ const RATE_LIMIT_MAP_MAX = 10_000;
 // this for every request.
 export function clientIpFor(c: Context): string {
   if (env.TRUST_PROXY) {
-    const xff = c.req.header('x-forwarded-for');
-    if (xff !== undefined && xff.length > 0) {
-      const first = xff.split(',')[0]?.trim();
-      if (first !== undefined && first.length > 0) return first;
-    }
+    // Spoof-proof source: Fly's edge overwrites `Fly-Client-IP` with the
+    // real peer it saw, so a client cannot forge it. We deliberately do
+    // NOT read `X-Forwarded-For` — behind Fly its leftmost entry is
+    // attacker-controlled, which is exactly the bypass FT-08 closes.
+    const flyClientIp = c.req.header('fly-client-ip')?.trim();
+    if (flyClientIp !== undefined && flyClientIp.length > 0) return flyClientIp;
   }
   try {
     const info = getConnInfo(c);

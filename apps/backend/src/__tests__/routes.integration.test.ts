@@ -14,8 +14,10 @@ vi.mock('../env.js', () => ({
     CTX_CLIENT_ID_WEB: 'loopweb',
     CTX_CLIENT_ID_IOS: 'loopios',
     CTX_CLIENT_ID_ANDROID: 'loopandroid',
-    // Audit A-023 — rate limiter trusts X-Forwarded-For only when this
-    // is true. Integration tests inject XFF values, so enable trust.
+    // Audit A-023 / FT-08 — the rate limiter keys on the client IP only when
+    // this is true; behind a trusted proxy it reads the spoof-proof
+    // `Fly-Client-IP` header. Integration tests inject Fly-Client-IP values,
+    // so enable trust.
     TRUST_PROXY: true,
   },
 }));
@@ -75,13 +77,28 @@ vi.mock('../clustering/handler.js', () => ({
   ),
 }));
 
-// Mock Discord notifiers so the health-change tests can observe the
-// flap-damping behavior via call counts without hitting a webhook.
-const mockNotifyHealthChange = vi.hoisted(() => vi.fn());
-vi.mock('../discord.js', async (importOriginal) => {
-  const orig = (await importOriginal()) as Record<string, unknown>;
-  return { ...orig, notifyHealthChange: mockNotifyHealthChange };
-});
+// CONV-WATCH-02: the health-change page is now routed through the
+// fleet-wide `watchdog_alert_state` dedup gate (`applyBinaryWatchdogAlert`)
+// instead of the old per-process `notifyHealthChange`. Mock the gate so
+// the flap-damping tests can observe the paging behavior via call
+// counts/args without hitting the DB or a webhook — a healthy→degraded
+// flip invokes it once with `shouldBeActive: true`, a degraded→healthy
+// flip once with `shouldBeActive: false`. (The real gate + real
+// `watchdog_alert_state` persistence/dedup/re-arm is covered end-to-end by
+// `__tests__/integration/health-change-dedup.test.ts`.)
+const applyBinaryWatchdogAlertMock = vi.hoisted(() =>
+  vi.fn<
+    (args: {
+      watchdogName: string;
+      shouldBeActive: boolean;
+      notifyActive: () => Promise<boolean>;
+      notifyRecovered: () => Promise<boolean>;
+    }) => Promise<boolean>
+  >(async () => true),
+);
+vi.mock('../credits/vaults/vault-watchdog-alert.js', () => ({
+  applyBinaryWatchdogAlert: applyBinaryWatchdogAlertMock,
+}));
 
 // Mock circuit breaker to pass through to global fetch (avoids cross-test state leaks).
 // A2-1305: also mirror the production circuit-breaker's CTX-request-id
@@ -132,6 +149,7 @@ import {
   recordOtpSendSuccess,
   setOtpDeliveryEnabled,
 } from '../runtime-health.js';
+import { __resetMetricsForTests, setMoneyIntegrityBreach } from '../metrics.js';
 
 // Mock global fetch for upstream proxy calls
 const mockFetch = vi.fn();
@@ -139,7 +157,7 @@ vi.stubGlobal('fetch', mockFetch);
 
 beforeEach(() => {
   mockFetch.mockReset();
-  mockNotifyHealthChange.mockReset();
+  applyBinaryWatchdogAlertMock.mockReset().mockResolvedValue(true);
   // /health caches the upstream reachability probe for 10s so external
   // spammers don't turn into an outbound fetch amplifier. Invalidate the
   // cache between cases so the reachable→unreachable transition is
@@ -285,12 +303,12 @@ describe('GET /health', () => {
     const res = await app.request('/health');
     const body = (await res.json()) as { status: string };
     expect(body.status).toBe('degraded');
-    expect(mockNotifyHealthChange).not.toHaveBeenCalled();
+    expect(applyBinaryWatchdogAlertMock).not.toHaveBeenCalled();
   });
 
   it('a single failed probe after healthy does not fire the degraded notify', async () => {
     await driveHealth(['ok', 'fail']);
-    expect(mockNotifyHealthChange).not.toHaveBeenCalled();
+    expect(applyBinaryWatchdogAlertMock).not.toHaveBeenCalled();
   });
 
   it('4 of 5 bad probes does NOT trip degraded — threshold is 5-of-window', async () => {
@@ -298,51 +316,61 @@ describe('GET /health', () => {
     // 4 degraded < 5 threshold. The old streak detector would have
     // fired on the 2nd failure in a row; the window tolerates it.
     await driveHealth(['ok', 'fail', 'fail', 'fail', 'fail']);
-    expect(mockNotifyHealthChange).not.toHaveBeenCalled();
+    expect(applyBinaryWatchdogAlertMock).not.toHaveBeenCalled();
   });
 
   it('5 of 10 bad probes fires degraded exactly once', async () => {
     await driveHealth(['ok', 'fail', 'fail', 'fail', 'fail', 'fail']);
-    // Window now has 5 degraded — at the threshold.
-    expect(mockNotifyHealthChange).toHaveBeenCalledTimes(1);
-    expect(mockNotifyHealthChange).toHaveBeenCalledWith('degraded', expect.any(String));
+    // Window now has 5 degraded — at the threshold. The flip pages once
+    // through the fleet-wide gate, keyed 'health-change' with
+    // shouldBeActive=true (degraded).
+    expect(applyBinaryWatchdogAlertMock).toHaveBeenCalledTimes(1);
+    expect(applyBinaryWatchdogAlertMock).toHaveBeenCalledWith(
+      expect.objectContaining({ watchdogName: 'health-change', shouldBeActive: true }),
+    );
   });
 
   it('one transient timeout inside a healthy run is absorbed — no flap to Discord', async () => {
     // Drive a realistic "mostly fine, one blip" pattern. The
     // supermajority stays healthy so nothing fires.
     await driveHealth(['ok', 'ok', 'ok', 'fail', 'ok', 'ok', 'ok', 'ok', 'ok', 'ok']);
-    expect(mockNotifyHealthChange).not.toHaveBeenCalled();
+    expect(applyBinaryWatchdogAlertMock).not.toHaveBeenCalled();
   });
 
   it('a partial recovery (4 successes after degraded) is NOT enough to flip back', async () => {
     // Drive into degraded first (6 fails on top of 1 healthy seed).
     await driveHealth(['ok', 'fail', 'fail', 'fail', 'fail', 'fail']);
-    expect(mockNotifyHealthChange).toHaveBeenCalledTimes(1);
+    expect(applyBinaryWatchdogAlertMock).toHaveBeenCalledTimes(1);
 
     // 4 healthy readings — not enough (threshold is 8 healthy in the
-    // 10-wide window).
+    // 10-wide window). No flip → the gate is not invoked again (still 1).
     await driveHealth(['ok', 'ok', 'ok', 'ok']);
-    expect(mockNotifyHealthChange).toHaveBeenCalledTimes(1);
+    expect(applyBinaryWatchdogAlertMock).toHaveBeenCalledTimes(1);
   });
 
   it('8 of 10 healthy probes after a degraded flip eventually flip back to healthy', async () => {
     // Drive degraded via 5 bad readings on top of 1 seed.
     await driveHealth(['ok', 'fail', 'fail', 'fail', 'fail', 'fail']);
-    expect(mockNotifyHealthChange).toHaveBeenCalledWith('degraded', expect.any(String));
+    expect(applyBinaryWatchdogAlertMock).toHaveBeenCalledWith(
+      expect.objectContaining({ watchdogName: 'health-change', shouldBeActive: true }),
+    );
 
-    // The full-reset below clears the 30-min notify cooldown (this is
-    // what stands in the way of the recovery fire in a real process
-    // running within the cooldown window; the test fast-forwards it).
+    // The full-reset below clears the per-machine hysteresis state (this
+    // is what stands in the way of the recovery fire in a real process;
+    // the gate's own dedup is fleet-wide, not per-process). Reset the gate
+    // mock too so the recovery flip is observed in isolation.
     __resetHealthProbeCacheForTests();
-    mockNotifyHealthChange.mockReset();
+    applyBinaryWatchdogAlertMock.mockReset().mockResolvedValue(true);
 
     // Re-seed degraded, then push enough healthy probes to cross
     // the 8-of-10 threshold.
     await driveHealth(['fail', 'fail', 'fail', 'fail', 'fail']); // window = [d,d,d,d,d]
     await driveHealth(['ok', 'ok', 'ok', 'ok', 'ok', 'ok', 'ok', 'ok']);
-    // Window now has 8 healthy out of last 10 → flip back.
-    expect(mockNotifyHealthChange).toHaveBeenCalledWith('healthy', expect.any(String));
+    // Window now has 8 healthy out of last 10 → flip back. The recovery
+    // page routes through the same gate with shouldBeActive=false (healthy).
+    expect(applyBinaryWatchdogAlertMock).toHaveBeenCalledWith(
+      expect.objectContaining({ watchdogName: 'health-change', shouldBeActive: false }),
+    );
   });
 });
 
@@ -517,7 +545,7 @@ describe('app-level middleware', () => {
     const doReq = (): Promise<Response> | Response =>
       app.request('/api/auth/request-otp', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-forwarded-for': ip },
+        headers: { 'Content-Type': 'application/json', 'fly-client-ip': ip },
         body: JSON.stringify({ email: 'u@example.com' }),
       });
 
@@ -752,6 +780,38 @@ describe('app-level middleware', () => {
     expect(body).toContain('loop_rate_limit_fleet_estimate_source 0');
   });
 
+  it('/metrics exposes money-integrity breach gauges independent of Discord (FT-07/NS-02)', async () => {
+    // Simulate what a watcher does when it finds a standing breach: a
+    // ledger drift + a vault solvency breach are live, while asset
+    // drift last evaluated clean. Before FT-07 the /metrics surface
+    // carried NO money-integrity gauge at all, so a live ledger/
+    // solvency breach was a green dashboard detectable only via Discord.
+    __resetMetricsForTests();
+    setMoneyIntegrityBreach('ledger_invariant', true);
+    setMoneyIntegrityBreach('vault_solvency', true);
+    setMoneyIntegrityBreach('asset_drift', false);
+
+    const res = await app.request('/metrics');
+    const body = await res.text();
+
+    expect(body).toContain('# TYPE loop_money_integrity_breach_active gauge');
+    // The breached signals must read 1 — the whole point of the gauge.
+    expect(body).toContain('loop_money_integrity_breach_active{signal="ledger_invariant"} 1');
+    expect(body).toContain('loop_money_integrity_breach_active{signal="vault_solvency"} 1');
+    // An evaluated-clean signal reads 0 (checked, not breached) — not absent.
+    expect(body).toContain('loop_money_integrity_breach_active{signal="asset_drift"} 0');
+    // A signal no watcher has evaluated yet is absent (no false "clean").
+    expect(body).not.toContain('loop_money_integrity_breach_active{signal="operator_float"}');
+    // Freshness gauge so "checked and clean" is distinguishable from
+    // "not being checked" (absent).
+    expect(body).toContain('# TYPE loop_money_integrity_last_evaluated_timestamp_ms gauge');
+    expect(body).toMatch(
+      /loop_money_integrity_last_evaluated_timestamp_ms\{signal="ledger_invariant"\} \d{13}/,
+    );
+
+    __resetMetricsForTests();
+  });
+
   it('/metrics emits exactly one HELP line per metric (audit A-016)', async () => {
     // Prometheus exposition format requires at most one HELP line per
     // metric. We briefly emitted two for loop_circuit_state (one for the
@@ -770,6 +830,8 @@ describe('app-level middleware', () => {
       'loop_geo_db_stale',
       'loop_rate_limit_fleet_estimate',
       'loop_rate_limit_fleet_estimate_source',
+      'loop_money_integrity_breach_active',
+      'loop_money_integrity_last_evaluated_timestamp_ms',
     ]) {
       const helpLines = body.split('\n').filter((l) => l.startsWith(`# HELP ${metric} `));
       expect(helpLines, `expected exactly one HELP line for ${metric}`).toHaveLength(1);
@@ -810,5 +872,59 @@ describe('bodyLimit middleware (A2-1005)', () => {
     });
     // Handler-level 400 for missing email — NOT the middleware's 413.
     expect(res.status).toBe(400);
+  });
+
+  // BK-bodylimit: the global volumetric rate limiter (`globalRateLimit`,
+  // 600/min/IP) MUST sit ahead of the body-size check in the middleware
+  // chain. `bodyLimit` short-circuits an oversized request with a 413
+  // and never calls `next()`; if it ran first, an attacker flooding
+  // oversized bodies would be rejected by size before the rate limiter
+  // ever counted the traffic, so the volumetric backstop would never
+  // engage on that flood. This asserts the observable consequence of
+  // the correct order: once a client's global per-IP budget is spent,
+  // an oversized-body request is throttled (429) rather than slipping
+  // straight to the size backstop (413) — i.e. oversized bodies are
+  // still counted by, and subject to, the rate limiter.
+  it('BK-bodylimit: oversized-body requests hit the global rate limit (429), not the size check (413), once the per-IP budget is spent', async () => {
+    const ip = '198.51.100.200';
+    // `globalRateLimit()` is mounted with its documented default budget
+    // (600/min/IP); the test fleet-size estimate is 1, so the effective
+    // ceiling is exactly 600. Prime the global per-IP bucket to that
+    // ceiling with cheap, body-less requests to an unmatched route (a
+    // 404 still traverses every global middleware, including the
+    // limiter, but carries no per-route limiter of its own — so only
+    // the `__global__` bucket is spent).
+    // Sequential by design: each request must land in the same 60s
+    // window to accumulate into one shared per-IP bucket.
+    const GLOBAL_BUDGET = 600;
+    for (let i = 0; i < GLOBAL_BUDGET; i++) {
+      const primer = await app.request('/api/bk-bodylimit-prime', {
+        method: 'GET',
+        headers: { 'fly-client-ip': ip },
+      });
+      // Sanity: priming stays under budget, so none of these is itself a 429.
+      expect(primer.status).toBe(404);
+    }
+
+    // The bucket is now at its ceiling. The next request from this IP —
+    // an oversized-body POST — must be seen and rejected by the limiter
+    // (429) before the body-size check (413) can short-circuit it.
+    const oversized = 'a'.repeat(1024 * 1024 + 1);
+    const res = await app.request('/api/bk-bodylimit-prime', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': String(oversized.length),
+        'fly-client-ip': ip,
+      },
+      body: oversized,
+    });
+
+    // Pre-fix (bodyLimit ahead of globalRateLimit) this is 413: the
+    // oversized body is rejected by size and never reaches — or is
+    // counted by — the limiter. Post-fix it is 429.
+    expect(res.status).toBe(429);
+    const body = (await res.json()) as { code: string; message: string };
+    expect(body.code).toBe('RATE_LIMITED');
   });
 });

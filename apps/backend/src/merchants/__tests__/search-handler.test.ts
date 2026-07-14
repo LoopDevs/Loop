@@ -8,8 +8,9 @@ const mockEnv = vi.hoisted(() => ({
   GIFT_CARD_API_BASE_URL: 'http://test-upstream.local',
   REFRESH_INTERVAL_HOURS: 6,
   LOCATION_REFRESH_INTERVAL_HOURS: 24,
-  // Rate-limit test below drives requests via `x-forwarded-for` — matches
-  // the auth handler test's pattern (auth/__tests__/handler.test.ts).
+  // Rate-limit test below drives requests via the spoof-proof `Fly-Client-IP`
+  // header (FT-08) — matches the auth handler test's pattern
+  // (auth/__tests__/handler.test.ts).
   TRUST_PROXY: true,
 }));
 
@@ -217,7 +218,7 @@ describe('GET /api/merchants/search', () => {
     let last: Response | undefined;
     for (let i = 0; i < 181; i++) {
       last = await app.request('/api/merchants/search?q=store', {
-        headers: { 'x-forwarded-for': '203.0.113.9' },
+        headers: { 'fly-client-ip': '203.0.113.9' },
       });
     }
     expect(last?.status).toBe(429);

@@ -33,8 +33,30 @@ export interface DriftEntry {
   balanceMinor: string;
   /** Sum of `credit_transactions.amount_minor` for the (user, currency) pair. */
   ledgerSumMinor: string;
-  /** `balanceMinor - ledgerSumMinor`. Non-zero by construction. */
+  /**
+   * `balanceMinor - ledgerSumMinor`. Non-zero for a materialised
+   * (`user_credits`-backed) drift row. For an ORPHAN row (`orphan: true`)
+   * it may be `"0"`: `credit_transactions` rows exist for a (user,
+   * currency) that has NO `user_credits` row, and those rows net to zero
+   * (e.g. `+100` and `-100`). That is still an ADR-009 violation — a
+   * materialised balance row must exist for any (user, currency) that has
+   * ledger activity — but `SUM(amount_minor)` collapses the offsetting
+   * rows to `0`, so the delta alone can't distinguish it from a clean
+   * ledger. `orphan` is the non-collapsing signal that qualifies such a
+   * zero-sum row as drift (DAT-06).
+   */
   deltaMinor: string;
+  /**
+   * DAT-06: `true` iff this is an ORPHAN — `credit_transactions` rows
+   * exist with no matching `user_credits` row. Present (and `true`) only
+   * on orphan rows; omitted for materialised-balance drift rows. Read it
+   * as "a balance row is missing, not merely wrong": it stays `true`
+   * regardless of whether the orphaned rows net to zero, so a zero-sum
+   * orphan is detected instead of reading as clean, and it disambiguates
+   * an orphan from a genuine `balance_minor = 0` mismatch (both carry
+   * `balanceMinor: "0"`).
+   */
+  orphan?: boolean;
 }
 
 export interface BalanceRow {
@@ -57,8 +79,13 @@ export interface TransactionRow {
  *   1. A balance row exists whose ledger sum differs.
  *   2. A balance row exists but no transactions match → drift iff
  *      balance != 0.
- *   3. Transactions exist but no balance row → orphan; balance
- *      treated as 0, delta = -ledgerSum.
+ *   3. Transactions exist but no balance row → orphan (`orphan: true`);
+ *      balance treated as 0, delta = -ledgerSum. DAT-06: an orphan is
+ *      emitted for EVERY (user, currency) with orphaned rows — including
+ *      one whose rows net to zero (delta `"0"`) — because the missing
+ *      balance row is the violation, not the net magnitude. The `orphan`
+ *      flag carries that signal so a zero-sum orphan isn't collapsed to a
+ *      row indistinguishable from clean.
  *
  * Matches the SQL `UNION ALL` shape in `adminReconciliationHandler`.
  * Results ordered by `userId` for deterministic test output.
@@ -103,6 +130,10 @@ export function computeLedgerDriftFromRows(
       balanceMinor: '0',
       ledgerSumMinor: ledgerSum.toString(),
       deltaMinor: (-ledgerSum).toString(),
+      // DAT-06: flag the orphan explicitly. `-ledgerSum` is `"0"` for a
+      // zero-sum orphan (offsetting rows), so this flag — not the delta —
+      // is what keeps it from reading as clean.
+      orphan: true,
     });
   }
 
@@ -120,6 +151,7 @@ interface DriftSqlRow extends Record<string, unknown> {
   balanceMinor: string;
   ledgerSumMinor: string;
   deltaMinor: string;
+  orphan: boolean;
 }
 
 /**
@@ -129,7 +161,11 @@ interface DriftSqlRow extends Record<string, unknown> {
  * The query mirrors `adminReconciliationHandler`'s UNION ALL shape:
  * the balance-side anchor catches sum-disagreement and zero-sum
  * drift, the transaction-side anchor catches orphan CT rows without
- * a matching `user_credits` row.
+ * a matching `user_credits` row. DAT-06: each anchor tags its rows
+ * with an `orphan` boolean (transaction-side `TRUE`, balance-side
+ * `FALSE`) so a zero-sum orphan — whose `SUM(amount_minor)` collapses
+ * to 0 and would otherwise read as a clean `0 = 0` row — is still
+ * qualified as drift, matching `computeLedgerDriftFromRows`.
  */
 export async function computeLedgerDriftSql(
   // `execute` is the only method used — accepting the narrow shape
@@ -139,14 +175,15 @@ export async function computeLedgerDriftSql(
   limit = 1000,
 ): Promise<DriftEntry[]> {
   const result = await db.execute<DriftSqlRow>(sql`
-    SELECT "userId", currency, "balanceMinor", "ledgerSumMinor", "deltaMinor"
+    SELECT "userId", currency, "balanceMinor", "ledgerSumMinor", "deltaMinor", "orphan"
     FROM (
       SELECT
         uc.user_id::text AS "userId",
         uc.currency AS currency,
         uc.balance_minor::text AS "balanceMinor",
         COALESCE(SUM(ct.amount_minor), 0)::text AS "ledgerSumMinor",
-        (uc.balance_minor - COALESCE(SUM(ct.amount_minor), 0))::text AS "deltaMinor"
+        (uc.balance_minor - COALESCE(SUM(ct.amount_minor), 0))::text AS "deltaMinor",
+        FALSE AS "orphan"
       FROM user_credits uc
       LEFT JOIN credit_transactions ct
         ON ct.user_id = uc.user_id AND ct.currency = uc.currency
@@ -158,7 +195,11 @@ export async function computeLedgerDriftSql(
         ct.currency AS currency,
         '0' AS "balanceMinor",
         SUM(ct.amount_minor)::text AS "ledgerSumMinor",
-        (-SUM(ct.amount_minor))::text AS "deltaMinor"
+        (-SUM(ct.amount_minor))::text AS "deltaMinor",
+        -- DAT-06: orphan rows are drift regardless of their net sum. No
+        -- HAVING on the sum here (a zero-sum orphan must NOT be filtered
+        -- out); the flag carries the signal the collapsed sum can't.
+        TRUE AS "orphan"
       FROM credit_transactions ct
       LEFT JOIN user_credits uc
         ON uc.user_id = ct.user_id AND uc.currency = ct.currency
@@ -174,6 +215,10 @@ export async function computeLedgerDriftSql(
     balanceMinor: r.balanceMinor,
     ledgerSumMinor: r.ledgerSumMinor,
     deltaMinor: r.deltaMinor,
+    // Only present on orphan rows, mirroring `computeLedgerDriftFromRows`.
+    // postgres returns a JS boolean for the `TRUE`/`FALSE` literal; guard
+    // for the `'t'`/`'f'` string form too in case a driver marshals it raw.
+    ...(r.orphan === true || (r.orphan as unknown) === 't' ? { orphan: true } : {}),
   }));
 }
 

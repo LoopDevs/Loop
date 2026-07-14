@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ApiException, formatMinorCurrency } from '@loop/shared';
 import {
@@ -8,17 +8,14 @@ import {
   type CreditAdjustmentResult,
 } from '~/services/admin';
 import { useAdminStepUp } from '~/hooks/use-admin-step-up';
+import { useOnline } from '~/hooks/use-online';
 import { ReplayedBadge } from './ReplayedBadge';
 import { ConfirmDialog } from './ConfirmDialog';
 import { StepUpModal } from './StepUpModal';
+import { ADMIN_WRITE_MAX_ABS_MINOR } from './constants';
 
 const CURRENCIES = ['USD', 'GBP', 'EUR'] as const;
 type Currency = (typeof CURRENCIES)[number];
-
-// Backend caps magnitude at 10_000_000 minor (100k major units). Show
-// the friendly bound here so the form can reject pre-submit rather
-// than bouncing off the backend.
-const MAX_ABS_MINOR = 10_000_000n;
 
 interface Props {
   userId: string;
@@ -59,6 +56,11 @@ export function parseAmountMajor(raw: string): ParsedAmount | null {
 
 export function CreditAdjustmentForm({ userId, defaultCurrency }: Props): React.JSX.Element {
   const queryClient = useQueryClient();
+  // FE-43: applying a credit adjustment is a money write. Offline the request
+  // can only fail, so disable the submit (with a spoken-aloud reason) until the
+  // device reconnects — matching the PayWithLoopBalance offline-guard pattern.
+  const online = useOnline();
+  const offlineHintId = useId();
   const [amountMajor, setAmountMajor] = useState('');
   const [currency, setCurrency] = useState<Currency>(defaultCurrency);
   const [reason, setReason] = useState('');
@@ -95,7 +97,13 @@ export function CreditAdjustmentForm({ userId, defaultCurrency }: Props): React.
 
   const mutation = useMutation({
     mutationFn: (args: Parameters<typeof applyCreditAdjustment>[0]) =>
-      stepUp.runWithStepUp(() => applyCreditAdjustment(args)),
+      // P2-07: echo the signed amount + target user the OTP authorizes.
+      stepUp.runWithStepUp(() => applyCreditAdjustment(args), {
+        action: 'Apply credit adjustment',
+        scope: 'credit-adjustment',
+        amount: { minor: args.amountMinor, currency: args.currency },
+        destination: args.userId,
+      }),
     onSuccess: (envelope: AdminWriteEnvelope<CreditAdjustmentResult>) => {
       setLastApplied({ result: envelope.result, replayed: envelope.audit.replayed });
       setAmountMajor('');
@@ -132,7 +140,7 @@ export function CreditAdjustmentForm({ userId, defaultCurrency }: Props): React.
       return;
     }
     const abs = parsed.minorBigInt < 0n ? -parsed.minorBigInt : parsed.minorBigInt;
-    if (abs > MAX_ABS_MINOR) {
+    if (abs > ADMIN_WRITE_MAX_ABS_MINOR) {
       setFormError('Amount exceeds the ±100,000 major-unit limit.');
       return;
     }
@@ -224,13 +232,19 @@ export function CreditAdjustmentForm({ userId, defaultCurrency }: Props): React.
         <div className="sm:col-span-1 flex items-end">
           <button
             type="submit"
-            disabled={mutation.isPending}
+            disabled={mutation.isPending || !online}
+            aria-describedby={!online ? offlineHintId : undefined}
             className="w-full rounded-lg border border-gray-900 bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white dark:bg-white dark:text-gray-900 dark:hover:bg-gray-200"
           >
             {mutation.isPending ? 'Applying…' : 'Apply adjustment'}
           </button>
         </div>
       </div>
+      {!online && (
+        <p id={offlineHintId} className="text-xs text-gray-500 dark:text-gray-400">
+          You’re offline — reconnect to apply the adjustment.
+        </p>
+      )}
       <label className="space-y-1 block">
         <span className="text-xs font-medium text-gray-600 dark:text-gray-400">
           Reason (2–500 chars, logged in audit)

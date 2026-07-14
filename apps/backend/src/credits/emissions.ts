@@ -116,7 +116,20 @@ const STROOPS_PER_MINOR = 100_000n;
 
 /**
  * Conservation accounting (hardening A1): net minor units already
- * materialised on-chain for this (user, asset).
+ * materialised on-chain for this (user, MIRROR CURRENCY).
+ *
+ * Scoped by mirror currency — `loop_asset_mirror_currency(asset_code)
+ * = loop_asset_mirror_currency(assetCode)` — NOT by the bare
+ * `asset_code`, to MATCH the DB conservation trigger
+ * (`assert_emission_conservation`, re-scoped by migration 0061). Since
+ * USDLOOP + LOOPUSD both mirror into 'USD' (EURLOOP + LOOPEUR into
+ * 'EUR') they share one `user_credits` headroom, so both must be
+ * summed together. Scoping this pre-check by the bare asset code while
+ * the trigger scopes by mirror currency lets the app pass a shared-
+ * mirror emission the trigger then rejects — surfacing as an opaque
+ * 500 instead of the intended 409 EMISSION_EXCEEDS_UNEMITTED_BALANCE
+ * (CONV-MNY-01). For a classic-only deployment (no LOOPUSD/LOOPEUR
+ * rows) this sum is identical to the old bare-asset_code sum.
  *
  * The invariant every money flow preserves is
  * `mintedNet ≤ mirror balance`:
@@ -162,7 +175,7 @@ const STROOPS_PER_MINOR = 100_000n;
  * 'payout-compensation') — do NOT unify the scopes without also
  * unifying the acquisition order.
  */
-async function emittedNetMinorFor(
+export async function emittedNetMinorFor(
   tx: Pick<typeof db, 'execute'>,
   args: { userId: string; assetCode: string },
 ): Promise<bigint> {
@@ -185,7 +198,7 @@ async function emittedNetMinorFor(
       COALESCE(SUM(amount_stroops) FILTER (WHERE kind = 'burn'), 0)::text AS burned
     FROM pending_payouts
     WHERE user_id = ${args.userId}
-      AND asset_code = ${args.assetCode}
+      AND loop_asset_mirror_currency(asset_code) = loop_asset_mirror_currency(${args.assetCode})
   `);
   const rows = Array.isArray(result)
     ? (result as Array<{ minted: string; burned: string }>)
@@ -240,6 +253,12 @@ export interface EmissionResult {
  *   - generic Error — `Emission amount must be positive` if the
  *     caller passes 0 or negative; the schema CHECK enforces this
  *     too but we fail fast with a typed message.
+ *   - generic Error — MNY-11-EMISSION-HARDENING: the caller-supplied
+ *     `amountMinor` and `intent.amountStroops` are internally
+ *     inconsistent (minor ≠ stroops / STROOPS_PER_MINOR, or the
+ *     stroops are not a whole number of minor units). Rejected at
+ *     entry so the minor-denominated fences and the stroops-denominated
+ *     mint cannot be driven by two different amounts.
  */
 export async function applyAdminEmission(args: {
   userId: string;
@@ -249,6 +268,44 @@ export async function applyAdminEmission(args: {
 }): Promise<EmissionResult> {
   if (args.amountMinor <= 0n) {
     throw new Error('Emission amount must be positive');
+  }
+
+  // MNY-11-EMISSION-HARDENING — first-line consistency guard. The
+  // caller supplies BOTH `amountMinor` and `intent.amountStroops`
+  // independently, but the two are consumed on OPPOSITE sides of the
+  // fences: the per-call balance guard (`balance < args.amountMinor`)
+  // and the A1 conservation check (`alreadyEmittedMinor +
+  // args.amountMinor > balance`) read the MINOR, while the row that is
+  // actually minted (INSERT `amountStroops`), the daily cap's checked
+  // amount (`mintedMinor = amountStroops / STROOPS_PER_MINOR`, the
+  // MNY-11-emissioncap fix), the dedup fence, and the 0044/0061
+  // `assert_emission_conservation` trigger all read the STROOPS. If the
+  // two disagree, a small `amountMinor` satisfies the minor-denominated
+  // fences while a large `amountStroops` is queued on-chain — a
+  // cap/guard bypass backstopped today only by the DB trigger (and only
+  // when the minted stroops also exceed the balance). Fail closed HERE,
+  // before any fence or DB work, so all three fences operate on one
+  // validated amount. The downstream math floor-divides stroops by
+  // STROOPS_PER_MINOR (same as `usedMinor`/`mintedMinor` below and the
+  // A4-021 sibling in payout-compensation.ts), so the minor MUST equal
+  // that floor. Emissions are whole-minor by construction — the handler
+  // computes `amountStroops = amountMinor * 100_000n` — so reject a
+  // sub-minor stroop remainder too: otherwise 150_000 stroops (1.5
+  // minor) would floor to a matching `amountMinor` of 1 while minting
+  // 1.5 minor. No DB CHECK enforces whole-minor (only amount_stroops>0),
+  // so this is the only whole-minor gate at the app boundary.
+  if (args.intent.amountStroops % STROOPS_PER_MINOR !== 0n) {
+    throw new Error(
+      `Emission amountStroops (${args.intent.amountStroops}) must be a whole multiple of ` +
+        `${STROOPS_PER_MINOR} stroops per minor unit — emissions are whole-minor`,
+    );
+  }
+  if (args.amountMinor !== args.intent.amountStroops / STROOPS_PER_MINOR) {
+    throw new Error(
+      `Emission amountMinor (${args.amountMinor}) does not match amountStroops ` +
+        `(${args.intent.amountStroops}) / ${STROOPS_PER_MINOR} = ` +
+        `${args.intent.amountStroops / STROOPS_PER_MINOR} — inconsistent caller amounts`,
+    );
   }
 
   try {
@@ -311,18 +368,43 @@ export async function applyAdminEmission(args: {
           .where(
             and(
               eq(pendingPayouts.kind, 'emission'),
-              eq(pendingPayouts.assetCode, args.intent.assetCode),
+              // MNY-11-CAPSCOPE: sum by MIRROR CURRENCY, not the bare
+              // asset_code — same `loop_asset_mirror_currency` mapping
+              // (migration 0061) the conservation SUM above and the
+              // `assert_emission_conservation` trigger use, and the same
+              // scope the advisory lock already keys on
+              // (`EMISSION_CAP_LOCK_SCOPE`, `args.currency`). The cap is
+              // declared per-currency (`ADMIN_DAILY_WITHDRAWAL_CAP_MINOR`),
+              // but scoping the sum by the raw asset_code gave each LOOP
+              // asset its OWN bucket: since USDLOOP + LOOPUSD both mirror
+              // 'USD' (EURLOOP + LOOPEUR into 'EUR'), a rogue admin could
+              // split a day's emissions across the two mirror-sharing codes
+              // and mint up to ~2x the intended per-currency ceiling. Summing
+              // across every asset code sharing the mirror closes that split.
+              sql`loop_asset_mirror_currency(${pendingPayouts.assetCode}) = loop_asset_mirror_currency(${args.intent.assetCode})`,
               sql`${pendingPayouts.createdAt} >= ${dayStart.toISOString()}`,
             ),
           );
         const usedMinor = BigInt(dayRow?.usedStroops ?? '0') / STROOPS_PER_MINOR;
-        if (usedMinor + args.amountMinor > capMinor) {
+        // MNY-11: the daily cap must bind the CHECKED value to what is
+        // actually minted. `args.amountMinor` is caller-supplied and can
+        // diverge from `intent.amountStroops` — the amount the INSERT
+        // below actually queues on-chain. Checking the caller's minor let
+        // a caller understate `amountMinor` to slip under the cap while
+        // minting a large `amountStroops` (cap bypass). DERIVE the
+        // checked minor FROM the minted stroops, the same way the sibling
+        // A4-021 (`payout-compensation.ts`: `payout.amountStroops /
+        // 100_000n`) refuses to trust a caller-supplied minor — using the
+        // same floor-division as `usedMinor` two lines above so the
+        // already-used total and this attempt are measured on one scale.
+        const mintedMinor = args.intent.amountStroops / STROOPS_PER_MINOR;
+        if (usedMinor + mintedMinor > capMinor) {
           throw new DailyAdjustmentLimitError(
             args.currency,
             dayStart,
             usedMinor,
             capMinor,
-            args.amountMinor,
+            mintedMinor,
           );
         }
       }

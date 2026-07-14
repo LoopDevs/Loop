@@ -1,9 +1,10 @@
-import { useRef, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { ApiException, CURRENCY_TO_ASSET_CODE, isHomeCurrency } from '@loop/shared';
 import type { CreateLoopOrderResponse, LoopOrderView } from '~/services/orders-loop';
 import { redeemLoopOrder, loopBalanceCoversCharge, balanceToStroops } from '~/services/wallet';
 import { useWallet, WALLET_QUERY_KEY } from '~/hooks/use-wallet';
+import { useOnline } from '~/hooks/use-online';
 import { fmtLoopBalance } from '~/components/features/wallet/WalletCard';
 import { triggerHaptic, triggerHapticNotification } from '~/native/haptics';
 import { friendlyError } from '~/utils/error-messages';
@@ -45,6 +46,14 @@ export function PayWithLoopBalance({
   const queryClient = useQueryClient();
   const { wallet, isActivated, balanceFor } = useWallet();
   const locale = useLocaleTag();
+  // Gate the tap on connectivity. Offline, the POST can only fail or hang;
+  // an enabled button just invites a re-tap and a confused "did it go
+  // through?" moment. Disabling it (with a spoken-aloud reason below) is the
+  // honest affordance — the submit/idempotency path is untouched.
+  const online = useOnline();
+  // Ties the button to whichever hint is showing so AT reads the reason it's
+  // disabled (offline / short balance) instead of an unexplained dead control.
+  const hintId = useId();
   const [isPaying, setIsPaying] = useState(false);
   // A4-122 pattern: the disabled flag depends on React state
   // propagation, which a synchronous double-tap can outrun. The ref
@@ -132,7 +141,8 @@ export function PayWithLoopBalance({
     <div className="space-y-2">
       <button
         type="button"
-        disabled={!covers || isPaying}
+        disabled={!covers || isPaying || !online}
+        aria-describedby={hintId}
         onClick={() => {
           void handlePay();
         }}
@@ -140,12 +150,16 @@ export function PayWithLoopBalance({
       >
         {isPaying ? 'Paying…' : `Pay with Loop balance — ${chargeLabel}`}
       </button>
-      {!covers ? (
-        <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
+      {!online ? (
+        <p id={hintId} className="text-xs text-gray-500 dark:text-gray-400 text-center">
+          You’re offline — reconnect to pay from your Loop balance.
+        </p>
+      ) : !covers ? (
+        <p id={hintId} className="text-xs text-gray-500 dark:text-gray-400 text-center">
           Not enough Loop balance — you have {fmtLoopBalance(balance, assetCode, locale)}.
         </p>
       ) : (
-        <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
+        <p id={hintId} className="text-xs text-gray-500 dark:text-gray-400 text-center">
           Instant — uses the cashback you’ve earned.
         </p>
       )}

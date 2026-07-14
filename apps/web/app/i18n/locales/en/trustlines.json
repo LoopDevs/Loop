@@ -1,0 +1,33 @@
+{
+  "meta": {
+    "title": "LOOP asset trustlines — Loop",
+    "description": "Verified issuer accounts for USDLOOP, GBPLOOP, and EURLOOP Stellar stablecoins. Add a trustline from any Stellar wallet to receive cashback on Loop."
+  },
+  "heading": "LOOP asset trustlines",
+  "intro": "Loop pays cashback in <bold>USDLOOP</bold>, <bold>GBPLOOP</bold>, and <bold>EURLOOP</bold> — Stellar stablecoins pinned 1:1 to your home currency. To receive on-chain payouts, add a trustline against the verified issuer account below from any Stellar wallet.",
+  "loadError": "Couldn’t load the trustline list. Please refresh.",
+  "empty": "Trustlines are being configured — check back soon.",
+  "issuersSectionLabel": "Verified LOOP asset issuers",
+  "why": {
+    "heading": "Why trustlines?",
+    "body": "On Stellar, an account needs a trustline for every non-native asset it can hold. A trustline says: <em>this account is willing to receive tokens issued by this specific issuer.</em> Without one, an on-chain payout to a USDLOOP address would simply bounce.",
+    "safety": "Using the issuer account from this page — rather than searching by asset code in your wallet — is the single most important safety step. Anyone can issue a token called “USDLOOP”; only the account below is the real Loop-operated issuer."
+  },
+  "wallets": {
+    "heading": "Recommended wallets",
+    "freighterDesc": "browser extension maintained by SDF. Adds trustlines via the Manage Assets screen.",
+    "lobstrDesc": "mobile wallet with a built-in asset search. Paste the issuer account from above."
+  },
+  "asset": {
+    "rowLabel": "{{code}} issuer details",
+    "stellarExpert": "View on Stellar Expert",
+    "issuerAccount": "Issuer account",
+    "copyIssuer": "Copy {{code}} issuer account"
+  },
+  "pinned": {
+    "USDLOOP": "1 USDLOOP = 1 US dollar cashback, backed 1:1 by Loop fiat reserves.",
+    "GBPLOOP": "1 GBPLOOP = 1 British pound cashback, backed 1:1 by Loop fiat reserves.",
+    "EURLOOP": "1 EURLOOP = 1 Euro cashback, backed 1:1 by Loop fiat reserves."
+  },
+  "back": "← Back to home"
+}

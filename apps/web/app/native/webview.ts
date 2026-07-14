@@ -46,6 +46,68 @@ function assertSafeUrl(url: string): URL {
   return parsed;
 }
 
+/**
+ * Scheme-gates a redeem URL before it is placed in an `<a href>`.
+ *
+ * Returns the URL unchanged if it clears the SAME allow-list as
+ * `openWebView` (`assertSafeUrl`: http(s) only, no embedded
+ * credentials, https-only in production), otherwise `null`.
+ *
+ * A `redeemUrl` is server/upstream-supplied. Dropped straight into an
+ * anchor, a `javascript:` / `data:` value would execute script on
+ * click — with app privileges inside the Capacitor native WebView.
+ * Anchors that can't route through `openWebView` (they render as a
+ * plain link the user taps) must gate the value here and fail closed:
+ * a rejected URL yields `null`, and the caller renders no link at all.
+ */
+export function safeRedeemHref(url: string): string | null {
+  try {
+    assertSafeUrl(url);
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Scheme-gates a SEP-7 payment URI before it is placed in an `<a href>`.
+ *
+ * `paymentUri` is a server-supplied field on the create-order / order-read
+ * API responses — Loop builds it via `buildSep7PayUri`, but it can also be
+ * threaded straight through from CTX's upstream `paymentUrls` map. From the
+ * client's side it is server/upstream-controlled and must not be trusted:
+ * a `javascript:` / `data:` / `vbscript:` value dropped into an anchor
+ * would execute on tap with app privileges inside the Capacitor native
+ * WebView — the SAME XSS class `safeRedeemHref` closes for `redeemUrl`.
+ *
+ * A legitimate payment URI uses the SEP-7 `web+stellar:` / `stellar:`
+ * scheme, which `safeRedeemHref` (http(s)-only, by design for redeem URLs)
+ * deliberately rejects. So this gate allow-lists exactly those two schemes
+ * — applying the same fail-closed embedded-credential guard as
+ * `assertSafeUrl` — and defers every other scheme to `safeRedeemHref`,
+ * reusing one sanitizer rather than forking a second. Anything outside the
+ * allow-list yields `null`, and the caller renders no live link at all.
+ */
+export function safePaymentUriHref(url: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol === 'web+stellar:' || parsed.protocol === 'stellar:') {
+    // Mirror assertSafeUrl's embedded-credential guard. A legitimate SEP-7
+    // URI is opaque (`web+stellar:pay?...`) and carries none; the authority
+    // form `web+stellar://user:pass@…` is a phishing shape we fail closed.
+    if (parsed.username !== '' || parsed.password !== '') return null;
+    return url;
+  }
+  // Not a SEP-7 scheme: fall back to the redeem-URL gate (http(s) only, no
+  // embedded credentials, https-only in production). javascript: / data: /
+  // vbscript: fail closed to null there.
+  return safeRedeemHref(url);
+}
+
 function originOf(rawUrl: string): string | null {
   try {
     return new URL(rawUrl).origin;
@@ -72,15 +134,22 @@ export async function openWebView(
       const { InAppBrowser, ToolBarType } = await import('@capgo/inappbrowser');
       let currentOrigin: string | null = allowedMessageOrigin;
 
-      // Listen for messages from injected scripts
-      if (onMessage) {
-        // R3-13: `messageFromWebview` does not include a browser-native
-        // MessageEvent.origin, so keep our own current-page origin from the
-        // plugin's URL-change event and only accept messages while the WebView
-        // is still on the original redeem origin.
+      // Track the WebView's current page origin across navigations. The
+      // plugin's `messageFromWebview` / `browserPageLoaded` events carry no
+      // browser-native MessageEvent.origin (R3-13), so this URL-change event
+      // is our only origin source. BOTH the inbound message path and the
+      // outbound script-injection path below gate on
+      // `currentOrigin === allowedMessageOrigin`, so it must be kept fresh
+      // whenever either path is active.
+      if (onMessage || scripts.length > 0) {
         await InAppBrowser.addListener('urlChangeEvent', (event) => {
           currentOrigin = typeof event.url === 'string' ? originOf(event.url) : null;
         });
+      }
+
+      // Listen for messages from injected scripts. Only accept a message while
+      // the WebView is still on the original redeem origin (R3-13).
+      if (onMessage) {
         await InAppBrowser.addListener('messageFromWebview', (event) => {
           if (currentOrigin !== allowedMessageOrigin) return;
           // The plugin sends { detail, rawMessage } — try parsing detail or rawMessage
@@ -102,9 +171,15 @@ export async function openWebView(
         });
       }
 
-      // Inject scripts after page loads
+      // Inject scripts after page loads — but ONLY while the WebView is still
+      // on the intended redeem origin. If it has navigated away (merchant
+      // redirect, an ad, an attacker-controlled page), `currentOrigin` drifts
+      // and we must NOT inject: an injected script can carry a redeem
+      // code/PIN and would leak it cross-origin (P2-04). Mirrors the inbound
+      // `messageFromWebview` origin gate above exactly.
       if (scripts.length > 0) {
         await InAppBrowser.addListener('browserPageLoaded', () => {
+          if (currentOrigin !== allowedMessageOrigin) return;
           for (const script of scripts) {
             void InAppBrowser.executeScript({ code: script });
           }

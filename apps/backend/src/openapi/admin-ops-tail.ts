@@ -104,6 +104,10 @@ export function registerAdminOpsTailOpenApi(
         description: 'Rate limit exceeded (60/min per IP)',
         content: { 'application/json': { schema: errorResponse } },
       },
+      500: {
+        description: 'Internal error',
+        content: { 'application/json': { schema: errorResponse } },
+      },
     },
   });
 
@@ -194,6 +198,10 @@ export function registerAdminOpsTailOpenApi(
       },
       502: {
         description: 'Upstream CTX catalog fetch failed — cached snapshot retained',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      500: {
+        description: 'Internal error',
         content: { 'application/json': { schema: errorResponse } },
       },
     },

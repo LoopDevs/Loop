@@ -36,11 +36,16 @@ vi.mock('../../discord.js', async (importActual) => {
 });
 
 import { db } from '../../db/client.js';
-import { users, creditTransactions, userCredits } from '../../db/schema.js';
+import { users } from '../../db/schema.js';
 import { findOrCreateUserByEmail } from '../../db/users.js';
 import { signLoopToken, DEFAULT_ACCESS_TTL_SECONDS } from '../../auth/tokens.js';
 import { app } from '../../app.js';
-import { ensureMigrated, truncateAllTables } from './db-test-setup.js';
+import {
+  ensureMigrated,
+  truncateAllTables,
+  seedUserCreditsWithBackingLedger,
+  seedLedgerRowsWithMirrorBalance,
+} from './db-test-setup.js';
 
 const describeIf = RUN_INTEGRATION ? describe : describe.skip;
 
@@ -58,6 +63,9 @@ async function seedUser(email: string): Promise<SeededUser> {
     email: user.email,
     typ: 'access',
     ttlSeconds: DEFAULT_ACCESS_TTL_SECONDS,
+    // NS-09: stamp the seeded user's current token_version (0) so
+    // requireAuth's revocation check admits the token.
+    tv: user.tokenVersion,
   });
   return { userId: user.id, email: user.email, bearer: access.token };
 }
@@ -77,19 +85,23 @@ describeIf('cashback-history integration — JSON pagination + caller scope', ()
     // DESC ordering is unambiguous. The handler defaults to limit=20
     // so we should see the newest 20.
     const base = new Date('2026-01-01T00:00:00Z').getTime();
-    for (let i = 0; i < 25; i++) {
-      // No reference — the partial unique index on
-      // (type, reference_type, reference_id) only fires when the
-      // reference fields are populated. Pagination test doesn't care
-      // about ref_id, so leaving them null keeps the seed simple.
-      await db.insert(creditTransactions).values({
-        userId: me.userId,
-        type: 'cashback',
-        amountMinor: BigInt(100 + i),
-        currency: 'USD',
-        createdAt: new Date(base + i * 1000),
-      });
-    }
+    // No reference — the partial unique index on
+    // (type, reference_type, reference_id) only fires when the
+    // reference fields are populated. Pagination test doesn't care
+    // about ref_id, so leaving them null keeps the seed simple.
+    // DAT-01-inv1 (migration 0066): seed the ledger rows AND a matching
+    // mirror balance (this helper derives the balance from the ledger
+    // sum) in one txn, so the one-sided ledger seed no longer trips the
+    // deferred mirror-invariant trigger. The endpoint reads only the
+    // ledger, so the added balance row is invisible to the assertions.
+    const rows = Array.from({ length: 25 }, (_, i) => ({
+      userId: me.userId,
+      type: 'cashback' as const,
+      amountMinor: BigInt(100 + i),
+      currency: 'USD',
+      createdAt: new Date(base + i * 1000),
+    }));
+    await seedLedgerRowsWithMirrorBalance(db, rows);
 
     const res = await app.request('http://localhost/api/users/me/cashback-history', {
       method: 'GET',
@@ -106,8 +118,11 @@ describeIf('cashback-history integration — JSON pagination + caller scope', ()
   it('?before=<iso> excludes rows AT or AFTER that timestamp', async () => {
     const me = await seedUser('history-before@test.local');
     const cursorTime = new Date('2026-02-01T00:00:00Z');
-    // 3 rows BEFORE cursor + 2 rows AT/AFTER cursor.
-    await db.insert(creditTransactions).values([
+    // 3 rows BEFORE cursor + 2 rows AT/AFTER cursor. DAT-01-inv1
+    // (migration 0066): seed the rows + a matching mirror balance in one
+    // txn (helper derives the balance from the ledger sum); invisible to
+    // this ledger-read endpoint's assertions.
+    await seedLedgerRowsWithMirrorBalance(db, [
       {
         userId: me.userId,
         type: 'cashback',
@@ -173,7 +188,10 @@ describeIf('cashback-history integration — JSON pagination + caller scope', ()
   it('caller-scoping — never returns another user`s ledger rows', async () => {
     const me = await seedUser('history-me@test.local');
     const other = await seedUser('history-other@test.local');
-    await db.insert(creditTransactions).values([
+    // DAT-01-inv1: seed each user's ledger row + its matching mirror
+    // balance (per-user sums) atomically. Both users' rows land in one
+    // txn, so the deferred trigger sees an equal mirror for each.
+    await seedLedgerRowsWithMirrorBalance(db, [
       { userId: me.userId, type: 'cashback', amountMinor: 100n, currency: 'USD' },
       { userId: other.userId, type: 'cashback', amountMinor: 999n, currency: 'USD' },
     ]);
@@ -212,7 +230,10 @@ describeIf('cashback-history-csv integration — wire shape + escaping', () => {
     // would break a naive CSV writer. Schema CHECK on
     // credit_transactions allows arbitrary text in referenceType;
     // the handler trusts it and escapes at serialisation time.
-    await db.insert(creditTransactions).values([
+    // DAT-01-inv1: seed the rows + a matching mirror balance (sum = 50)
+    // in one txn; the CSV endpoint reads only the ledger, so the balance
+    // row is invisible to the x-result-count / line assertions below.
+    await seedLedgerRowsWithMirrorBalance(db, [
       {
         userId: me.userId,
         type: 'cashback',
@@ -284,11 +305,25 @@ describeIf('user-credits integration — multi-currency caller balance', () => {
 
   it('returns the caller`s per-currency balances ordered by currency code', async () => {
     const me = await seedUser('credits-multi@test.local');
-    await db.insert(userCredits).values([
-      { userId: me.userId, currency: 'USD', balanceMinor: 1000n },
-      { userId: me.userId, currency: 'GBP', balanceMinor: 500n },
-      { userId: me.userId, currency: 'EUR', balanceMinor: 250n },
-    ]);
+    // DAT-01-inv1: each per-currency balance is backed by a matching
+    // opening-balance ledger row (helper, one txn each). The `/credits`
+    // endpoint reads only user_credits, so the backing rows are invisible
+    // to the balance assertions.
+    await seedUserCreditsWithBackingLedger(db, {
+      userId: me.userId,
+      currency: 'USD',
+      balanceMinor: 1000n,
+    });
+    await seedUserCreditsWithBackingLedger(db, {
+      userId: me.userId,
+      currency: 'GBP',
+      balanceMinor: 500n,
+    });
+    await seedUserCreditsWithBackingLedger(db, {
+      userId: me.userId,
+      currency: 'EUR',
+      balanceMinor: 250n,
+    });
 
     const res = await app.request('http://localhost/api/users/me/credits', {
       method: 'GET',
@@ -306,10 +341,19 @@ describeIf('user-credits integration — multi-currency caller balance', () => {
   it('caller-scoping — never returns another user`s balances', async () => {
     const me = await seedUser('credits-me@test.local');
     const other = await seedUser('credits-other@test.local');
-    await db.insert(userCredits).values([
-      { userId: me.userId, currency: 'USD', balanceMinor: 100n },
-      { userId: other.userId, currency: 'USD', balanceMinor: 9999n },
-    ]);
+    // DAT-01-inv1: each user's balance is backed by a matching opening
+    // ledger row (helper, one txn each); invisible to the `/credits`
+    // caller-scoping assertion below.
+    await seedUserCreditsWithBackingLedger(db, {
+      userId: me.userId,
+      currency: 'USD',
+      balanceMinor: 100n,
+    });
+    await seedUserCreditsWithBackingLedger(db, {
+      userId: other.userId,
+      currency: 'USD',
+      balanceMinor: 9999n,
+    });
 
     const res = await app.request('http://localhost/api/users/me/credits', {
       method: 'GET',
