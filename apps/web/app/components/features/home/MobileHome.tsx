@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
@@ -32,6 +32,13 @@ import { MerchantCardSkeleton } from '~/components/ui/Skeleton';
 import { FavoritesStrip } from '~/components/features/FavoritesStrip';
 import { RecentlyPurchasedStrip } from '~/components/features/RecentlyPurchasedStrip';
 import { WalletCard } from '~/components/features/wallet/WalletCard';
+import { useWindowedGrid } from './use-windowed-grid';
+// FE-25 windowing primitives now live in ./use-windowed-grid (shared with the
+// desktop directory grid in routes/home.tsx). Re-exported here so the existing
+// MobileHome.virtualization.test.tsx import path (`computeGridWindow` from this
+// module) stays stable.
+export { computeGridWindow } from './use-windowed-grid';
+export type { GridWindow } from './use-windowed-grid';
 
 /**
  * S4-7 §3 tail (go-live-plan §P3): the search-mode directory grid used
@@ -46,18 +53,16 @@ import { WalletCard } from '~/components/features/wallet/WalletCard';
 const MOBILE_SEARCH_RESULT_LIMIT = 50;
 
 /**
- * FE-25 (PRF) — directory-grid windowing.
+ * FE-25 (PRF) — mobile directory-grid windowing config.
  *
  * The directory maps the full brand catalog (~1,134 listings → ~982 groups,
  * ADR 032). Mounting every cell at once inflates the DOM node count regardless
  * of viewport, which janks first interaction and bloats memory — worst inside
  * the Capacitor native webview, which is the *only* place this component paints
- * full-screen. We window it: only the rows in (or near) the viewport are
- * mounted, with spacer blocks reserving the scroll height above and below so
- * the scrollbar length and every item's scroll position are unchanged. No
- * windowing library is in the tree; the cells are uniform height and the grid
- * only paints post-hydration (the `hydrated` gate keeps it empty on the server
- * and first client render), which keeps the math simple and SSR-safe.
+ * full-screen. The windowing mechanism (`computeGridWindow` + `useWindowedGrid`)
+ * lives in ./use-windowed-grid, shared with the desktop directory grid in
+ * routes/home.tsx (FE-25-DESKTOP-GRID); the constants below are this grid's
+ * config — a fixed 2-column layout with a `gap-2.5` (10px) row gap.
  */
 const GRID_COLUMNS = 2;
 // Tailwind `gap-2.5` → 0.625rem → 10px of row gap between grid rows.
@@ -70,130 +75,6 @@ const ESTIMATED_ROW_PITCH_PX = 132;
 // Extra rows mounted above and below the viewport so a fast flick doesn't
 // expose an unpainted gap before the scroll handler catches up.
 const GRID_OVERSCAN_ROWS = 4;
-
-export interface GridWindow {
-  /** First item index to mount (inclusive). */
-  startIndex: number;
-  /** One past the last item index to mount (exclusive). */
-  endIndex: number;
-  /** Height (px) of the spacer standing in for the un-mounted rows above. */
-  topPad: number;
-  /** Height (px) of the spacer standing in for the un-mounted rows below. */
-  bottomPad: number;
-}
-
-/**
- * Pure windowing math (exported for unit tests — jsdom has no layout, so the
- * hook below feeds this measured/estimated numbers rather than pixel scroll).
- * Given the item count and how far the grid's top has scrolled above the
- * viewport top, returns the slice of items to mount plus the spacer heights
- * that preserve the full scroll height. Every item is reachable: as
- * `scrolledPastTop` grows the window advances, and the union of windows across
- * all scroll offsets covers `[0, itemCount)`.
- */
-export function computeGridWindow({
-  itemCount,
-  columns,
-  rowHeight,
-  viewportHeight,
-  scrolledPastTop,
-  overscanRows,
-}: {
-  itemCount: number;
-  columns: number;
-  rowHeight: number;
-  viewportHeight: number;
-  /** Distance (px) the grid's top edge has scrolled above the viewport top; 0 while still below the fold. */
-  scrolledPastTop: number;
-  overscanRows: number;
-}): GridWindow {
-  if (itemCount <= 0 || rowHeight <= 0 || columns <= 0) {
-    return { startIndex: 0, endIndex: Math.max(0, itemCount), topPad: 0, bottomPad: 0 };
-  }
-  const totalRows = Math.ceil(itemCount / columns);
-  const firstVisibleRow = Math.floor(Math.max(0, scrolledPastTop) / rowHeight);
-  // +1 so a viewport that straddles a row boundary still mounts the partial row.
-  const visibleRows = Math.ceil(viewportHeight / rowHeight) + 1;
-  const startRow = Math.max(0, firstVisibleRow - overscanRows);
-  const endRow = Math.min(totalRows, firstVisibleRow + visibleRows + overscanRows);
-  return {
-    startIndex: startRow * columns,
-    endIndex: Math.min(itemCount, endRow * columns),
-    topPad: startRow * rowHeight,
-    bottomPad: Math.max(0, (totalRows - endRow) * rowHeight),
-  };
-}
-
-interface WindowedGrid {
-  containerRef: React.RefObject<HTMLDivElement | null>;
-  gridWindow: GridWindow;
-}
-
-/**
- * Wires {@link computeGridWindow} to real page scroll. The grid is not its own
- * scroll container — it sits in the page flow below the hero/quick-buy — so we
- * derive `scrolledPastTop` from the container's viewport-relative top
- * (`-rect.top`, clamped at 0), which is 0 until the grid reaches the top of the
- * viewport and grows as it scrolls past. Scroll/resize are rAF-throttled.
- */
-function useWindowedGrid(itemCount: number): WindowedGrid {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const [rowHeight, setRowHeight] = useState(ESTIMATED_ROW_PITCH_PX);
-  const [viewportHeight, setViewportHeight] = useState(() =>
-    typeof window === 'undefined' ? 800 : window.innerHeight,
-  );
-  const [scrolledPastTop, setScrolledPastTop] = useState(0);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    let frame = 0;
-    const measure = (): void => {
-      frame = 0;
-      const el = containerRef.current;
-      if (el === null) return;
-      const rect = el.getBoundingClientRect();
-      setScrolledPastTop(Math.max(0, -rect.top));
-      setViewportHeight(window.innerHeight);
-    };
-    const schedule = (): void => {
-      if (frame === 0) frame = window.requestAnimationFrame(measure);
-    };
-    measure();
-    window.addEventListener('scroll', schedule, { passive: true });
-    window.addEventListener('resize', schedule);
-    return () => {
-      if (frame !== 0) window.cancelAnimationFrame(frame);
-      window.removeEventListener('scroll', schedule);
-      window.removeEventListener('resize', schedule);
-    };
-  }, []);
-
-  // Measure a real cell's height once cells are mounted so the spacers track
-  // the actual device/font-scaled row pitch. jsdom returns 0 (no layout) — the
-  // estimate stands there, which is what makes the windowing unit-testable.
-  useEffect(() => {
-    const el = containerRef.current;
-    if (el === null || itemCount === 0) return;
-    const cell = el.querySelector('a');
-    const h = cell === null ? 0 : cell.getBoundingClientRect().height;
-    if (h > 0) setRowHeight(Math.round(h) + GRID_ROW_GAP_PX);
-  }, [itemCount]);
-
-  const gridWindow = useMemo(
-    () =>
-      computeGridWindow({
-        itemCount,
-        columns: GRID_COLUMNS,
-        rowHeight,
-        viewportHeight,
-        scrolledPastTop,
-        overscanRows: GRID_OVERSCAN_ROWS,
-      }),
-    [itemCount, rowHeight, viewportHeight, scrolledPastTop],
-  );
-
-  return { containerRef, gridWindow };
-}
 
 /**
  * Mobile home — native and web narrow widths. Combines the dashboard
@@ -388,7 +269,12 @@ export function MobileHome(): React.JSX.Element {
   // FE-25: window the directory grid so only the rows near the viewport are
   // mounted. Transparent to correctness — every group is still counted in the
   // section meta below and reachable by scrolling.
-  const { containerRef, gridWindow } = useWindowedGrid(groupedGrid.length);
+  const { containerRef, gridWindow } = useWindowedGrid(groupedGrid.length, {
+    columns: GRID_COLUMNS,
+    rowGapPx: GRID_ROW_GAP_PX,
+    estimatedRowPitchPx: ESTIMATED_ROW_PITCH_PX,
+    overscanRows: GRID_OVERSCAN_ROWS,
+  });
 
   useEffect(() => {
     setHydrated(true);
