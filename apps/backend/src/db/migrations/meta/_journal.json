@@ -477,6 +477,13 @@
       "when": 1780189800000,
       "tag": "0067_mint_insert_conservation",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1780189900000,
+      "tag": "0068_orders_pct_non_negative_and_face_value_positive",
+      "breakpoints": true
     }
   ]
 }
