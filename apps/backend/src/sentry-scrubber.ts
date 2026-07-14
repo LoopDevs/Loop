@@ -86,6 +86,11 @@ export interface SentryEventLike {
   extra?: Record<string, unknown>;
   contexts?: Record<string, unknown>;
   tags?: Record<string, unknown>;
+  // OBS-04: Sentry's top-level user object (`id`, `email`,
+  // `ip_address`, `username`, plus arbitrary caller-set keys). It was
+  // previously not walked, so a secret-named key or a free-text PII
+  // shape parked under `event.user` reached Sentry un-redacted.
+  user?: Record<string, unknown>;
   exception?: {
     values?: Array<{
       type?: string;
@@ -117,11 +122,21 @@ export function scrubSentryString(s: string): string {
 
 /**
  * Returns a new event with known-secret values replaced by
- * `[REDACTED]`. Safe on arbitrary shapes — any non-string value at a
- * sensitive key is left untouched (preserves primitives other than
- * strings; nested objects are recursed). Never throws; on an
+ * `[REDACTED]`. Safe on arbitrary shapes. Never throws; on an
  * unexpected shape the event passes through unchanged rather than
  * dropping the error.
+ *
+ * **OBS-04:** a value at a known-secret key is redacted regardless of
+ * type. A secret serialized as a number/boolean, or wrapped in an
+ * object/array (e.g. `{ apiKey: { raw: 0xdead } }`), used to slip past
+ * the old `typeof === 'string'` guard; the whole value is now replaced
+ * with `[REDACTED]` (a secret-keyed object is NOT recursed into — its
+ * entire subtree is treated as secret). See `scrubObject`.
+ *
+ * **OBS-04:** also key-walks `event.user` (the same structured
+ * treatment as `extra`/`contexts`/`tags`), which was previously not
+ * walked at all — a secret-named key or free-text PII parked under
+ * `event.user` reached Sentry un-redacted.
  *
  * **A4-074:** also walks `event.message`,
  * `event.exception.values[].value`, and `event.breadcrumbs[].*`
@@ -152,6 +167,13 @@ export function scrubSentryEvent<T extends SentryEventLike>(event: T): T {
     if (event.extra !== undefined) scrubbed.extra = scrubObject(event.extra);
     if (event.contexts !== undefined) scrubbed.contexts = scrubObject(event.contexts);
     if (event.tags !== undefined) scrubbed.tags = scrubObject(event.tags);
+    // OBS-04: key-walk the user object like the other structured
+    // regions. Guard null explicitly (Sentry commonly sets
+    // `user: null`) so we don't throw into the catch and abandon the
+    // scrub of the regions above — `scrubObject(null)` would throw.
+    if (event.user !== undefined && event.user !== null) {
+      scrubbed.user = scrubObject(event.user);
+    }
     if (event.exception?.values !== undefined) {
       scrubbed.exception = {
         ...event.exception,
@@ -176,19 +198,30 @@ export function scrubSentryEvent<T extends SentryEventLike>(event: T): T {
 
 /**
  * Recursively walks `v`. At every object key in SENSITIVE_KEYS
- * (case-insensitive), replaces the string value with `[REDACTED]`.
- * String values at non-sensitive keys still get the free-text
- * PII regex pass (A4-074) — emails / bearer tokens / Stellar
- * secrets / long hex runs are scrubbed even when they appear in
- * a non-sensitive field name like `extras.message` or `tags.detail`.
- * Non-string values at sensitive keys are left as-is — the
- * assumption is that a secret must be a string to be useful.
+ * (case-insensitive), replaces the value with `[REDACTED]`.
+ *
+ * OBS-04: redaction at a secret key is now type-agnostic. The old
+ * `typeof === 'string'` guard let a secret serialized as a number or
+ * boolean (e.g. a numeric key id, a `enabled: true` flag on a secret
+ * config) and — worse — a secret wrapped in an object/array leak: a
+ * non-string value fell through to `scrubAny`, which recursed *into*
+ * a secret-keyed object and re-exposed any nested value the key/regex
+ * passes didn't independently catch. We now replace the whole value
+ * at a secret key with `[REDACTED]` and do NOT recurse — a
+ * secret-keyed object's entire subtree is treated as secret.
+ * `null`/`undefined` carry no secret and are preserved as-is so we
+ * don't fabricate a `[REDACTED]` where the field was simply absent.
+ *
+ * String values at non-sensitive keys still get the free-text PII
+ * regex pass (A4-074) — emails / bearer tokens / Stellar secrets /
+ * long hex runs are scrubbed even when they appear in a non-sensitive
+ * field name like `extras.message` or `tags.detail`.
  */
 function scrubObject(obj: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(obj)) {
-    if (SENSITIVE_KEYS.has(key.toLowerCase()) && typeof value === 'string') {
-      out[key] = '[REDACTED]';
+    if (SENSITIVE_KEYS.has(key.toLowerCase())) {
+      out[key] = value === null || value === undefined ? value : '[REDACTED]';
     } else {
       out[key] = scrubAny(value);
     }

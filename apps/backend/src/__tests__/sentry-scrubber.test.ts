@@ -180,4 +180,93 @@ describe('scrubSentryEvent (A2-1308)', () => {
     const leaked = leafKeys.filter((k) => scrubbed[k] !== '[REDACTED]');
     expect(leaked).toEqual([]);
   });
+
+  // OBS-04 gap 1 (cold audit): key-based redaction only fired when the
+  // value was a *string* (`typeof value === 'string'`), so a secret
+  // serialized as a number/boolean — or wrapped in an object/array —
+  // at a known-secret key slipped through un-redacted. It is now
+  // redacted regardless of type. The values below carry NO free-text
+  // PII shape, so a bare `[REDACTED]` can only come from the
+  // type-agnostic key redaction this fix adds (RED on unfixed: the raw
+  // value / recursed subtree leaks).
+  it('OBS-04: redacts a NON-STRING value at a secret key (number / boolean / object / array)', () => {
+    const out = scrubSentryEvent({
+      extra: {
+        // Numeric secret (e.g. an internal key id serialized as a number).
+        apiKey: 1234567890,
+        // Boolean at a secret key.
+        secret: true,
+        // Secret wrapped in an object — must be redacted WHOLESALE and
+        // NOT recursed into (the old code recursed and re-exposed `raw`).
+        apiSecret: { raw: 42, note: 'sekret' },
+        // Secret wrapped in an array.
+        privateKey: [0xdead, 'part-two'],
+        // Non-secret numeric field must survive (no over-redaction).
+        PORT: 8080,
+      },
+    });
+    const extra = out.extra as Record<string, unknown>;
+    expect(extra.apiKey).toBe('[REDACTED]');
+    expect(extra.secret).toBe('[REDACTED]');
+    expect(extra.apiSecret).toBe('[REDACTED]');
+    expect(extra.privateKey).toBe('[REDACTED]');
+    expect(extra.PORT).toBe(8080);
+  });
+
+  // OBS-04 carve-out pin: null / undefined at a secret key carry no
+  // secret, so we preserve them rather than fabricate a `[REDACTED]`
+  // marker — keeps the event shape honest. (Green pre- and post-fix;
+  // documents the deliberate decision, not a red proof.)
+  it('OBS-04: preserves null / undefined at a secret key (no fabricated marker)', () => {
+    const out = scrubSentryEvent({ extra: { apiKey: null, apiSecret: undefined } });
+    const extra = out.extra as Record<string, unknown>;
+    expect(extra.apiKey).toBeNull();
+    expect('apiSecret' in extra).toBe(true);
+    expect(extra.apiSecret).toBeUndefined();
+  });
+
+  // OBS-04 gap 2 (cold audit): `event.user` was never walked, so a
+  // secret-named key or a free-text PII shape parked under it reached
+  // Sentry un-redacted. It is now key-walked with the same
+  // `scrubObject` treatment as extra/contexts/tags. RED on unfixed for
+  // the secret key AND the email; id / ip_address / username are
+  // asserted intact to prove we don't over-redact benign user fields.
+  it('OBS-04: key-walks event.user (secret keys + free-text PII redacted, benign fields intact)', () => {
+    const out = scrubSentryEvent({
+      user: {
+        id: 'u-123',
+        apiKey: 'user-scoped-secret', // secret key, no free-text PII shape
+        email: 'u@example.com', // free-text PII (A4-074 regex)
+        ip_address: '1.2.3.4', // benign, must survive
+        username: 'alice', // benign, must survive
+      },
+    });
+    const user = out.user as Record<string, unknown>;
+    expect(user.apiKey).toBe('[REDACTED]');
+    expect(user.email).toBe('[REDACTED_EMAIL]');
+    expect(user.id).toBe('u-123');
+    expect(user.ip_address).toBe('1.2.3.4');
+    expect(user.username).toBe('alice');
+  });
+
+  // OBS-04 pin: the finding also named `event.exception.values[].value`
+  // as a missed region, but re-derivation against current code shows it
+  // is ALREADY scrubbed by the A4-074 free-text pass (scrubSentryString)
+  // — so this is a GREEN-on-both regression guard, not a red proof. It
+  // pins that the exception message keeps getting the PII regex applied.
+  it('OBS-04: exception.values[].value keeps its free-text PII scrub (regression pin)', () => {
+    const out = scrubSentryEvent({
+      exception: {
+        values: [
+          {
+            type: 'AuthError',
+            value: 'login failed for u@example.com with Bearer abcdefghijklmnop0123',
+          },
+        ],
+      },
+    });
+    expect(out.exception?.values?.[0]?.value).toBe(
+      'login failed for [REDACTED_EMAIL] with [REDACTED_BEARER]',
+    );
+  });
 });
