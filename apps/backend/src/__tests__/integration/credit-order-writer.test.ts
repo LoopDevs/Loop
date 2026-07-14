@@ -56,7 +56,11 @@ import {
   insertCreditOrderTxn,
   type CreditOrderBaseValues,
 } from '../../orders/repo-credit-order.js';
-import { ensureMigrated, truncateAllTables } from './db-test-setup.js';
+import {
+  ensureMigrated,
+  truncateAllTables,
+  seedUserCreditsWithBackingLedger,
+} from './db-test-setup.js';
 
 const describeIf = RUN_INTEGRATION ? describe : describe.skip;
 
@@ -66,9 +70,14 @@ async function seedUserId(email: string): Promise<string> {
   return user.id;
 }
 
-/** Seed a `(user, USD)` credit row at the given balance (minor units). */
+/**
+ * Seed a `(user, USD)` credit row at the given balance (minor units),
+ * WITH a matching opening-balance ledger row so the DAT-01-inv1 mirror
+ * invariant (migration 0066) holds — the seeded balance now HAS backing
+ * ledger, exactly as a real credited balance does.
+ */
 async function seedBalance(userId: string, balanceMinor: bigint): Promise<void> {
-  await db.insert(userCredits).values({ userId, currency: 'USD', balanceMinor });
+  await seedUserCreditsWithBackingLedger(db, { userId, currency: 'USD', balanceMinor });
 }
 
 /**
@@ -164,26 +173,36 @@ describeIf('insertCreditOrderTxn — happy path (real postgres)', () => {
     expect(await usdBalance(userId)).toBe(5000n);
   });
 
-  it('conservation — final balance equals seeded balance plus the sum of ledger rows', async () => {
+  it('conservation — final balance equals the full ledger replay (mirror invariant)', async () => {
     const userId = await seedUserId('credit-writer-conservation@test.local');
     const seeded = 8_000n;
     const charge = 3_000n;
+    // seedBalance now also books a matching +8000 opening-balance ledger
+    // row (DAT-01-inv1), so the seeded balance HAS backing ledger.
     await seedBalance(userId, seeded);
 
     await insertCreditOrderTxn(baseValues(userId, { chargeMinor: charge }));
 
-    // Replay the append-only ledger: the materialised balance must
-    // equal the seed plus the signed sum of every credit_transactions
-    // row for this (user, currency). If the writer debited a different
-    // amount than it booked, this reconciliation breaks.
+    // Replay the append-only ledger. Under the DAT-01-inv1 mirror
+    // invariant the materialised balance must equal the FULL signed sum
+    // of every credit_transactions row for this (user, currency) — the
+    // seeded opening balance (+8000) PLUS the writer's spend (-charge).
+    // If the writer debited a different amount than it booked, this
+    // reconciliation breaks.
     const ledger = await db
       .select({ amountMinor: creditTransactions.amountMinor })
       .from(creditTransactions)
       .where(and(eq(creditTransactions.userId, userId), eq(creditTransactions.currency, 'USD')));
     const ledgerSum = ledger.reduce((acc, r) => acc + r.amountMinor, 0n);
+    expect(ledgerSum).toBe(seeded - charge);
 
-    expect(ledgerSum).toBe(-charge);
-    expect(await usdBalance(userId)).toBe(seeded + ledgerSum);
+    // The writer's OWN booking, isolated to the spend rows: exactly the
+    // negative charge — the property this test guards, unchanged.
+    const spendSum = (await spendRowsForUser(userId)).reduce((acc, r) => acc + r.amountMinor, 0n);
+    expect(spendSum).toBe(-charge);
+
+    // The mirror holds: materialised balance == full ledger replay.
+    expect(await usdBalance(userId)).toBe(ledgerSum);
     expect(await usdBalance(userId)).toBe(5_000n);
   });
 });

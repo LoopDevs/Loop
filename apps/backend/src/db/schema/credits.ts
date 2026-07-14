@@ -110,6 +110,14 @@ export const creditTransactions = pgTable(
   },
   (t) => [
     index('credit_transactions_user_created').on(t.userId, t.createdAt),
+    // DAT-01-inv1 (migration 0066): backs the commit-time mirror-invariant
+    // constraint trigger, which runs `SUM(amount_minor) WHERE user_id = ?
+    // AND currency = ?` once per touched (user, currency) on every ledger
+    // write. `credit_transactions_user_created` above only prefixes on
+    // user_id (so it reads every currency's rows for the user); this
+    // `(user_id, currency)` btree serves the check's exact predicate as a
+    // bounded range scan over precisely the summed rows.
+    index('credit_transactions_user_currency').on(t.userId, t.currency),
     // CF-29 / PERF-001 + PERF-005: the composite `(user_id, created_at)`
     // above can't serve an unfiltered range or a `WHERE type='cashback'`
     // roll-up (leading column is user_id). This `(type, created_at)`

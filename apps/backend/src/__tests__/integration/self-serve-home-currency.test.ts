@@ -39,7 +39,11 @@ import { users, userCredits } from '../../db/schema.js';
 import { findOrCreateUserByEmail } from '../../db/users.js';
 import { signLoopToken, DEFAULT_ACCESS_TTL_SECONDS } from '../../auth/tokens.js';
 import { app, __resetRateLimitsForTests } from '../../app.js';
-import { ensureMigrated, truncateAllTables } from './db-test-setup.js';
+import {
+  ensureMigrated,
+  truncateAllTables,
+  seedUserCreditsWithBackingLedger,
+} from './db-test-setup.js';
 
 const describeIf = RUN_INTEGRATION ? describe : describe.skip;
 
@@ -88,8 +92,11 @@ describeIf('self-serve home-currency change — real postgres (DOM-03)', () => {
   it('409 HOME_CURRENCY_HAS_LIVE_BALANCE when the (order-less) user holds a non-zero balance in the current currency', async () => {
     const me = await seedUser('dom03-live-balance@test.local', 'USD');
     // A non-zero credit balance in the CURRENT home currency, and no
-    // order — the case the A2-552 order guard alone lets through.
-    await db.insert(userCredits).values({
+    // order — the case the A2-552 order guard alone lets through. Backed
+    // by a matching opening-balance ledger row in ONE transaction
+    // (DAT-01-inv1, migration 0066) so the mirror is consistent; the
+    // guard reads only the balance, so the backing row is invisible here.
+    await seedUserCreditsWithBackingLedger(db, {
       userId: me.userId,
       currency: 'USD',
       balanceMinor: 4200n,

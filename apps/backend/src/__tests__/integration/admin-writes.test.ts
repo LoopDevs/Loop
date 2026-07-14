@@ -70,7 +70,11 @@ import { adjustmentCapLockKey, DailyAdjustmentLimitError } from '../../credits/a
 import { CLEAR_LOCKOUT_MAX_PER_TARGET_PER_DAY } from '../../admin/clear-otp-lockout.js';
 import { applyAdminEmission } from '../../credits/emissions.js';
 import { env } from '../../env.js';
-import { ensureMigrated, truncateAllTables } from './db-test-setup.js';
+import {
+  ensureMigrated,
+  truncateAllTables,
+  seedUserCreditsWithBackingLedger,
+} from './db-test-setup.js';
 import { computeLedgerDriftSql } from '../../credits/ledger-invariant.js';
 
 const describeIf = RUN_INTEGRATION ? describe : describe.skip;
@@ -126,18 +130,20 @@ async function seedCashbackBalance(args: {
   amountMinor: bigint;
 }): Promise<void> {
   const currency = args.currency ?? 'USD';
-  await db.insert(creditTransactions).values({
-    userId: args.userId,
-    type: 'cashback',
-    amountMinor: args.amountMinor,
-    currency,
-    referenceType: 'order',
-    referenceId: crypto.randomUUID(),
-  });
-  await db.insert(userCredits).values({
+  // DAT-01-inv1 (migration 0066): the cashback ledger row and the
+  // matching balance must land in ONE transaction so the deferred
+  // mirror-invariant trigger sees an EQUAL mirror at commit (previously
+  // the two autocommitted separately, tripping the constraint). Backing
+  // type stays 'cashback' with an order reference — a cashback-derived
+  // balance is what these emission fixtures model.
+  await seedUserCreditsWithBackingLedger(db, {
     userId: args.userId,
     currency,
     balanceMinor: args.amountMinor,
+    type: 'cashback',
+    reason: null,
+    referenceType: 'order',
+    referenceId: crypto.randomUUID(),
   });
 }
 
@@ -176,14 +182,35 @@ async function seedFailedLegacyWithdrawalPayout(args: {
   }
   // The legacy at-send debit — pre-ADR-036 withdrawals debited the
   // mirror when queueing. This row is the compensability marker.
-  await db.insert(creditTransactions).values({
-    userId: args.userId,
-    type: 'withdrawal',
-    amountMinor: -(args.amountStroops / 100_000n),
-    currency: 'USD',
-    referenceType: 'payout',
-    referenceId: row.id,
-    reason: 'seeded legacy at-send debit (pre-ADR-036)',
+  //
+  // DAT-01-inv1 (migration 0066): pre-ADR-036 the at-send debit was a
+  // MATCHED write (the withdrawal ledger row AND a balance decrement,
+  // drawn against the credits that funded it) — never one-sided. A lone
+  // `-X` debit would unbalance the mirror against the separately-seeded
+  // balance. So seed the debit together with the `+X` funding credit it
+  // was drawn against, in ONE transaction: the pair is net-zero to the
+  // ledger, so whatever balance the caller seeded stays consistent
+  // (balance 0 → ledger 0; a prior cashback balance stays equal to it).
+  const debitMinor = args.amountStroops / 100_000n;
+  await db.transaction(async (tx) => {
+    await tx.insert(creditTransactions).values({
+      userId: args.userId,
+      type: 'adjustment',
+      amountMinor: debitMinor,
+      currency: 'USD',
+      referenceType: null,
+      referenceId: null,
+      reason: 'funding credit for the legacy at-send debit (test seed)',
+    });
+    await tx.insert(creditTransactions).values({
+      userId: args.userId,
+      type: 'withdrawal',
+      amountMinor: -debitMinor,
+      currency: 'USD',
+      referenceType: 'payout',
+      referenceId: row.id,
+      reason: 'seeded legacy at-send debit (pre-ADR-036)',
+    });
   });
   return row.id;
 }
@@ -636,20 +663,17 @@ describeIf('admin emission write — real postgres ladder, mirror untouched (ADR
   it('emission happy path: queues pending_payouts row; balance unchanged + no ledger row', async () => {
     const { targetUser, bearer, mintStepUp } = await seed();
     // The unbacked-emission guard requires an existing mirror
-    // balance >= the emitted amount. Pre-seed a credit_transactions
-    // row + user_credits balance directly.
-    await db.insert(creditTransactions).values({
-      userId: targetUser.id,
-      type: 'cashback',
-      amountMinor: 2000n,
-      currency: 'USD',
-      referenceType: 'order',
-      referenceId: '00000000-0000-0000-0000-000000000001',
-    });
-    await db.insert(userCredits).values({
+    // balance >= the emitted amount. Pre-seed a cashback ledger row +
+    // matching user_credits balance in ONE transaction so the
+    // DAT-01-inv1 mirror invariant (migration 0066) holds at commit.
+    await seedUserCreditsWithBackingLedger(db, {
       userId: targetUser.id,
       currency: 'USD',
       balanceMinor: 2000n,
+      type: 'cashback',
+      reason: null,
+      referenceType: 'order',
+      referenceId: '00000000-0000-0000-0000-000000000001',
     });
 
     const destinationAddress = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
@@ -2150,7 +2174,12 @@ describeIf('admin payout-compensation write — fleet-wide daily cap race', () =
       });
       const holder = db.transaction(async (tx) => {
         await tx.execute(sql`SELECT pg_advisory_xact_lock(${lockKey})`);
-        // Uncommitted usage a lock-less reader cannot see.
+        // Uncommitted usage a lock-less reader cannot see. DAT-01-inv1
+        // (migration 0066): a real compensation is a MATCHED write, so
+        // this simulated holder moves the mirror balance WITH the ledger
+        // credit (both in this held txn) — the cap-lock serialization is
+        // what's under test, not the mirror, and a one-sided +500 credit
+        // would trip the deferred mirror trigger at the holder's commit.
         await tx.insert(creditTransactions).values({
           userId: targetUser.id,
           type: 'adjustment',
@@ -2160,6 +2189,13 @@ describeIf('admin payout-compensation write — fleet-wide daily cap race', () =
           referenceId: crypto.randomUUID(),
           reason: 'simulated concurrent compensation holding the cap lock',
         });
+        await tx
+          .insert(userCredits)
+          .values({ userId: targetUser.id, currency: 'USD', balanceMinor: 500n })
+          .onConflictDoUpdate({
+            target: [userCredits.userId, userCredits.currency],
+            set: { balanceMinor: sql`${userCredits.balanceMinor} + 500` },
+          });
         signalEntered();
         await holderGate;
       });

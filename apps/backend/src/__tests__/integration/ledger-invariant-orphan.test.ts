@@ -20,7 +20,11 @@ const RUN_INTEGRATION = process.env['LOOP_E2E_DB'] === '1';
 import { db } from '../../db/client.js';
 import { users, creditTransactions, userCredits } from '../../db/schema.js';
 import { computeLedgerDriftSql } from '../../credits/ledger-invariant.js';
-import { ensureMigrated, truncateAllTables } from './db-test-setup.js';
+import {
+  ensureMigrated,
+  truncateAllTables,
+  seedWithMirrorTriggersSuppressed,
+} from './db-test-setup.js';
 
 const describeIf = RUN_INTEGRATION ? describe : describe.skip;
 
@@ -62,11 +66,24 @@ describeIf('DAT-06 ledger-invariant zero-sum orphan (real postgres)', () => {
     // A materialised balance row of 0 that disagrees with a non-zero
     // ledger sum. Same `balanceMinor:"0"` as an orphan, but a real row
     // exists — so it must NOT carry orphan=true.
+    //
+    // This is a DELIBERATE, one-sided mirror state (balance 0 vs ledger
+    // +50, delta -50) — precisely the drift the 0066 mirror-invariant
+    // trigger REJECTS. It's the whole point of this test (the drift
+    // detector must catch pre-existing divergence), so it CANNOT be made
+    // mirror-consistent without destroying what it exercises. Seed it
+    // with the mirror trigger SUPPRESSED — `SET LOCAL
+    // session_replication_role = 'replica'`, scoped to (and auto-reset at
+    // the end of) this seeding txn — modeling historical rows that
+    // predate the constraint. computeLedgerDriftSql then runs normally,
+    // with all triggers enabled, against the committed drift.
     const userId = await seedUser(`dat06-zerobal-${crypto.randomUUID()}@test.local`);
-    await db.insert(userCredits).values({ userId, currency: 'GBP', balanceMinor: 0n });
-    await db
-      .insert(creditTransactions)
-      .values({ userId, type: 'cashback', amountMinor: 50n, currency: 'GBP' });
+    await seedWithMirrorTriggersSuppressed(db, async (tx) => {
+      await tx.insert(userCredits).values({ userId, currency: 'GBP', balanceMinor: 0n });
+      await tx
+        .insert(creditTransactions)
+        .values({ userId, type: 'cashback', amountMinor: 50n, currency: 'GBP' });
+    });
 
     const drift = await computeLedgerDriftSql(db);
 

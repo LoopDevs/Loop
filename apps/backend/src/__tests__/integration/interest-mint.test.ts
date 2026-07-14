@@ -407,16 +407,24 @@ describeIf('interest-mint integration — real postgres (Q6-6)', () => {
       carryAfterStroops: 0n,
       mintedMinor: 1000n,
     });
-    await db.insert(creditTransactions).values({
-      userId: userA.id,
-      type: 'interest',
-      amountMinor: 1000n,
-      currency: 'GBP',
-      referenceType: null,
-      referenceId: null,
-      periodCursor: PERIOD_1,
+    // DAT-01-inv1 (migration 0066): the prior-period interest ledger row
+    // and the balance it minted must land in ONE transaction so the
+    // deferred mirror-invariant trigger sees an equal mirror at commit
+    // (the interest row IS the intended crash-recovery ledger content, so
+    // it's seeded directly rather than via the generic opening-balance
+    // helper).
+    await db.transaction(async (tx) => {
+      await tx.insert(creditTransactions).values({
+        userId: userA.id,
+        type: 'interest',
+        amountMinor: 1000n,
+        currency: 'GBP',
+        referenceType: null,
+        referenceId: null,
+        periodCursor: PERIOD_1,
+      });
+      await tx.insert(userCredits).values({ userId: userA.id, currency: 'GBP', balanceMinor: 1000n });
     });
-    await db.insert(userCredits).values({ userId: userA.id, currency: 'GBP', balanceMinor: 1000n });
     await db.insert(pendingPayouts).values({
       userId: userA.id,
       kind: 'interest_mint',

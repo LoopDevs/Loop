@@ -451,19 +451,25 @@ describeIf('payment-watcher integration — loop_asset redemption (A4-110 + ADR 
 
   it('debits the mirror AND enqueues the issuer-return burn in the same txn', async () => {
     const seeded = await seedLoopAssetOrder('redeem-memo-1');
-    // The redeeming user holds 3000 minor of mirrored USD balance.
-    await db.insert(creditTransactions).values({
-      userId: seeded.userId,
-      type: 'cashback',
-      amountMinor: 3000n,
-      currency: 'USD',
-      referenceType: 'order',
-      referenceId: crypto.randomUUID(),
-    });
-    await db.insert(userCredits).values({
-      userId: seeded.userId,
-      currency: 'USD',
-      balanceMinor: 3000n,
+    // The redeeming user holds 3000 minor of mirrored USD balance —
+    // seeded as a cashback ledger row PLUS its matching balance in ONE
+    // transaction so the DAT-01-inv1 mirror invariant (migration 0066)
+    // holds at commit (the two previously autocommitted separately,
+    // tripping the deferred trigger).
+    await db.transaction(async (tx) => {
+      await tx.insert(creditTransactions).values({
+        userId: seeded.userId,
+        type: 'cashback',
+        amountMinor: 3000n,
+        currency: 'USD',
+        referenceType: 'order',
+        referenceId: crypto.randomUUID(),
+      });
+      await tx.insert(userCredits).values({
+        userId: seeded.userId,
+        currency: 'USD',
+        balanceMinor: 3000n,
+      });
     });
     vi.mocked(listAccountPayments).mockResolvedValueOnce({
       records: [usdloopPayment({ id: 'lp1', pagingToken: 'tok-loop-1', memo: seeded.memo })],

@@ -52,7 +52,6 @@ vi.mock('../../discord.js', async (importActual) => {
 });
 
 import { db } from '../../db/client.js';
-import { userCredits } from '../../db/schema.js';
 import { findOrCreateUserByEmail } from '../../db/users.js';
 import {
   runAssetDriftTick,
@@ -60,7 +59,11 @@ import {
 } from '../../payments/asset-drift-watcher.js';
 import { getLoopAssetCirculation } from '../../payments/horizon-circulation.js';
 import { notifyAssetDrift, notifyAssetDriftRecovered } from '../../discord.js';
-import { ensureMigrated, truncateAllTables } from './db-test-setup.js';
+import {
+  ensureMigrated,
+  truncateAllTables,
+  seedUserCreditsWithBackingLedger,
+} from './db-test-setup.js';
 
 const describeIf = RUN_INTEGRATION ? describe : describe.skip;
 
@@ -89,11 +92,16 @@ describeIf('asset-drift watcher integration — real ledger aggregation', () => 
     const userUsd = await findOrCreateUserByEmail('usd-holder@test.local');
     const userGbp = await findOrCreateUserByEmail('gbp-holder@test.local');
     const userEur = await findOrCreateUserByEmail('eur-holder@test.local');
-    await db.insert(userCredits).values([
-      { userId: userUsd.id, currency: 'USD', balanceMinor: 1000n }, // 10.00 USD
-      { userId: userGbp.id, currency: 'GBP', balanceMinor: 500n }, //  5.00 GBP
-      { userId: userEur.id, currency: 'EUR', balanceMinor: 200n }, //  2.00 EUR
-    ]);
+    // DAT-01-inv1 (migration 0066): back each seeded mirror balance with
+    // a matching opening-balance ledger row so the mirror is consistent.
+    // The watcher reads `SUM(user_credits.balance_minor)` (the mirror
+    // liability) and compares it to (mocked) on-chain circulation — the
+    // drift this suite exercises is mirror-vs-ONCHAIN, orthogonal to
+    // balance-vs-ledger, so a consistent backing ledger leaves the drift
+    // scenario unchanged.
+    await seedUserCreditsWithBackingLedger(db, { userId: userUsd.id, currency: 'USD', balanceMinor: 1000n }); // 10.00 USD
+    await seedUserCreditsWithBackingLedger(db, { userId: userGbp.id, currency: 'GBP', balanceMinor: 500n }); //  5.00 GBP
+    await seedUserCreditsWithBackingLedger(db, { userId: userEur.id, currency: 'EUR', balanceMinor: 200n }); //  2.00 EUR
 
     // On-chain: each issuer has exactly the matching ledger amount —
     // drift = 0 for each. If the watcher mixed currencies, drift
@@ -128,7 +136,9 @@ describeIf('asset-drift watcher integration — real ledger aggregation', () => 
     // tick: restore on-chain to match ledger, recovery page fires.
     // Fourth tick: still ok, no further page.
     const user = await findOrCreateUserByEmail('drift-holder@test.local');
-    await db.insert(userCredits).values({ userId: user.id, currency: 'USD', balanceMinor: 1000n });
+    // Mirror-consistent seed (DAT-01-inv1): balance backed by a matching
+    // opening ledger row; the watcher's mirror-vs-onchain drift is unchanged.
+    await seedUserCreditsWithBackingLedger(db, { userId: user.id, currency: 'USD', balanceMinor: 1000n });
     const onChainPerCode = new Map<string, bigint>();
     onChainPerCode.set('USDLOOP', 1000n * STROOPS_PER_MINOR);
     onChainPerCode.set('GBPLOOP', 0n);
@@ -178,7 +188,9 @@ describeIf('asset-drift watcher integration — real ledger aggregation', () => 
     // BEFORE the state Map is updated — the next successful tick
     // can then fire a fresh ok → over transition.
     const user = await findOrCreateUserByEmail('horizon-fail@test.local');
-    await db.insert(userCredits).values({ userId: user.id, currency: 'USD', balanceMinor: 1000n });
+    // Mirror-consistent seed (DAT-01-inv1): balance backed by a matching
+    // opening ledger row; the watcher's mirror-vs-onchain drift is unchanged.
+    await seedUserCreditsWithBackingLedger(db, { userId: user.id, currency: 'USD', balanceMinor: 1000n });
 
     vi.mocked(getLoopAssetCirculation).mockImplementation(async (code, issuer) => {
       if (code === 'USDLOOP') throw new Error('Horizon timeout');

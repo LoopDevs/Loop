@@ -24,7 +24,11 @@ import {
   users,
 } from '../../db/schema.js';
 import { findOrCreateUserByEmail } from '../../db/users.js';
-import { ensureMigrated, truncateAllTables } from './db-test-setup.js';
+import {
+  ensureMigrated,
+  truncateAllTables,
+  seedUserCreditsWithBackingLedger,
+} from './db-test-setup.js';
 import { claimForRefund } from '../../payments/deposit-refund.js';
 import {
   applyAdminRefund,
@@ -94,11 +98,17 @@ async function seedFailedOrder(payingId: string | null): Promise<{
 }
 
 async function insertCreditRefund(userId: string, orderId: string): Promise<void> {
-  await db.insert(creditTransactions).values({
+  // Models "this order was already refunded as credit": a +2500 refund
+  // ledger row AND the +2500 balance it credited. DAT-01-inv1 (migration
+  // 0066): both sides land in ONE transaction so the deferred mirror
+  // trigger sees an equal mirror at commit (a lone refund ledger row with
+  // no balance move was the one-sided drift it now rejects).
+  await seedUserCreditsWithBackingLedger(db, {
     userId,
-    type: 'refund',
-    amountMinor: 2500n,
     currency: 'USD',
+    balanceMinor: 2500n,
+    type: 'refund',
+    reason: null,
     referenceType: 'order',
     referenceId: orderId,
   });

@@ -108,7 +108,11 @@ import { runPayoutTick } from '../../payments/payout-worker.js';
 import { reclaimSubmittedPayout, listClaimablePayouts } from '../../credits/pending-payouts.js';
 import { submitPayout, PayoutSubmitError } from '../../payments/payout-submit.js';
 import { findOutboundPaymentByMemo, getOutboundPaymentByTxHash } from '../../payments/horizon.js';
-import { ensureMigrated, truncateAllTables } from './db-test-setup.js';
+import {
+  ensureMigrated,
+  truncateAllTables,
+  seedUserCreditsWithBackingLedger,
+} from './db-test-setup.js';
 
 const describeIf = RUN_INTEGRATION ? describe : describe.skip;
 
@@ -142,8 +146,13 @@ async function seedPayout(args: {
 
   // Hardening A1/C10: the emission-conservation trigger requires the
   // mirror liability to cover the emitted amount — seed the matching
-  // balance (500 minor × 100_000 stroops/minor = the row below).
-  await db.insert(userCredits).values({
+  // balance (500 minor × 100_000 stroops/minor = the row below). The
+  // balance is now backed by a matching opening-balance ledger row in
+  // ONE transaction (DAT-01-inv1, migration 0066) so the deferred mirror
+  // trigger sees an equal mirror; the backing row is invisible to the
+  // pending_payouts assertions and does not change balance_minor (the
+  // headroom the conservation trigger reads).
+  await seedUserCreditsWithBackingLedger(db, {
     userId: user.id,
     currency: 'USD',
     balanceMinor: 500n,
@@ -508,14 +517,31 @@ describeIf(
       // Seed the LEGACY at-send withdrawal debit row so the real compensation
       // primitive (which refuses post-ADR-036 emissions lacking it) actually
       // credits the user — this is what "made whole" requires end-to-end.
-      await db.insert(creditTransactions).values({
-        userId,
-        type: 'withdrawal',
-        amountMinor: -500n,
-        currency: 'USD',
-        referenceType: 'payout',
-        referenceId: payoutId,
-        reason: 'legacy at-send debit (test seed)',
+      // DAT-01-inv1 (migration 0066): the pre-ADR-036 at-send debit was a
+      // MATCHED write, drawn against the credits that funded it — never a
+      // lone -500 that unbalances the seeded 500 mirror. Seed it with its
+      // +500 funding credit in ONE txn (net-zero to the ledger), so the
+      // balance stays 500 and the mirror stays consistent (500 == 500 +
+      // 500 - 500).
+      await db.transaction(async (tx) => {
+        await tx.insert(creditTransactions).values({
+          userId,
+          type: 'adjustment',
+          amountMinor: 500n,
+          currency: 'USD',
+          referenceType: null,
+          referenceId: null,
+          reason: 'funding credit for the legacy at-send debit (test seed)',
+        });
+        await tx.insert(creditTransactions).values({
+          userId,
+          type: 'withdrawal',
+          amountMinor: -500n,
+          currency: 'USD',
+          referenceType: 'payout',
+          referenceId: payoutId,
+          reason: 'legacy at-send debit (test seed)',
+        });
       });
 
       // Every submit blackholes (transient_horizon after persisting the hash) and
@@ -594,14 +620,29 @@ describeIf(
       const { payoutId, userId } = await seedPayout({ state: 'pending', attempts: 4 });
       // Seed the legacy debit row so that if the resolver WRONGLY compensated,
       // the credit would actually land and the balance assertion would catch it.
-      await db.insert(creditTransactions).values({
-        userId,
-        type: 'withdrawal',
-        amountMinor: -500n,
-        currency: 'USD',
-        referenceType: 'payout',
-        referenceId: payoutId,
-        reason: 'legacy at-send debit (test seed)',
+      // DAT-01-inv1 (migration 0066): pair the -500 legacy at-send debit with
+      // its +500 funding credit in ONE txn (net-zero to the ledger), so the
+      // seeded 500 balance stays mirror-consistent (a lone -500 would leave
+      // balance 500 vs ledger 0).
+      await db.transaction(async (tx) => {
+        await tx.insert(creditTransactions).values({
+          userId,
+          type: 'adjustment',
+          amountMinor: 500n,
+          currency: 'USD',
+          referenceType: null,
+          referenceId: null,
+          reason: 'funding credit for the legacy at-send debit (test seed)',
+        });
+        await tx.insert(creditTransactions).values({
+          userId,
+          type: 'withdrawal',
+          amountMinor: -500n,
+          currency: 'USD',
+          referenceType: 'payout',
+          referenceId: payoutId,
+          reason: 'legacy at-send debit (test seed)',
+        });
       });
 
       vi.mocked(submitPayout).mockImplementation(

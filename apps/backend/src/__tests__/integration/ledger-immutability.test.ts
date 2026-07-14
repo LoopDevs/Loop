@@ -25,7 +25,11 @@ const RUN_INTEGRATION = process.env['LOOP_E2E_DB'] === '1';
 
 import { db } from '../../db/client.js';
 import { users, creditTransactions, userCredits } from '../../db/schema.js';
-import { ensureMigrated, truncateAllTables } from './db-test-setup.js';
+import {
+  ensureMigrated,
+  truncateAllTables,
+  seedUserCreditsWithBackingLedger,
+} from './db-test-setup.js';
 
 const describeIf = RUN_INTEGRATION ? describe : describe.skip;
 
@@ -35,11 +39,18 @@ async function seedUser(email: string): Promise<string> {
 }
 
 async function insertLedgerRow(userId: string): Promise<string> {
-  const [row] = await db
-    .insert(creditTransactions)
-    .values({ userId, type: 'cashback', amountMinor: 500n, currency: 'GBP' })
-    .returning({ id: creditTransactions.id });
-  return row!.id;
+  // DAT-01-inv1 (migration 0066): seed the booked ledger row together
+  // with its matching 500 balance in ONE txn so the mirror is equal at
+  // commit; return the ledger row id for the immutability (UPDATE/DELETE)
+  // attempts below (those target the credit_transactions row only).
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .insert(creditTransactions)
+      .values({ userId, type: 'cashback', amountMinor: 500n, currency: 'GBP' })
+      .returning({ id: creditTransactions.id });
+    await tx.insert(userCredits).values({ userId, currency: 'GBP', balanceMinor: 500n });
+    return row!.id;
+  });
 }
 
 /**
@@ -116,10 +127,20 @@ describeIf('FT-13 ledger immutability (real postgres)', () => {
     const id = await insertLedgerRow(userId);
     // A second, offsetting append (the ONLY legitimate way to correct
     // the ledger) also lands — immutability blocks mutation, not growth.
-    const [spend] = await db
-      .insert(creditTransactions)
-      .values({ userId, type: 'spend', amountMinor: -200n, currency: 'GBP' })
-      .returning({ id: creditTransactions.id });
+    // Under the DAT-01-inv1 mirror invariant a legitimate append is a
+    // MATCHED write, so pair the -200 spend with its balance move (→300)
+    // in one txn; it commits, proving the fresh INSERT is still allowed.
+    const spend = await db.transaction(async (tx) => {
+      const [s] = await tx
+        .insert(creditTransactions)
+        .values({ userId, type: 'spend', amountMinor: -200n, currency: 'GBP' })
+        .returning({ id: creditTransactions.id });
+      await tx
+        .update(userCredits)
+        .set({ balanceMinor: 300n })
+        .where(eq(userCredits.userId, userId));
+      return s;
+    });
     expect(id).toBeTruthy();
     expect(spend?.id).toBeTruthy();
     const rows = await db
@@ -131,13 +152,27 @@ describeIf('FT-13 ledger immutability (real postgres)', () => {
 
   it('still allows a legitimate user_credits balance UPDATE (running-balance projection)', async () => {
     const userId = await seedUser(`ft13-bal-${crypto.randomUUID()}@test.local`);
-    await db.insert(userCredits).values({ userId, currency: 'GBP', balanceMinor: 500n });
+    // Consistent starting mirror: balance 500 backed by a matching 500
+    // opening-balance ledger row (DAT-01-inv1, migration 0066).
+    await seedUserCreditsWithBackingLedger(db, { userId, currency: 'GBP', balanceMinor: 500n });
 
-    // This is the move every transaction makes — it must NOT be blocked.
-    await db
-      .update(userCredits)
-      .set({ balanceMinor: 800n })
-      .where(eq(userCredits.userId, userId));
+    // The move every transaction makes — a running-balance UPDATE — must
+    // NOT be blocked by the 0064 immutability fence (which guards
+    // credit_transactions mutation + user_credits DELETE, never a balance
+    // UPDATE). Under the DAT-01-inv1 mirror invariant a LEGITIMATE balance
+    // move is a MATCHED write: append a +300 ledger row AND update the
+    // balance to 800 in ONE transaction. It commits — proving 0064 leaves
+    // the balance UPDATE untouched — and the mirror stays equal
+    // (800 == 500 + 300).
+    await db.transaction(async (tx) => {
+      await tx
+        .insert(creditTransactions)
+        .values({ userId, type: 'cashback', amountMinor: 300n, currency: 'GBP' });
+      await tx
+        .update(userCredits)
+        .set({ balanceMinor: 800n })
+        .where(eq(userCredits.userId, userId));
+    });
 
     const after = await db
       .select({ bal: userCredits.balanceMinor })
@@ -148,7 +183,10 @@ describeIf('FT-13 ledger immutability (real postgres)', () => {
 
   it('rejects a DELETE of a user_credits balance row (would orphan the ledger)', async () => {
     const userId = await seedUser(`ft13-ucdel-${crypto.randomUUID()}@test.local`);
-    await db.insert(userCredits).values({ userId, currency: 'GBP', balanceMinor: 500n });
+    // Consistent starting mirror (DAT-01-inv1): balance 500 backed by a
+    // matching 500 ledger row. The DELETE below is rejected by the 0064
+    // no-delete fence BEFORE it could orphan that ledger.
+    await seedUserCreditsWithBackingLedger(db, { userId, currency: 'GBP', balanceMinor: 500n });
 
     const rejection = await expectDbReject(
       db.execute(sql`DELETE FROM user_credits WHERE user_id = ${userId} AND currency = 'GBP'`),

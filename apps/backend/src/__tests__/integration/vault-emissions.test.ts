@@ -118,7 +118,11 @@ import {
   watchdogAlertState,
 } from '../../db/schema.js';
 import { findOrCreateUserByEmail } from '../../db/users.js';
-import { ensureMigrated, truncateAllTables } from './db-test-setup.js';
+import {
+  ensureMigrated,
+  truncateAllTables,
+  seedUserCreditsWithBackingLedger,
+} from './db-test-setup.js';
 import { computeLedgerDriftSql } from '../../credits/ledger-invariant.js';
 import { generatePayoutMemo } from '../../credits/payout-builder.js';
 import {
@@ -186,14 +190,15 @@ async function seedUserCreditsBalance(
   currency: string,
   amountMinor: bigint,
 ): Promise<void> {
-  await db.insert(userCredits).values({ userId, currency, balanceMinor: amountMinor });
-  await db.insert(creditTransactions).values({
+  // DAT-01-inv1 (migration 0066): the balance row and its backing
+  // opening-balance ledger row must land in ONE transaction so the
+  // deferred mirror-invariant trigger sees an EQUAL mirror at commit.
+  // (Same shape as before — one adjustment ledger row of `amountMinor`
+  // — just made atomic via the shared helper.)
+  await seedUserCreditsWithBackingLedger(db, {
     userId,
-    type: 'adjustment',
-    amountMinor,
     currency,
-    referenceType: null,
-    referenceId: null,
+    balanceMinor: amountMinor,
     reason: 'integration-test fixture balance',
   });
 }

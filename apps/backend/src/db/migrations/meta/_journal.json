@@ -463,6 +463,13 @@
       "when": 1780189600000,
       "tag": "0065_admin_step_up_consumptions",
       "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1780189700000,
+      "tag": "0066_user_credits_mirror_invariant",
+      "breakpoints": true
     }
   ]
 }

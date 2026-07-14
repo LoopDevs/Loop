@@ -43,5 +43,25 @@
     "side": "migrations-only",
     "line": "trigger user_credits.user_credits_no_delete: CREATE TRIGGER user_credits_no_delete BEFORE DELETE ON public.user_credits FOR EACH ROW EXECUTE FUNCTION reject_user_credits_delete()",
     "reason": "FT-13 balance-row DELETE guard (migration 0064) \u2014 user_credits is the mutable running-balance projection (UPDATE is allowed and untouched), but deleting a balance row would orphan its credit_transactions and drop a live liability, so DELETE is fenced. Drizzle cannot represent triggers."
+  },
+  {
+    "side": "migrations-only",
+    "line": "trigger credit_transactions.credit_transactions_mirror_invariant: CREATE CONSTRAINT TRIGGER credit_transactions_mirror_invariant AFTER INSERT ON public.credit_transactions DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION assert_user_credits_mirror()",
+    "reason": "DAT-01-inv1 balance/ledger mirror-invariant fence (migration 0066), ledger side \u2014 a DEFERRABLE INITIALLY DEFERRED CONSTRAINT TRIGGER asserting at COMMIT that a touched (user, currency)'s user_credits.balance_minor equals its credit_transactions ledger sum (INV-1 / ADR 009). Fires on the ledger-append side (a ledger row inserted without a matching balance move). Drizzle's schema DSL cannot represent triggers (A2-412/A2-703); the hand-written migration is the source of truth."
+  },
+  {
+    "side": "migrations-only",
+    "line": "trigger user_credits.user_credits_mirror_invariant: CREATE CONSTRAINT TRIGGER user_credits_mirror_invariant AFTER INSERT OR UPDATE ON public.user_credits DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION assert_user_credits_mirror()",
+    "reason": "DAT-01-inv1 balance/ledger mirror-invariant fence (migration 0066), balance side \u2014 the same deferred commit-time INV-1 assertion fired on user_credits INSERT/UPDATE (a balance move with no matching ledger row). Distinct custom SQLSTATE 23M01 (integrity-constraint class, 'M01'=mirror) from FT-13's 23001 and 0044's 23514. Drizzle cannot represent triggers."
+  },
+  {
+    "side": "migrations-only",
+    "line": "constraint credit_transactions.credit_transactions_mirror_invariant: TRIGGER DEFERRABLE INITIALLY DEFERRED",
+    "reason": "DAT-01-inv1 (migration 0066): a CONSTRAINT TRIGGER also materialises a pg_constraint row (contype='t'), which pg_get_constraintdef renders as 'TRIGGER DEFERRABLE INITIALLY DEFERRED' \u2014 the constraint-side pair of the credit_transactions_mirror_invariant trigger entry above. Unlike 0044/0064's plain (non-constraint) triggers, a DEFERRABLE constraint trigger needs this second allowlist line. Drizzle's schema DSL cannot represent triggers."
+  },
+  {
+    "side": "migrations-only",
+    "line": "constraint user_credits.user_credits_mirror_invariant: TRIGGER DEFERRABLE INITIALLY DEFERRED",
+    "reason": "DAT-01-inv1 (migration 0066): the pg_constraint pair of the user_credits_mirror_invariant CONSTRAINT TRIGGER (rendered by pg_get_constraintdef as 'TRIGGER DEFERRABLE INITIALLY DEFERRED'). Drizzle cannot represent triggers."
   }
 ]
