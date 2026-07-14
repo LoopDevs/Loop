@@ -129,9 +129,16 @@ export const orders = pgTable(
     // the column stays `text`, holding `enc:v1:<base64url>` ciphertext
     // instead of plaintext. `redeem_url` is the redemption landing
     // page, not the secret, so it stays plaintext. Migration 0035 also
-    // revokes `loop_readonly`'s SELECT on the two secret columns. Key
-    // unset → plaintext storage (legacy), backward-safe on read. Fly
-    // volume at-rest encryption remains the disk-theft backstop.
+    // revokes `loop_readonly`'s SELECT on the two secret columns. NS-10:
+    // the key is now REQUIRED in production (env.ts fails closed at
+    // boot when unset), so prod rows are always ciphertext; dev/test
+    // key-unset → plaintext storage (legacy), backward-safe on read.
+    // The `enc:v1:` prefix is the sole ciphertext↔plaintext
+    // discriminator (no schema marker column) — an unambiguous
+    // discriminator for CTX-issued codes, and the same tag
+    // `scripts/backfill-redeem-encryption.ts` keys off to encrypt any
+    // pre-existing plaintext idempotently. Fly volume at-rest
+    // encryption remains the disk-theft backstop.
     redeemCode: text('redeem_code'),
     redeemPin: text('redeem_pin'),
     redeemUrl: text('redeem_url'),

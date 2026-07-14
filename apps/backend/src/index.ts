@@ -82,13 +82,16 @@ if (
   process.exit(1);
 }
 
-// CF-25 / X-PRIV-03: a single boot warn while gift-card redeem-secret
-// encryption is disabled. Codes + PINs are spendable bearer
-// instruments; without LOOP_REDEEM_ENCRYPTION_KEY they're stored
-// plaintext (legacy behaviour) and any logical DB read yields
-// spendable codes. Set a 32-byte key (base64 / hex) to activate
-// AES-256-GCM at rest — backward-safe, no backfill needed. Warn (not
-// fail) so the change ships dark and the operator can flip it on.
+// CF-25 / X-PRIV-03 / NS-10: a single boot warn while gift-card
+// redeem-secret encryption is disabled. Codes + PINs are spendable
+// bearer instruments; without LOOP_REDEEM_ENCRYPTION_KEY they're
+// stored plaintext (legacy behaviour) and any logical DB read yields
+// spendable codes. NS-10: PRODUCTION now fails closed on an unset key
+// in `env.ts` (parseEnv throws before this file runs), so this branch
+// only ever fires in dev/test — where warn-and-allow is intentional so
+// local work isn't blocked on generating a key. Set a 32-byte key
+// (base64 / hex) to activate AES-256-GCM at rest; existing plaintext
+// rows are encrypted by `scripts/backfill-redeem-encryption.ts`.
 if (env.LOOP_REDEEM_ENCRYPTION_KEY === undefined || env.LOOP_REDEEM_ENCRYPTION_KEY === '') {
   logger.warn(
     'LOOP_REDEEM_ENCRYPTION_KEY is unset — gift-card redeem codes/PINs are stored PLAINTEXT at rest (CF-25 / X-PRIV-03). Set a 32-byte key (e.g. `openssl rand -base64 32`) to encrypt them with AES-256-GCM.',

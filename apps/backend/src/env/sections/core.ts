@@ -170,6 +170,18 @@ export const coreEnvFields = {
   // for a real production launch.
   DISABLE_MONITORING_WEBHOOK_ENFORCEMENT: z.enum(['1']).optional(),
 
+  // NS-10 (CF-25 / X-PRIV-03 follow-up): emergency opt-out for the
+  // production LOOP_REDEEM_ENCRYPTION_KEY boot guard below (env.ts).
+  // Same `"1"`-only shape as its siblings so a deploy typo fails at
+  // parse time. Setting it ships production storing gift-card redeem
+  // codes/PINs (spendable bearer secrets) as PLAINTEXT at rest — the
+  // very exposure the guard exists to prevent. For a deliberate,
+  // audited rollback / staging deploy ONLY; never for a real
+  // production launch with live redemption data. Unlike a forgotten
+  // key (which now fails boot), turning encryption off must be an
+  // explicit, conspicuous act.
+  DISABLE_REDEEM_ENCRYPTION_ENFORCEMENT: z.enum(['1']).optional(),
+
   // Rate-limiter trust boundary (audit A-023). When `true` the rate limiter
   // reads the client IP from the first value in X-Forwarded-For (required
   // when running behind Fly.io / a load balancer). When `false` it falls

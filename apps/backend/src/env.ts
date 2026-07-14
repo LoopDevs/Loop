@@ -575,6 +575,36 @@ export function parseEnv(source: NodeJS.ProcessEnv): Env {
     );
   }
 
+  // NS-10 (CF-25 / X-PRIV-03 follow-up): production must ENCRYPT the
+  // gift-card redeem code + PIN at rest. These are spendable bearer
+  // secrets; before this guard the key was opt-in and its absence only
+  // WARNed at boot (index.ts), so a prod deploy that forgot
+  // LOOP_REDEEM_ENCRYPTION_KEY silently stored every code/PIN in
+  // PLAINTEXT — a logical DB read (leaked DATABASE_URL, rogue
+  // loop_readonly SELECT, backup exfiltration) then handed out
+  // spendable cards. Fail CLOSED at boot in production when the key is
+  // unset, matching the LOOP_STELLAR_USDC_ISSUER / step-up precedents
+  // above, with the same `"1"`-only emergency opt-out. Dev/test keep
+  // the warn-and-allow posture (index.ts) so local work isn't blocked
+  // on generating a key. Encryption is backward-safe on read (legacy
+  // plaintext rows pass through), and `scripts/backfill-redeem-
+  // encryption.ts` encrypts any pre-existing plaintext as a deploy step.
+  if (
+    parsed.data.NODE_ENV === 'production' &&
+    (parsed.data.LOOP_REDEEM_ENCRYPTION_KEY === undefined ||
+      parsed.data.LOOP_REDEEM_ENCRYPTION_KEY === '') &&
+    parsed.data.DISABLE_REDEEM_ENCRYPTION_ENFORCEMENT !== '1'
+  ) {
+    throw new Error(
+      'Invalid environment variables — LOOP_REDEEM_ENCRYPTION_KEY must be set in production ' +
+        '(NS-10; CF-25 / X-PRIV-03). Without it, gift-card redeem codes/PINs (spendable bearer ' +
+        'secrets) are stored PLAINTEXT at rest and any logical DB read yields spendable cards. ' +
+        'Generate a 32-byte key (`openssl rand -base64 32`), or set ' +
+        'DISABLE_REDEEM_ENCRYPTION_ENFORCEMENT=1 to deliberately ship production with redeem ' +
+        'secrets stored in plaintext (rollback/staging only, never with live redemption data).',
+    );
+  }
+
   // CF-25 / X-PRIV-03: validate the redeem envelope key decodes to
   // exactly 32 bytes when present. A wrong-length key would silently
   // write ciphertext nobody can later decrypt (the read path throws on

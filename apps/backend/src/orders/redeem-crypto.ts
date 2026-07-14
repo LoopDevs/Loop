@@ -39,14 +39,19 @@
  *     treats that as "redemption unavailable" rather than serving a
  *     forged code.
  *
- * ── Key-unset behaviour (ships dark) ──────────────────────────────
+ * ── Key-unset behaviour ───────────────────────────────────────────
  *
  * If `LOOP_REDEEM_ENCRYPTION_KEY` is unset, `encryptRedeemField`
- * returns the plaintext unchanged. This lets the change ship without
- * forcing a new secret — encryption activates the moment the operator
- * sets the key. `index.ts` logs a single boot warn while it's unset so
- * the dark state is visible. Once set, new writes are encrypted and
- * old plaintext rows still decrypt (passthrough); the two coexist.
+ * returns the plaintext unchanged. NS-10: this dev/test-only fallback
+ * is a convenience for local work — PRODUCTION now fails closed at
+ * boot when the key is unset (`env.ts` parseEnv throws), so a prod
+ * write never reaches the plaintext-passthrough branch. In dev/test
+ * `index.ts` logs a single boot warn while the key is unset so the
+ * dark state is visible. Once the key is set, new writes are encrypted
+ * and old plaintext rows still decrypt (passthrough) — the two coexist
+ * during the transition, and `scripts/backfill-redeem-encryption.ts`
+ * (a deploy-time one-shot) encrypts any pre-existing plaintext rows,
+ * reusing the SAME `enc:v1:` discriminator to stay idempotent.
  */
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { env } from '../env.js';

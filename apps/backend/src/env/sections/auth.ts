@@ -74,13 +74,18 @@ export const authEnvFields = {
   // plaintext (it's the redemption landing page, not the secret).
   //
   // 32 bytes, supplied as base64 / base64url or hex. Validated at boot
-  // (below) so a wrong-length key fails loudly instead of silently
-  // writing un-decryptable ciphertext. Absent → encryption is disabled
-  // and codes are stored plaintext (legacy behaviour); index.ts logs a
-  // single boot warn while unset. Decrypt is backward-safe: old
-  // plaintext rows and key-unset writes pass through untouched, so
-  // setting the key activates encryption for new writes without a
-  // backfill or boot break. NOT a JWT/HMAC secret — keep it separate.
+  // (env.ts) so a wrong-length key fails loudly instead of silently
+  // writing un-decryptable ciphertext. NS-10: REQUIRED in production —
+  // env.ts fails closed at boot when it is unset in prod (spendable
+  // bearer secrets must not sit in plaintext at rest), with a `"1"`-only
+  // DISABLE_REDEEM_ENCRYPTION_ENFORCEMENT rollback opt-out. Absent in
+  // dev/test → encryption is disabled and codes are stored plaintext
+  // (legacy behaviour); index.ts logs a single boot warn while unset.
+  // Decrypt is backward-safe: old plaintext rows and key-unset writes
+  // pass through untouched, so setting the key activates encryption for
+  // new writes; `scripts/backfill-redeem-encryption.ts` encrypts any
+  // pre-existing plaintext rows as a deploy step. NOT a JWT/HMAC secret
+  // — keep it separate.
   LOOP_REDEEM_ENCRYPTION_KEY: z.string().optional(),
 
   // Loop-native auth feature flag (ADR 013). When true, /request-otp

@@ -24,10 +24,20 @@ const MONITORING_WEBHOOK = 'https://discord.com/api/webhooks/123456789012345678/
 // carried here so the production-success fixtures below (which spread
 // `...base`) satisfy the CFG-01 required-in-prod boot guard; it's
 // optional in dev/test, so its presence is inert for the dev parses.
+// NS-10 (CF-25 / X-PRIV-03): production boots require
+// LOOP_REDEEM_ENCRYPTION_KEY (or the explicit opt-out). A 32-byte key
+// (base64 of "0123456789abcdef0123456789abcdef") that also clears the
+// 32-byte length validation. Carried in `base` — same pattern as
+// DISCORD_WEBHOOK_MONITORING above — so every production-success
+// fixture that spreads `...base` satisfies the guard; it's optional in
+// dev/test, so its presence is inert for the dev parses.
+const REDEEM_KEY = 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=';
+
 const base = {
   GIFT_CARD_API_BASE_URL: 'https://upstream.example.com',
   DATABASE_URL: 'postgres://user:pass@localhost:5433/loop',
   DISCORD_WEBHOOK_MONITORING: MONITORING_WEBHOOK,
+  LOOP_REDEEM_ENCRYPTION_KEY: REDEEM_KEY,
 };
 
 // Hardening B3: production boots require LOOP_ADMIN_STEP_UP_SIGNING_KEY
@@ -944,6 +954,68 @@ describe('parseEnv', () => {
       ).not.toThrow();
       expect(() =>
         parseEnv({ ...base, DISCORD_WEBHOOK_MONITORING: undefined, NODE_ENV: 'test' }),
+      ).not.toThrow();
+    });
+  });
+
+  // NS-10 (CF-25 / X-PRIV-03 follow-up): production must ENCRYPT the
+  // gift-card redeem code + PIN at rest. Before this guard the key was
+  // opt-in and its absence only WARNed at boot, so a prod deploy that
+  // forgot LOOP_REDEEM_ENCRYPTION_KEY silently stored every spendable
+  // bearer secret in PLAINTEXT. parseEnv now fails closed in production
+  // when the key is unset — same shape as the USDC-issuer / step-up
+  // guards above, with a `"1"`-only opt-out. Dev/test keep warn-and-allow.
+  describe('NS-10: production redeem-encryption-key boot guard', () => {
+    // A production config that clears every OTHER prod boot guard, so a
+    // test can isolate the redeem-key check (parseEnv throws on the FIRST
+    // failing guard, and this one runs late). `base` carries the redeem
+    // key, so we explicitly UNSET it here to exercise the guard.
+    const prodMinusRedeem = {
+      ...base,
+      NODE_ENV: 'production' as const,
+      IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
+      LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
+      LOOP_AUTH_NATIVE_ENABLED: 'true' as const,
+      LOOP_JWT_SIGNING_KEY: JWT_KEY,
+      LOOP_STELLAR_USDC_ISSUER: USDC_ISSUER,
+      LOOP_REDEEM_ENCRYPTION_KEY: undefined,
+    };
+
+    it('refuses to start in production when LOOP_REDEEM_ENCRYPTION_KEY is unset', () => {
+      expect(() => parseEnv(prodMinusRedeem)).toThrow(
+        /LOOP_REDEEM_ENCRYPTION_KEY must be set in production/,
+      );
+    });
+
+    it('refuses to start in production when LOOP_REDEEM_ENCRYPTION_KEY is empty', () => {
+      expect(() => parseEnv({ ...prodMinusRedeem, LOOP_REDEEM_ENCRYPTION_KEY: '' })).toThrow(
+        /LOOP_REDEEM_ENCRYPTION_KEY must be set in production/,
+      );
+    });
+
+    it('accepts production once LOOP_REDEEM_ENCRYPTION_KEY is set', () => {
+      const env = parseEnv({ ...prodMinusRedeem, LOOP_REDEEM_ENCRYPTION_KEY: REDEEM_KEY });
+      expect(env.LOOP_REDEEM_ENCRYPTION_KEY).toBe(REDEEM_KEY);
+    });
+
+    it('allows DISABLE_REDEEM_ENCRYPTION_ENFORCEMENT=1 as the explicit opt-out', () => {
+      expect(() =>
+        parseEnv({ ...prodMinusRedeem, DISABLE_REDEEM_ENCRYPTION_ENFORCEMENT: '1' }),
+      ).not.toThrow();
+    });
+
+    it('rejects any opt-out value other than "1" at parse time', () => {
+      expect(() =>
+        parseEnv({ ...prodMinusRedeem, DISABLE_REDEEM_ENCRYPTION_ENFORCEMENT: 'true' }),
+      ).toThrow(/DISABLE_REDEEM_ENCRYPTION_ENFORCEMENT/);
+    });
+
+    it('does not enforce the redeem key outside production (dev/test boot with the key unset)', () => {
+      expect(() =>
+        parseEnv({ ...base, LOOP_REDEEM_ENCRYPTION_KEY: undefined, NODE_ENV: 'development' }),
+      ).not.toThrow();
+      expect(() =>
+        parseEnv({ ...base, LOOP_REDEEM_ENCRYPTION_KEY: undefined, NODE_ENV: 'test' }),
       ).not.toThrow();
     });
   });
