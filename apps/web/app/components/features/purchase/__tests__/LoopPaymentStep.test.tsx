@@ -374,3 +374,125 @@ describe('LoopPaymentStep — credit', () => {
     await waitFor(() => expect(spy).toHaveBeenCalledOnce());
   });
 });
+
+// FE-05 (round 2): the fulfilled RedemptionBody renders the gift-card CODE
+// and PIN as copyable Rows — this IS the fulfilled-redemption view for the
+// Loop-native flow (ADR-010 keeps it visible over PurchaseComplete), so the
+// user copies their secret from here on a primary path. Copying a redemption
+// secret must route through `copySensitive` so the clipboard auto-clears
+// after ~60s. The deposit address / memo Rows are NOT secrets and must stay
+// on the clipboard. We drive the REAL clipboard module (copySensitive is not
+// mocked) under fake timers and assert the auto-clear (an empty-string write)
+// fires for the code/PIN Row but never for the address / memo Row.
+describe('LoopPaymentStep — FE-05 sensitive copy auto-clear', () => {
+  const CLEAR_MS = 60_000;
+  let writeText: ReturnType<typeof vi.fn>;
+  let readText: ReturnType<typeof vi.fn>;
+
+  /** True iff the clipboard was cleared (an empty-string write) at any point. */
+  function wasCleared(): boolean {
+    return writeText.mock.calls.some((call) => call[0] === '');
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    writeText = vi.fn().mockResolvedValue(undefined);
+    // Read-back guard in `copySensitive` reads the clipboard back before
+    // clearing; model a clipboard that still holds whatever we last wrote,
+    // so a scheduled sensitive clear is allowed to fire.
+    readText = vi.fn().mockImplementation(async () => {
+      const calls = writeText.mock.calls;
+      return calls.length > 0 ? String(calls[calls.length - 1]![0]) : '';
+    });
+    Object.assign(navigator, { clipboard: { writeText, readText } });
+  });
+
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  // Flush the react-query mount fetch (resolved-promise microtasks + its
+  // internal 0ms batch) under fake timers so the polled body renders.
+  async function settle(): Promise<void> {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20);
+    });
+  }
+
+  it('routes the fulfilled gift-card CODE Row through copySensitive (schedules the auto-clear)', async () => {
+    getLoopOrderMock.mockResolvedValue(
+      mkOrder({
+        state: 'fulfilled',
+        redeemCode: 'CARD-123-XYZ',
+        redeemPin: null,
+        ctxOrderId: 'ctx-abc',
+        fulfilledAt: new Date().toISOString(),
+      }),
+    );
+    render(wrap(<LoopPaymentStep create={mkStellarCreate()} />));
+    await settle();
+    const copyBtn = screen.getByRole('button', { name: /Copy gift card code/i });
+    await act(async () => {
+      fireEvent.click(copyBtn);
+    });
+    // The secret is written immediately, and not cleared before the delay.
+    expect(writeText).toHaveBeenCalledWith('CARD-123-XYZ');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(CLEAR_MS - 1);
+    });
+    expect(wasCleared()).toBe(false);
+    // Once the auto-clear delay elapses the secret is wiped. This assertion
+    // is RED against the pre-fix Row (plain writeText, no scheduled clear).
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(wasCleared()).toBe(true);
+  });
+
+  it('routes the fulfilled PIN Row through copySensitive (schedules the auto-clear)', async () => {
+    getLoopOrderMock.mockResolvedValue(
+      mkOrder({
+        state: 'fulfilled',
+        redeemCode: null,
+        redeemPin: '4242',
+        ctxOrderId: 'ctx-abc',
+        fulfilledAt: new Date().toISOString(),
+      }),
+    );
+    render(wrap(<LoopPaymentStep create={mkStellarCreate()} />));
+    await settle();
+    const copyBtn = screen.getByRole('button', { name: /Copy pin/i });
+    await act(async () => {
+      fireEvent.click(copyBtn);
+    });
+    expect(writeText).toHaveBeenCalledWith('4242');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(CLEAR_MS);
+    });
+    expect(wasCleared()).toBe(true);
+  });
+
+  it('does NOT schedule an auto-clear for the deposit address / memo Rows (they must persist)', async () => {
+    // pending_payment → StellarPaymentBody renders the deposit address + memo
+    // as copyable, NON-sensitive Rows. A user pastes these into their wallet,
+    // so wiping them after 60s would break the payment flow — they stay put.
+    getLoopOrderMock.mockResolvedValue(mkOrder({ state: 'pending_payment' }));
+    render(wrap(<LoopPaymentStep create={mkStellarCreate()} />));
+    await settle();
+    const copyAddress = screen.getByRole('button', { name: /Copy to address/i });
+    await act(async () => {
+      fireEvent.click(copyAddress);
+    });
+    expect(writeText).toHaveBeenCalledWith(
+      'GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW',
+    );
+    // Long past any sensitive-clear delay: nothing is cleared. (This is the
+    // control — it passes both pre-fix and post-fix.)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(CLEAR_MS * 2);
+    });
+    expect(wasCleared()).toBe(false);
+  });
+});

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { triggerHapticNotification } from '~/native/haptics';
-import { copyToClipboard } from '~/native/clipboard';
+import { copySensitive } from '~/native/clipboard';
 import { nativeShare } from '~/native/share';
 import { getImageProxyUrl } from '~/utils/image';
 import { composeGiftCardShareImage } from '~/utils/share-image';
@@ -41,7 +41,10 @@ export function PurchaseComplete({
   const useCanvas = barcodeImageUrl === undefined || imageFailed;
 
   const handleCopy = async (text: string, which: 'code' | 'pin'): Promise<void> => {
-    const ok = await copyToClipboard(text);
+    // Gift-card code/PIN are redemption secrets: copy via `copySensitive`
+    // so the clipboard auto-clears after a short delay (FE-05) instead of
+    // leaving the value for any later paste to read.
+    const ok = await copySensitive(text);
     if (ok) {
       setCopied(which);
       setTimeout(() => setCopied(null), 2000);

@@ -13,6 +13,7 @@ import { Spinner } from '~/components/ui/Spinner';
 import { isNativePlatform } from '~/native/platform';
 import { safeRedeemHref, safePaymentUriHref } from '~/native/webview';
 import { formatMinorCurrency, useLocaleTag } from '~/i18n/format';
+import { copySensitive } from '~/native/clipboard';
 import { PayWithLoopBalance } from './PayWithLoopBalance';
 
 export interface LoopPaymentStepProps {
@@ -227,8 +228,10 @@ function RedemptionBody({ order }: { order: LoopOrderView }): React.JSX.Element 
 
   return (
     <div className="rounded-xl border border-green-200 dark:border-green-900/40 bg-green-50/50 dark:bg-green-900/10 p-4 space-y-3">
-      {hasCode ? <Row label="Gift card code" value={order.redeemCode!} copyable mono /> : null}
-      {hasPin ? <Row label="PIN" value={order.redeemPin!} copyable mono /> : null}
+      {hasCode ? (
+        <Row label="Gift card code" value={order.redeemCode!} copyable mono sensitive />
+      ) : null}
+      {hasPin ? <Row label="PIN" value={order.redeemPin!} copyable mono sensitive /> : null}
       {redeemHref !== null ? (
         <div>
           <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
@@ -426,15 +429,28 @@ function Row({
   value,
   copyable,
   mono,
+  sensitive = false,
 }: {
   label: string;
   value: string;
   copyable?: boolean;
   mono?: boolean;
+  /**
+   * When true the value is a redemption secret (gift-card code / PIN):
+   * copy via `copySensitive` so the clipboard auto-clears after a short
+   * delay (FE-05). Non-sensitive rows (payment address / memo / amounts)
+   * copy plainly and are deliberately left on the clipboard so the user
+   * can paste them into their wallet.
+   */
+  sensitive?: boolean;
 }): React.JSX.Element {
   const [copied, setCopied] = useState(false);
   const onCopy = (): void => {
-    void navigator.clipboard.writeText(value);
+    if (sensitive) {
+      void copySensitive(value);
+    } else {
+      void navigator.clipboard.writeText(value);
+    }
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1500);
   };

@@ -8,6 +8,7 @@ import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
 import { formatMinorCurrency, useLocaleTag } from '~/i18n/format';
 import { safeRedeemHref } from '~/native/webview';
+import { copySensitive } from '~/native/clipboard';
 
 /**
  * Loop-native orders section on the account/orders page.
@@ -140,10 +141,14 @@ function LoopOrderRow({ order }: { order: LoopOrderView }): React.JSX.Element {
           {isFulfilled && hasRedemption ? (
             <div className="rounded-lg bg-gray-50 dark:bg-gray-950/50 p-3 space-y-2">
               {order.redeemCode !== null && order.redeemCode.length > 0 ? (
-                <RedemptionField label={t('loopList.fields.code')} value={order.redeemCode} />
+                <RedemptionField
+                  label={t('loopList.fields.code')}
+                  value={order.redeemCode}
+                  sensitive
+                />
               ) : null}
               {order.redeemPin !== null && order.redeemPin.length > 0 ? (
-                <RedemptionField label={t('loopList.fields.pin')} value={order.redeemPin} />
+                <RedemptionField label={t('loopList.fields.pin')} value={order.redeemPin} sensitive />
               ) : null}
               {redeemHref !== null ? (
                 <a
@@ -257,11 +262,29 @@ function PendingPaymentRecoveryPanel({
   );
 }
 
-function RedemptionField({ label, value }: { label: string; value: string }): React.JSX.Element {
+function RedemptionField({
+  label,
+  value,
+  sensitive = false,
+}: {
+  label: string;
+  value: string;
+  /**
+   * When true the value is a redemption secret (gift-card code / PIN):
+   * copy via `copySensitive` so the clipboard auto-clears after a short
+   * delay (FE-05). Non-sensitive fields (payment address / memo) copy
+   * plainly and are left on the clipboard.
+   */
+  sensitive?: boolean;
+}): React.JSX.Element {
   const { t } = useTranslation('orders');
   const [copied, setCopied] = useState(false);
   const onCopy = (): void => {
-    void navigator.clipboard.writeText(value);
+    if (sensitive) {
+      void copySensitive(value);
+    } else {
+      void navigator.clipboard.writeText(value);
+    }
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1500);
   };
