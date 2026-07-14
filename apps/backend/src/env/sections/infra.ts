@@ -317,6 +317,25 @@ export const infraEnvFields = {
   LOOP_LEDGER_INVARIANT_INTERVAL_HOURS: z.coerce.number().int().positive().default(24),
   LOOP_AUTH_ROW_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
 
+  // NS-03: retention window for the durable admin money-move AUDIT
+  // trail. `admin_idempotency_keys` is both the idempotency-replay
+  // store AND the sole durable record of every admin money-move
+  // (refunds, emissions, credit-adjustments — read by
+  // `admin/audit-tail.ts` + `admin/user-audit-timeline.ts`). Its sweep
+  // (`sweepStaleIdempotencyKeys`) previously reaped rows at the 24h
+  // REPLAY TTL, so the forensic/regulatory audit self-deleted after a
+  // day. Retention is now decoupled from replay: the replay-hit window
+  // stays 24h (IDEMPOTENCY_TTL_HOURS) while the sweep keeps rows for
+  // this many days.
+  //
+  // Default 2555 days (~7 years) is a CONSERVATIVE, defensible baseline
+  // for financial audit records (the SOX / typical financial-records
+  // retention horizon). NEEDS-DECISION (compliance): the exact
+  // jurisdiction-specific period is a legal/compliance call, not an
+  // engineering one — tune this var to the value your regulator
+  // mandates. Prefer keeping data (longer) over losing it.
+  LOOP_ADMIN_AUDIT_RETENTION_DAYS: z.coerce.number().int().positive().default(2555),
+
   // ADR 031 §Detailed design D4, V5: vault drift + solvency watcher
   // (`credits/vaults/vault-drift-watcher.ts`) — the Soroban
   // LOOPUSD/LOOPEUR twin of the classic asset-drift watcher above.

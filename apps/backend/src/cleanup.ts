@@ -6,11 +6,13 @@
  * - `evictExpiredImageCache` — drops decoded image blobs whose
  *   TTL has passed (`./images/proxy.js`). 7-day TTL; hourly is
  *   plenty.
- * - `sweepStaleIdempotencyKeys` (A2-500, ADR-017) — expires
- *   admin-write idempotency snapshots past the 24h TTL. Fire-
- *   and-forget — a sweep failure can be retried next hour; the
- *   read-time TTL gate in `lookupIdempotencyKey` keeps replay
- *   semantics correct in the meantime.
+ * - `sweepStaleIdempotencyKeys` (A2-500, ADR-017, NS-03) — deletes
+ *   admin-write idempotency snapshots past the AUDIT RETENTION window
+ *   (`LOOP_ADMIN_AUDIT_RETENTION_DAYS`, ~7 years — NOT the 24h replay
+ *   TTL; this table doubles as the durable admin money-move audit
+ *   trail). Fire-and-forget — a sweep failure can be retried next
+ *   hour; the read-time 24h replay gate in `lookupIdempotencyKey`
+ *   keeps replay semantics correct independently of the sweep.
  *
  * **Per-minute tick** (`runRateLimitSweep`, A4-016):
  * - `sweepExpiredRateLimits` — drops per-IP per-route rate-limit

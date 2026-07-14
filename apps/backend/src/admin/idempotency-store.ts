@@ -4,16 +4,19 @@
  * Lifted out of `./idempotency.ts`. Three persistence helpers that
  * operate directly on the `admin_idempotency_keys` table:
  *
- *   - `lookupIdempotencyKey` — read snapshot, TTL-aware
+ *   - `lookupIdempotencyKey` — read snapshot, replay-TTL-aware
  *   - `storeIdempotencyKey`  — write snapshot (ON CONFLICT DO UPDATE)
- *   - `sweepStaleIdempotencyKeys` — TTL sweep, called from the
- *     app-level cleanup interval
+ *   - `sweepStaleIdempotencyKeys` — audit-retention sweep, called from
+ *     the app-level cleanup interval
  *
  * The higher-level `withIdempotencyGuard` (which serialises
  * lookup → write → store under a `pg_advisory_xact_lock`) lives in
  * the parent file and uses the in-transaction shape of the same
- * primitives. Both are kept on the same source-of-truth for the
- * 24h TTL via the parent's `IDEMPOTENCY_TTL_HOURS` constant.
+ * primitives. NS-03: the 24h REPLAY window (`IDEMPOTENCY_TTL_HOURS`,
+ * enforced at read time by `lookupIdempotencyKey` + the guard) is now
+ * decoupled from the much longer sweep/retention window
+ * (`LOOP_ADMIN_AUDIT_RETENTION_DAYS`) — this table doubles as the
+ * durable admin money-move audit trail, which must outlive replay.
  *
  * Re-exported from `./idempotency.ts` so the wide network of
  * existing import sites (admin handlers + tests) keeps resolving.
@@ -21,6 +24,7 @@
 import { and, eq, gt, lt, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { adminIdempotencyKeys } from '../db/schema.js';
+import { env } from '../env.js';
 import { logger } from '../logger.js';
 import { IDEMPOTENCY_TTL_HOURS } from './idempotency-constants.js';
 
@@ -67,22 +71,50 @@ export async function lookupIdempotencyKey(args: {
 }
 
 /**
- * A2-500: hourly sweep that DELETEs admin-idempotency snapshots
- * older than the declared TTL. Called from the app-level cleanup
- * interval. Cheap even at steady state because
+ * A2-500 / NS-03: hourly sweep that DELETEs admin-idempotency
+ * snapshots older than the AUDIT RETENTION window. Called from the
+ * app-level cleanup interval. Cheap even at steady state because
  * `admin_idempotency_keys_created_at` is indexed.
+ *
+ * NS-03: the retention window is NOT the 24h replay TTL. This table
+ * is the durable admin money-move audit trail (`audit-tail.ts` /
+ * `user-audit-timeline.ts` read it), so a 24h sweep silently deleted
+ * the sole forensic record of refunds/emissions/adjustments after a
+ * day. Retention now defaults to `LOOP_ADMIN_AUDIT_RETENTION_DAYS`
+ * (~7 years, financial-records grade) while the 24h REPLAY window
+ * (`IDEMPOTENCY_TTL_HOURS`, enforced at read time in
+ * `lookupIdempotencyKey` / `withIdempotencyGuard`) is unchanged.
+ *
+ * Replay semantics are preserved: a re-submitted key whose row is
+ * RETAINED but older than 24h is a replay MISS (read-time gate), so
+ * `doWrite()` re-executes — exactly as it did before this change,
+ * when the row would already have been swept. The subsequent snapshot
+ * INSERT then hits the retained row's PK and is absorbed by the
+ * existing `ON CONFLICT DO UPDATE` (it refreshes method/path/status/
+ * body; `created_at` is deliberately left untouched so the audit
+ * timestamp of a crash-recovery re-store stays at the first write).
+ *
+ * @param args.retentionMs override the retention grace (defaults to
+ *        `LOOP_ADMIN_AUDIT_RETENTION_DAYS`). Mirrors the
+ *        `runAuthRowPurgeTick` seam so tests can drive a short window.
+ * @param args.now clock injection for tests.
  */
-export async function sweepStaleIdempotencyKeys(): Promise<number> {
+export async function sweepStaleIdempotencyKeys(args?: {
+  retentionMs?: number;
+  now?: Date;
+}): Promise<number> {
   try {
-    const cutoff = new Date(Date.now() - IDEMPOTENCY_TTL_HOURS * 60 * 60 * 1000);
+    const retentionMs =
+      args?.retentionMs ?? env.LOOP_ADMIN_AUDIT_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+    const cutoff = new Date((args?.now ?? new Date()).getTime() - retentionMs);
     const result = await db
       .delete(adminIdempotencyKeys)
       .where(lt(adminIdempotencyKeys.createdAt, cutoff))
       .returning({ key: adminIdempotencyKeys.key });
     if (result.length > 0) {
       log.info(
-        { deletedCount: result.length, ttlHours: IDEMPOTENCY_TTL_HOURS },
-        'Swept stale admin idempotency snapshots',
+        { deletedCount: result.length, retentionMs },
+        'Swept admin idempotency snapshots past audit retention',
       );
     }
     return result.length;
@@ -105,11 +137,14 @@ export async function sweepStaleIdempotencyKeys(): Promise<number> {
  * Counts stored idempotency rows, and a row exists only if the write
  * committed — so this is a count of APPLIED actions, not attempts. A
  * replay of an already-applied action does NOT create a new row, so it
- * doesn't inflate the count. The table is TTL-swept at the same
- * `IDEMPOTENCY_TTL_HOURS` (24h) window, so callers must keep
- * `windowMs <= that TTL` or older applied actions will have been
- * reaped before the window closes (a shorter effective window only
- * makes the cap *stricter*, never looser — safe direction).
+ * doesn't inflate the count. The `windowMs <= retention` invariant the
+ * cap relies on (older applied actions must not have been reaped before
+ * the window closes) is now satisfied with a huge margin: NS-03
+ * decoupled the sweep from the 24h replay TTL onto the
+ * `LOOP_ADMIN_AUDIT_RETENTION_DAYS` audit-retention window (~7 years),
+ * so any sane velocity `windowMs` sits far inside it. (A shorter
+ * effective window only makes the cap *stricter*, never looser — safe
+ * direction — but with year-scale retention that no longer bites.)
  *
  * Deliberately does NOT catch its own errors: the sole caller treats a
  * throw as FAIL-CLOSED (reject the action) so a transient DB error

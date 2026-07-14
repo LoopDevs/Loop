@@ -96,6 +96,7 @@ import {
   sweepStaleIdempotencyKeys,
   storeIdempotencyKey,
 } from '../idempotency.js';
+import { env } from '../../env.js';
 
 beforeEach(() => {
   state.row = undefined;
@@ -202,14 +203,34 @@ describe('storeIdempotencyKey — A2-1700', () => {
   });
 });
 
-describe('sweepStaleIdempotencyKeys — A2-500 sweeper', () => {
-  it('DELETEs rows older than the TTL and returns the count', async () => {
+describe('sweepStaleIdempotencyKeys — A2-500 / NS-03 sweeper', () => {
+  it('DELETEs rows older than the AUDIT RETENTION window (not the 24h replay TTL) and returns the count', async () => {
     state.deletedRows = [{ key: 'k-old-1' }, { key: 'k-old-2' }];
     const n = await sweepStaleIdempotencyKeys();
     expect(n).toBe(2);
-    // Cutoff is ~24h in the past (±a few seconds of test drift).
+    // NS-03: the sweep cutoff is now the audit-retention window
+    // (LOOP_ADMIN_AUDIT_RETENTION_DAYS, ~7y), NOT the 24h replay TTL.
     const now = Date.now();
-    const expectedCutoff = now - IDEMPOTENCY_TTL_HOURS * 60 * 60 * 1000;
+    const retentionMs = env.LOOP_ADMIN_AUDIT_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+    const expectedCutoff = now - retentionMs;
+    expect(state.lastDeleteWhereCutoff).not.toBeNull();
+    const drift = Math.abs((state.lastDeleteWhereCutoff as Date).getTime() - expectedCutoff);
+    expect(drift).toBeLessThan(5_000);
+    // Decoupling guard: the cutoff must be FAR older than the 24h
+    // replay window — a rows-younger-than-retention audit record is
+    // never reaped. (Regression pin for the pre-NS-03 24h sweep.)
+    const replayCutoff = now - IDEMPOTENCY_TTL_HOURS * 60 * 60 * 1000;
+    expect((state.lastDeleteWhereCutoff as Date).getTime()).toBeLessThan(
+      replayCutoff - 30 * 24 * 60 * 60 * 1000,
+    );
+  });
+
+  it('honours an explicit retentionMs override (test/runbook seam)', async () => {
+    state.deletedRows = [{ key: 'k-old-1' }];
+    const overrideMs = 48 * 60 * 60 * 1000;
+    const n = await sweepStaleIdempotencyKeys({ retentionMs: overrideMs });
+    expect(n).toBe(1);
+    const expectedCutoff = Date.now() - overrideMs;
     expect(state.lastDeleteWhereCutoff).not.toBeNull();
     const drift = Math.abs((state.lastDeleteWhereCutoff as Date).getTime() - expectedCutoff);
     expect(drift).toBeLessThan(5_000);

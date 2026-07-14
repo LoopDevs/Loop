@@ -14,12 +14,27 @@ export const IDEMPOTENCY_KEY_MAX = 128;
 /**
  * A2-500: ADR-017 #6 promised a 24h TTL on admin-idempotency
  * snapshots, but nothing enforced it — rows accumulated forever.
- * The TTL is applied in two places:
- *   - `sweepStaleIdempotencyKeys()` runs hourly from the app-level
- *     cleanup interval and DELETEs rows whose `created_at` is older
- *     than the TTL.
- *   - `lookupIdempotencyKey()` filters expired rows at read time so
- *     a replay within the first sweep window after a restart still
- *     sees the correct behaviour.
+ *
+ * NS-03 decoupling: this constant now governs ONLY the REPLAY-hit
+ * window — the bounded period in which a re-submitted (adminUserId,
+ * key) pair returns the cached response instead of re-executing the
+ * write. It is applied at read time in two places:
+ *   - `lookupIdempotencyKey()` (idempotency-store.ts) — a row older
+ *     than this window is treated as a MISS.
+ *   - the re-read inside `withIdempotencyGuard()` (idempotency.ts) —
+ *     same window, so the guarded and manual replay paths cannot
+ *     drift.
+ *
+ * It is NO LONGER the retention/sweep cutoff. `admin_idempotency_keys`
+ * doubles as the durable admin money-move AUDIT trail (read by
+ * `audit-tail.ts` and `user-audit-timeline.ts`), which must persist
+ * far longer than the 24h replay window for regulatory/forensic
+ * reasons. Retention is now governed independently by
+ * `LOOP_ADMIN_AUDIT_RETENTION_DAYS` (consumed by
+ * `sweepStaleIdempotencyKeys()`). Keeping the replay window at 24h
+ * while retaining rows for years is safe: a re-submit past 24h is a
+ * replay MISS and re-executes (the same behaviour as before, when the
+ * row would already have been swept) — see `sweepStaleIdempotencyKeys`
+ * for the ON-CONFLICT interaction on the retained row.
  */
 export const IDEMPOTENCY_TTL_HOURS = 24;
