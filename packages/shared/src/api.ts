@@ -194,6 +194,10 @@ export const ApiErrorCode = {
   HOME_CURRENCY_HAS_LIVE_BALANCE: 'HOME_CURRENCY_HAS_LIVE_BALANCE',
   HOME_CURRENCY_HAS_IN_FLIGHT_PAYOUTS: 'HOME_CURRENCY_HAS_IN_FLIGHT_PAYOUTS',
   CONCURRENT_CHANGE: 'CONCURRENT_CHANGE',
+  // MNY-10: admin emission destination must be the target user's registered
+  // wallet — reject a mismatched destination or a user with no wallet.
+  NO_REGISTERED_WALLET: 'NO_REGISTERED_WALLET',
+  DESTINATION_NOT_REGISTERED: 'DESTINATION_NOT_REGISTERED',
   // User favourites (per-user merchant pin list).
   MERCHANT_NOT_FOUND: 'MERCHANT_NOT_FOUND',
   FAVORITES_LIMIT_EXCEEDED: 'FAVORITES_LIMIT_EXCEEDED',
