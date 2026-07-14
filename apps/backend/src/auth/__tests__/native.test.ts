@@ -12,7 +12,10 @@ const createOtpMock = vi.fn();
 const countRecentMock = vi.fn();
 const findLiveOtpMock = vi.fn();
 const incrementAttemptsMock = vi.fn();
-const markConsumedMock = vi.fn();
+// BK-otpatomic: verify now consumes via the atomic CAS `tryConsumeOtp`
+// (returns true iff THIS call won the single-use race), replacing the
+// old unconditional `markOtpConsumed`.
+const tryConsumeOtpMock = vi.fn();
 const sendOtpMock = vi.fn();
 const findOrCreateUserMock = vi.fn();
 const recordRefreshMock = vi.fn();
@@ -41,7 +44,7 @@ vi.mock('../otps.js', async () => {
     countRecentOtpsForEmail: (args: unknown) => countRecentMock(args),
     findLiveOtp: (args: unknown) => findLiveOtpMock(args),
     incrementOtpAttempts: (args: unknown) => incrementAttemptsMock(args),
-    markOtpConsumed: (id: string) => markConsumedMock(id),
+    tryConsumeOtp: (id: string) => tryConsumeOtpMock(id),
   };
 });
 vi.mock('../email.js', () => ({
@@ -120,7 +123,7 @@ beforeEach(() => {
   countRecentMock.mockReset();
   findLiveOtpMock.mockReset();
   incrementAttemptsMock.mockReset();
-  markConsumedMock.mockReset();
+  tryConsumeOtpMock.mockReset();
   sendOtpMock.mockReset();
   findOrCreateUserMock.mockReset();
   recordRefreshMock.mockReset();
@@ -143,7 +146,9 @@ beforeEach(() => {
   createOtpMock.mockResolvedValue({ id: 'row-1', expiresAt: new Date(Date.now() + 60_000) });
   sendOtpMock.mockResolvedValue(undefined);
   incrementAttemptsMock.mockResolvedValue(undefined);
-  markConsumedMock.mockResolvedValue(undefined);
+  // BK-otpatomic: default the consume-CAS to "won the race" so happy-path
+  // tests mint; the concurrent-loser test flips it to false.
+  tryConsumeOtpMock.mockResolvedValue(true);
   recordRefreshMock.mockResolvedValue(undefined);
   revokeRefreshMock.mockResolvedValue(undefined);
   tryRevokeIfLiveMock.mockResolvedValue(true);
@@ -337,7 +342,7 @@ describe('nativeVerifyOtpHandler', () => {
     const { ctx } = makeCtx({ email: 'a@b.com', otp: '123456' });
     const res = await nativeVerifyOtpHandler(ctx);
     expect(res.status).toBe(200);
-    expect(markConsumedMock).toHaveBeenCalledWith('otp-1');
+    expect(tryConsumeOtpMock).toHaveBeenCalledWith('otp-1');
     expect(findOrCreateUserMock).toHaveBeenCalledWith('a@b.com');
     expect(recordRefreshMock).toHaveBeenCalled();
     // B5: the email's failed-attempt counter is cleared on success.
@@ -345,6 +350,23 @@ describe('nativeVerifyOtpHandler', () => {
     const body = (await res.json()) as { accessToken: string; refreshToken: string };
     expect(body.accessToken.split('.')).toHaveLength(3);
     expect(body.refreshToken.split('.')).toHaveLength(3);
+  });
+
+  it('BK-otpatomic: losing the consume CAS (row already consumed) → 401, mints nothing', async () => {
+    // findLiveOtp read the row as live, but a concurrent verify consumed
+    // it first, so the atomic `tryConsumeOtp` returns false for this call.
+    findLiveOtpMock.mockResolvedValue({ id: 'otp-1', attempts: 0 });
+    tryConsumeOtpMock.mockResolvedValue(false);
+    const { ctx } = makeCtx({ email: 'a@b.com', otp: '123456' });
+    const res = await nativeVerifyOtpHandler(ctx);
+    // The CAS loser is rejected with the generic 401 — single-use holds.
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as { code: string }).code).toBe('UNAUTHORIZED');
+    // Crucially it must NOT mint a second session or clear the counter.
+    expect(tryConsumeOtpMock).toHaveBeenCalledWith('otp-1');
+    expect(findOrCreateUserMock).not.toHaveBeenCalled();
+    expect(recordRefreshMock).not.toHaveBeenCalled();
+    expect(clearOtpAttemptsMock).not.toHaveBeenCalled();
   });
 
   it('returns 500 on a db failure inside user upsert', async () => {

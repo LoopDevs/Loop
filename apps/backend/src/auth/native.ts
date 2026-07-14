@@ -11,7 +11,7 @@ import { logger } from '../logger.js';
 import {
   findLiveOtp,
   incrementOtpAttempts,
-  markOtpConsumed,
+  tryConsumeOtp,
   countRecentOtpsForEmail,
   OTP_TTL_MS,
 } from './otps.js';
@@ -149,7 +149,25 @@ export async function nativeVerifyOtpHandler(c: Context): Promise<Response> {
       }
       return c.json({ code: 'UNAUTHORIZED', message: 'Invalid or expired verification code' }, 401);
     }
-    await markOtpConsumed(hit.id);
+    // BK-otpatomic: single-use is enforced by an ATOMIC compare-and-set,
+    // not a read-then-mark. `findLiveOtp` above only READ the row as
+    // unconsumed; two concurrent verifies with the same valid code both
+    // pass that read. `tryConsumeOtp` flips `consumed_at` NULL → now() in
+    // ONE `UPDATE ... WHERE consumed_at IS NULL RETURNING`, so exactly one
+    // caller gets the row back (`won === true`) and proceeds to mint; the
+    // loser gets 0 rows and must NOT issue a second pair. Mirrors the
+    // refresh path's `tryRevokeIfLive` CAS (A4-098).
+    const won = await tryConsumeOtp(hit.id);
+    if (!won) {
+      // A concurrent verify already consumed this OTP — it is now spent.
+      // Surface the same generic 401 a wrong / expired / already-consumed
+      // code returns, without minting tokens or clearing the counter (the
+      // winner already did the latter).
+      return c.json(
+        { code: 'UNAUTHORIZED', message: 'Invalid or expired verification code' },
+        401,
+      );
+    }
     // B5: legitimate verify clears the email's failed-attempt counter.
     await clearOtpAttempts(email);
     const user = await findOrCreateUserByEmail(email);
