@@ -62,16 +62,35 @@ function emitSessionExpired(event: SessionExpiredEvent): void {
 }
 
 /**
- * FE-40: 401 codes that are NOT a dead-session signal. Admin step-up
- * challenges are a re-auth flow of their own (`useAdminStepUp` mints a
- * fresh `X-Admin-Step-Up` token and retries) — surfacing a full
- * "sign in again" re-auth prompt for them would hijack that flow.
+ * FE-06: 401 codes that are a step-up *challenge*, not an access-token
+ * expiry. The backend runs `requireAuth` (the access-token check) BEFORE
+ * the step-up gate, so any of these codes proves the access token was
+ * still valid — refreshing it is not merely pointless but harmful: it
+ * burns a round-trip, needlessly rotates the refresh token, and — if that
+ * refresh transiently fails — tears down a perfectly good admin session
+ * (`clearSession()` below) on what was only a freshness challenge. These
+ * must bypass the refresh-and-retry path entirely and surface unchanged so
+ * the step-up flow (`useAdminStepUp`) mints a fresh `X-Admin-Step-Up`
+ * token and replays. STEP_UP_UNAVAILABLE is a 503 (ops misconfig), not a
+ * 401 challenge, so it is not a member here.
  */
-const SESSION_EXPIRY_EXEMPT_CODES = new Set<string>([
+const STEP_UP_CHALLENGE_CODES = new Set<string>([
   ApiErrorCode.STEP_UP_REQUIRED,
   ApiErrorCode.STEP_UP_INVALID,
   ApiErrorCode.STEP_UP_SUBJECT_MISMATCH,
   ApiErrorCode.STEP_UP_PURPOSE_MISMATCH,
+]);
+
+/**
+ * FE-40: 401 codes that are NOT a dead-session signal. Admin step-up
+ * challenges are a re-auth flow of their own (`useAdminStepUp` mints a
+ * fresh `X-Admin-Step-Up` token and retries) — surfacing a full
+ * "sign in again" re-auth prompt for them would hijack that flow.
+ * Superset of the step-up challenge codes plus STEP_UP_UNAVAILABLE (503),
+ * derived from `STEP_UP_CHALLENGE_CODES` so the two can't drift.
+ */
+const SESSION_EXPIRY_EXEMPT_CODES = new Set<string>([
+  ...STEP_UP_CHALLENGE_CODES,
   ApiErrorCode.STEP_UP_UNAVAILABLE,
 ]);
 
@@ -319,8 +338,15 @@ export async function authenticatedRequest<T>(
   let stepUpHeader: Record<string, string> = {};
   if (options.withStepUp === true) {
     const { useAdminStepUpStore } = await import('~/stores/admin-step-up.store');
-    const stepUpToken = useAdminStepUpStore.getState().token;
-    if (stepUpToken !== null && stepUpToken.length > 0) {
+    const stepUpStore = useAdminStepUpStore.getState();
+    // FE-07: reuse the cached step-up token ONLY while the store's
+    // freshness guard vouches for it. `isFresh()` fails closed on a
+    // missing / expired / about-to-expire (5s skew) token, so a
+    // stale-but-not-yet-server-expired token is dropped here and forces
+    // a fresh challenge (empty header → 401 STEP_UP_REQUIRED → modal)
+    // instead of being replayed into a guaranteed mid-flight 401.
+    const stepUpToken = stepUpStore.token;
+    if (stepUpStore.isFresh() && stepUpToken !== null && stepUpToken.length > 0) {
       stepUpHeader = { 'X-Admin-Step-Up': stepUpToken };
     }
   }
@@ -336,6 +362,21 @@ export async function authenticatedRequest<T>(
       },
     });
   } catch (err) {
+    // FE-06: a step-up challenge (STEP_UP_*) is NOT an access-token
+    // expiry — `requireAuth` runs before the step-up gate, so the access
+    // token was valid. Never enter the refresh-and-retry path for it:
+    // that would burn a round-trip, needlessly rotate the refresh token,
+    // and (if the refresh transiently fails) call clearSession() below,
+    // wiping a live admin session on a mere freshness challenge. Surface
+    // it unchanged so `useAdminStepUp` runs its own re-auth dance. (FE-40
+    // exempted only the session-expiry EMIT; this exempts the refresh.)
+    if (
+      err instanceof ApiException &&
+      err.status === 401 &&
+      STEP_UP_CHALLENGE_CODES.has(err.code)
+    ) {
+      throw err;
+    }
     // On 401, attempt one silent refresh and retry
     if (err instanceof ApiException && err.status === 401) {
       const newToken = await tryRefresh();

@@ -21,7 +21,7 @@
  * (loading state, success cache invalidation, error display); the
  * hook just intercepts the step-up failure mode.
  */
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { ApiException } from '@loop/shared';
 import { useAdminStepUpStore, type PendingActionSummary } from '~/stores/admin-step-up.store';
 
@@ -57,43 +57,55 @@ export function useAdminStepUp(): UseAdminStepUpReturn {
   const clearStepUp = useAdminStepUpStore((s) => s.clear);
   const setPendingAction = useAdminStepUpStore((s) => s.setPendingAction);
 
-  // Pending state for the queued mutation. Pulling these into refs
-  // would avoid re-renders, but the modal itself already gates
-  // on `modalOpen`, so the extra render-pass is not load-bearing.
+  // P2-06: the queue of step-up-blocked mutations awaiting a single
+  // token mint. Held in a ref, not React state, because two concurrent
+  // `runWithStepUp` calls each append synchronously — a `useState`
+  // single slot (or even a functional-update array) invited a lost
+  // update where the second call's `set` overwrote the first, silently
+  // dropping one mutation's promise (it never resolved or rejected). A
+  // ref append is atomic and never loses an entry, and the modal already
+  // gates on `modalOpen` so no re-render is needed to hold the queue.
   const [modalOpen, setModalOpen] = useState(false);
-  const [pendingResolve, setPendingResolve] = useState<{
-    fn: () => Promise<unknown>;
-    resolve: (value: unknown) => void;
-    reject: (err: unknown) => void;
-  } | null>(null);
+  const pendingQueueRef = useRef<
+    Array<{
+      fn: () => Promise<unknown>;
+      resolve: (value: unknown) => void;
+      reject: (err: unknown) => void;
+    }>
+  >([]);
 
   const handleStepUpConfirm = useCallback(
     (token: string, expiresAt: string) => {
       setStepUp(token, expiresAt);
       setModalOpen(false);
       setPendingAction(null);
-      const pending = pendingResolve;
-      setPendingResolve(null);
-      if (pending !== null) {
-        // Re-run the mutation now that the store has a fresh token.
-        // `authenticatedRequest` reads it from the store on the next
-        // call. Errors here surface to the original caller via the
-        // pending promise's reject path.
+      // Drain the whole queue: ONE confirmed step-up token authorizes
+      // every mutation that was waiting on it (consistent with the
+      // store's existing 5-minute token-reuse window — a fresh token in
+      // the store is silently reused by any `withStepUp` call). Replaying
+      // all queued mutations serves each concurrent demand rather than
+      // dropping the losers. Retry runs once per mutation; a second
+      // failure bubbles to that caller via its own reject path.
+      const queued = pendingQueueRef.current;
+      pendingQueueRef.current = [];
+      for (const pending of queued) {
         pending.fn().then(pending.resolve).catch(pending.reject);
       }
     },
-    [setStepUp, setPendingAction, pendingResolve],
+    [setStepUp, setPendingAction],
   );
 
   const handleStepUpCancel = useCallback(() => {
     setModalOpen(false);
     setPendingAction(null);
-    const pending = pendingResolve;
-    setPendingResolve(null);
-    if (pending !== null) {
+    // Cancel rejects EVERY queued mutation deterministically — no
+    // concurrent demand is left hanging with an unresolved promise.
+    const queued = pendingQueueRef.current;
+    pendingQueueRef.current = [];
+    for (const pending of queued) {
       pending.reject(new Error('Admin step-up cancelled'));
     }
-  }, [setPendingAction, pendingResolve]);
+  }, [setPendingAction]);
 
   const runWithStepUp = useCallback(
     <T>(fn: () => Promise<T>, action?: PendingActionSummary): Promise<T> => {
@@ -107,7 +119,7 @@ export function useAdminStepUp(): UseAdminStepUpReturn {
           // next mutation doesn't re-send the bad value.
           clearStepUp();
           return new Promise<T>((resolve, reject) => {
-            setPendingResolve({
+            pendingQueueRef.current.push({
               fn: fn as () => Promise<unknown>,
               resolve: resolve as (value: unknown) => void,
               reject,
