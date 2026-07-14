@@ -441,6 +441,16 @@ export const vaultHotFloat = pgTable(
     pendingUnredeemedShares: bigint('pending_unredeemed_shares', { mode: 'bigint' })
       .notNull()
       .default(0n),
+    // MNY-06-hotfloat (migration 0069): sub-minor stroop carry
+    // accumulator. `treasury/hot-float.ts`'s replenish tick converts the
+    // batched withdraw proceeds to `balance_minor` and holds the
+    // `amount_out_stroops % STROOPS_PER_MINOR` remainder HERE instead of
+    // truncating it away, flushing a whole minor into `balance_minor`
+    // once carry crosses 100_000. Conservation the replenish writer
+    // maintains: `balance_minor * 100_000 + carry_stroops == Σ proceeds
+    // stroops`. Mirrors the interest-mint carry accumulator
+    // (`interest_mint_snapshots.carry_after_stroops`, migration 0041).
+    carryStroops: bigint('carry_stroops', { mode: 'bigint' }).notNull().default(0n),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -449,6 +459,12 @@ export const vaultHotFloat = pgTable(
     check('vault_hot_float_network_known', sql`${t.network} IN ('testnet', 'mainnet')`),
     check('vault_hot_float_balance_non_negative', sql`${t.balanceMinor} >= 0`),
     check('vault_hot_float_pending_shares_non_negative', sql`${t.pendingUnredeemedShares} >= 0`),
+    // A sub-minor remainder is always in [0, STROOPS_PER_MINOR) — same
+    // bounded shape as `interest_mint_snapshots_carry_bounded` (0041).
+    check(
+      'vault_hot_float_carry_bounded',
+      sql`${t.carryStroops} >= 0 AND ${t.carryStroops} < 100000`,
+    ),
   ],
 );
 

@@ -245,7 +245,26 @@ export async function runHotFloatReplenishTick(
       `hot-float replenish: withdrawFromVault returned an empty amountsOut (${vault.assetCode}/${vault.network})`,
     );
   }
-  const amountOutMinor = amountOutStroops / STROOPS_PER_MINOR;
+
+  // MNY-06-hotfloat: the withdraw proceeds (`amountOutStroops`, 7-decimal
+  // underlying stroops) DO NOT generally land on a whole-minor boundary,
+  // so a plain `amountOutStroops / STROOPS_PER_MINOR` would TRUNCATE the
+  // `amountOutStroops % STROOPS_PER_MINOR` sub-minor remainder — real
+  // on-chain USDC dropped from the float on every tick, accumulating over
+  // time into a growing, unaccounted gap (the leak this fix removes).
+  // Instead we carry the remainder forward in `carry_stroops` and flush a
+  // whole minor into `balance_minor` only once carry + this tick's
+  // remainder crosses STROOPS_PER_MINOR — conserving every stroop:
+  // `balance_minor * PER + carry_stroops == Σ amountOutStroops`. Same
+  // carry idiom as `credits/interest-mint.ts` `splitPayable`.
+  //
+  // `creditedMinor` is the whole-minor amount this tick flushes to the
+  // balance, reported to the log / caller. It is derived from the
+  // `carry_stroops` this tick READ (`row`, from the unlocked
+  // `getHotFloatRow`) — telemetry only, in the same best-effort spirit as
+  // `shares` above; the AUTHORITATIVE credit is the pure-SQL
+  // read-modify-write below, which reads the row's CURRENT carry.
+  const creditedMinor = (row.carryStroops + amountOutStroops) / STROOPS_PER_MINOR;
 
   // Credit the withdraw proceeds and retire the pending shares this
   // tick redeemed. Two properties matter here:
@@ -280,7 +299,16 @@ export async function runHotFloatReplenishTick(
     await tx
       .update(vaultHotFloat)
       .set({
-        balanceMinor: sql`${vaultHotFloat.balanceMinor} + ${amountOutMinor}`,
+        // Flush whole minors, carry the sub-minor remainder. Both
+        // expressions read the row's CURRENT `carry_stroops`, so under
+        // READ COMMITTED a concurrent tick's committed carry is folded in
+        // (Postgres re-evaluates SET against the updated row) — carry
+        // accumulates correctly without a separate FOR UPDATE, matching
+        // the atomic-per-row-UPDATE idiom the balance delta and the
+        // GREATEST pending clamp already rely on. `carry_stroops` stays a
+        // proper sub-minor remainder (0 <= carry < PER, DB-CHECKed).
+        balanceMinor: sql`${vaultHotFloat.balanceMinor} + (${vaultHotFloat.carryStroops} + ${amountOutStroops}) / ${STROOPS_PER_MINOR}`,
+        carryStroops: sql`(${vaultHotFloat.carryStroops} + ${amountOutStroops}) % ${STROOPS_PER_MINOR}`,
         pendingUnredeemedShares: sql`GREATEST(${vaultHotFloat.pendingUnredeemedShares} - ${shares}, 0)`,
         updatedAt: sql`NOW()`,
       })
@@ -297,7 +325,8 @@ export async function runHotFloatReplenishTick(
       assetCode: vault.assetCode,
       network: vault.network,
       shares,
-      amountOutMinor,
+      creditedMinor,
+      amountOutStroops,
       txHash: result.txHash,
     },
     'hot-float replenished',
@@ -326,5 +355,5 @@ export async function runHotFloatReplenishTick(
     reason: `Hot-float replenish withdraw (${vault.assetCode}/${vault.network}, ${shares} shares)`,
   });
 
-  return { replenished: true, amountMinor: amountOutMinor, txHash: result.txHash };
+  return { replenished: true, amountMinor: creditedMinor, txHash: result.txHash };
 }

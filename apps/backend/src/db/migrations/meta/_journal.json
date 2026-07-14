@@ -484,6 +484,13 @@
       "when": 1780189900000,
       "tag": "0068_orders_pct_non_negative_and_face_value_positive",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1780190000000,
+      "tag": "0069_vault_hot_float_carry_stroops",
+      "breakpoints": true
     }
   ]
 }
