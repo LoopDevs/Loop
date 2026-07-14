@@ -6,11 +6,7 @@ vi.mock('../../logger.js', () => ({
   },
 }));
 
-import {
-  usdcStroopsPerCent,
-  convertMinorUnits,
-  __resetFxFeedForTests,
-} from '../price-feed-fx.js';
+import { usdcStroopsPerCent, convertMinorUnits, __resetFxFeedForTests } from '../price-feed-fx.js';
 // The corroboration hysteresis lives in the shared rate-sanity module, keyed
 // per (feed, currency). Clear it around each test so an `fx:GBP` breach streak
 // from one case can't leak into the next. (`__resetFxFeedForTests` wipes only

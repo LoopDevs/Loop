@@ -423,7 +423,9 @@ describeIf('interest-mint integration — real postgres (Q6-6)', () => {
         referenceId: null,
         periodCursor: PERIOD_1,
       });
-      await tx.insert(userCredits).values({ userId: userA.id, currency: 'GBP', balanceMinor: 1000n });
+      await tx
+        .insert(userCredits)
+        .values({ userId: userA.id, currency: 'GBP', balanceMinor: 1000n });
     });
     await db.insert(pendingPayouts).values({
       userId: userA.id,

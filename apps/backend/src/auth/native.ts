@@ -163,10 +163,7 @@ export async function nativeVerifyOtpHandler(c: Context): Promise<Response> {
       // Surface the same generic 401 a wrong / expired / already-consumed
       // code returns, without minting tokens or clearing the counter (the
       // winner already did the latter).
-      return c.json(
-        { code: 'UNAUTHORIZED', message: 'Invalid or expired verification code' },
-        401,
-      );
+      return c.json({ code: 'UNAUTHORIZED', message: 'Invalid or expired verification code' }, 401);
     }
     // B5: legitimate verify clears the email's failed-attempt counter.
     await clearOtpAttempts(email);

@@ -306,9 +306,21 @@ describeIf('user-credits integration — multi-currency caller balance', () => {
     // opening-balance ledger row (helper, one txn each). The `/credits`
     // endpoint reads only user_credits, so the backing rows are invisible
     // to the balance assertions.
-    await seedUserCreditsWithBackingLedger(db, { userId: me.userId, currency: 'USD', balanceMinor: 1000n });
-    await seedUserCreditsWithBackingLedger(db, { userId: me.userId, currency: 'GBP', balanceMinor: 500n });
-    await seedUserCreditsWithBackingLedger(db, { userId: me.userId, currency: 'EUR', balanceMinor: 250n });
+    await seedUserCreditsWithBackingLedger(db, {
+      userId: me.userId,
+      currency: 'USD',
+      balanceMinor: 1000n,
+    });
+    await seedUserCreditsWithBackingLedger(db, {
+      userId: me.userId,
+      currency: 'GBP',
+      balanceMinor: 500n,
+    });
+    await seedUserCreditsWithBackingLedger(db, {
+      userId: me.userId,
+      currency: 'EUR',
+      balanceMinor: 250n,
+    });
 
     const res = await app.request('http://localhost/api/users/me/credits', {
       method: 'GET',
@@ -329,8 +341,16 @@ describeIf('user-credits integration — multi-currency caller balance', () => {
     // DAT-01-inv1: each user's balance is backed by a matching opening
     // ledger row (helper, one txn each); invisible to the `/credits`
     // caller-scoping assertion below.
-    await seedUserCreditsWithBackingLedger(db, { userId: me.userId, currency: 'USD', balanceMinor: 100n });
-    await seedUserCreditsWithBackingLedger(db, { userId: other.userId, currency: 'USD', balanceMinor: 9999n });
+    await seedUserCreditsWithBackingLedger(db, {
+      userId: me.userId,
+      currency: 'USD',
+      balanceMinor: 100n,
+    });
+    await seedUserCreditsWithBackingLedger(db, {
+      userId: other.userId,
+      currency: 'USD',
+      balanceMinor: 9999n,
+    });
 
     const res = await app.request('http://localhost/api/users/me/credits', {
       method: 'GET',

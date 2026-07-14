@@ -287,79 +287,86 @@ async function seed(): Promise<SeededState> {
 // (2) single-use — the same token replayed against its own endpoint is
 // rejected. This is the audited "one token → any write, unlimited times"
 // hole, closed at the live request path.
-describeIf('SEC-02-stepup: admin step-up gate is class-bound + single-use (HTTP end-to-end)', () => {
-  beforeAll(async () => {
-    await ensureMigrated();
-  });
-  beforeEach(async () => {
-    await truncateAllTables();
-  });
+describeIf(
+  'SEC-02-stepup: admin step-up gate is class-bound + single-use (HTTP end-to-end)',
+  () => {
+    beforeAll(async () => {
+      await ensureMigrated();
+    });
+    beforeEach(async () => {
+      await truncateAllTables();
+    });
 
-  it('rejects a token minted for a DIFFERENT action class (emission token on the credit-adjust endpoint) → STEP_UP_PURPOSE_MISMATCH', async () => {
-    const { targetUser, bearer, mintStepUp } = await seed();
-    const res = await app.request(
-      `http://localhost/api/admin/users/${targetUser.id}/credit-adjustments`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${bearer}`,
-          'idempotency-key': idemKey(),
-          // Minted to queue an EMISSION; replayed against a credit-adjust.
-          'X-Admin-Step-Up': mintStepUp('emission'),
+    it('rejects a token minted for a DIFFERENT action class (emission token on the credit-adjust endpoint) → STEP_UP_PURPOSE_MISMATCH', async () => {
+      const { targetUser, bearer, mintStepUp } = await seed();
+      const res = await app.request(
+        `http://localhost/api/admin/users/${targetUser.id}/credit-adjustments`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${bearer}`,
+            'idempotency-key': idemKey(),
+            // Minted to queue an EMISSION; replayed against a credit-adjust.
+            'X-Admin-Step-Up': mintStepUp('emission'),
+          },
+          body: JSON.stringify({
+            amountMinor: '500',
+            currency: 'USD',
+            reason: 'wrong-class replay',
+          }),
         },
-        body: JSON.stringify({ amountMinor: '500', currency: 'USD', reason: 'wrong-class replay' }),
-      },
-    );
-    expect(res.status).toBe(401);
-    expect(((await res.json()) as { code: string }).code).toBe('STEP_UP_PURPOSE_MISMATCH');
+      );
+      expect(res.status).toBe(401);
+      expect(((await res.json()) as { code: string }).code).toBe('STEP_UP_PURPOSE_MISMATCH');
 
-    // The wrong-class presentation wrote nothing — no ledger row.
-    const txRows = await db
-      .select()
-      .from(creditTransactions)
-      .where(eq(creditTransactions.userId, targetUser.id));
-    expect(txRows).toHaveLength(0);
-  });
-
-  it('is single-use: replaying the SAME token against its own endpoint → STEP_UP_ALREADY_USED', async () => {
-    const { targetUser, bearer, mintStepUp } = await seed();
-    const token = mintStepUp('credit-adjustment');
-    const url = `http://localhost/api/admin/users/${targetUser.id}/credit-adjustments`;
-    const headersWith = (key: string): Record<string, string> => ({
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${bearer}`,
-      'idempotency-key': key,
-      'X-Admin-Step-Up': token,
+      // The wrong-class presentation wrote nothing — no ledger row.
+      const txRows = await db
+        .select()
+        .from(creditTransactions)
+        .where(eq(creditTransactions.userId, targetUser.id));
+      expect(txRows).toHaveLength(0);
     });
 
-    // First use of the token — passes step-up, applies the write.
-    const first = await app.request(url, {
-      method: 'POST',
-      headers: headersWith(idemKey()),
-      body: JSON.stringify({ amountMinor: '500', currency: 'USD', reason: 'first use' }),
-    });
-    expect(first.status).toBe(200);
+    it('is single-use: replaying the SAME token against its own endpoint → STEP_UP_ALREADY_USED', async () => {
+      const { targetUser, bearer, mintStepUp } = await seed();
+      const token = mintStepUp('credit-adjustment');
+      const url = `http://localhost/api/admin/users/${targetUser.id}/credit-adjustments`;
+      const headersWith = (key: string): Record<string, string> => ({
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${bearer}`,
+        'idempotency-key': key,
+        'X-Admin-Step-Up': token,
+      });
 
-    // Same token, DIFFERENT idempotency key (so the idempotency fence
-    // can't mask it): the single-use consume rejects the replay.
-    const second = await app.request(url, {
-      method: 'POST',
-      headers: headersWith(idemKey()),
-      body: JSON.stringify({ amountMinor: '300', currency: 'USD', reason: 'replayed token' }),
-    });
-    expect(second.status).toBe(401);
-    expect(((await second.json()) as { code: string }).code).toBe('STEP_UP_ALREADY_USED');
+      // First use of the token — passes step-up, applies the write.
+      const first = await app.request(url, {
+        method: 'POST',
+        headers: headersWith(idemKey()),
+        body: JSON.stringify({ amountMinor: '500', currency: 'USD', reason: 'first use' }),
+      });
+      expect(first.status).toBe(200);
 
-    // Only the FIRST write landed — the replay never reached the handler.
-    const txRows = await db
-      .select()
-      .from(creditTransactions)
-      .where(eq(creditTransactions.userId, targetUser.id));
-    expect(txRows).toHaveLength(1);
-    expect(txRows[0]!.amountMinor).toBe(500n);
-  });
-});
+      // Same token, DIFFERENT idempotency key (so the idempotency fence
+      // can't mask it): the single-use consume rejects the replay.
+      const second = await app.request(url, {
+        method: 'POST',
+        headers: headersWith(idemKey()),
+        body: JSON.stringify({ amountMinor: '300', currency: 'USD', reason: 'replayed token' }),
+      });
+      expect(second.status).toBe(401);
+      expect(((await second.json()) as { code: string }).code).toBe('STEP_UP_ALREADY_USED');
+
+      // Only the FIRST write landed — the replay never reached the handler.
+      const txRows = await db
+        .select()
+        .from(creditTransactions)
+        .where(eq(creditTransactions.userId, targetUser.id));
+      expect(txRows).toHaveLength(1);
+      expect(txRows[0]!.amountMinor).toBe(500n);
+    });
+  },
+);
 
 describeIf('admin credit-adjustment write — real postgres ladder', () => {
   beforeAll(async () => {
@@ -1903,7 +1910,13 @@ describeIf('admin payout-retry write — idempotency-guarded ladder', () => {
       .set({ state: 'failed', failedAt: new Date(), lastError: 'failed again post-retry' })
       .where(eq(pendingPayouts.id, payoutId));
 
-    const second = await retryRequest({ payoutId, bearer, mintStepUp, key, reason: 'second click' });
+    const second = await retryRequest({
+      payoutId,
+      bearer,
+      mintStepUp,
+      key,
+      reason: 'second click',
+    });
     expect(second.status).toBe(200);
     const secondBody = (await second.json()) as {
       result: { id: string; state: string };

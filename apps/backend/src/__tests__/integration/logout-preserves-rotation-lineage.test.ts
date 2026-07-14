@@ -92,8 +92,13 @@ async function seedChain(): Promise<{
 
   const jtis = { A: 'cor11-jti-A', B: 'cor11-jti-B', C: 'cor11-jti-C' };
   const mint = (jti: string): string =>
-    signLoopToken({ sub: userId, email: 'cor11@test.local', typ: 'refresh', ttlSeconds: REFRESH_TTL, jti })
-      .token;
+    signLoopToken({
+      sub: userId,
+      email: 'cor11@test.local',
+      typ: 'refresh',
+      ttlSeconds: REFRESH_TTL,
+      jti,
+    }).token;
   const tokens = { A: mint(jtis.A), B: mint(jtis.B), C: mint(jtis.C) };
   const expiresAt = new Date(Date.now() + REFRESH_TTL * 1000);
 

@@ -222,7 +222,9 @@ describe('signAdminStepUpToken / verifyAdminStepUpToken', () => {
       // It must still VERIFY (so an in-flight token survives the upgrade
       // window) — but the consume path fails it closed (not_consumable),
       // covered in the DB-backed consume suite.
-      const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+      const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString(
+        'base64url',
+      );
       const payload = Buffer.from(
         JSON.stringify({
           sub: 'a',
@@ -243,7 +245,9 @@ describe('signAdminStepUpToken / verifyAdminStepUpToken', () => {
     });
 
     it('rejects a present-but-empty / non-string jti as malformed (not a silent unlimited-use token)', () => {
-      const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+      const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString(
+        'base64url',
+      );
       const mk = (jti: unknown): string => {
         const payload = Buffer.from(
           JSON.stringify({

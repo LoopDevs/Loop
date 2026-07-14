@@ -87,7 +87,9 @@ describe('<StepUpModal />', () => {
       expiresAt: '2026-06-11T12:05:00.000Z',
     });
     const onConfirm = vi.fn();
-    render(<StepUpModal onConfirm={onConfirm} onCancel={vi.fn()} pendingAction={EMISSION_ACTION} />);
+    render(
+      <StepUpModal onConfirm={onConfirm} onCancel={vi.fn()} pendingAction={EMISSION_ACTION} />,
+    );
 
     fireEvent.click(screen.getByRole('button', { name: /send code/i }));
     await waitFor(() => {

@@ -162,9 +162,9 @@ describe('useAdminStepUp', () => {
       void result.current
         .runWithStepUp(mutationB, { action: 'Action B', scope: 'emission' })
         .then((v) => {
-        outcomeB.settled = true;
-        outcomeB.value = v;
-      });
+          outcomeB.settled = true;
+          outcomeB.value = v;
+        });
       // Flush both inner rejections so each enqueues + opens the modal.
       await flush();
     });

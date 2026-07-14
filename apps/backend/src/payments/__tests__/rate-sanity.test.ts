@@ -228,7 +228,13 @@ describe('validateRateJump — recovery-from-wedge (MNY-22 A)', () => {
     // (300 / 150 = 2 > 1.5), so two more rejects then a capped advance to
     // 225 (= 150 × 1.5).
     const from150 = (): number =>
-      validateRateJump({ currency: 'USD', feed: 'xlm', previousValue: 150, newValue: 300, maxRatio: 0.5 });
+      validateRateJump({
+        currency: 'USD',
+        feed: 'xlm',
+        previousValue: 150,
+        newValue: 300,
+        maxRatio: 0.5,
+      });
     expect(from150).toThrow(/exceeds sanity bound/);
     expect(from150).toThrow(/exceeds sanity bound/);
     expect(from150()).toBe(225);
@@ -271,13 +277,31 @@ describe('validateRateJump — recovery-from-wedge (MNY-22 A)', () => {
     // keeps resetting to 1 and never reaches the threshold — corroboration
     // requires a STABLE new level, not a value that keeps climbing.
     expect(() =>
-      validateRateJump({ currency: 'USD', feed: 'xlm', previousValue: 100, newValue: 300, maxRatio: 0.5 }),
+      validateRateJump({
+        currency: 'USD',
+        feed: 'xlm',
+        previousValue: 100,
+        newValue: 300,
+        maxRatio: 0.5,
+      }),
     ).toThrow(/exceeds sanity bound/);
     expect(() =>
-      validateRateJump({ currency: 'USD', feed: 'xlm', previousValue: 100, newValue: 900, maxRatio: 0.5 }),
+      validateRateJump({
+        currency: 'USD',
+        feed: 'xlm',
+        previousValue: 100,
+        newValue: 900,
+        maxRatio: 0.5,
+      }),
     ).toThrow(/exceeds sanity bound/);
     expect(() =>
-      validateRateJump({ currency: 'USD', feed: 'xlm', previousValue: 100, newValue: 2700, maxRatio: 0.5 }),
+      validateRateJump({
+        currency: 'USD',
+        feed: 'xlm',
+        previousValue: 100,
+        newValue: 2700,
+        maxRatio: 0.5,
+      }),
     ).toThrow(/exceeds sanity bound/);
   });
 
@@ -288,9 +312,21 @@ describe('validateRateJump — recovery-from-wedge (MNY-22 A)', () => {
     // shared a key the 3rd interleaved call would have prematurely
     // accepted.
     const xlm = (): number =>
-      validateRateJump({ currency: 'USD', feed: 'xlm', previousValue: 100, newValue: 300, maxRatio: 0.5 });
+      validateRateJump({
+        currency: 'USD',
+        feed: 'xlm',
+        previousValue: 100,
+        newValue: 300,
+        maxRatio: 0.5,
+      });
     const fx = (): number =>
-      validateRateJump({ currency: 'GBP', feed: 'fx', previousValue: 100, newValue: 300, maxRatio: 0.5 });
+      validateRateJump({
+        currency: 'GBP',
+        feed: 'fx',
+        previousValue: 100,
+        newValue: 300,
+        maxRatio: 0.5,
+      });
     expect(xlm).toThrow(); // xlm streak = 1
     expect(fx).toThrow(); // fx streak = 1
     expect(xlm).toThrow(); // xlm streak = 2 (still < 3)
@@ -327,7 +363,7 @@ describe('validateRateJump — absolute floor (MNY-22 B)', () => {
     ).not.toThrow();
   });
 
-  it('is fail-open: no floor supplied → any positive rate accepted (today\'s behaviour)', () => {
+  it("is fail-open: no floor supplied → any positive rate accepted (today's behaviour)", () => {
     expect(() =>
       validateRateJump({
         currency: 'USD',

@@ -158,7 +158,9 @@ describe('adminStepUpHandler', () => {
 
   it('401 on a wrong/expired OTP, and bumps the attempts counter (reuse/brute-force guard)', async () => {
     findLiveOtpMock.mockResolvedValue(null);
-    const res = await adminStepUpHandler(makeCtx({ auth: LOOP_ADMIN, body: { otp: '000000', scope: 'refund' } }));
+    const res = await adminStepUpHandler(
+      makeCtx({ auth: LOOP_ADMIN, body: { otp: '000000', scope: 'refund' } }),
+    );
     expect(res.status).toBe(401);
     const body = (await res.json()) as { code: string };
     expect(body.code).toBe('UNAUTHORIZED');
@@ -172,7 +174,9 @@ describe('adminStepUpHandler', () => {
 
   it('429 TOO_MANY_ATTEMPTS when the admin email is already locked, before checking any OTP', async () => {
     isEmailOtpLockedMock.mockResolvedValue(true);
-    const res = await adminStepUpHandler(makeCtx({ auth: LOOP_ADMIN, body: { otp: '000000', scope: 'refund' } }));
+    const res = await adminStepUpHandler(
+      makeCtx({ auth: LOOP_ADMIN, body: { otp: '000000', scope: 'refund' } }),
+    );
     expect(res.status).toBe(429);
     expect(res.headers.get('Retry-After')).toBe('900');
     const body = (await res.json()) as { code: string };
@@ -186,7 +190,9 @@ describe('adminStepUpHandler', () => {
   it('429 TOO_MANY_ATTEMPTS when a wrong OTP crosses the per-email threshold', async () => {
     findLiveOtpMock.mockResolvedValue(null);
     registerFailedOtpAttemptMock.mockResolvedValue({ failedAttempts: 10, locked: true });
-    const res = await adminStepUpHandler(makeCtx({ auth: LOOP_ADMIN, body: { otp: '000000', scope: 'refund' } }));
+    const res = await adminStepUpHandler(
+      makeCtx({ auth: LOOP_ADMIN, body: { otp: '000000', scope: 'refund' } }),
+    );
     expect(res.status).toBe(429);
     expect(res.headers.get('Retry-After')).toBe('900');
     expect(incrementOtpAttemptsMock).toHaveBeenCalledWith({ email: 'admin@loop.test' });

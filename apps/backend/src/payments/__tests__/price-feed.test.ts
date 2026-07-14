@@ -36,7 +36,11 @@ const COINGECKO_OVERRIDE =
 // MNY-22 (B): per-asset absolute floor env vars — cleared around every
 // test so an unset default (no floor) is the baseline and no floor test
 // can leak into an unrelated one.
-const MIN_PRICE_ENV = ['LOOP_XLM_MIN_PRICE_USD', 'LOOP_XLM_MIN_PRICE_GBP', 'LOOP_XLM_MIN_PRICE_EUR'];
+const MIN_PRICE_ENV = [
+  'LOOP_XLM_MIN_PRICE_USD',
+  'LOOP_XLM_MIN_PRICE_GBP',
+  'LOOP_XLM_MIN_PRICE_EUR',
+];
 
 beforeEach(() => {
   __resetPriceFeedForTests();
@@ -426,7 +430,7 @@ describe('stroopsPerCent — CTX rates adapter', () => {
       await expect(stroopsPerCent('USD')).rejects.toThrow(/below absolute floor/);
     });
 
-    it('the floor is fail-open: unset → a low rate is still accepted (today\'s behaviour)', async () => {
+    it("the floor is fail-open: unset → a low rate is still accepted (today's behaviour)", async () => {
       // No floor env set (default) — the same $0.01 cold rate is accepted,
       // proving the mechanism never silently rejects legit rates when the
       // money-policy value is unconfigured.

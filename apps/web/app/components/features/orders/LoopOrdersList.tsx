@@ -148,7 +148,11 @@ function LoopOrderRow({ order }: { order: LoopOrderView }): React.JSX.Element {
                 />
               ) : null}
               {order.redeemPin !== null && order.redeemPin.length > 0 ? (
-                <RedemptionField label={t('loopList.fields.pin')} value={order.redeemPin} sensitive />
+                <RedemptionField
+                  label={t('loopList.fields.pin')}
+                  value={order.redeemPin}
+                  sensitive
+                />
               ) : null}
               {redeemHref !== null ? (
                 <a

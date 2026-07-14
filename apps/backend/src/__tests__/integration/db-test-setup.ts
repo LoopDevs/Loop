@@ -242,12 +242,15 @@ export async function seedLedgerRowsWithMirrorBalance(
   await dbOrTx.transaction(async (tx) => {
     await tx.insert(creditTransactions).values(rows);
     const keys = new Map<string, { userId: string; currency: string }>();
-    for (const r of rows) keys.set(`${r.userId}:${r.currency}`, { userId: r.userId, currency: r.currency });
+    for (const r of rows)
+      keys.set(`${r.userId}:${r.currency}`, { userId: r.userId, currency: r.currency });
     for (const { userId, currency } of keys.values()) {
       const [summed] = await tx
         .select({ sum: sql<bigint>`COALESCE(SUM(${creditTransactions.amountMinor}), 0)` })
         .from(creditTransactions)
-        .where(and(eq(creditTransactions.userId, userId), eq(creditTransactions.currency, currency)));
+        .where(
+          and(eq(creditTransactions.userId, userId), eq(creditTransactions.currency, currency)),
+        );
       const balanceMinor = summed?.sum ?? 0n;
       await tx
         .insert(userCredits)

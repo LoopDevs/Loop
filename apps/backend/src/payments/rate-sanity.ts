@@ -146,11 +146,7 @@ export function isPlausibleRateJump(
  * before caching so the downstream `BigInt()` size-check math stays
  * integral; a float-unit caller (fiat FX) would consume it as-is.
  */
-export function ratchetedAnchor(
-  previousValue: number,
-  newValue: number,
-  maxRatio: number,
-): number {
+export function ratchetedAnchor(previousValue: number, newValue: number, maxRatio: number): number {
   if (newValue > previousValue) {
     return Math.min(newValue, previousValue * (1 + maxRatio));
   }

@@ -22,12 +22,7 @@
  * wallet-provider-signed user→operator transfer, which is V4's job,
  * not V2's.
  */
-import {
-  Keypair,
-  TransactionBuilder,
-  scValToNative,
-  type xdr,
-} from '@stellar/stellar-sdk';
+import { Keypair, TransactionBuilder, scValToNative, type xdr } from '@stellar/stellar-sdk';
 import { env } from '../../env.js';
 import { vaultsEnabled, type LoopVaultRow } from './registry.js';
 import {
