@@ -234,6 +234,9 @@ describeIf('flywheel integration — XLM order → fulfilment → cashback credi
       email: user.email,
       typ: 'access',
       ttlSeconds: DEFAULT_ACCESS_TTL_SECONDS,
+      // NS-09: stamp the seeded user's current token_version (0) so
+      // requireAuth's revocation check admits the token.
+      tv: user.tokenVersion,
     });
 
     // ─── POST /api/orders/loop with XLM payment method ────────────────
@@ -362,6 +365,9 @@ describeIf('flywheel integration — XLM order → fulfilment → cashback credi
       email: user.email,
       typ: 'access',
       ttlSeconds: DEFAULT_ACCESS_TTL_SECONDS,
+      // NS-09: stamp the seeded user's current token_version (0) so
+      // requireAuth's revocation check admits the token.
+      tv: user.tokenVersion,
     });
 
     const createRes = await app.request('http://localhost/api/orders/loop', {

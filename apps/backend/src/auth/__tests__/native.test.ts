@@ -18,6 +18,9 @@ const incrementAttemptsMock = vi.fn();
 const tryConsumeOtpMock = vi.fn();
 const sendOtpMock = vi.fn();
 const findOrCreateUserMock = vi.fn();
+// NS-09: verify-otp stamps the user's token_version on the access token,
+// and refresh reads the current token_version to stamp the rotated one.
+const getUserTokenVersionMock = vi.fn();
 const recordRefreshMock = vi.fn();
 const findLiveRefreshMock = vi.fn();
 const revokeRefreshMock = vi.fn();
@@ -55,6 +58,7 @@ vi.mock('../email.js', () => ({
 }));
 vi.mock('../../db/users.js', () => ({
   findOrCreateUserByEmail: (email: string) => findOrCreateUserMock(email),
+  getUserTokenVersion: (id: string) => getUserTokenVersionMock(id),
 }));
 vi.mock('../refresh-tokens.js', () => ({
   recordRefreshToken: (args: unknown) => recordRefreshMock(args),
@@ -126,6 +130,10 @@ beforeEach(() => {
   tryConsumeOtpMock.mockReset();
   sendOtpMock.mockReset();
   findOrCreateUserMock.mockReset();
+  getUserTokenVersionMock.mockReset();
+  // NS-09: default the current token_version to 0 so refresh rotation
+  // mints a well-formed access token; tests that care override it.
+  getUserTokenVersionMock.mockResolvedValue(0);
   recordRefreshMock.mockReset();
   findLiveRefreshMock.mockReset();
   revokeRefreshMock.mockReset();
@@ -338,7 +346,7 @@ describe('nativeVerifyOtpHandler', () => {
 
   it('consumes the OTP, upserts the user, mints a pair, and clears the counter on success', async () => {
     findLiveOtpMock.mockResolvedValue({ id: 'otp-1', attempts: 0 });
-    findOrCreateUserMock.mockResolvedValue({ id: 'user-1', email: 'a@b.com' });
+    findOrCreateUserMock.mockResolvedValue({ id: 'user-1', email: 'a@b.com', tokenVersion: 0 });
     const { ctx } = makeCtx({ email: 'a@b.com', otp: '123456' });
     const res = await nativeVerifyOtpHandler(ctx);
     expect(res.status).toBe(200);

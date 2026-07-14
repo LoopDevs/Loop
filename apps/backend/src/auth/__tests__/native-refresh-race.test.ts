@@ -118,6 +118,13 @@ vi.mock('../refresh-tokens.js', () => ({
     }
   },
 }));
+// NS-09: the refresh handler reads the user's current token_version to
+// stamp the rotated access token. This suite is about the refresh-row
+// CAS, not token_version — return a fixed 0 so the rotation mints a
+// well-formed token without a live DB.
+vi.mock('../../db/users.js', () => ({
+  getUserTokenVersion: async (): Promise<number> => 0,
+}));
 vi.mock('../../logger.js', () => ({
   logger: {
     child: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() }),

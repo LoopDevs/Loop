@@ -24,7 +24,7 @@ import {
 import { enqueueWalletProvisioning } from '../wallet/provisioning.js';
 import { normalizeEmail, NonAsciiEmailError } from './normalize-email.js';
 import { verifyLoopToken, isLoopAuthConfigured } from './tokens.js';
-import { findOrCreateUserByEmail } from '../db/users.js';
+import { findOrCreateUserByEmail, getUserTokenVersion } from '../db/users.js';
 import {
   findLiveRefreshToken,
   findRefreshTokenRecord,
@@ -168,7 +168,13 @@ export async function nativeVerifyOtpHandler(c: Context): Promise<Response> {
     // B5: legitimate verify clears the email's failed-attempt counter.
     await clearOtpAttempts(email);
     const user = await findOrCreateUserByEmail(email);
-    const pair = await issueTokenPair({ id: user.id, email: user.email });
+    // NS-09: stamp the user's current token_version on the fresh access
+    // token so a later logout / revoke-all can invalidate it.
+    const pair = await issueTokenPair({
+      id: user.id,
+      email: user.email,
+      tokenVersion: user.tokenVersion,
+    });
     // ADR 030 Phase C1 — fire-and-forget embedded-wallet
     // provisioning. Synchronous + never throws; signup must not
     // block on Stellar or the wallet provider. Failures are picked
@@ -253,7 +259,18 @@ export async function nativeRefreshHandler(c: Context): Promise<Response> {
     // live successor row that nothing would ever revoke (it isn't
     // the `replaced_by_jti` of any row, and the loser's 401 left
     // it behind as a live orphaned credential).
-    const minted = mintTokenPair({ id: claims.sub, email: claims.email });
+    // NS-09: the rotated access token must carry the user's CURRENT
+    // token_version — a bump may have landed (e.g. a logout on another
+    // device) between this refresh token's issuance and now, and the new
+    // access token must reflect it. Read the live value rather than
+    // trusting the refresh token's issuance-time state. A missing row
+    // (user deleted) fails the refresh closed.
+    const tokenVersion = await getUserTokenVersion(claims.sub);
+    if (tokenVersion === null) {
+      log.warn({ sub: claims.sub }, 'Refresh for a user row that no longer exists');
+      return c.json({ code: 'UNAUTHORIZED', message: 'Invalid refresh token' }, 401);
+    }
+    const minted = mintTokenPair({ id: claims.sub, email: claims.email, tokenVersion });
     const won = await tryRevokeIfLive({ jti: claims.jti, replacedByJti: minted.refreshJti });
     if (!won) {
       // Concurrent rotation lost the race. The other caller already

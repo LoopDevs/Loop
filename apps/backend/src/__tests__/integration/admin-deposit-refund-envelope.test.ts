@@ -116,6 +116,9 @@ async function seedAdmin(): Promise<SeededAdmin> {
     email: admin.email,
     typ: 'access',
     ttlSeconds: 300,
+    // NS-09: stamp the seeded admin's current token_version (0) so
+    // requireAuth's revocation check admits the bearer.
+    tv: admin.tokenVersion,
   });
   const mintStepUp = (scope: AdminStepUpScope): string =>
     signAdminStepUpToken({ sub: admin.id, email: admin.email, scope }).token;

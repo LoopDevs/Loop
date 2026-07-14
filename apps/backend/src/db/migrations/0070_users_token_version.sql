@@ -1,0 +1,46 @@
+-- NS-09: per-user access-token revocation (token_version).
+--
+-- Access tokens (15-min TTL, no per-token DB row) were NON-REVOCABLE
+-- until natural expiry: verifyLoopToken checks only signature + expiry,
+-- so a logout / password-reset / account-compromise could not
+-- invalidate an already-issued, still-signed access token — it stayed
+-- valid for its full TTL. Refresh tokens are already DB-tracked and
+-- revocable (COR-11 / the refresh_tokens table); the gap was the
+-- short-lived ACCESS token (and the admin bearers, which ARE Loop
+-- access tokens).
+--
+-- This adds a monotonic per-user counter that is:
+--   (a) embedded as the `tv` claim in every minted access token
+--       (auth/tokens.ts::signLoopToken via issue-token-pair.ts),
+--   (b) compared against this row's current value on EVERY
+--       authenticated request (auth/require-auth.ts) — a token whose
+--       `tv` differs from the row's `token_version`, or that carries no
+--       `tv` claim at all (a legacy pre-deploy token), is rejected 401,
+--   (c) bumped (atomic `token_version = token_version + 1`) on logout
+--       (auth/logout-handler.ts), sign-out-all + admin revoke-sessions,
+--       and refresh-token-reuse detection
+--       (auth/refresh-tokens.ts::revokeAllRefreshTokensForUser), so all
+--       of a user's prior access tokens die at once.
+--
+-- `NOT NULL DEFAULT 0` backfills every existing row to 0 in one pass.
+-- Postgres 11+ stores a constant column default in the catalog, so this
+-- is a metadata-only change — no full table rewrite even on a large
+-- users table.
+--
+-- Deploy behaviour: in-flight access tokens minted before this deploy
+-- carry NO `tv` claim and therefore fail closed at requireAuth (treated
+-- as a version mismatch). Their still-live refresh tokens transparently
+-- re-mint a `tv = 0` access token on the next refresh, so NO user is
+-- actually logged out — it is a one-time silent re-auth, not a session
+-- drop. Fail-closed is the security-correct choice: a token we cannot
+-- prove post-dates any revocation must not be honoured.
+--
+-- Drizzle-representable (integer NOT NULL DEFAULT 0) and mirrored in
+-- db/schema/users.ts, so schema <-> migration parity holds with NO
+-- allowlist entry (check:migration-parity).
+--
+-- Idempotent ADD COLUMN IF NOT EXISTS keeps a partial-apply rerun safe
+-- (matches the discipline in 0016 / 0029 / 0030 / 0068).
+
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS token_version integer NOT NULL DEFAULT 0;

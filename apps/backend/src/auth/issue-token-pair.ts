@@ -66,12 +66,24 @@ export interface MintedTokenPair extends TokenPair {
  * leaves an orphaned live row behind. Pair with
  * `persistMintedRefreshToken`.
  */
-export function mintTokenPair(user: { id: string; email: string }): MintedTokenPair {
+export function mintTokenPair(user: {
+  id: string;
+  email: string;
+  // NS-09: the user's current `token_version`, stamped as the access
+  // token's `tv` claim so `requireAuth` can reject it once the counter
+  // is bumped (logout / sign-out-all / compromise). Rotation callers
+  // must read the LIVE value (getUserTokenVersion) rather than trusting
+  // a stale copy, so a token minted while a bump is in flight carries
+  // at worst a too-low `tv` (rejected → client refreshes again) — never
+  // a too-high one (fail-secure).
+  tokenVersion: number;
+}): MintedTokenPair {
   const access = signLoopToken({
     sub: user.id,
     email: user.email,
     typ: 'access',
     ttlSeconds: DEFAULT_ACCESS_TTL_SECONDS,
+    tv: user.tokenVersion,
   });
   const refresh = signLoopToken({
     sub: user.id,
@@ -119,7 +131,13 @@ export async function persistMintedRefreshToken(minted: MintedTokenPair): Promis
  * `mintTokenPair` / `persistMintedRefreshToken` around the
  * `tryRevokeIfLive` compare-and-set instead (A4-098).
  */
-export async function issueTokenPair(user: { id: string; email: string }): Promise<TokenPair> {
+export async function issueTokenPair(user: {
+  id: string;
+  email: string;
+  // NS-09: see `mintTokenPair`. First-issue callers pass the freshly
+  // resolved user row's `token_version` (0 for a brand-new user).
+  tokenVersion: number;
+}): Promise<TokenPair> {
   const minted = mintTokenPair(user);
   await persistMintedRefreshToken(minted);
   return {

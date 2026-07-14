@@ -233,6 +233,9 @@ async function seed(): Promise<SeededState> {
     email: admin.email,
     typ: 'access',
     ttlSeconds: 300,
+    // NS-09: stamp the seeded admin's current token_version (0) so
+    // requireAuth's revocation check admits the bearer.
+    tv: admin.tokenVersion,
   });
   // SEC-02-stepup: mint fresh, class-bound single-use tokens on demand.
   const mintStepUp = (scope: AdminStepUpScope): string =>
@@ -2652,6 +2655,8 @@ describeIf(
           email: a.email,
           typ: 'access',
           ttlSeconds: 300,
+          // NS-09: stamp the seeded admin's current token_version (0).
+          tv: a.tokenVersion,
         });
         const t = await findOrCreateUserByEmail('lockme@test.local');
         return { admin: a, target: t, bearer: token };

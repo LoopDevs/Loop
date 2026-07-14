@@ -163,7 +163,14 @@ export function makeSocialLoginHandler(config: SocialProviderConfig) {
         providerSub: claims.sub,
         email,
       });
-      const pair = await issueTokenPair({ id: user.id, email: user.email });
+      // NS-09: stamp the user's current token_version (0 for a brand-new
+      // social signup) so the access token is revocable via logout /
+      // sign-out-all like the OTP path's.
+      const pair = await issueTokenPair({
+        id: user.id,
+        email: user.email,
+        tokenVersion: user.tokenVersion,
+      });
       // ADR 030 Phase C1 — fire-and-forget embedded-wallet
       // provisioning (see native.ts verify-otp for rationale).
       enqueueWalletProvisioning(user.id);

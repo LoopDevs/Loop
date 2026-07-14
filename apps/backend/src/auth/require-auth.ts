@@ -4,10 +4,20 @@
  *
  * Lifted out of `apps/backend/src/auth/handler.ts` to separate
  * the per-request auth check from the `/api/auth/*` route
- * handlers (request-otp / verify-otp / refresh / logout). The
- * middleware needs to be cheap and pure (no DB or upstream calls
- * outside the JWT verify), and lives next to the token /
- * refresh-token primitives it composes.
+ * handlers (request-otp / verify-otp / refresh / logout). It lives
+ * next to the token / refresh-token primitives it composes.
+ *
+ * NS-09 update: the Loop-token branch is no longer DB-free. A
+ * signature+expiry-valid access token proves it was minted by us and
+ * is unexpired, but NOT that it is still LIVE — access tokens are
+ * 15-min and carry no per-token DB row, so a logout / sign-out-all /
+ * compromise could not previously invalidate an already-issued one.
+ * We now compare the token's `tv` claim to the user's CURRENT
+ * `users.token_version` (one column-scoped read per authenticated
+ * request) and reject a stale or `tv`-less token. This is the single
+ * enforcement point for access-token revocation — every authenticated
+ * surface (/me*, /api/admin/*, staff) runs through `requireAuth`
+ * first, so the check need not be repeated downstream.
  *
  * `LoopAuthContext` is re-exported from `auth/handler.ts` via the
  * barrel pattern so existing imports across the backend keep
@@ -17,6 +27,7 @@ import type { Context } from 'hono';
 import { env } from '../env.js';
 import { logger } from '../logger.js';
 import { verifyLoopToken, isLoopAuthConfigured } from './tokens.js';
+import { getUserTokenVersion } from '../db/users.js';
 
 const log = logger.child({ handler: 'auth-middleware' });
 
@@ -91,6 +102,33 @@ export async function requireAuth(c: Context, next: () => Promise<void>): Promis
   if (isLoopAuthConfigured()) {
     const verified = verifyLoopToken(token, 'access');
     if (verified.ok) {
+      // NS-09: access-token revocation enforcement. The signature +
+      // expiry check above does not prove the token is still LIVE — a
+      // logout / sign-out-all / compromise bumps the user's
+      // `token_version`, and every access token minted before that bump
+      // must be rejected even while still inside its 15-min TTL. Compare
+      // the token's `tv` claim to the row's CURRENT value.
+      let currentVersion: number | null;
+      try {
+        currentVersion = await getUserTokenVersion(verified.claims.sub);
+      } catch (err) {
+        // DB read failed. Fail closed with a 500 (mirrors requireStaff's
+        // user-lookup-throw posture): we cannot prove the token is live,
+        // and a DB outage already breaks the wider request anyway.
+        log.error(
+          { err, userId: verified.claims.sub },
+          'NS-09: token_version read failed — rejecting request',
+        );
+        return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to verify session' }, 500);
+      }
+      if (currentVersion === null || verified.claims.tv !== currentVersion) {
+        // Fail closed on: no user row (deleted user), a legacy token
+        // with no `tv` claim (`undefined !== <number>`), or a token
+        // minted before the latest revocation (`tv` stale). The client's
+        // still-live refresh token, if any, re-mints an access token
+        // carrying the current `tv`.
+        return c.json({ code: 'UNAUTHORIZED', message: 'Invalid or expired token' }, 401);
+      }
       const authCtx: LoopAuthContext = {
         kind: 'loop',
         userId: verified.claims.sub,

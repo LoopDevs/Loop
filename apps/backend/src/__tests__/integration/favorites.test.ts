@@ -73,6 +73,9 @@ async function seedUser(email: string): Promise<SeededUser> {
     email: user.email,
     typ: 'access',
     ttlSeconds: DEFAULT_ACCESS_TTL_SECONDS,
+    // NS-09: stamp the seeded user's current token_version (0) so
+    // requireAuth's revocation check admits the token.
+    tv: user.tokenVersion,
   });
   return { userId: user.id, email: user.email, bearer: access.token };
 }
