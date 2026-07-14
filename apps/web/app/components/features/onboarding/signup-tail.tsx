@@ -515,6 +515,15 @@ export function useOnboardingAuth(): {
   const [verifyingOtp, setVerifyingOtp] = useState(false);
   const [emailError, setEmailError] = useState<string | null>(null);
   const [otpError, setOtpError] = useState<string | null>(null);
+  // P2-05: synchronous in-flight lock for `verify`. `verifyingOtp` is React
+  // state and doesn't commit until the next render, so two near-simultaneous
+  // dispatches for the SAME code — a double-tap on the Verify CTA, the
+  // OtpEntry auto-submit `setTimeout` racing that tap, or an effect re-fire —
+  // both read `verifyingOtp === false` and each fire a `verifyOtp` request,
+  // consuming the one-time code twice. A ref flips synchronously (before the
+  // first `await`), so the second dispatch is a no-op regardless of the
+  // path (button OR programmatic), not just when the disabled state applies.
+  const verifyInFlight = useRef(false);
 
   const sendOtp = async (email: string): Promise<boolean> => {
     setEmailError(null);
@@ -531,6 +540,13 @@ export function useOnboardingAuth(): {
   };
 
   const verify = async (email: string, otp: string): Promise<boolean> => {
+    // Bail before touching the network if a verify is already running.
+    // Returning `false` (rather than reusing the in-flight promise) keeps
+    // the duplicate dispatch from also advancing the flow — `next()` is a
+    // functional updater, so letting both callers resolve `true` would
+    // skip a screen. The real dispatch owns the success/error outcome.
+    if (verifyInFlight.current) return false;
+    verifyInFlight.current = true;
     setOtpError(null);
     setVerifyingOtp(true);
     try {
@@ -541,6 +557,7 @@ export function useOnboardingAuth(): {
       setOtpError(friendlyError(err, t('error.verifyFallback')));
       return false;
     } finally {
+      verifyInFlight.current = false;
       setVerifyingOtp(false);
     }
   };
