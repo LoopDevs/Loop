@@ -33,5 +33,15 @@
     "side": "migrations-only",
     "line": "trigger pending_payouts.pending_payouts_mint_reentry_conservation: CREATE TRIGGER pending_payouts_mint_reentry_conservation BEFORE UPDATE OF state ON public.pending_payouts FOR EACH ROW WHEN (((old.state = 'failed'::text) AND (new.state <> 'failed'::text) AND (new.kind = ANY (ARRAY['emission'::text, 'order_cashback'::text, 'interest_mint'::text])))) EXECUTE FUNCTION assert_emission_conservation()",
     "reason": "Hardening A1/C10 re-entry conservation fence (migration 0044) \u2014 the second way a row enters the counted mint set is an admin payout-retry flipping failed \u2192 pending; without this trigger the freed headroom could be double-materialised (adversarial-review P0). Drizzle cannot represent triggers."
+  },
+  {
+    "side": "migrations-only",
+    "line": "trigger credit_transactions.credit_transactions_immutable: CREATE TRIGGER credit_transactions_immutable BEFORE DELETE OR UPDATE ON public.credit_transactions FOR EACH ROW EXECUTE FUNCTION reject_credit_transactions_mutation()",
+    "reason": "FT-13 ledger-immutability fence (migration 0064) \u2014 credit_transactions is the append-only financial ledger; this BEFORE UPDATE OR DELETE trigger RAISEs so no writer can mutate or erase a booked money row. Drizzle's schema DSL cannot represent triggers (A2-412/A2-703); the hand-written migration is the source of truth."
+  },
+  {
+    "side": "migrations-only",
+    "line": "trigger user_credits.user_credits_no_delete: CREATE TRIGGER user_credits_no_delete BEFORE DELETE ON public.user_credits FOR EACH ROW EXECUTE FUNCTION reject_user_credits_delete()",
+    "reason": "FT-13 balance-row DELETE guard (migration 0064) \u2014 user_credits is the mutable running-balance projection (UPDATE is allowed and untouched), but deleting a balance row would orphan its credit_transactions and drop a live liability, so DELETE is fenced. Drizzle cannot represent triggers."
   }
 ]
