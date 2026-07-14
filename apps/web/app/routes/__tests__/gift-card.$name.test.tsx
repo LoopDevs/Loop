@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { meta } from '../gift-card.$name';
-import type { Route } from '../+types/gift-card.$name';
 
 // The meta fn is pure — it owns the SEO title/description AND a
 // crash-guard: a crawler hitting a junk URL like /gift-card/%ZZ must
@@ -9,7 +8,7 @@ import type { Route } from '../+types/gift-card.$name';
 function run(name: string | undefined): { title: string; description: string } {
   const params: Record<string, string> = {};
   if (name !== undefined) params.name = name;
-  const descriptors = meta({ params } as unknown as Route.MetaArgs);
+  const descriptors = meta({ params });
   let title = '';
   let description = '';
   for (const d of descriptors as Array<Record<string, string>>) {

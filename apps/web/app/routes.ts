@@ -22,6 +22,17 @@ const splatRoute = isMobile
   ? route('*', 'routes/not-found.tsx')
   : route('*', 'routes/not-found-ssr.tsx');
 
+// P2-10/P2-11: the conversion pages (`/gift-card/:name`, `/brand/:slug`,
+// `/cashback/:slug`) resolve their slug client-side, so SSR served an unknown
+// entry as a soft-404 (HTTP 200 with "not found" content) that crawlers indexed.
+// The SSR build wires each to its `-ssr` variant, whose loader resolves the slug
+// server-side and throws a real HTTP 404 for an unknown entry (same idiom as
+// `not-found-ssr.tsx`). Mobile (SPA, no `loader`) keeps the component-only file;
+// both render the same page. Used for the legacy + localised mounts below.
+const giftCardModule = isMobile ? 'routes/gift-card.$name.tsx' : 'routes/gift-card.$name-ssr.tsx';
+const brandModule = isMobile ? 'routes/brand.$slug.tsx' : 'routes/brand.$slug-ssr.tsx';
+const cashbackSlugModule = isMobile ? 'routes/cashback.$slug.tsx' : 'routes/cashback.$slug-ssr.tsx';
+
 // ADR 034 — the public marketing surface is also reachable under a
 // `/:country/:lang` locale prefix (e.g. `/gb/en/cashback`). These mirror the
 // legacy top-level routes below: both forms resolve during the migration so
@@ -38,10 +49,10 @@ const splatRoute = isMobile
 const localeChildren: RouteConfig = [
   index('routes/home.tsx', { id: 'locale/home' }),
   route('map', 'routes/map.tsx', { id: 'locale/map' }),
-  route('gift-card/:name', 'routes/gift-card.$name.tsx', { id: 'locale/gift-card' }),
-  route('brand/:slug', 'routes/brand.$slug.tsx', { id: 'locale/brand' }),
+  route('gift-card/:name', giftCardModule, { id: 'locale/gift-card' }),
+  route('brand/:slug', brandModule, { id: 'locale/brand' }),
   route('cashback', 'routes/cashback.tsx', { id: 'locale/cashback' }),
-  route('cashback/:slug', 'routes/cashback.$slug.tsx', { id: 'locale/cashback-slug' }),
+  route('cashback/:slug', cashbackSlugModule, { id: 'locale/cashback-slug' }),
   route('calculator', 'routes/calculator.tsx', { id: 'locale/calculator' }),
   route('trustlines', 'routes/trustlines.tsx', { id: 'locale/trustlines' }),
   route('privacy', 'routes/privacy.tsx', { id: 'locale/privacy' }),
@@ -67,10 +78,10 @@ export default [
   // Legacy top-level public routes — unchanged, kept working during the ADR 034
   // migration (mirrored by `localeChildren` above).
   route('map', 'routes/map.tsx'),
-  route('gift-card/:name', 'routes/gift-card.$name.tsx'),
-  route('brand/:slug', 'routes/brand.$slug.tsx'),
+  route('gift-card/:name', giftCardModule),
+  route('brand/:slug', brandModule),
   route('cashback', 'routes/cashback.tsx'),
-  route('cashback/:slug', 'routes/cashback.$slug.tsx'),
+  route('cashback/:slug', cashbackSlugModule),
   route('calculator', 'routes/calculator.tsx'),
   route('trustlines', 'routes/trustlines.tsx'),
   route('privacy', 'routes/privacy.tsx'),
