@@ -1496,6 +1496,87 @@ describeIf('hardening A1 — emission conservation (cumulative, cross-writer, DB
       .where(eq(pendingPayouts.userId, targetUser.id));
     expect(queued).toHaveLength(0);
   });
+
+  it('MNY-11-CAPSCOPE: the daily cap is PER MIRROR CURRENCY — splitting across two asset codes that share a mirror cannot double it', async () => {
+    // Cap default is 100M minor, declared PER CURRENCY
+    // (`ADMIN_DAILY_WITHDRAWAL_CAP_MINOR`; the OpenAPI contract calls it
+    // "a fleet-wide per-currency daily cap"). USDLOOP and LOOPUSD both
+    // mirror into 'USD' (`loop_asset_mirror_currency`, migration 0061), so
+    // they must draw on ONE shared USD daily-cap bucket. Pre-fix the cap
+    // SUM was scoped by the bare `asset_code`, giving each code its OWN
+    // 100M bucket — a rogue/compromised admin splits a day's emissions
+    // across the two mirror-sharing codes to mint up to ~2x the intended
+    // per-currency ceiling. Drive the primitive directly (the HTTP surface
+    // adds a 10M per-request cap that would need many calls).
+    const { targetUser } = await seed();
+    // Mirror balance far above the day's emissions so neither the per-call
+    // balance guard nor the conservation fence (both already scoped by
+    // mirror currency) can fire first — isolating the DAILY CAP as the only
+    // gate under test.
+    await seedCashbackBalance({ userId: targetUser.id, amountMinor: 400_000_000n });
+
+    const ISSUER = 'GISSUERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+    const intent = (
+      assetCode: string,
+      amountMinor: bigint,
+    ): {
+      assetCode: string;
+      assetIssuer: string;
+      toAddress: string;
+      amountStroops: bigint;
+      memoText: string;
+    } => ({
+      assetCode,
+      assetIssuer: ISSUER,
+      toAddress: DEST,
+      amountStroops: amountMinor * 100_000n,
+      memoText: `capscope ${assetCode} ${amountMinor}`,
+    });
+
+    // First emission: 95M minor under USDLOOP — a legitimate emission that
+    // stays UNDER the 100M USD cap. Must still succeed (the fix must not
+    // over-reject a within-cap emission). USD bucket now 95M.
+    const first = await applyAdminEmission({
+      userId: targetUser.id,
+      currency: 'USD',
+      amountMinor: 95_000_000n,
+      intent: intent('USDLOOP', 95_000_000n),
+    });
+    expect(first.payoutId).toBeTruthy();
+
+    // Second emission: 95M minor under LOOPUSD — a DIFFERENT asset code
+    // that shares the SAME 'USD' mirror. Combined they would materialise
+    // 190M minor of USD-mirror value in one day, just under 2x the 100M
+    // cap. Individually each code is under 100M, so the pre-fix
+    // per-asset_code SUM sees a fresh 0-used LOOPUSD bucket and WRONGLY
+    // ALLOWS it. Post-fix the sum is scoped by mirror currency: USD used is
+    // already 95M, +95M = 190M > 100M → the cap REJECTS it.
+    let thrown: unknown = null;
+    const second = await applyAdminEmission({
+      userId: targetUser.id,
+      currency: 'USD',
+      amountMinor: 95_000_000n,
+      intent: intent('LOOPUSD', 95_000_000n),
+    }).catch((err: unknown) => {
+      thrown = err;
+      return null;
+    });
+
+    // The per-currency breach must be refused, not queued on the strength
+    // of a separate raw-asset_code bucket.
+    expect(second).toBeNull();
+    expect(thrown).toBeInstanceOf(DailyAdjustmentLimitError);
+
+    // Disease-proof: exactly ONE emission landed (the within-cap USDLOOP
+    // one). On the pre-fix per-asset_code scope BOTH would land — 190M USD
+    // minted under a 100M per-currency cap.
+    const queued = await db
+      .select()
+      .from(pendingPayouts)
+      .where(eq(pendingPayouts.userId, targetUser.id));
+    expect(queued).toHaveLength(1);
+    expect(queued[0]!.assetCode).toBe('USDLOOP');
+  });
 });
 
 describeIf('admin payout-retry write — idempotency-guarded ladder', () => {

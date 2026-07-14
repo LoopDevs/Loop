@@ -324,7 +324,20 @@ export async function applyAdminEmission(args: {
           .where(
             and(
               eq(pendingPayouts.kind, 'emission'),
-              eq(pendingPayouts.assetCode, args.intent.assetCode),
+              // MNY-11-CAPSCOPE: sum by MIRROR CURRENCY, not the bare
+              // asset_code — same `loop_asset_mirror_currency` mapping
+              // (migration 0061) the conservation SUM above and the
+              // `assert_emission_conservation` trigger use, and the same
+              // scope the advisory lock already keys on
+              // (`EMISSION_CAP_LOCK_SCOPE`, `args.currency`). The cap is
+              // declared per-currency (`ADMIN_DAILY_WITHDRAWAL_CAP_MINOR`),
+              // but scoping the sum by the raw asset_code gave each LOOP
+              // asset its OWN bucket: since USDLOOP + LOOPUSD both mirror
+              // 'USD' (EURLOOP + LOOPEUR into 'EUR'), a rogue admin could
+              // split a day's emissions across the two mirror-sharing codes
+              // and mint up to ~2x the intended per-currency ceiling. Summing
+              // across every asset code sharing the mirror closes that split.
+              sql`loop_asset_mirror_currency(${pendingPayouts.assetCode}) = loop_asset_mirror_currency(${args.intent.assetCode})`,
               sql`${pendingPayouts.createdAt} >= ${dayStart.toISOString()}`,
             ),
           );
