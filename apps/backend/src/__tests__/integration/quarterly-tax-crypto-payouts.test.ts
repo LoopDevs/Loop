@@ -31,7 +31,11 @@ import { db } from '../../db/client.js';
 import { users, orders, pendingPayouts } from '../../db/schema.js';
 import { findOrCreateUserByEmail } from '../../db/users.js';
 import { parseQuarter, queryCryptoPayouts } from '../../scripts/quarterly-tax.js';
-import { ensureMigrated, truncateAllTables } from './db-test-setup.js';
+import {
+  ensureMigrated,
+  truncateAllTables,
+  seedUserCreditsWithBackingLedger,
+} from './db-test-setup.js';
 
 const describeIf = RUN_INTEGRATION ? describe : describe.skip;
 
@@ -128,6 +132,22 @@ describeIf('FT-04: crypto-payouts excludes redemption burns', () => {
     const userU = await seedUser('u');
     const cashbackOrder = await seedOrder(userU, { paymentMethod: 'xlm', state: 'fulfilled' });
     const redeemOrder = await seedOrder(userU, { paymentMethod: 'loop_asset', state: 'paid' });
+    // MNY-01-INV3 (migration 0067): a confirmed `order_cashback` payout is
+    // a BACKED mint — the on-chain half of a cashback liability that
+    // credited the USD mirror in the same fulfilment txn. The 0067 INSERT
+    // conservation fence now rejects an order_cashback row that isn't
+    // backed by the mirror, so seed the matching USD balance (PAYOUT_STROOPS
+    // / 1e5 = 3000 minor) the real flow would have credited. The report
+    // query reads pending_payouts only, so this backing does not affect the
+    // regulatory total under test.
+    await seedUserCreditsWithBackingLedger(db, {
+      userId: userU,
+      currency: 'USD',
+      balanceMinor: PAYOUT_STROOPS / 100_000n,
+      type: 'cashback',
+      referenceType: 'order',
+      referenceId: cashbackOrder,
+    });
     await seedConfirmedPayout({
       userId: userU,
       orderId: cashbackOrder,

@@ -1,0 +1,91 @@
+-- MNY-01-INV3 (money / on-chain-backing conservation, INV-3) — extend
+-- the emission-conservation fence to the FRESH cashback / interest MINT
+-- INSERT paths.
+--
+-- Background. Migration 0044 added `assert_emission_conservation()` and
+-- fenced INV-3 (minted-net on-chain LOOP <= the mirror liability, per
+-- `(user, mirror-currency)`) at the DB boundary — but its INSERT-side
+-- trigger (`pending_payouts_emission_conservation`) WHENs ONLY on
+-- `kind='emission'`. That migration's own header justifies excluding the
+-- other two mint kinds: "the cashback/interest flows move the mirror in
+-- the same txn and preserve the invariant by construction." That holds
+-- for the CURRENT app writers — `orders/fulfillment.ts` and
+-- `credits/interest-mint.ts` both credit `user_credits.balance_minor`
+-- (with a matching `credit_transactions` row) BEFORE inserting the
+-- `kind='order_cashback'` / `kind='interest_mint'` payout, in ONE txn —
+-- but "by construction" is exactly the app-CONVENTION the 0044/0064/0066
+-- DB fences exist to NOT trust. A rogue or buggy future writer (or manual
+-- SQL) that inserts an `order_cashback` / `interest_mint` payout WITHOUT
+-- the matching mirror credit would mint unbacked on-chain LOOP, and —
+-- unlike the emission path — NOTHING at the DB tier would catch it.
+--
+-- INV-3 genuinely APPLIES to these two kinds: the conservation accounting
+-- already COUNTS them as minted (`credits/emissions.ts::emittedNetMinorFor`
+-- and this trigger's own function both `SUM(amount_stroops) FILTER (WHERE
+-- kind IN ('order_cashback','emission','interest_mint') ...)`). They are
+-- on-chain-BACKED mints (each queues a real issuer/operator payment AND
+-- credits the mirror liability the same txn), NOT intentionally-unbacked
+-- promotional credits — a promo credit would be a mirror-only liability
+-- with NO `pending_payouts` row at all, so it would never reach this
+-- table or this fence. So the correct invariant here is the SAME
+-- backing-conservation rule 0044 enforces, just applied to the two mint
+-- entry paths it left to the app.
+--
+-- The re-entry (UPDATE) side already covers all three mint kinds
+-- (`pending_payouts_mint_reentry_conservation`, `failed` -> non-`failed`).
+-- So the ONLY remaining un-fenced way a cashback / interest mint ENTERS
+-- the counted set is a FRESH INSERT. This migration closes that with a
+-- new BEFORE INSERT trigger, `pending_payouts_mint_insert_conservation`,
+-- WHENing on `kind IN ('order_cashback','interest_mint') AND state !=
+-- 'failed'` and running the SAME `assert_emission_conservation()`
+-- function. (A row born `failed` never materialised anything and is
+-- excluded from the accounting — mirroring the emission INSERT trigger's
+-- `state != 'failed'` guard — so it needs no INSERT-time check.)
+--
+-- WHY REUSE `assert_emission_conservation()` (not a new function, not a
+-- new SQLSTATE): the invariant is IDENTICAL — minted-net <= mirror
+-- balance, scoped by mirror currency (`loop_asset_mirror_currency`). The
+-- function already deparses correctly for all three kinds: its ONLY
+-- emission-specific branch is the legacy pre-ADR-036 withdrawal-era
+-- exclusion, guarded by `NEW.kind = 'emission'`; for
+-- `order_cashback`/`interest_mint` the CASE ELSE yields
+-- `new_amount_stroops = NEW.amount_stroops` (the whole fresh mint counts
+-- against headroom). It RAISEs `check_violation` (SQLSTATE 23514) — the
+-- SAME class the emission INSERT and the mint re-entry paths already
+-- raise, and the same one the app maps to
+-- `EMISSION_EXCEEDS_UNEMITTED_BALANCE`. A distinct SQLSTATE would falsely
+-- imply a distinct invariant; one function is one source of truth.
+--
+-- WHY LEGITIMATE FLOWS STILL COMMIT: both real minting writers credit the
+-- mirror in the SAME txn BEFORE inserting the payout, and this BEFORE
+-- INSERT trigger reads `user_credits` FOR UPDATE, so it sees the
+-- just-credited balance. The check holds at the boundary — existing
+-- minted-net + this mint's stroops == `balance_minor * 100000` (cashback
+-- stroops = `userCashbackMinor * 1e5` via `credits/payout-builder.ts`;
+-- interest stroops = `mintedMinor * 1e5` via `credits/interest-mint.ts`).
+-- Equality passes; rejection is strictly `>`.
+--
+-- COEXISTENCE / ORDERING: this trigger is on `pending_payouts`, the same
+-- table as 0044/0061's two emission-conservation triggers and NO others
+-- (0064's immutability triggers and 0066's mirror-invariant CONSTRAINT
+-- triggers are on `credit_transactions` / `user_credits` — different
+-- tables, so no interaction). The three `pending_payouts` triggers have
+-- mutually-exclusive WHEN scopes keyed on `kind` (emission INSERT |
+-- cashback/interest INSERT | any-mint state re-entry UPDATE), so a given
+-- row fires at most ONE INSERT trigger — no inter-trigger ordering
+-- dependency. schema.ts cannot represent triggers (A2-412/A2-703); the
+-- divergence is carried in `scripts/migration-parity-allowlist.json`.
+--
+-- Idempotent: DROP TRIGGER IF EXISTS + CREATE TRIGGER. The function is
+-- unchanged from 0044/0061 and needs no CREATE OR REPLACE here.
+-- Rollback:
+--   DROP TRIGGER pending_payouts_mint_insert_conservation ON pending_payouts;
+--   (assert_emission_conservation() stays — migrations 0044/0061 own it.)
+
+DROP TRIGGER IF EXISTS pending_payouts_mint_insert_conservation ON pending_payouts;
+--> statement-breakpoint
+CREATE TRIGGER pending_payouts_mint_insert_conservation
+  BEFORE INSERT ON pending_payouts
+  FOR EACH ROW
+  WHEN (NEW.kind IN ('order_cashback', 'interest_mint') AND NEW.state != 'failed')
+  EXECUTE FUNCTION assert_emission_conservation();

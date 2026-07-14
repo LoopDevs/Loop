@@ -36,6 +36,11 @@
   },
   {
     "side": "migrations-only",
+    "line": "trigger pending_payouts.pending_payouts_mint_insert_conservation: CREATE TRIGGER pending_payouts_mint_insert_conservation BEFORE INSERT ON public.pending_payouts FOR EACH ROW WHEN (((new.kind = ANY (ARRAY['order_cashback'::text, 'interest_mint'::text])) AND (new.state <> 'failed'::text))) EXECUTE FUNCTION assert_emission_conservation()",
+    "reason": "MNY-01-INV3 fresh-mint INSERT conservation fence (migration 0067) \u2014 the THIRD way a row enters the counted mint set is a fresh order_cashback/interest_mint INSERT. 0044's INSERT trigger WHENed only on kind='emission', trusting that the cashback/interest app writers move the mirror in the same txn; a rogue/buggy writer inserting an order_cashback/interest_mint payout without the matching mirror credit would mint unbacked LOOP undetected. Runs the SAME assert_emission_conservation() (identical INV-3 rule, same check_violation SQLSTATE 23514). Drizzle's schema DSL cannot represent triggers (A2-412/A2-703); the hand-written migration is the source of truth."
+  },
+  {
+    "side": "migrations-only",
     "line": "trigger credit_transactions.credit_transactions_immutable: CREATE TRIGGER credit_transactions_immutable BEFORE DELETE OR UPDATE ON public.credit_transactions FOR EACH ROW EXECUTE FUNCTION reject_credit_transactions_mutation()",
     "reason": "FT-13 ledger-immutability fence (migration 0064) \u2014 credit_transactions is the append-only financial ledger; this BEFORE UPDATE OR DELETE trigger RAISEs so no writer can mutate or erase a booked money row. Drizzle's schema DSL cannot represent triggers (A2-412/A2-703); the hand-written migration is the source of truth."
   },

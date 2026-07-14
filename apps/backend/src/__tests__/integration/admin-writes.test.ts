@@ -2520,9 +2520,18 @@ describeIf('admin home-currency write — real postgres ladder + safety prefligh
 
   it('409 HOME_CURRENCY_HAS_IN_FLIGHT_PAYOUTS when user has a pending payout', async () => {
     const { targetUser, bearer, mintStepUp, orderId } = await seed();
+    // MNY-01-INV3 (migration 0067): the in-flight guard has to fire while
+    // the OLD-currency balance is ZERO (the live-balance preflight, checked
+    // FIRST, would otherwise 409 with a different code). A `kind='burn'`
+    // (pending redemption issuer-return) is the conservation-correct way to
+    // model "zero balance + an in-flight payout": a burn is NOT a mint, so
+    // the 0067 fence doesn't gate it, and a redeemed-to-zero user with a
+    // still-pending issuer-return is a real reachable state. An in-flight
+    // `order_cashback` with no mirror backing is exactly the unbacked mint
+    // 0067 now forbids, so it can no longer stand in here.
     await db.insert(pendingPayouts).values({
       userId: targetUser.id,
-      kind: 'order_cashback',
+      kind: 'burn',
       assetCode: 'USDLOOP',
       assetIssuer: 'GISSUERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
       toAddress: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',

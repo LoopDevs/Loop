@@ -470,6 +470,13 @@
       "when": 1780189700000,
       "tag": "0066_user_credits_mirror_invariant",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1780189800000,
+      "tag": "0067_mint_insert_conservation",
+      "breakpoints": true
     }
   ]
 }
