@@ -27,6 +27,7 @@
       "cta": "Sign in"
     },
     "empty": "No orders yet.",
+    "emptyPage": "No orders on this page.",
     "browseGiftCards": "Browse gift cards",
     "retry": "Retry",
     "previous": "Previous",
