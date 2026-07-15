@@ -91,16 +91,28 @@ export default async function globalSetup(): Promise<void> {
     // Seed: cashback credit_transactions row + matching user_credits
     // balance. Mirrors what `markOrderFulfilled` would have done, but
     // pre-baked so the UI test starts from a settled state.
-    await db.execute(sql`
-      INSERT INTO credit_transactions
-        (user_id, type, amount_minor, currency, reference_type, reference_id)
-      VALUES
-        (${userId}, 'cashback', 250, 'USD', 'order', ${orderId})
-    `);
-    await db.execute(sql`
-      INSERT INTO user_credits (user_id, currency, balance_minor)
-      VALUES (${userId}, 'USD', 250)
-    `);
+    //
+    // Both writes MUST land in ONE transaction. Migration 0066 added
+    // `credit_transactions_mirror_invariant` / `user_credits_mirror_invariant`
+    // as CONSTRAINT TRIGGERs `DEFERRABLE INITIALLY DEFERRED` (INV-1),
+    // evaluated once at COMMIT: a balance write must be matched by a
+    // ledger row within the same transaction and vice-versa. Seeding the
+    // two as separate auto-commit statements committed the ledger row
+    // alone (balance still 0) and tripped INV-1 — the failure that broke
+    // this suite from the wave6 merge onward. `markOrderFulfilled` writes
+    // both in one txn; the seed now does too.
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`
+        INSERT INTO credit_transactions
+          (user_id, type, amount_minor, currency, reference_type, reference_id)
+        VALUES
+          (${userId}, 'cashback', 250, 'USD', 'order', ${orderId})
+      `);
+      await tx.execute(sql`
+        INSERT INTO user_credits (user_id, currency, balance_minor)
+        VALUES (${userId}, 'USD', 250)
+      `);
+    });
   } finally {
     await client.end({ timeout: 5 });
   }
