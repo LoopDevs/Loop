@@ -67,6 +67,15 @@ export function registerHealthOpenApi(
         googleClientIdAndroid: z.string().nullable(),
         appleServiceId: z.string().nullable(),
       }),
+      minSupportedVersion: z
+        .object({
+          ios: z.string().nullable(),
+          android: z.string().nullable(),
+        })
+        .openapi({
+          description:
+            'P2-14 — oldest supported native build per platform (dotted numeric, e.g. "0.4.0"). The native ForceUpdateGate blocks an older client. null = no gate. Server-side floor via MIN_SUPPORTED_APP_VERSION_IOS / _ANDROID.',
+        }),
     }),
   );
 

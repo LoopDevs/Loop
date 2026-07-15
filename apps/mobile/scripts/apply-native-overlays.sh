@@ -372,6 +372,66 @@ PY
   else
     say "AndroidManifest.xml already has the App Links intent-filter, skipping"
   fi
+
+  # ─── AGT-11: soft-keyboard resize behaviour ─────────────────────────────
+  # Add `android:windowSoftInputMode="adjustResize"` to the MainActivity
+  # <activity> so the window (and the Capacitor WebView inside it) resizes
+  # when the soft keyboard opens — the focused input scrolls into view
+  # instead of sitting hidden behind the keyboard. Capacitor's
+  # android-template MainActivity ships with NO windowSoftInputMode
+  # attribute, so the platform default (adjustPan/adjustUnspecified varies
+  # by API level + theme) applies, which on several devices leaves the OTP
+  # / email inputs occluded. `resize: 'body'` in capacitor.config.ts drives
+  # the WebView's own viewport, but the Activity-level attr is the
+  # authoritative signal the WindowInsets machinery reads — set both.
+  # Anchored on the `.MainActivity` android:name (Capacitor emits it
+  # verbatim on `cap add android`); idempotent via the attribute-presence
+  # check. python3 (already required above) rather than sed for a robust
+  # attribute-preserving insert.
+  if ! grep -q 'android:windowSoftInputMode' "$ANDROID_MANIFEST"; then
+    if ! command -v python3 >/dev/null 2>&1; then
+      say "ERROR: python3 is required for the AGT-11 windowSoftInputMode patch."
+      exit 1
+    fi
+    say "Adding windowSoftInputMode=adjustResize (AGT-11) to AndroidManifest.xml"
+    python3 - "$ANDROID_MANIFEST" <<'PY'
+import re
+import sys
+
+path = sys.argv[1]
+with open(path) as f:
+    text = f.read()
+
+# Match the android:name attribute that identifies the MainActivity
+# <activity> (the template writes it as ".MainActivity"). Insert the
+# windowSoftInputMode attribute on the following line with the same
+# indentation so the activity tag stays well-formed.
+pattern = re.compile(r'([ \t]*)(android:name="\.MainActivity"\n)')
+m = pattern.search(text)
+if not m:
+    sys.stderr.write(
+        'ERROR: android:name=".MainActivity" not found in AndroidManifest.xml — '
+        "Capacitor template drifted. Update the AGT-11 patch in "
+        "apps/mobile/scripts/apply-native-overlays.sh to match.\n"
+    )
+    sys.exit(1)
+
+indent = m.group(1)
+insertion = f'{indent}android:windowSoftInputMode="adjustResize"\n'
+text = text[: m.end()] + insertion + text[m.end() :]
+
+with open(path, "w") as f:
+    f.write(text)
+print("[apply-native-overlays] Added windowSoftInputMode=adjustResize to AndroidManifest.xml")
+PY
+    if ! grep -q 'android:windowSoftInputMode="adjustResize"' "$ANDROID_MANIFEST"; then
+      say "ERROR: python3 patch completed but android:windowSoftInputMode is still"
+      say "       missing from AndroidManifest.xml. Inspect the file by hand."
+      exit 1
+    fi
+  else
+    say "AndroidManifest.xml already has windowSoftInputMode, skipping"
+  fi
 else
   say "Android project not present at $ANDROID_DIR — skipping (run \`npx cap add android\` first)"
 fi

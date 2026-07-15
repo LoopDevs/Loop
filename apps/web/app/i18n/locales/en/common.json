@@ -1,5 +1,10 @@
 {
   "errorBoundary": {
     "heading": "Something went wrong"
+  },
+  "forceUpdate": {
+    "title": "Update Loop to continue",
+    "body": "This version of Loop is no longer supported. Update to the latest version to keep your account and payments secure.",
+    "cta": "Update Loop"
   }
 }

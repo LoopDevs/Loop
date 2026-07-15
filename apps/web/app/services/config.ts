@@ -62,6 +62,18 @@ export interface AppConfig {
     googleClientIdAndroid: string | null;
     appleServiceId: string | null;
   };
+  /**
+   * P2-14 — oldest supported native build per platform (dotted numeric,
+   * e.g. "0.4.0"). `ForceUpdateGate` compares the running client version
+   * against the entry for its platform and blocks an older build. `null`
+   * = no gate. Web is never gated (always served fresh) so it has no
+   * entry. Mirrors the backend `AppConfig` in
+   * `apps/backend/src/config/handler.ts`.
+   */
+  minSupportedVersion: {
+    ios: string | null;
+    android: string | null;
+  };
 }
 
 /** Fetches the public app config. No auth required. */

@@ -27,4 +27,62 @@
 -->
 <network-security-config>
     <!-- Empty: defaults apply (HTTPS required, no cleartext). -->
+
+    <!--
+      FE-04 / ADR-027 — TLS certificate pinning for api.loopfinance.io.
+
+      DELIBERATELY INERT. ADR-027 (§"SSL / cert pinning") accepts a
+      Phase-1 DEFERRAL of pinning: TLS rides the system trust store +
+      Fly's edge cert today. The Phase-2 trigger is "first confirmed
+      MITM event in production telemetry OR enterprise customer
+      requirement" — neither has fired (re-accepted 2026-06-16). So the
+      <pin-set> below is left COMMENTED OUT: an active <pin-set> with a
+      wrong or placeholder digest bricks EVERY API call the instant the
+      pinned cert rotates, which for a money app is a self-inflicted
+      outage. This block is a ready-to-activate recipe, not a live
+      control.
+
+      Activation is an ADR-027 Phase-2 decision (get sign-off first).
+      To activate:
+        1. Compute the base64 SHA-256 of the SubjectPublicKeyInfo for
+           the pin target. Per ADR-027 §"Phase-2 implementation order",
+           pin the Fly / CDN *intermediate CA* SPKI, NOT the leaf —
+           leaves rotate on a ~90-day Let's Encrypt/edge cadence and
+           would force an app release every rotation. Intermediates
+           rotate on a known, multi-year cadence.
+             openssl s_client -connect api.loopfinance.io:443 -showcerts </dev/null \
+               | openssl x509 -pubkey -noout \
+               | openssl pkey -pubin -outform der \
+               | openssl dgst -sha256 -binary | openssl enc -base64
+           (run once per cert in the chain to pick the intermediate).
+        2. ALWAYS ship a BACKUP pin — a second <pin> for the next
+           intermediate / a KMS-held backup key CSR — so a planned
+           rotation doesn't require an app-store round-trip. A pin-set
+           with a single pin is an outage waiting for a rotation.
+        3. Set expiration ~90 days out and wire a calendar reminder to
+           refresh before it lapses; an expired pin-set falls back to
+           system trust (fails OPEN, by Android design) — safer than a
+           hard brick but it silently disables the control, so treat
+           the expiry as a deadline, not a safety net.
+        4. Also implement the iOS side (no network_security_config
+           equivalent): URLSessionDelegate SPKI pinning or TrustKit in
+           a small Capacitor plugin. Capacitor's WKWebView traffic does
+           NOT flow through URLSession, so iOS pinning only covers the
+           app-client `fetch()` path unless the WebView is also
+           intercepted — a Phase-2 native spike (see handoff doc FE-04).
+        5. Verify on-device with an mitmproxy + user-installed root CA:
+           BEFORE = requests succeed through the proxy (MITM works);
+           AFTER = requests fail (pin rejects the proxy's cert). See
+           docs/audit/audit-2026-07/native-device-qa-handoff.md FE-04.
+
+      <domain-config>
+          <domain includeSubdomains="false">api.loopfinance.io</domain>
+          <pin-set expiration="2026-10-15">
+              <!-- Primary: Fly/CDN INTERMEDIATE CA SPKI (replace). -->
+              <pin digest="SHA-256">REPLACE_WITH_INTERMEDIATE_SPKI_SHA256_BASE64=</pin>
+              <!-- Backup: next intermediate / held backup key (replace). -->
+              <pin digest="SHA-256">REPLACE_WITH_BACKUP_SPKI_SHA256_BASE64=</pin>
+          </pin-set>
+      </domain-config>
+    -->
 </network-security-config>

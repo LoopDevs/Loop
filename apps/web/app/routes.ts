@@ -8,6 +8,26 @@ const isMobile = process.env.BUILD_TARGET === 'mobile';
 // has no use for a sitemap anyway.
 const sitemapRoutes = isMobile ? [] : [route('sitemap.xml', 'routes/sitemap.tsx')];
 
+// FE-03: the OS App-Link / Universal-Link domain-verification files,
+// served at the marketing hosts (loopfinance.io / www / beta) this web
+// app owns — the hosts the native intent-filter + associated-domains
+// entitlement declare, and therefore the hosts Apple/Google fetch the
+// verification file from. SSR-only resource routes (export a `loader`),
+// so — like the sitemap — they're excluded from the mobile SPA build,
+// which rejects `loader` exports and doesn't serve HTTP anyway. The
+// paths carry literal dots + no extension (apple-app-site-association);
+// `route()` takes the URL path verbatim so no filename escaping is
+// needed. See apps/web/app/services/deep-link-association.ts.
+const wellKnownRoutes = isMobile
+  ? []
+  : [
+      route('.well-known/assetlinks.json', 'routes/well-known.assetlinks.tsx'),
+      route(
+        '.well-known/apple-app-site-association',
+        'routes/well-known.apple-app-site-association.tsx',
+      ),
+    ];
+
 // FE-24: styleguide now exports a `loader` that 404s the design-system
 // page in production. SPA mode (mobile static export) rejects `loader`
 // exports, and the mobile app has no use for the web-only styleguide, so
@@ -87,6 +107,7 @@ export default [
   route('privacy', 'routes/privacy.tsx'),
   route('terms', 'routes/terms.tsx'),
   ...sitemapRoutes,
+  ...wellKnownRoutes,
   route('auth', 'routes/auth.tsx'),
   // Internal design-system kitchen-sink (noindex; gate/remove before public launch).
   ...styleguideRoutes,

@@ -47,6 +47,13 @@ export function BiometricSetup({
   const reduced = useReducedMotion();
   const [scanning, setScanning] = useState(false);
   const [done, setDone] = useState(false);
+  // FE-55: biometric-failure feedback. A cancelled / failed prompt used
+  // to reset silently — the ring went back to idle with no explanation,
+  // and because the footer CTA only ever re-fires the prompt, a user
+  // whose biometrics keep failing had no visible signal AND no way off
+  // the step. Track the failure so the screen can (a) tell the user what
+  // happened and (b) surface a "Skip for now" escape.
+  const [failed, setFailed] = useState(false);
 
   // Reset visual state whenever the screen goes inactive — otherwise
   // navigating Back and returning leaves the ring stuck in its last
@@ -55,6 +62,7 @@ export function BiometricSetup({
     if (!active) {
       setScanning(false);
       setDone(false);
+      setFailed(false);
     }
   }, [active]);
 
@@ -79,9 +87,12 @@ export function BiometricSetup({
       if (done || scanning || available !== true) return;
       void (async () => {
         setScanning(true);
+        setFailed(false);
         const ok = await authenticateWithBiometrics(t('biometric.enableReason'));
         if (!ok) {
+          // FE-55: surface the failure instead of resetting silently.
           setScanning(false);
+          setFailed(true);
           return;
         }
         await setAppLockEnabled(true);
@@ -112,14 +123,18 @@ export function BiometricSetup({
     ? t('biometric.status.enabled', { type: biometricLabel })
     : scanning
       ? t('biometric.status.scanning')
-      : available === false
-        ? t('biometric.status.unavailable')
-        : t('biometric.status.use', { type: biometricLabel });
+      : failed
+        ? t('biometric.status.failed')
+        : available === false
+          ? t('biometric.status.unavailable')
+          : t('biometric.status.use', { type: biometricLabel });
   const statusSub = done
     ? t('biometric.sub.enabled', { type: biometricLabel })
-    : available === false
-      ? t('biometric.sub.unavailable')
-      : t('biometric.sub.default');
+    : failed
+      ? t('biometric.sub.failed', { type: biometricLabel })
+      : available === false
+        ? t('biometric.sub.unavailable')
+        : t('biometric.sub.default');
 
   return (
     <div className="flex-1 flex flex-col justify-center gap-6 px-6 py-6">
@@ -214,12 +229,33 @@ export function BiometricSetup({
         </div>
 
         <div className="text-center">
-          <div className="text-[15px] font-semibold text-gray-950 dark:text-white">
+          <div
+            className={
+              'text-[15px] font-semibold ' +
+              (failed ? 'text-red-600 dark:text-red-400' : 'text-gray-950 dark:text-white')
+            }
+          >
             {statusTitle}
           </div>
-          <div className="text-[13px] text-gray-500 dark:text-gray-400 mt-1 max-w-[260px] leading-[1.4] mx-auto">
+          {/* FE-55: announce the failure to assistive tech and, on
+              failure, give a plain escape so a user who can't pass
+              biometrics isn't trapped on the step (the footer CTA only
+              ever re-fires the prompt). */}
+          <div
+            className="text-[13px] text-gray-500 dark:text-gray-400 mt-1 max-w-[260px] leading-[1.4] mx-auto"
+            {...(failed ? { role: 'alert' } : {})}
+          >
             {statusSub}
           </div>
+          {failed ? (
+            <button
+              type="button"
+              onClick={onEnabled}
+              className="mt-3 text-[13px] font-semibold text-blue-600 dark:text-blue-400 underline underline-offset-2"
+            >
+              {t('biometric.skip')}
+            </button>
+          ) : null}
         </div>
       </div>
 

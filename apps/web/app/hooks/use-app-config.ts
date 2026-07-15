@@ -41,6 +41,10 @@ const DEFAULT_CONFIG: AppConfig = {
     googleClientIdAndroid: null,
     appleServiceId: null,
   },
+  // P2-14: default to no gate. A missing / erroring config must never
+  // fabricate a version floor that would lock users out of a working
+  // build — fail open, same principle as every other flag here.
+  minSupportedVersion: { ios: null, android: null },
 };
 
 export function useAppConfig(): { config: AppConfig; isLoading: boolean } {

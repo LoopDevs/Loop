@@ -128,6 +128,21 @@ export const coreEnvFields = {
   // side by side during rollout. Split/trimmed at read time.
   ANDROID_CERT_SHA256: z.string().optional(),
 
+  // P2-14 (min-app-version / forced-update gate). The oldest native app
+  // build the backend still supports, per platform. Surfaced on the
+  // public `/api/config` so the native shell's `ForceUpdateGate`
+  // (apps/web/app/components/ForceUpdateGate.tsx) can hard-block a build
+  // older than this with an "update required" screen. SERVER-SIDE source
+  // of truth (operator-controlled, no app-store resubmission to raise
+  // the floor) — the client only stamps `X-Client-Version`, it never
+  // decides its own minimum. Unset → no gate (the pre-launch default).
+  // Dotted numeric, e.g. "0.4.0"; iOS and Android are independent so a
+  // floor can be raised on one platform (e.g. an App Store hotfix
+  // shipped ahead of Play) without gating the other. Web is never gated
+  // — it is always served fresh, so it has no minimum.
+  MIN_SUPPORTED_APP_VERSION_IOS: z.string().optional(),
+  MIN_SUPPORTED_APP_VERSION_ANDROID: z.string().optional(),
+
   // A2-654: emergency opt-out for the production-allowlist boot guard
   // below. Typed here rather than read from bare `process.env` so a
   // typo on deploy (`DISABLE_IMAGE_PROXY_ALLOWLIST_ENFORCMENT=1`) fails

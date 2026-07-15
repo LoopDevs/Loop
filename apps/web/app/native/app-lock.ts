@@ -3,6 +3,16 @@ import { checkBiometrics, authenticateWithBiometrics } from './biometrics';
 
 const APP_LOCK_KEY = 'loop_app_lock_enabled';
 
+// FE-02: re-lock on foreground only after the app has been backgrounded
+// for at least this long. A short grace window keeps brief context
+// switches (glancing at a notification, copying an OTP from Messages,
+// a 5-second app flip) from re-prompting — which is the "hostile for no
+// benefit" case the original cold-start-only design called out — while
+// still gating the "phone left on a table / handed to someone / picked
+// up minutes later" case the audit (FE-02) flagged as the real gap in
+// cold-start-only locking. 60s mirrors the common banking-app default.
+const FOREGROUND_RELOCK_AFTER_MS = 60_000;
+
 /** Checks if app lock is enabled in user preferences. */
 export async function isAppLockEnabled(): Promise<boolean> {
   if (!Capacitor.isNativePlatform()) return false;
@@ -41,23 +51,28 @@ export function markAppLockJustVerified(): void {
 }
 
 /**
- * Prompts for biometrics once on cold start when app-lock is enabled.
- * Returns a cleanup function.
+ * Prompts for biometrics on cold start when app-lock is enabled, and
+ * re-prompts on foreground after a grace window (FE-02). Returns a
+ * cleanup function.
  *
- * Design choice: we intentionally do NOT re-prompt on resume. A Loop gift
- * card can only be bought by paying XLM from the user's own wallet, so a
- * phone thief in possession of an unlocked handset still can't make a
- * fraudulent purchase. Re-authenticating on every brief context switch
- * (pulling down notifications, reading an SMS, switching apps for five
- * seconds) makes the app feel hostile for no real security benefit. The
- * cold-start prompt catches the "someone found/stole a locked phone and
- * managed to get it unlocked" case; anything more is theatre.
+ * Design history: the original design was cold-start-only and
+ * deliberately did NOT re-prompt on resume (rationale: a Loop gift card
+ * can only be bought by paying XLM from the user's own wallet, so a
+ * phone thief with an unlocked handset still can't make a fraudulent
+ * purchase, and re-auth on every brief context switch feels hostile).
+ * M-5 re-examined resume-relock and deferred it again.
  *
- * M-5 (`docs/readiness-backlog-2026-07-03.md`) added `appStateChange`
- * lifecycle handling (`./app-state.ts`) and re-examined resume-relock
- * as part of that work — still deliberately deferred, for the same
- * reasoning above. Revisit only if the product calls for it, not as a
- * side effect of unrelated lifecycle wiring.
+ * FE-02 (2026-07 audit) reversed that: cold-start-only was flagged as a
+ * gap because a phone left unlocked on a desk, or handed to someone, or
+ * picked up minutes later, exposes every already-visible balance /
+ * gift-card code with no re-gate. The reconciliation with the original
+ * "don't be hostile" concern is the grace window
+ * (`FOREGROUND_RELOCK_AFTER_MS`): brief switches don't re-prompt; a real
+ * absence does. Still opt-in (off by default, same `APP_LOCK_KEY`
+ * preference) and still not a purchase gate — it gates UI visibility.
+ * NOTE for QA sign-off: this changes the documented M-5 decision; if the
+ * product prefers cold-start-only, set the grace window to Infinity (or
+ * drop the resume listener) — the cold-start path is unchanged.
  */
 export function registerAppLockGuard(): () => void {
   if (!Capacitor.isNativePlatform()) return () => {};
@@ -177,8 +192,36 @@ export function registerAppLockGuard(): () => void {
 
   startWhenVisible();
 
+  // FE-02: foreground re-lock. Capacitor dispatches `pause` when the OS
+  // backgrounds the app and `resume` when it returns to the foreground
+  // (the same events `task-switcher-overlay.ts` uses). Record when we
+  // went to the background, and on return re-run the lock check if the
+  // absence exceeded the grace window.
+  let backgroundedAt: number | null = null;
+
+  const onPause = (): void => {
+    backgroundedAt = Date.now();
+  };
+
+  const onResume = (): void => {
+    if (cancelled) return;
+    // A lock overlay is already up (cold-start lock never unlocked, or a
+    // prior resume-lock) — don't stack a second biometric prompt.
+    if (overlay !== null) return;
+    const since = backgroundedAt;
+    backgroundedAt = null;
+    if (since === null) return;
+    if (Date.now() - since < FOREGROUND_RELOCK_AFTER_MS) return;
+    void runLockCheck();
+  };
+
+  document.addEventListener('pause', onPause);
+  document.addEventListener('resume', onResume);
+
   return () => {
     cancelled = true;
+    document.removeEventListener('pause', onPause);
+    document.removeEventListener('resume', onResume);
     hideLockScreen();
   };
 }

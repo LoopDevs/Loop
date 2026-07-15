@@ -74,6 +74,20 @@ export interface AppConfig {
     googleClientIdAndroid: string | null;
     appleServiceId: string | null;
   };
+  /**
+   * P2-14 — the oldest native app build the backend still supports, per
+   * platform (dotted numeric, e.g. "0.4.0"). The native shell's
+   * `ForceUpdateGate` compares the running client's `X-Client-Version`
+   * against the entry for its platform and hard-blocks an older build.
+   * `null` = no gate for that platform (the pre-launch default). Web is
+   * always served fresh, so it has no minimum and is never included.
+   * Server-side source of truth — raising the floor is a config change,
+   * not an app-store resubmission.
+   */
+  minSupportedVersion: {
+    ios: string | null;
+    android: string | null;
+  };
 }
 
 function assetConfig(issuer: string | undefined): LoopAssetConfig {
@@ -102,6 +116,10 @@ export function configHandler(c: Context): Response {
       googleClientIdIos: env.GOOGLE_OAUTH_CLIENT_ID_IOS ?? null,
       googleClientIdAndroid: env.GOOGLE_OAUTH_CLIENT_ID_ANDROID ?? null,
       appleServiceId: env.APPLE_SIGN_IN_SERVICE_ID ?? null,
+    },
+    minSupportedVersion: {
+      ios: env.MIN_SUPPORTED_APP_VERSION_IOS ?? null,
+      android: env.MIN_SUPPORTED_APP_VERSION_ANDROID ?? null,
     },
   };
   // 10-minute client cache is generous but safe — the operator

@@ -36,6 +36,7 @@ import { buildSecurityHeaders } from '~/utils/security-headers';
 import { useNonce } from '~/utils/nonce-context';
 import { shouldRetry } from '~/hooks/query-retry';
 import { NativeTabBar } from '~/components/features/NativeTabBar';
+import { ForceUpdateGate } from '~/components/ForceUpdateGate';
 import { LoopLogo } from '~/components/ui/LoopLogo';
 import { fetchAllMerchants } from '~/services/merchants';
 import { getLangDir, useLocale } from '~/i18n/locale';
@@ -601,9 +602,11 @@ export default function App(): React.JSX.Element {
     if (isRestoring) {
       return (
         <QueryClientProvider client={queryClient}>
-          <NativeShell>
-            <NativeSplash />
-          </NativeShell>
+          <ForceUpdateGate>
+            <NativeShell>
+              <NativeSplash />
+            </NativeShell>
+          </ForceUpdateGate>
         </QueryClientProvider>
       );
     }
@@ -616,9 +619,11 @@ export default function App(): React.JSX.Element {
     if (!isAuthenticated || onboardingInFlight) {
       return (
         <QueryClientProvider client={queryClient}>
-          <Suspense fallback={<NativeSplash />}>
-            <Onboarding onComplete={() => setOnboardingInFlight(false)} />
-          </Suspense>
+          <ForceUpdateGate>
+            <Suspense fallback={<NativeSplash />}>
+              <Onboarding onComplete={() => setOnboardingInFlight(false)} />
+            </Suspense>
+          </ForceUpdateGate>
         </QueryClientProvider>
       );
     }
@@ -626,9 +631,11 @@ export default function App(): React.JSX.Element {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <NativeShell>
-        <Outlet />
-      </NativeShell>
+      <ForceUpdateGate>
+        <NativeShell>
+          <Outlet />
+        </NativeShell>
+      </ForceUpdateGate>
     </QueryClientProvider>
   );
 }

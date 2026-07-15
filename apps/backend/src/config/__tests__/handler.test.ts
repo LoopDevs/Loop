@@ -34,6 +34,8 @@ function clearEnv(): void {
   delete process.env['LOOP_JWT_SIGNING_KEY'];
   delete process.env['LOOP_WORKERS_ENABLED'];
   delete process.env['LOOP_STELLAR_DEPOSIT_ADDRESS'];
+  delete process.env['MIN_SUPPORTED_APP_VERSION_IOS'];
+  delete process.env['MIN_SUPPORTED_APP_VERSION_ANDROID'];
   for (const k of LOOP_ISSUER_VARS) delete process.env[k];
 }
 
@@ -180,6 +182,27 @@ describe('configHandler', () => {
     expect(body.loopAssets.GBPLOOP.available).toBe(true);
     expect(body.loopAssets.EURLOOP.available).toBe(false);
     expect(body.loopAssets.EURLOOP.issuer).toBeNull();
+  });
+
+  it('defaults minSupportedVersion to null per platform when unset (no gate)', async () => {
+    const { configHandler } = await import('../handler.js');
+    const { ctx } = makeCtx();
+    const body = (await configHandler(ctx).json()) as {
+      minSupportedVersion: { ios: string | null; android: string | null };
+    };
+    expect(body.minSupportedVersion).toEqual({ ios: null, android: null });
+  });
+
+  it('surfaces per-platform minSupportedVersion floors independently', async () => {
+    process.env['MIN_SUPPORTED_APP_VERSION_IOS'] = '0.4.0';
+    // Android floor left unset — must stay null (no gate on that platform).
+    const { configHandler } = await import('../handler.js');
+    const { ctx } = makeCtx();
+    const body = (await configHandler(ctx).json()) as {
+      minSupportedVersion: { ios: string | null; android: string | null };
+    };
+    expect(body.minSupportedVersion.ios).toBe('0.4.0');
+    expect(body.minSupportedVersion.android).toBeNull();
   });
 
   it('always emits all three LOOP-asset keys so the client shape is stable', async () => {
