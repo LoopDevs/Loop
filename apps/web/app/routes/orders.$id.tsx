@@ -18,7 +18,7 @@ import { PurchaseComplete } from '~/components/features/purchase/PurchaseComplet
 import { EarnedCashbackCard } from '~/components/features/purchase/EarnedCashbackCard';
 import { OrderPayoutCard } from '~/components/features/order/OrderPayoutCard';
 import { LinkWalletNudge } from '~/components/features/cashback/LinkWalletNudge';
-import { formatMoney, useLocaleTag } from '~/i18n/format';
+import { formatDateTime, formatMoney, useLocaleTag } from '~/i18n/format';
 import { friendlyError } from '~/utils/error-messages';
 import { openWebView } from '~/native/webview';
 import { buildChallengeBarScript } from '~/utils/redeem-challenge-bar';
@@ -150,10 +150,14 @@ export default function OrderDetailRoute(): React.JSX.Element {
 function OrderDetailBody({ order, now }: { order: Order; now: number }): React.JSX.Element {
   const { t } = useTranslation('orders');
   const locale = useLocaleTag();
+  // Valid dates go through the shared `formatDateTime` seam in the route
+  // locale — not a local `toLocaleString` copy — so a `/de/en` reader sees the
+  // German date/time, not the host default (ADR 034 / P2-DATE). Malformed
+  // input falls back to the raw string rather than "Invalid Date".
   const created = new Date(order.createdAt);
   const createdLabel = Number.isNaN(created.getTime())
     ? order.createdAt
-    : created.toLocaleString(locale, {
+    : formatDateTime(order.createdAt, locale, {
         month: 'short',
         day: 'numeric',
         year: 'numeric',

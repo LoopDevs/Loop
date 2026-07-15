@@ -22,7 +22,7 @@ import { OrdersSummaryHeader } from '~/components/features/orders/OrdersSummaryH
 import { CashbackEarningsHeadline } from '~/components/features/cashback/CashbackEarningsHeadline';
 import { FlywheelChip } from '~/components/features/cashback/FlywheelChip';
 import { friendlyError } from '~/utils/error-messages';
-import { formatMoney, useLocaleTag } from '~/i18n/format';
+import { formatDateTime, formatMoney, useLocaleTag } from '~/i18n/format';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: i18n.t('orders:list.meta.title') }];
@@ -127,10 +127,13 @@ function OrderRow({
   const status = statusLabel(t, order.status);
   // A malformed upstream createdAt would otherwise render "Invalid Date" in
   // the UI. Fall back to the raw string so the row is still informative.
+  // Valid dates go through the shared `formatDateTime` seam in the route
+  // locale — not a local `toLocaleDateString` copy — so a `/de/en` reader sees
+  // the German month/order, not the host default (ADR 034 / P2-DATE).
   const parsed = new Date(order.createdAt);
   const date = Number.isNaN(parsed.getTime())
     ? order.createdAt
-    : parsed.toLocaleDateString(locale, {
+    : formatDateTime(order.createdAt, locale, {
         month: 'short',
         day: 'numeric',
         year: 'numeric',
