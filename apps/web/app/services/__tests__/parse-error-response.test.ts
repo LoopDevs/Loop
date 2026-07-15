@@ -149,4 +149,52 @@ describe('parseErrorResponse (A2-1162 shared coerce)', () => {
       expect(err.requestId).toBeUndefined();
     });
   });
+
+  // ONB-4: the backend stamps `Retry-After` (delta-seconds) on 429
+  // rate-limit / OTP-lockout responses. Read it off the header so the UI
+  // can tell the user a concrete wait, and be defensive about the units.
+  describe('ONB-4 — reads Retry-After seconds from the response header', () => {
+    it('parses integer delta-seconds on a well-formed 429 body', async () => {
+      const res = new Response(JSON.stringify({ code: 'RATE_LIMITED', message: 'slow down' }), {
+        status: 429,
+        headers: { 'content-type': 'application/json', 'Retry-After': '30' },
+      });
+      const err = await parseErrorResponse(res);
+      expect(err.retryAfter).toBe(30);
+    });
+
+    it('carries Retry-After onto the HTML/empty-body fallback path', async () => {
+      const res = new Response('<html>too many</html>', {
+        status: 429,
+        statusText: 'Too Many Requests',
+        headers: { 'content-type': 'text/html', 'Retry-After': '900' },
+      });
+      const err = await parseErrorResponse(res);
+      expect(err).toEqual({
+        code: 'UPSTREAM_ERROR',
+        message: 'Too Many Requests',
+        retryAfter: 900,
+      });
+    });
+
+    it('omits retryAfter when the header is absent', async () => {
+      const res = new Response(JSON.stringify({ code: 'RATE_LIMITED', message: 'slow down' }), {
+        status: 429,
+      });
+      const err = await parseErrorResponse(res);
+      expect(err.retryAfter).toBeUndefined();
+    });
+
+    it('ignores a non-integer (HTTP-date) Retry-After rather than guessing', async () => {
+      const res = new Response(JSON.stringify({ code: 'RATE_LIMITED', message: 'slow down' }), {
+        status: 429,
+        headers: {
+          'content-type': 'application/json',
+          'Retry-After': 'Wed, 21 Oct 2026 07:28:00 GMT',
+        },
+      });
+      const err = await parseErrorResponse(res);
+      expect(err.retryAfter).toBeUndefined();
+    });
+  });
 });
