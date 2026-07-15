@@ -22,6 +22,12 @@ export async function parseErrorResponse(response: Response): Promise<ApiError> 
   // attaches it. Read the header up front so the thrown ApiException
   // always carries the correlation id, even when the body didn't.
   const headerRequestId = response.headers.get('X-Request-Id') ?? undefined;
+  // ONB-4: the rate-limit middleware (and the per-email OTP lockout) stamp
+  // `Retry-After` on 429 responses so clients can back off instead of hot-
+  // looping. Read it here — like requestId, it lives in the header, never
+  // the body — so the thrown ApiException can drive a concrete "try again
+  // in N seconds" message instead of the vague "wait a moment" copy.
+  const retryAfter = parseRetryAfter(response.headers.get('Retry-After'));
   try {
     const body = (await response.json()) as unknown;
     if (body !== null && typeof body === 'object') {
@@ -45,6 +51,7 @@ export async function parseErrorResponse(response: Response): Promise<ApiError> 
           : headerRequestId !== undefined
             ? { requestId: headerRequestId }
             : {}),
+        ...(retryAfter !== undefined ? { retryAfter } : {}),
       };
     }
   } catch {
@@ -54,5 +61,21 @@ export async function parseErrorResponse(response: Response): Promise<ApiError> 
     code: 'UPSTREAM_ERROR',
     message: response.statusText,
     ...(headerRequestId !== undefined ? { requestId: headerRequestId } : {}),
+    ...(retryAfter !== undefined ? { retryAfter } : {}),
   };
+}
+
+/**
+ * Parse the `Retry-After` header into a non-negative integer number of
+ * seconds. The backend emits the delta-seconds form (`Retry-After: 30`),
+ * so we accept only a bare non-negative integer — the alternative HTTP-date
+ * form isn't produced by our backend and we'd rather omit the hint than
+ * surface a guessed-wrong duration to the user.
+ */
+function parseRetryAfter(raw: string | null): number | undefined {
+  if (raw === null) return undefined;
+  const trimmed = raw.trim();
+  if (!/^\d+$/.test(trimmed)) return undefined;
+  const seconds = Number.parseInt(trimmed, 10);
+  return Number.isFinite(seconds) ? seconds : undefined;
 }

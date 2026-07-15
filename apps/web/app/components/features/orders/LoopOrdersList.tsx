@@ -6,7 +6,7 @@ import { listLoopOrders, loopOrderStateLabel, type LoopOrderView } from '~/servi
 import { useAllMerchants } from '~/hooks/use-merchants';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
-import { formatMinorCurrency, useLocaleTag } from '~/i18n/format';
+import { formatDateTime, formatMinorCurrency, useLocaleTag } from '~/i18n/format';
 import { safeRedeemHref } from '~/native/webview';
 import { copySensitive } from '~/native/clipboard';
 
@@ -76,7 +76,10 @@ function LoopOrderRow({ order }: { order: LoopOrderView }): React.JSX.Element {
   // matching the cashback teaser two lines below instead of the old
   // bare-number-plus-code-suffix local formatMinor.
   const amount = formatMinorCurrency(order.faceValueMinor, order.currency, locale);
-  const date = new Date(order.createdAt).toLocaleDateString(locale, {
+  // Route-locale timestamp via the shared `formatDateTime` seam — not a local
+  // `toLocaleDateString` copy — so a `/de/en` reader sees the German month/order,
+  // not the host default (ADR 034 / P2-DATE). Options unchanged.
+  const date = formatDateTime(order.createdAt, locale, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',

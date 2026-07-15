@@ -23,6 +23,16 @@ describe('ApiException', () => {
     const e = new ApiException(500, { code: 'INTERNAL_ERROR', message: 'boom' });
     expect(e.details).toBeUndefined();
     expect(e.requestId).toBeUndefined();
+    expect(e.retryAfter).toBeUndefined();
+  });
+
+  it('ONB-4: carries retryAfter (Retry-After seconds) when present', () => {
+    const e = new ApiException(429, {
+      code: ApiErrorCode.RATE_LIMITED,
+      message: 'slow down',
+      retryAfter: 30,
+    });
+    expect(e.retryAfter).toBe(30);
   });
 });
 

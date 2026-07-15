@@ -30,6 +30,12 @@ COPY apps/web/ apps/web/
 # functional bundle (Sentry just stays off, same as before).
 ARG VITE_API_URL=https://api.loopfinance.io
 ENV VITE_API_URL=$VITE_API_URL
+# FE-22: the Phase-1 launch gate's SSR/first-paint default. Must be set
+# in lockstep with the backend's LOOP_PHASE_1_ONLY for the same deploy so
+# a crawler (SSR HTML) and a real runtime gate on the same value. Defaults
+# to `true` (Phase-1, gated) so an un-plumbed build never unlocks Phase 2.
+ARG VITE_PHASE_1_ONLY=true
+ENV VITE_PHASE_1_ONLY=$VITE_PHASE_1_ONLY
 ARG VITE_SENTRY_DSN=
 ENV VITE_SENTRY_DSN=$VITE_SENTRY_DSN
 ARG VITE_SENTRY_RELEASE=

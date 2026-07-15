@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { onSessionExpired } from '~/services/api-client';
 import { Button } from '~/components/ui/Button';
+import { Dialog } from '~/components/ui/Dialog';
 
 /**
  * FE-40: centralized session-expiry re-auth prompt.
@@ -22,14 +23,13 @@ import { Button } from '~/components/ui/Button';
  * challenges are exempted at the emit site, so this prompt never
  * hijacks the step-up flow.
  *
- * Native <dialog> gives us the focus trap, ESC dismissal, and
- * aria-modal semantics for free (same pattern as ConfirmDialog /
- * StepUpModal).
+ * FE-33: the native `<dialog>` shell (focus trap, ESC dismissal,
+ * aria-modal) lives in the shared `Dialog` primitive (same shell the
+ * admin ConfirmDialog / ReasonDialog now use).
  */
 export function SessionExpiredPrompt(): React.JSX.Element {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
-  const dialogRef = useRef<HTMLDialogElement | null>(null);
   const signInButtonRef = useRef<HTMLButtonElement | null>(null);
 
   // Subscribe once for the component's lifetime. `onSessionExpired`
@@ -42,17 +42,6 @@ export function SessionExpiredPrompt(): React.JSX.Element {
     });
   }, []);
 
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (dialog === null) return;
-    if (open && !dialog.open) {
-      dialog.showModal();
-      requestAnimationFrame(() => signInButtonRef.current?.focus());
-    } else if (!open && dialog.open) {
-      dialog.close();
-    }
-  }, [open]);
-
   const dismiss = (): void => setOpen(false);
 
   const signIn = (): void => {
@@ -64,16 +53,12 @@ export function SessionExpiredPrompt(): React.JSX.Element {
   };
 
   return (
-    <dialog
-      ref={dialogRef}
+    <Dialog
+      open={open}
       onClose={dismiss}
-      onCancel={(e) => {
-        e.preventDefault();
-        dismiss();
-      }}
-      className="rounded-lg shadow-xl backdrop:bg-black/60 p-0 max-w-md w-[90vw] bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
-      aria-labelledby="session-expired-title"
-      aria-describedby="session-expired-desc"
+      initialFocusRef={signInButtonRef}
+      labelledBy="session-expired-title"
+      describedBy="session-expired-desc"
     >
       <div className="flex flex-col gap-3 p-5">
         <h2 id="session-expired-title" className="text-base font-semibold">
@@ -92,6 +77,6 @@ export function SessionExpiredPrompt(): React.JSX.Element {
           </Button>
         </div>
       </div>
-    </dialog>
+    </Dialog>
   );
 }

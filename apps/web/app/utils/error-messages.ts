@@ -1,4 +1,4 @@
-import { ApiException } from '@loop/shared';
+import { ApiErrorCode, ApiException } from '@loop/shared';
 
 /**
  * Code-to-user-message map. A2-1153: the backend emits a bespoke
@@ -91,12 +91,58 @@ const STATUS_MESSAGES: Record<number, string> = {
   504: 'Our provider timed out. Please try again.',
 };
 
+/**
+ * ONB-4: format a `Retry-After` duration into a short human phrase.
+ * Sub-minute waits stay in seconds (a per-IP throttle clears in seconds);
+ * anything longer rounds UP to whole minutes (the OTP lockout is ~15 min)
+ * so we never tell the user to come back before the window has actually
+ * elapsed.
+ */
+function formatRetryAfter(seconds: number): string {
+  if (seconds < 60) {
+    return `${seconds} second${seconds === 1 ? '' : 's'}`;
+  }
+  const minutes = Math.ceil(seconds / 60);
+  return `${minutes} minute${minutes === 1 ? '' : 's'}`;
+}
+
+/**
+ * ONB-4: when the backend told us exactly how long to wait (a `Retry-After`
+ * on a 429 throttle / lockout), replace the vague "wait a moment" / "try
+ * again later" copy with the concrete duration. Returns `null` when there's
+ * no usable hint or the error isn't a rate-limit, so the caller falls back
+ * to the normal code/status message.
+ */
+function rateLimitRetryMessage(err: ApiException): string | null {
+  const seconds = err.retryAfter;
+  if (seconds === undefined || !Number.isFinite(seconds) || seconds <= 0) {
+    return null;
+  }
+  const isRateLimit =
+    err.status === 429 ||
+    err.code === ApiErrorCode.RATE_LIMITED ||
+    err.code === ApiErrorCode.TOO_MANY_ATTEMPTS;
+  if (!isRateLimit) return null;
+
+  const wait = formatRetryAfter(seconds);
+  if (err.code === ApiErrorCode.TOO_MANY_ATTEMPTS) {
+    return `Too many incorrect attempts. For your security, this is locked — please try again in ${wait}.`;
+  }
+  return `Too many attempts. Please try again in ${wait}.`;
+}
+
 /** Returns a user-friendly error message, checking if the device is offline. */
 export function friendlyError(err: unknown, fallback: string): string {
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
     return 'You appear to be offline. Please check your connection and try again.';
   }
   if (err instanceof ApiException) {
+    // ONB-4: if the backend sent a Retry-After on a rate-limit response,
+    // prefer the concrete "try again in N seconds" copy over the vague
+    // throttle/lockout strings below.
+    const retryMsg = rateLimitRetryMessage(err);
+    if (retryMsg !== null) return retryMsg;
+
     // A2-1153: prefer the code-keyed string over status. Codes are
     // always more specific — an INSUFFICIENT_CREDIT 400 wants
     // different copy than a VALIDATION_ERROR 400. `null` in the map

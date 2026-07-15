@@ -11,6 +11,14 @@ export interface ApiError {
    * devtools for the header.
    */
   requestId?: string | undefined;
+  /**
+   * ONB-4: seconds to wait before retrying, sourced from the
+   * `Retry-After` response header on 429 rate-limit / lockout responses.
+   * Present only when the backend sent the header; the web transport
+   * (`parse-error-response.ts`) parses the delta-seconds form. Lets the
+   * UI tell the user a concrete wait instead of a vague "try again later".
+   */
+  retryAfter?: number | undefined;
 }
 
 /** Error thrown when a backend API call fails. */
@@ -19,6 +27,7 @@ export class ApiException extends Error {
   public readonly status: number;
   public readonly details: Record<string, unknown> | undefined;
   public readonly requestId: string | undefined;
+  public readonly retryAfter: number | undefined;
 
   constructor(status: number, error: ApiError) {
     super(error.message);
@@ -27,6 +36,7 @@ export class ApiException extends Error {
     this.status = status;
     this.details = error.details;
     this.requestId = error.requestId;
+    this.retryAfter = error.retryAfter;
   }
 }
 

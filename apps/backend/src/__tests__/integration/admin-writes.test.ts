@@ -1400,6 +1400,68 @@ describeIf('hardening A1 — emission conservation (cumulative, cross-writer, DB
     );
   });
 
+  it('CONV-MNY-01: a SHARED-MIRROR over-emission (prior LOOPUSD ate the USD headroom, handler emits USDLOOP) is a typed 409, NOT an opaque 500', async () => {
+    // CONV-MNY-01. USDLOOP and LOOPUSD BOTH map to the one 'USD'
+    // `user_credits` mirror (`loop_asset_mirror_currency`, migration
+    // 0061), so they draw from a SINGLE pool of emission headroom. The
+    // DB conservation trigger (`assert_emission_conservation`, migrations
+    // 0044/0061) scopes its minted-sum by MIRROR CURRENCY. The app-layer
+    // pre-check in `applyAdminEmission` (`emittedNetMinorFor`) must scope
+    // its sum the SAME way: if it summed by the bare `asset_code`, a
+    // USDLOOP emission would not "see" a prior LOOPUSD emission, would
+    // sail past the app fence, and would only be caught at the trigger —
+    // surfacing to the operator as an untyped 500 from the generic
+    // catch-all rather than the intended typed 409
+    // EMISSION_EXCEEDS_UNEMITTED_BALANCE. The existing "CONFIRMED prior
+    // mint consumes headroom" test above uses USDLOOP on BOTH sides, so
+    // it passes under EITHER scoping and does not guard this hole; this
+    // test drives the CROSS-asset shared-mirror path end-to-end through
+    // the HTTP handler and pins the 409.
+    const { targetUser, bearer, mintStepUp } = await seed();
+    await seedCashbackBalance({ userId: targetUser.id, amountMinor: 2000n });
+
+    // A confirmed prior emission on the SIBLING mirror-sharing asset —
+    // LOOPUSD, NOT the USDLOOP the handler will emit — that already
+    // consumes the ENTIRE 2000-minor USD headroom. `confirmed` counts
+    // toward the minted total; the raw insert itself is admitted by the
+    // trigger because minted 2000 ≤ balance 2000.
+    await db.insert(pendingPayouts).values({
+      userId: targetUser.id,
+      kind: 'emission',
+      assetCode: 'LOOPUSD',
+      assetIssuer: 'CLOOPUSDVAULTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      toAddress: DEST,
+      amountStroops: 2000n * 100_000n,
+      memoText: 'seeded confirmed LOOPUSD emission (shares USD mirror)',
+      state: 'confirmed',
+    });
+
+    // Now emit via the handler (currency USD → USDLOOP) for 1 more
+    // minor. The shared USD headroom is already fully consumed by the
+    // LOOPUSD row above, so the mirror-currency-scoped app fence must
+    // reject this BEFORE the DB trigger would — mapping to a typed 409.
+    const res = await emit({ userId: targetUser.id, bearer, mintStepUp, amountMinor: '1' });
+
+    // The whole point of the finding: a typed 409, never an opaque 500.
+    expect(res.status).not.toBe(500);
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { code: string; message: string };
+    expect(body.code).toBe('EMISSION_EXCEEDS_UNEMITTED_BALANCE');
+    // Message names the balance + already-emitted totals for the
+    // operator (2000 balance minus 2000 already materialised on-chain
+    // leaves 0 available).
+    expect(body.message).toContain('2000');
+
+    // No side effects: the rejected USDLOOP emission wrote nothing — the
+    // only emission row for the user is the seeded LOOPUSD one.
+    const rows = await db
+      .select({ assetCode: pendingPayouts.assetCode })
+      .from(pendingPayouts)
+      .where(eq(pendingPayouts.userId, targetUser.id));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.assetCode).toBe('LOOPUSD');
+  });
+
   it('a FAILED prior mint does NOT consume headroom — the backfill use case emission exists for', async () => {
     const { targetUser, bearer, mintStepUp } = await seed();
     await seedCashbackBalance({ userId: targetUser.id, amountMinor: 2000n });

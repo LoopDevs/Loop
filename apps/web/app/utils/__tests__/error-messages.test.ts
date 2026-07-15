@@ -122,4 +122,52 @@ describe('friendlyError', () => {
       expect(msg).toBe('Server error fallback');
     });
   });
+
+  // ONB-4: when the backend sends a Retry-After (seconds) on a 429, surface
+  // the concrete wait instead of the vague "wait a moment" / "try again later".
+  describe('Retry-After surfacing (ONB-4)', () => {
+    const rateErr = (code: string, retryAfter?: number): ApiException =>
+      new ApiException(429, {
+        code,
+        message: 'slow down',
+        ...(retryAfter !== undefined ? { retryAfter } : {}),
+      });
+
+    it('RATE_LIMITED with Retry-After names the concrete wait in seconds', () => {
+      const msg = friendlyError(rateErr('RATE_LIMITED', 30), 'Fallback');
+      expect(msg).toContain('try again in 30 seconds');
+    });
+
+    it('uses a singular "second" for a 1-second wait', () => {
+      const msg = friendlyError(rateErr('RATE_LIMITED', 1), 'Fallback');
+      expect(msg).toContain('try again in 1 second');
+      expect(msg).not.toContain('1 seconds');
+    });
+
+    it('rounds a sub-minute-plus wait up to whole minutes', () => {
+      // The OTP lockout Retry-After is ~15 minutes (900s).
+      const msg = friendlyError(rateErr('TOO_MANY_ATTEMPTS', 900), 'Fallback');
+      expect(msg).toContain('try again in 15 minutes');
+      expect(msg.toLowerCase()).toContain('locked');
+    });
+
+    it('rounds UP so we never send the user back before the window elapsed', () => {
+      const msg = friendlyError(rateErr('RATE_LIMITED', 61), 'Fallback');
+      expect(msg).toContain('try again in 2 minutes');
+    });
+
+    it('without Retry-After keeps the existing vague throttle copy', () => {
+      const msg = friendlyError(rateErr('RATE_LIMITED'), 'Fallback');
+      expect(msg).toBe('Too many attempts. Please wait a moment.');
+    });
+
+    it('ignores a non-rate-limit code even if retryAfter is set', () => {
+      const msg = friendlyError(
+        new ApiException(400, { code: 'VALIDATION_ERROR', message: 'bad input', retryAfter: 30 }),
+        'Fallback',
+      );
+      // VALIDATION_ERROR still falls through to the backend message.
+      expect(msg).toBe('bad input');
+    });
+  });
 });
