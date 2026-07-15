@@ -75,9 +75,7 @@ export class RailHaltedError extends Error {
  */
 export class KillSwitchNotProvisionedError extends Error {
   constructor(operation: string) {
-    super(
-      `rail kill-switch store not provisioned (NS-04 migration 0071+ pending): ${operation}`,
-    );
+    super(`rail kill-switch store not provisioned (NS-04 migration 0071+ pending): ${operation}`);
     this.name = 'KillSwitchNotProvisionedError';
   }
 }
@@ -98,10 +96,7 @@ export class KillSwitchNotProvisionedError extends Error {
  *   - refund  → applyAdminRefund (credits/refunds.ts) + refundDeposit
  *               (payments/deposit-refund.ts)
  */
-export async function assertRailNotHalted(
-  service: KillSwitchService,
-  rail: Rail,
-): Promise<void> {
+export async function assertRailNotHalted(service: KillSwitchService, rail: Rail): Promise<void> {
   if (await service.isHalted(rail)) {
     throw new RailHaltedError(rail);
   }

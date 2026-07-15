@@ -1,0 +1,284 @@
+diff --git a/apps/backend/src/credits/vaults/__tests__/soroban-submit.test.ts b/apps/backend/src/credits/vaults/__tests__/soroban-submit.test.ts
+index 7888e9d7..18cf6ce9 100644
+--- a/apps/backend/src/credits/vaults/__tests__/soroban-submit.test.ts
++++ b/apps/backend/src/credits/vaults/__tests__/soroban-submit.test.ts
+@@ -313,6 +313,133 @@ describe('submitSorobanInvocation — CF-18 at-most-once fence', () => {
+   });
+ });
+ 
++describe('submitSorobanInvocation — CF-18 aged-out NOT_FOUND disambiguation (FT-02)', () => {
++  // A Soroban RPC retains tx history only for a bounded window. A
++  // deposit/withdraw that LANDED but then aged out of that window
++  // returns NOT_FOUND — identical to a tx that never landed. Treating
++  // the aged-out-but-landed case as never-landed lets a delayed retry
++  // build a fresh tx and DOUBLE-submit (double-mint / operator USDC
++  // loss). `priorTxSubmittedLedger` (the ledger the original attempt
++  // submitted at, persisted with the hash) disambiguates: a NOT_FOUND is
++  // authoritative only while the RPC's retained window still reaches
++  // back to that ledger.
++
++  it('FAILS CLOSED when the prior tx submit ledger has aged out of the RPC history — no re-submit (no double-mint)', async () => {
++    // getTransaction says NOT_FOUND, but the retained window now starts
++    // at oldestLedger=500 — PAST the ledger (100) the prior tx submitted
++    // at. So a landed-then-pruned tx is indistinguishable from
++    // never-landed; re-submitting risks a second on-chain deposit.
++    rpcState.getTransactionResults.set('aged-out-hash', {
++      status: rpc.Api.GetTransactionStatus.NOT_FOUND,
++      txHash: 'aged-out-hash',
++      oldestLedger: 500,
++      latestLedger: 800,
++    });
++
++    const err = await submitSorobanInvocation({
++      ...baseArgs,
++      priorTxHash: 'aged-out-hash',
++      priorTxSubmittedLedger: 100,
++    }).catch((e: unknown) => e);
++
++    expect(err).toBeInstanceOf(SorobanSubmitError);
++    expect((err as SorobanSubmitError).kind).toBe('transient_rpc');
++    // Money-critical: bailed at the pre-check — nothing built or sent.
++    expect(rpcState.calls.getTransaction).toEqual(['aged-out-hash']);
++    expect(rpcState.calls.getAccount).toHaveLength(0);
++    expect(rpcState.calls.simulateTransaction).toHaveLength(0);
++    expect(rpcState.calls.sendTransaction).toHaveLength(0);
++  });
++
++  it('a NOT_FOUND still within the RPC retained window is a genuine never-landed — retries with a fresh submit', async () => {
++    rpcState.simulateResult = successSim(xdr.ScVal.scvVoid());
++    rpcState.pollResult = successTx('fresh-hash', xdr.ScVal.scvVoid());
++    // oldestLedger=50 <= submittedLedger=100: the RPC would still hold
++    // the tx if it had landed, so NOT_FOUND authoritatively means
++    // never-landed. The genuine-retry path must NOT be weakened.
++    rpcState.getTransactionResults.set('never-landed-hash', {
++      status: rpc.Api.GetTransactionStatus.NOT_FOUND,
++      txHash: 'never-landed-hash',
++      oldestLedger: 50,
++      latestLedger: 800,
++    });
++
++    const result = await submitSorobanInvocation({
++      ...baseArgs,
++      priorTxHash: 'never-landed-hash',
++      priorTxSubmittedLedger: 100,
++    });
++
++    expect(result.deduped).toBe(false);
++    expect(rpcState.calls.sendTransaction).toHaveLength(1);
++  });
++
++  it('treats oldestLedger === submittedLedger as still-covered (boundary) — retries, does not fail closed', async () => {
++    rpcState.simulateResult = successSim(xdr.ScVal.scvVoid());
++    rpcState.pollResult = successTx('fresh-hash', xdr.ScVal.scvVoid());
++    rpcState.getTransactionResults.set('boundary-hash', {
++      status: rpc.Api.GetTransactionStatus.NOT_FOUND,
++      txHash: 'boundary-hash',
++      oldestLedger: 100,
++      latestLedger: 800,
++    });
++
++    const result = await submitSorobanInvocation({
++      ...baseArgs,
++      priorTxHash: 'boundary-hash',
++      priorTxSubmittedLedger: 100,
++    });
++
++    expect(result.deduped).toBe(false);
++    expect(rpcState.calls.sendTransaction).toHaveLength(1);
++  });
++
++  it('a landed SUCCESS still dedups even with a submit ledger supplied (the retention check is NOT_FOUND-only)', async () => {
++    rpcState.getTransactionResults.set(
++      'landed-hash',
++      successTx('landed-hash', xdr.ScVal.scvVoid()),
++    );
++
++    const result = await submitSorobanInvocation({
++      ...baseArgs,
++      priorTxHash: 'landed-hash',
++      priorTxSubmittedLedger: 1,
++    });
++
++    expect(result.deduped).toBe(true);
++    expect(rpcState.calls.sendTransaction).toHaveLength(0);
++  });
++
++  it('returns submittedLedger (sim.latestLedger) on a fresh submit so the caller can persist it for a future retry', async () => {
++    rpcState.simulateResult = successSim(xdr.ScVal.scvVoid()); // latestLedger: 100
++    rpcState.pollResult = successTx('h', xdr.ScVal.scvVoid());
++
++    const result = await submitSorobanInvocation(baseArgs);
++
++    expect(result.submittedLedger).toBe(100);
++  });
++
++  it('WITHOUT a submit ledger, an aged-out NOT_FOUND still falls through (legacy behaviour — the gap the caller wiring closes)', async () => {
++    // Documents that the in-module mechanism only bites once the caller
++    // persists + threads priorTxSubmittedLedger. Absent it, the pre-fix
++    // (unsafe) behaviour is preserved rather than regressing genuine
++    // retries to fail-closed.
++    rpcState.simulateResult = successSim(xdr.ScVal.scvVoid());
++    rpcState.pollResult = successTx('fresh-hash', xdr.ScVal.scvVoid());
++    rpcState.getTransactionResults.set('aged-no-ledger', {
++      status: rpc.Api.GetTransactionStatus.NOT_FOUND,
++      txHash: 'aged-no-ledger',
++      oldestLedger: 500,
++      latestLedger: 800,
++    });
++
++    const result = await submitSorobanInvocation({ ...baseArgs, priorTxHash: 'aged-no-ledger' });
++
++    expect(result.deduped).toBe(false);
++    expect(rpcState.calls.sendTransaction).toHaveLength(1);
++  });
++});
++
+ describe('submitSorobanInvocation — fee sanity cap (Lens1-F3)', () => {
+   it('refuses to sign when the assembled fee exceeds the default cap', async () => {
+     rpcState.simulateResult = successSim(xdr.ScVal.scvVoid());
+diff --git a/apps/backend/src/credits/vaults/soroban-submit.ts b/apps/backend/src/credits/vaults/soroban-submit.ts
+index 82143656..86975879 100644
+--- a/apps/backend/src/credits/vaults/soroban-submit.ts
++++ b/apps/backend/src/credits/vaults/soroban-submit.ts
+@@ -134,6 +134,21 @@ export interface SubmitSorobanInvocationArgs {
+    * double-submit.
+    */
+   priorTxHash?: string;
++  /**
++   * CF-18 aged-out disambiguation: the `submittedLedger` returned by
++   * the ORIGINAL attempt that produced `priorTxHash`, persisted by the
++   * caller alongside that hash. Used ONLY on a NOT_FOUND pre-check
++   * result: if the RPC's retained history no longer reaches back to
++   * this ledger (`oldestLedger > priorTxSubmittedLedger`), a NOT_FOUND
++   * is AMBIGUOUS — the prior tx may have LANDED and been pruned — so
++   * the pre-check fails CLOSED (refuses to submit) rather than treat it
++   * as never-landed and double-submit. Omitted → legacy behaviour: a
++   * NOT_FOUND is trusted as never-landed, which is UNSAFE once a retry
++   * can outlive the RPC's retention window. Callers on a money path
++   * MUST persist and thread this back; ignored unless `priorTxHash` is
++   * also set.
++   */
++  priorTxSubmittedLedger?: number;
+   /**
+    * CF-18: fired with the deterministic tx hash after signing but
+    * before submission, so the caller can persist it. Awaited; a
+@@ -158,6 +173,22 @@ export interface SorobanSubmitResult {
+   returnValue: xdr.ScVal;
+   /** true when a `priorTxHash` was found already-confirmed and this call short-circuited without submitting anything new. */
+   deduped: boolean;
++  /**
++   * CF-18 aged-out disambiguation: the ledger sequence the network was
++   * at when this tx was simulated moments before submit
++   * (`sim.latestLedger`) — a tight LOWER bound on the ledger it could
++   * have landed in (a tx never lands before it is submitted). Persist
++   * this alongside the tx hash; on a later retry, pass it back as
++   * `priorTxSubmittedLedger` so the NOT_FOUND pre-check can tell a
++   * genuinely-never-landed tx apart from one that LANDED and then aged
++   * out of the RPC's bounded history window (a `getTransaction`
++   * NOT_FOUND is otherwise identical for both, and treating an
++   * aged-out-but-landed tx as never-landed DOUBLE-submits — double-mint
++   * / operator loss). Present only on a fresh submit; omitted on a
++   * `deduped` short-circuit (the caller already recorded it on the
++   * original attempt).
++   */
++  submittedLedger?: number;
+ }
+ 
+ /**
+@@ -176,13 +207,32 @@ export interface PriorSorobanTxCheck {
+  * the provider-signed path (`prepareSorobanInvocationForExternalSigning`
+  * callers, `vault-client.ts`'s `transferShares({ signWith: 'provider'
+  * })`) can share the SAME fail-closed pre-check rather than
+- * reimplementing it. Semantics unchanged from the inline version this
+- * replaces: any RPC error refuses (throws `transient_rpc`) rather than
+- * risk treating an ambiguous check as "never landed".
++ * reimplementing it. Any RPC error refuses (throws `transient_rpc`)
++ * rather than risk treating an ambiguous check as "never landed".
++ *
++ * NOT_FOUND is itself ambiguous: it means EITHER "never submitted /
++ * never landed" OR "landed, but aged out of the RPC's bounded history
++ * window". Treating the latter as never-landed lets a delayed retry
++ * DOUBLE-submit the deposit/withdraw (double-mint / operator loss). To
++ * tell them apart we compare the RPC's earliest retained ledger
++ * (`oldestLedger`, returned on every NOT_FOUND) against
++ * `submittedLedger` — the ledger the ORIGINAL attempt was at when it
++ * submitted (a tx never lands before it is submitted, so if it landed
++ * it landed at some ledger >= `submittedLedger`). If the retained
++ * window still reaches back to `submittedLedger`
++ * (`oldestLedger <= submittedLedger`), a NOT_FOUND is authoritative:
++ * the RPC would still hold the tx if it had landed, so it genuinely
++ * never landed → safe to retry. If the window has advanced PAST it
++ * (`oldestLedger > submittedLedger`), a landed-then-pruned tx is
++ * indistinguishable from never-landed → fail CLOSED. When
++ * `submittedLedger` is omitted we cannot make this call, so we preserve
++ * the legacy "trust NOT_FOUND as never-landed" behaviour (UNSAFE past
++ * the retention window — money-path callers MUST supply it).
+  */
+ export async function checkPriorSorobanTx(
+   rpcUrl: string,
+   priorTxHash: string,
++  submittedLedger?: number,
+ ): Promise<PriorSorobanTxCheck> {
+   const server = new rpc.Server(rpcUrl);
+   let prior: Awaited<ReturnType<typeof server.getTransaction>>;
+@@ -199,10 +249,26 @@ export async function checkPriorSorobanTx(
+   if (prior.status === rpc.Api.GetTransactionStatus.SUCCESS) {
+     return { landed: true, returnValue: prior.returnValue ?? voidScVal() };
+   }
+-  // NOT_FOUND (never landed) or FAILED (reverted all state, consumed
+-  // its sequence, so a fresh higher-sequence submit won't collide):
+-  // both are a definitive "the prior attempt is not a landed success".
+-  // Only a THROWN error is ambiguous, and that path already bailed above.
++  if (prior.status === rpc.Api.GetTransactionStatus.NOT_FOUND) {
++    // Disambiguate never-landed from landed-but-aged-out (see the
++    // function doc). Only fail closed when we can PROVE the retained
++    // window no longer covers the tx's possible landing ledger — never
++    // weaken the retry for a genuinely-never-landed tx.
++    if (submittedLedger !== undefined && prior.oldestLedger > submittedLedger) {
++      throw new SorobanSubmitError(
++        'transient_rpc',
++        `CF-18 pre-check: prior tx ${priorTxHash} is NOT_FOUND, but its submit ledger ` +
++          `${submittedLedger} predates the RPC's retained history (oldestLedger ` +
++          `${prior.oldestLedger}) — a landed-then-aged-out tx cannot be distinguished from ` +
++          `never-landed here, so refusing to submit (fail-closed) to avoid a double-submit`,
++      );
++    }
++    return { landed: false, returnValue: null };
++  }
++  // FAILED: reverted all state and consumed its sequence, so a fresh
++  // higher-sequence submit won't collide — a definitive "not a landed
++  // success". (An aged-out FAILED tx would surface as NOT_FOUND, handled
++  // above; a FAILED status is only ever returned while still retained.)
+   return { landed: false, returnValue: null };
+ }
+ 
+@@ -212,9 +278,15 @@ export async function submitSorobanInvocation(
+   const server = new rpc.Server(args.rpcUrl);
+ 
+   // CF-18 pre-check: a prior attempt's hash, if the caller has one,
+-  // wins over building anything new.
++  // wins over building anything new. `priorTxSubmittedLedger` (if the
++  // caller persisted it) disambiguates a NOT_FOUND that is really a
++  // landed-but-aged-out tx from a genuinely-never-landed one.
+   if (args.priorTxHash !== undefined) {
+-    const prior = await checkPriorSorobanTx(args.rpcUrl, args.priorTxHash);
++    const prior = await checkPriorSorobanTx(
++      args.rpcUrl,
++      args.priorTxHash,
++      args.priorTxSubmittedLedger,
++    );
+     if (prior.landed) {
+       return {
+         txHash: args.priorTxHash,
+@@ -389,6 +461,11 @@ export async function submitSorobanInvocation(
+     txHash: signedHash,
+     returnValue: final.returnValue ?? voidScVal(),
+     deduped: false,
++    // CF-18: the ledger the network was at when we simulated, moments
++    // before submit — a tight lower bound on where this tx could land.
++    // The caller persists it with the hash so a later NOT_FOUND retry
++    // can be disambiguated (aged-out-but-landed vs never-landed).
++    submittedLedger: sim.latestLedger,
+   };
+ }
+ 

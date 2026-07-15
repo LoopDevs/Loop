@@ -1,0 +1,129 @@
+diff --git a/apps/backend/node_modules b/apps/backend/node_modules
+new file mode 120000
+index 00000000..67f716eb
+--- /dev/null
++++ b/apps/backend/node_modules
+@@ -0,0 +1 @@
++/Users/ash/code/loop-app/apps/backend/node_modules
+\ No newline at end of file
+diff --git a/apps/backend/src/__tests__/integration/interest-mint.test.ts b/apps/backend/src/__tests__/integration/interest-mint.test.ts
+index 9a3207fc..4d8ca720 100644
+--- a/apps/backend/src/__tests__/integration/interest-mint.test.ts
++++ b/apps/backend/src/__tests__/integration/interest-mint.test.ts
+@@ -523,6 +523,116 @@ describeIf('interest-mint integration — real postgres (Q6-6)', () => {
+     expect(after.minted).toBe(1);
+   });
+ 
++  // ─── INT-07 (money-correctness): mismatched idempotency fences ──────
++  //
++  // The two per-user idempotency fences key on DIFFERENT columns:
++  //
++  //   snapshot fence : interest_mint_snapshots_user_asset_period_unique
++  //                    (user_id, ASSET_CODE, period_cursor)
++  //   mirror fence   : credit_transactions_interest_period_unique
++  //                    (user_id, CURRENCY, period_cursor) WHERE type='interest'
++  //
++  // Today they agree 1:1 because GBPLOOP is the only mint-eligible asset
++  // and fiatOf(GBPLOOP)='GBP'. But the mirror fence is keyed on CURRENCY,
++  // one granularity COARSER than the per-ASSET snapshot fence. The moment
++  // two distinct asset_codes share a currency (a second GBP-denominated
++  // LOOP asset, or any widening of ONCHAIN_MINT_ELIGIBLE_ASSETS where
++  // asset_code and currency diverge), the currency-keyed mirror fence
++  // FALSELY trips for the second asset: its snapshot insert is unique
++  // (distinct asset_code) but its credit_transactions insert collides on
++  // (user, currency, night) with the first asset's row. The whole
++  // per-user txn rolls back and the catch classifies the 23505 as
++  // `skipped_already` — a legitimate, owed mint is SILENTLY DROPPED
++  // (under-mint): no snapshot, no mirror bump, no on-chain payout.
++  //
++  // A faithful "two real assets" repro is impossible inside this
++  // fixer's scope: fiatOf() only knows three codes (all distinct
++  // currencies), and the DB pins asset_code='GBPLOOP'
++  // (interest_mint_snapshots_asset_code_known / the pending_payouts
++  // CHECK). So the divergence is modelled by seeding the (user, GBP,
++  // night) interest slot with ANOTHER GBP-denominated holding's mirror
++  // row (exactly what a second eligible asset would have written this
++  // night) and then driving GBPLOOP's mint into the same slot. The
++  // seeded row is what makes it red — the identical flow WITHOUT it
++  // mints cleanly (see the passing "mints for an eligible GBPLOOP
++  // holder" test above), so this is non-vacuous: only the fence
++  // divergence turns it red.
++  //
++  // SKIPPED: aligning the mirror fence to the per-asset snapshot
++  // identity requires the credit_transactions interest unique index to
++  // carry an asset discriminator — credit_transactions has NO asset_code
++  // column and the mirror (user_credits) is per-currency by design, so
++  // there is NO code-only key derivation inside interest-mint.ts that
++  // makes the currency-keyed index discriminate by asset without either
++  // (a) a migration (new/changed unique index) or (b) overloading
++  // period_cursor, which both LOOSENS the documented legacy-currency
++  // dedup fence (interest-mint.ts §"second idempotency fence") and
++  // breaks readers that parse period_cursor as a bare YYYY-MM-DD
++  // (scripts/wallet-testnet-walk.ts, db/schema/admin.ts). This is
++  // therefore a NEEDS-COORDINATION (HUMAN-HOLD) migration, out of this
++  // fixer's scope fence. Proven RED against current code (mint dropped);
++  // un-skip once the migration lands and interest-mint.ts derives the
++  // aligned per-asset mirror key.
++  it.skip('INT-07: a legitimate mint is NOT dropped when another asset shares the currency, and a genuine GBPLOOP replay is still deduped', async () => {
++    const user = await seedActivatedUser();
++
++    // Divergence setup: another GBP-denominated holding's interest was
++    // already minted for this user tonight — occupies the CURRENCY-keyed
++    // mirror slot (user, GBP, PERIOD_1) with 500 minor units. No GBPLOOP
++    // snapshot exists, so the per-ASSET snapshot fence is clear.
++    await db.insert(creditTransactions).values({
++      userId: user.id,
++      type: 'interest',
++      amountMinor: 500n,
++      currency: 'GBP',
++      referenceType: null,
++      referenceId: null,
++      periodCursor: PERIOD_1,
++    });
++    await db.insert(userCredits).values({ userId: user.id, currency: 'GBP', balanceMinor: 500n });
++
++    // GBPLOOP holding that accrues exactly 1000 minor units tonight
++    // (36,500 GBPLOOP @ 100% APY/365 -> 100,000,000 stroops -> 1000
++    // minor, 0 carry) — a legitimate, owed mint distinct from the 500
++    // above.
++    trustlineBalances.set(user.walletAddress, 36_500_000_000n);
++
++    // ── Property (a): the legitimate GBPLOOP mint must NOT be dropped ──
++    const first = await runInterestMintTick({ now: DAY_1, apyBps: 10_000 });
++    expect(first.minted).toBe(1);
++    expect(first.skippedAlready).toBe(0);
++    expect(first.errors).toBe(0);
++
++    // GBPLOOP got its own snapshot + on-chain payout intent...
++    const snaps = await snapshotsFor(user.id);
++    expect(snaps).toHaveLength(1);
++    expect(snaps[0]).toMatchObject({ periodCursor: PERIOD_1, mintedMinor: 1000n, currency: 'GBP' });
++    expect(await payoutRowsFor(user.id)).toHaveLength(1);
++    // ...and its mirror credit landed ON TOP of the other asset's 500,
++    // as a SECOND interest row for the night — not collapsed into one.
++    expect(await creditRowsFor(user.id)).toHaveLength(2);
++    expect(await balanceOf(user.id)).toBe(1500n);
++
++    // ── Property (b): a genuine GBPLOOP replay is STILL deduped ─────────
++    // Drop the cursor so the resumed tick can't take the cheap
++    // cursor fast-path and must rely on the per-user fence — a real
++    // crash-recovery replay of the SAME (user, GBPLOOP, night).
++    await db.delete(watcherCursors).where(eq(watcherCursors.name, INTEREST_MINT_CURSOR_NAME));
++
++    const replay = await runInterestMintTick({ now: DAY_1, apyBps: 10_000 });
++    expect(replay.alreadyProcessed).toBe(false);
++    expect(replay.minted).toBe(0);
++    expect(replay.skippedAlready).toBe(1);
++    expect(replay.errors).toBe(0);
++
++    // No double-mint: still exactly one GBPLOOP snapshot / payout, and
++    // the mirror is unchanged (500 other + 1000 GBPLOOP).
++    expect(await snapshotsFor(user.id)).toHaveLength(1);
++    expect(await payoutRowsFor(user.id)).toHaveLength(1);
++    expect(await creditRowsFor(user.id)).toHaveLength(2);
++    expect(await balanceOf(user.id)).toBe(1500n);
++  });
++
+   it('CON-04: a hung sweep hits the lease deadline, RELEASES the fleet-wide lock, and does NOT advance the cursor', async () => {
+     const user = await seedActivatedUser();
+     trustlineBalances.set(user.walletAddress, 36_500_000_000n);

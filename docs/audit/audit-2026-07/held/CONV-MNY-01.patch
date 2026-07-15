@@ -1,0 +1,112 @@
+diff --git a/apps/backend/src/credits/__tests__/emissions.test.ts b/apps/backend/src/credits/__tests__/emissions.test.ts
+index 57483be4..2fe1fd94 100644
+--- a/apps/backend/src/credits/__tests__/emissions.test.ts
++++ b/apps/backend/src/credits/__tests__/emissions.test.ts
+@@ -112,7 +112,13 @@ vi.mock('../../db/schema.js', () => ({
+   },
+ }));
+ 
+-import { applyAdminEmission, EmissionAlreadyIssuedError } from '../emissions.js';
++import { PgDialect } from 'drizzle-orm/pg-core';
++import type { SQL } from 'drizzle-orm';
++import {
++  applyAdminEmission,
++  EmissionAlreadyIssuedError,
++  emittedNetMinorFor,
++} from '../emissions.js';
+ import { InsufficientBalanceError } from '../adjustments.js';
+ 
+ const intent = {
+@@ -306,3 +312,48 @@ describe('applyAdminEmission (A2-901 / ADR-024 re-scoped by ADR 036)', () => {
+     expect(state.insertCreditCalls).toHaveLength(0);
+   });
+ });
++
++/**
++ * CONV-MNY-01: the conservation pre-check's "already emitted" SUM must
++ * scope by MIRROR CURRENCY, exactly as the DB trigger
++ * `assert_emission_conservation` does after migration 0061
++ * (`loop_asset_mirror_currency(pp.asset_code) = mirror_currency`), NOT
++ * by the bare `asset_code`. USDLOOP + LOOPUSD share a single USD
++ * mirror headroom; a bare-asset_code pre-check undercounts and passes
++ * a shared-mirror emission the trigger then rejects, turning the
++ * intended 409 EMISSION_EXCEEDS_UNEMITTED_BALANCE into an opaque 500.
++ *
++ * This exercises the real query the code builds (compiled via the
++ * drizzle Pg dialect, no DB) — it fails against the pre-fix
++ * `AND asset_code = $n` scope and passes against the corrected
++ * mirror-currency scope.
++ */
++describe('emittedNetMinorFor — conservation SUM scope (CONV-MNY-01)', () => {
++  it('scopes the aggregation by mirror currency, matching the 0061 trigger', async () => {
++    let captured: SQL | undefined;
++    const tx = {
++      execute: async (query: SQL) => {
++        captured = query;
++        return [] as unknown as never;
++      },
++    } as unknown as Parameters<typeof emittedNetMinorFor>[0];
++
++    await emittedNetMinorFor(tx, { userId: 'u-1', assetCode: 'USDLOOP' });
++
++    expect(captured).toBeDefined();
++    const compiled = new PgDialect().sqlToQuery(captured as SQL);
++    const flat = compiled.sql.replace(/\s+/g, ' ');
++
++    // Corrected scope present: both sides routed through the same
++    // mirror-currency mapping the trigger uses.
++    expect(flat).toContain(
++      'loop_asset_mirror_currency(asset_code) = loop_asset_mirror_currency(',
++    );
++    // Pre-fix bare-asset_code scope must be gone — this is the exact
++    // predicate that diverged from the trigger.
++    expect(flat).not.toMatch(/\band asset_code =\s*\$/i);
++    // The assetCode arg is bound as a parameter (not string-interpolated).
++    expect(compiled.params).toContain('USDLOOP');
++    expect(compiled.params).toContain('u-1');
++  });
++});
+diff --git a/apps/backend/src/credits/emissions.ts b/apps/backend/src/credits/emissions.ts
+index a718b17a..f9778860 100644
+--- a/apps/backend/src/credits/emissions.ts
++++ b/apps/backend/src/credits/emissions.ts
+@@ -116,7 +116,20 @@ const STROOPS_PER_MINOR = 100_000n;
+ 
+ /**
+  * Conservation accounting (hardening A1): net minor units already
+- * materialised on-chain for this (user, asset).
++ * materialised on-chain for this (user, MIRROR CURRENCY).
++ *
++ * Scoped by mirror currency — `loop_asset_mirror_currency(asset_code)
++ * = loop_asset_mirror_currency(assetCode)` — NOT by the bare
++ * `asset_code`, to MATCH the DB conservation trigger
++ * (`assert_emission_conservation`, re-scoped by migration 0061). Since
++ * USDLOOP + LOOPUSD both mirror into 'USD' (EURLOOP + LOOPEUR into
++ * 'EUR') they share one `user_credits` headroom, so both must be
++ * summed together. Scoping this pre-check by the bare asset code while
++ * the trigger scopes by mirror currency lets the app pass a shared-
++ * mirror emission the trigger then rejects — surfacing as an opaque
++ * 500 instead of the intended 409 EMISSION_EXCEEDS_UNEMITTED_BALANCE
++ * (CONV-MNY-01). For a classic-only deployment (no LOOPUSD/LOOPEUR
++ * rows) this sum is identical to the old bare-asset_code sum.
+  *
+  * The invariant every money flow preserves is
+  * `mintedNet ≤ mirror balance`:
+@@ -162,7 +175,7 @@ const STROOPS_PER_MINOR = 100_000n;
+  * 'payout-compensation') — do NOT unify the scopes without also
+  * unifying the acquisition order.
+  */
+-async function emittedNetMinorFor(
++export async function emittedNetMinorFor(
+   tx: Pick<typeof db, 'execute'>,
+   args: { userId: string; assetCode: string },
+ ): Promise<bigint> {
+@@ -185,7 +198,7 @@ async function emittedNetMinorFor(
+       COALESCE(SUM(amount_stroops) FILTER (WHERE kind = 'burn'), 0)::text AS burned
+     FROM pending_payouts
+     WHERE user_id = ${args.userId}
+-      AND asset_code = ${args.assetCode}
++      AND loop_asset_mirror_currency(asset_code) = loop_asset_mirror_currency(${args.assetCode})
+   `);
+   const rows = Array.isArray(result)
+     ? (result as Array<{ minted: string; burned: string }>)

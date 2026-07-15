@@ -128,6 +128,7 @@ ON CONFLICT ("rail") DO NOTHING;
 ```
 
 Notes:
+
 - `text` PK on `rail` matches the small-enum-table idiom already used
   (`admin_step_up_consumptions.jti`, `user_favorite_merchants` composite
   PK). The `CHECK` pins the domain to the four rails.
@@ -149,13 +150,14 @@ Mirror the canonical audited-admin-write stack at
 `withIdempotencyGuard` + `buildAuditEnvelope` + `notifyAdminAudit`).
 Mount a new `mountAdminRailsRoutes(app)` factory under the `/api/admin/*`
 blanket (which already applies `requireAuth` + `requireStaff('support')`
-+ read-audit — `apps/backend/src/routes/admin.ts:132-223`).
 
-| Method + path | AuthZ | Step-up | Idempotent + audited |
-|---|---|---|---|
-| `GET /api/admin/rails/kill-switches` | `requireStaff('admin')` | no (read) | read-audit only |
-| `POST /api/admin/rails/:rail/halt` | `requireStaff('admin')` | `requireAdminStepUp('rail-halt')` | yes |
-| `POST /api/admin/rails/:rail/resume` | `requireStaff('admin')` | `requireAdminStepUp('rail-resume')` (see Q3) | yes |
+- read-audit — `apps/backend/src/routes/admin.ts:132-223`).
+
+| Method + path                        | AuthZ                   | Step-up                                      | Idempotent + audited |
+| ------------------------------------ | ----------------------- | -------------------------------------------- | -------------------- |
+| `GET /api/admin/rails/kill-switches` | `requireStaff('admin')` | no (read)                                    | read-audit only      |
+| `POST /api/admin/rails/:rail/halt`   | `requireStaff('admin')` | `requireAdminStepUp('rail-halt')`            | yes                  |
+| `POST /api/admin/rails/:rail/resume` | `requireStaff('admin')` | `requireAdminStepUp('rail-resume')` (see Q3) | yes                  |
 
 - **New step-up scope(s)** to add to `STEP_UP_SCOPES`
   (`apps/backend/src/auth/admin-step-up.ts:79`): `'rail-halt'` and
@@ -165,13 +167,13 @@ blanket (which already applies `requireAuth` + `requireStaff('support')`
 - **Request body:** `{ reason: string, idempotencyKey: string }`. `reason`
   is required (the halted-has-reason CHECK enforces it at the DB too).
 - **Handler flow (halt):** `withIdempotencyGuard({ adminUserId, key,
-  method, path }, doWrite)` where `doWrite` UPSERTs the row
+method, path }, doWrite)` where `doWrite` UPSERTs the row
   (`halted=true`, reason, actor) and returns `buildAuditEnvelope(...)`;
   then `notifyAdminAudit({ actorUserId, endpoint, reason, idempotencyKey,
-  replayed })` after commit (`apps/backend/src/discord/admin-audit.ts:49`).
+replayed })` after commit (`apps/backend/src/discord/admin-audit.ts:49`).
 - **Response when a rail is halted (enforcement side):** HTTP surfaces
   return `503 { code: 'RAIL_HALTED', message: '<rail> is temporarily
-  halted — retry shortly' }`, matching the existing
+halted — retry shortly' }`, matching the existing
   `SUBSYSTEM_DISABLED` 503 shape from `middleware/kill-switch.ts` so web +
   mobile already render it as a transient retry.
 - **Docs parity:** `scripts/lint-docs.sh` cross-checks `'/api/...'`
@@ -188,6 +190,7 @@ at the SINGLE new-operation chokepoint per rail, listed below with exact
 `file:line`. Enforcement is intentionally NOT added in this PR.
 
 ### deposit
+
 - **Primary:** `runPaymentWatcherTick(args)` —
   `apps/backend/src/payments/watcher.ts:790`. Deposits are inbound
   on-chain payments detected by this poller (no user "create deposit"
@@ -199,6 +202,7 @@ at the SINGLE new-operation chokepoint per rail, listed below with exact
   (`payments/watcher-bootstrap.ts:145`, started at `src/index.ts:158`).
 
 ### payout
+
 - **Primary:** `runPayoutTick(args)` —
   `apps/backend/src/payments/payout-worker.ts:182` (or
   `runPayoutTickLocked` at `:226`). The tick already reads
@@ -210,6 +214,7 @@ at the SINGLE new-operation chokepoint per rail, listed below with exact
   `insertPayout` (`credits/pending-payouts.ts:39`).
 
 ### vault
+
 - **Primary (single chokepoint for all mutating vault ops):**
   `requireVaultsEnabled()` — `apps/backend/src/credits/vaults/vault-client.ts:107`
   (delegates to `vaultsEnabled()` at `credits/vaults/registry.ts:38`).
@@ -225,8 +230,10 @@ at the SINGLE new-operation chokepoint per rail, listed below with exact
   User HTTP path: `redeemLoopOrderViaVault` (`orders/redeem-vault.ts:74`).
 
 ### refund
+
 Two internal sub-rails — gate BOTH primitives (the dispatcher alone is
 insufficient because the on-chain primitive is reachable directly):
+
 - **Credit-rail primitive:** `applyAdminRefund(args)` —
   `apps/backend/src/credits/refunds.ts:417`.
 - **On-chain-rail primitive:** `refundDeposit(paymentId)` —
@@ -240,12 +247,13 @@ insufficient because the on-chain primitive is reachable directly):
   calls `refundDeposit` — gating the two primitives covers it.
 
 ### Summary
-| Rail | Enforce at | file:line |
-|---|---|---|
-| deposit | `runPaymentWatcherTick` | `payments/watcher.ts:790` |
-| payout | `runPayoutTick` / `runPayoutTickLocked` | `payments/payout-worker.ts:182` / `:226` |
-| vault | `requireVaultsEnabled` | `credits/vaults/vault-client.ts:107` |
-| refund | `applyAdminRefund` + `refundDeposit` | `credits/refunds.ts:417` + `payments/deposit-refund.ts:272` |
+
+| Rail    | Enforce at                              | file:line                                                   |
+| ------- | --------------------------------------- | ----------------------------------------------------------- |
+| deposit | `runPaymentWatcherTick`                 | `payments/watcher.ts:790`                                   |
+| payout  | `runPayoutTick` / `runPayoutTickLocked` | `payments/payout-worker.ts:182` / `:226`                    |
+| vault   | `requireVaultsEnabled`                  | `credits/vaults/vault-client.ts:107`                        |
+| refund  | `applyAdminRefund` + `refundDeposit`    | `credits/refunds.ts:417` + `payments/deposit-refund.ts:272` |
 
 ---
 
@@ -283,6 +291,7 @@ later PR gated on the migration + policy below.
 
 **Q1 — In-flight ops on halt.** When a rail is halted, what happens to
 work already in progress?
+
 - Proposed: a halt blocks NEW entries only; in-flight ops (a payout mid-
   submit, a deposit already matched, a refund already begun) run to
   completion. Worker ticks early-return so QUEUED rows stay
