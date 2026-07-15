@@ -1,0 +1,281 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+/**
+ * MNY-06-hotfloat REPRO (scratch, not a committed test): drives repeated
+ * hot-float replenishes whose proceeds carry a sub-minor stroop
+ * remainder and asserts VALUE CONSERVATION — the sum of minor credited
+ * over time equals floor(total stroops moved / STROOPS_PER_MINOR), with
+ * no permanent leak. The truncating `amountOutStroops / STROOPS_PER_MINOR`
+ * drops the remainder every tick, so this is proven RED against it.
+ *
+ * Mirrors the mock harness in hot-float.test.ts (db/client mocked,
+ * vault-client mocked, in-memory vault_hot_float only).
+ */
+
+vi.mock('../../logger.js', () => ({
+  logger: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }) },
+}));
+
+function collectStringParams(node: unknown): string[] {
+  const out: string[] = [];
+  if (node === null || typeof node !== 'object') return out;
+  const asParam = node as { value?: unknown; encoder?: unknown };
+  if ('value' in asParam && 'encoder' in asParam && typeof asParam.value === 'string') {
+    out.push(asParam.value);
+    return out;
+  }
+  const chunks = (node as { queryChunks?: unknown[] }).queryChunks;
+  if (Array.isArray(chunks)) {
+    for (const c of chunks) out.push(...collectStringParams(c));
+  }
+  return out;
+}
+
+function extractSqlDelta(node: unknown): bigint {
+  const chunks = (node as { queryChunks?: unknown[] } | undefined)?.queryChunks;
+  if (!Array.isArray(chunks)) {
+    throw new Error('extractSqlDelta: expected a drizzle sql`` template node with queryChunks');
+  }
+  let sign = 1n;
+  let amount: bigint | null = null;
+  for (const chunk of chunks) {
+    if (typeof chunk === 'bigint') {
+      amount = chunk;
+      continue;
+    }
+    const asStringChunk = chunk as { value?: unknown } | null;
+    if (asStringChunk !== null && Array.isArray(asStringChunk.value)) {
+      const text = (asStringChunk.value as unknown[]).join('');
+      if (text.includes('-')) sign = -1n;
+    }
+  }
+  if (amount === null) {
+    throw new Error('extractSqlDelta: no raw bigint literal found in sql() template node');
+  }
+  return sign * amount;
+}
+
+function extractFloatKey(condition: unknown): string {
+  const params = collectStringParams(condition);
+  const assetCode = params.find((p) => p === 'LOOPUSD' || p === 'LOOPEUR');
+  const network = params.find((p) => p === 'testnet' || p === 'mainnet');
+  if (assetCode === undefined || network === undefined) {
+    throw new Error(
+      `extractFloatKey: could not resolve (assetCode, network) from condition params ${JSON.stringify(params)}`,
+    );
+  }
+  return `${assetCode}:${network}`;
+}
+
+const { state } = vi.hoisted(() => {
+  interface HotFloatRowLike {
+    id: string;
+    assetCode: string;
+    network: string;
+    balanceMinor: bigint;
+    pendingUnredeemedShares: bigint;
+    updatedAt: Date;
+  }
+  const s = {
+    rows: new Map<string, HotFloatRowLike>(),
+    nextId: 1,
+    tableNameOf: (_t: unknown): string => '',
+    reset(): void {
+      s.rows.clear();
+      s.nextId = 1;
+    },
+    seed(assetCode: string, network: string, balanceMinor: bigint, pending: bigint): void {
+      s.rows.set(`${assetCode}:${network}`, {
+        id: `float-${s.nextId++}`,
+        assetCode,
+        network,
+        balanceMinor,
+        pendingUnredeemedShares: pending,
+        updatedAt: new Date(),
+      });
+    },
+  };
+  return { state: s };
+});
+
+function buildDbMock(): Record<string, unknown> {
+  function handleEnsure(v: Record<string, unknown>): unknown[] {
+    const assetCode = v['assetCode'] as string;
+    const network = v['network'] as string;
+    const key = `${assetCode}:${network}`;
+    if (!state.rows.has(key)) {
+      state.seed(
+        assetCode,
+        network,
+        (v['balanceMinor'] as bigint | undefined) ?? 0n,
+        (v['pendingUnredeemedShares'] as bigint | undefined) ?? 0n,
+      );
+    }
+    return [];
+  }
+  function handleUpdate(patch: Record<string, unknown>, condition: unknown): void {
+    const key = extractFloatKey(condition);
+    const existing = state.rows.get(key);
+    if (existing === undefined) throw new Error(`vault_hot_float row missing for update (key=${key})`);
+    const next = { ...existing };
+    if ('balanceMinor' in patch) {
+      next.balanceMinor = existing.balanceMinor + extractSqlDelta(patch['balanceMinor']);
+    }
+    if ('pendingUnredeemedShares' in patch) {
+      next.pendingUnredeemedShares =
+        existing.pendingUnredeemedShares + extractSqlDelta(patch['pendingUnredeemedShares']);
+    }
+    next.updatedAt = new Date();
+    state.rows.set(key, next);
+  }
+  function makeSelect(): Record<string, unknown> {
+    let table = '';
+    const chain: Record<string, unknown> = {};
+    chain['from'] = (t: unknown) => {
+      table = state.tableNameOf(t);
+      return chain;
+    };
+    chain['where'] = (condition: unknown) => {
+      if (table !== 'vaultHotFloat') throw new Error(`unexpected select on ${table}`);
+      const readRow = (): unknown[] => {
+        const row = state.rows.get(extractFloatKey(condition));
+        return row ? [row] : [];
+      };
+      return {
+        for: async (..._args: unknown[]) => readRow(),
+        then: (resolve: (v: unknown) => unknown) => resolve(readRow()),
+      };
+    };
+    return chain;
+  }
+  function makeInsert(t: unknown): Record<string, unknown> {
+    const table = state.tableNameOf(t);
+    return {
+      values: (v: Record<string, unknown>) => {
+        if (table !== 'vaultHotFloat') throw new Error(`unexpected insert on ${table}`);
+        return {
+          onConflictDoNothing: (_opts?: unknown) => ({
+            then: (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
+              Promise.resolve().then(() => handleEnsure(v)).then(resolve, reject),
+          }),
+        };
+      },
+    };
+  }
+  function makeUpdate(t: unknown): Record<string, unknown> {
+    const table = state.tableNameOf(t);
+    return {
+      set: (patch: Record<string, unknown>) => ({
+        where: (condition: unknown) => ({
+          then: (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
+            Promise.resolve()
+              .then(() => {
+                if (table !== 'vaultHotFloat') throw new Error(`unexpected update on ${table}`);
+                handleUpdate(patch, condition);
+                return [];
+              })
+              .then(resolve, reject),
+        }),
+      }),
+    };
+  }
+  const mock: Record<string, unknown> = {
+    select: () => makeSelect(),
+    insert: (t: unknown) => makeInsert(t),
+    update: (t: unknown) => makeUpdate(t),
+    transaction: async (cb: (tx: unknown) => Promise<unknown>) => cb(mock),
+  };
+  return mock;
+}
+
+vi.mock('../../db/client.js', () => ({ db: buildDbMock() }));
+
+const { vaultClientMocks } = vi.hoisted(() => ({
+  vaultClientMocks: { readVaultState: vi.fn(), withdrawFromVault: vi.fn() },
+}));
+vi.mock('../../credits/vaults/vault-client.js', () => ({
+  readVaultState: (...args: unknown[]) => vaultClientMocks.readVaultState(...args),
+  withdrawFromVault: (...args: unknown[]) => vaultClientMocks.withdrawFromVault(...args),
+}));
+
+vi.mock('../vault-operator-movement.js', () => ({
+  recordVaultOperatorMovement: vi.fn(async () => {}),
+}));
+
+import { getTableName, type Table } from 'drizzle-orm';
+import { vaultHotFloat } from '../../db/schema.js';
+import { getHotFloatRow, runHotFloatReplenishTick } from '../hot-float.js';
+import type { LoopVaultRow } from '../../credits/vaults/registry.js';
+
+state.tableNameOf = (t: unknown) => (t === vaultHotFloat ? 'vaultHotFloat' : getTableName(t as Table));
+
+const ASSET = 'LOOPUSD' as const;
+const NETWORK = 'testnet' as const;
+const STROOPS_PER_MINOR = 100_000n;
+
+const VAULT: LoopVaultRow = {
+  id: 'vault-row-1',
+  assetCode: 'LOOPUSD',
+  vaultContractId: 'CVAULTCONTRACTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+  shareAssetCode: 'LOOPUSD',
+  shareAssetIssuer: 'CSHARECONTRACTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+  underlyingAssetCode: 'USDC',
+  underlyingAssetIssuer: 'GUSDCISSUERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+  strategyId: 'blend-usdc-pool',
+  network: 'testnet',
+  feeBps: 5000,
+  active: true,
+  createdAt: new Date('2026-01-01T00:00:00Z'),
+};
+
+beforeEach(() => {
+  state.reset();
+  vaultClientMocks.readVaultState.mockReset();
+  vaultClientMocks.readVaultState.mockResolvedValue({
+    totalSupply: 1_000_000_000n,
+    totalManaged: 1_000_000_000n,
+    sharePricePpm: 1_000_000n, // 1:1
+  });
+  vaultClientMocks.withdrawFromVault.mockReset();
+});
+
+describe('MNY-06: hot-float replenish conserves sub-minor value across ticks', () => {
+  it('sum of minor credited over N replenishes == floor(total stroops moved / PER) — no permanent leak', async () => {
+    // Each tick: 150_000 stroops proceeds = 1.5 minor (sub-minor
+    // remainder of 50_000 stroops). Price 1:1 so 150_000 pending shares
+    // clears the minAmountsOut floor.
+    const TICKS = 10n;
+    const perTickShares = 150_000n;
+    const perTickStroops = 150_000n; // 1.5 minor
+    vaultClientMocks.withdrawFromVault.mockImplementation(async () => ({
+      txHash: 'replenish-tx',
+      amountsOut: [perTickStroops],
+      deduped: false,
+    }));
+
+    let totalStroopsMoved = 0n;
+    for (let i = 0n; i < TICKS; i++) {
+      // Re-arm pending shares for this tick (fast-path collects between ticks).
+      const row = state.rows.get(`${ASSET}:${NETWORK}`);
+      if (row === undefined) {
+        state.seed(ASSET, NETWORK, 0n, perTickShares);
+      } else {
+        state.rows.set(`${ASSET}:${NETWORK}`, {
+          ...row,
+          pendingUnredeemedShares: row.pendingUnredeemedShares + perTickShares,
+        });
+      }
+      const res = await runHotFloatReplenishTick(VAULT);
+      expect(res.replenished).toBe(true);
+      totalStroopsMoved += perTickStroops;
+    }
+
+    const finalRow = await getHotFloatRow(ASSET, NETWORK);
+    const conservedMinor = totalStroopsMoved / STROOPS_PER_MINOR; // floor of the ACCUMULATED total
+    // Conservation invariant (MNY-06): the float must be credited the
+    // accumulated-floor, not the per-tick-floor. Truncation credits
+    // sum(floor(each)) = 10 minor; the conserved value is
+    // floor(sum) = 15 minor. The 5-minor gap is the systematic leak.
+    expect(finalRow.balanceMinor).toBe(conservedMinor);
+  });
+});

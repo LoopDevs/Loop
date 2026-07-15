@@ -1,0 +1,1021 @@
+diff --git a/apps/backend/src/__tests__/integration/staff-role-revocation.test.ts b/apps/backend/src/__tests__/integration/staff-role-revocation.test.ts
+new file mode 100644
+index 00000000..4c43de59
+--- /dev/null
++++ b/apps/backend/src/__tests__/integration/staff-role-revocation.test.ts
+@@ -0,0 +1,116 @@
++/**
++ * SEC-rbac integration proof — a staff-role REVOKE must STICK for an
++ * env-allowlisted admin across their next login's re-grant.
++ *
++ * The bug: `is_admin` is recomputed from the env allowlists
++ * (`ADMIN_EMAILS` / `ADMIN_CTX_USER_IDS`) on every login —
++ * `upsertUserFromCtx` on a CTX request, `findOrCreateUserByEmail`'s
++ * config-parity reconcile on native OTP login. `revokeStaffRole` used
++ * to only delete the `staff_roles` row and clear the `is_admin` mirror,
++ * so the very next login re-set `is_admin = true` and the revoked admin
++ * silently regained access (fail-open). The fix latches a durable
++ * `users.admin_revoked` flag that the re-grant paths honor.
++ *
++ * This exercises the CTX path against real postgres (the unit suite
++ * pins the native/reconcile path with a mocked db; the SQL
++ * `env AND NOT admin_revoked` conflict expression only evaluates for
++ * real here). Gated on `LOOP_E2E_DB=1` like the sibling suites; the
++ * integration setup pins `ADMIN_CTX_USER_IDS='test-admin-id'`.
++ */
++import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
++import { eq } from 'drizzle-orm';
++
++const RUN_INTEGRATION = process.env['LOOP_E2E_DB'] === '1';
++
++import { db } from '../../db/client.js';
++import { users } from '../../db/schema.js';
++import { upsertUserFromCtx, getUserById } from '../../db/users.js';
++import { grantStaffRole, revokeStaffRole, getStaffRole } from '../../db/staff-roles.js';
++import { ensureMigrated, truncateAllTables } from './db-test-setup.js';
++
++const describeIf = RUN_INTEGRATION ? describe : describe.skip;
++
++/**
++ * Keeps the last-admin invariant satisfied so revoking the env admin
++ * under test is permitted. A second, independent effective admin (a
++ * plain `is_admin=true` row) means `countEffectiveAdmins() > 1`.
++ */
++async function seedKeeperAdmin(): Promise<string> {
++  const [row] = await db
++    .insert(users)
++    .values({ email: 'keeper-admin@test.local', isAdmin: true })
++    .returning({ id: users.id });
++  if (row === undefined) throw new Error('seedKeeperAdmin: insert returned no row');
++  return row.id;
++}
++
++describeIf('SEC-rbac: env-allowlist admin revoke holds across re-login (CTX path)', () => {
++  beforeAll(async () => {
++    await ensureMigrated();
++  });
++  beforeEach(async () => {
++    await truncateAllTables();
++    await seedKeeperAdmin();
++  });
++
++  it('a revoked CTX-allowlisted admin is NOT re-granted is_admin on the next upsert', async () => {
++    // First login: env allowlist grants admin.
++    const first = await upsertUserFromCtx({ ctxUserId: 'test-admin-id', email: 'ctx-admin@test.local' });
++    expect(first.isAdmin).toBe(true);
++    expect(first.adminRevoked).toBe(false);
++
++    // Incident response: revoke the staff role.
++    const { priorRole } = await revokeStaffRole({ userId: first.id });
++    expect(priorRole).toBe('admin');
++
++    const afterRevoke = await getUserById(first.id);
++    expect(afterRevoke?.isAdmin).toBe(false);
++    expect(afterRevoke?.adminRevoked).toBe(true);
++    expect(await getStaffRole(first.id)).toBeNull();
++
++    // Next login (re-upsert). BEFORE the fix this re-set is_admin=true
++    // from env and the revoke was silently undone — the fail-open.
++    const second = await upsertUserFromCtx({ ctxUserId: 'test-admin-id', email: 'ctx-admin@test.local' });
++    expect(second.isAdmin).toBe(false);
++    expect(second.adminRevoked).toBe(true);
++
++    // And it stays revoked in the row of record.
++    const persisted = await getUserById(first.id);
++    expect(persisted?.isAdmin).toBe(false);
++  });
++
++  it('a deliberate re-grant clears the latch so a later login restores admin', async () => {
++    const first = await upsertUserFromCtx({ ctxUserId: 'test-admin-id', email: 'ctx-admin@test.local' });
++    await revokeStaffRole({ userId: first.id });
++    expect((await getUserById(first.id))?.adminRevoked).toBe(true);
++
++    // Deliberate re-grant lifts the suspension (clears admin_revoked).
++    await grantStaffRole({
++      userId: first.id,
++      role: 'admin',
++      grantedByUserId: first.id,
++      reason: 're-instated after review',
++    });
++    const afterGrant = await getUserById(first.id);
++    expect(afterGrant?.isAdmin).toBe(true);
++    expect(afterGrant?.adminRevoked).toBe(false);
++
++    // Next login now re-grants admin from env as normal (latch cleared).
++    const relogin = await upsertUserFromCtx({ ctxUserId: 'test-admin-id', email: 'ctx-admin@test.local' });
++    expect(relogin.isAdmin).toBe(true);
++  });
++
++  it('a never-revoked allowlisted admin is granted on upsert exactly as before (no regression)', async () => {
++    const row = await upsertUserFromCtx({ ctxUserId: 'test-admin-id', email: 'ctx-admin@test.local' });
++    expect(row.isAdmin).toBe(true);
++    expect(row.adminRevoked).toBe(false);
++    // Re-upsert keeps admin (latch stays false).
++    const again = await upsertUserFromCtx({ ctxUserId: 'test-admin-id', email: 'ctx-admin@test.local' });
++    expect(again.isAdmin).toBe(true);
++    // Sanity: the keeper admin is untouched.
++    const keeper = await db.query.users.findFirst({
++      where: eq(users.email, 'keeper-admin@test.local'),
++    });
++    expect(keeper?.isAdmin).toBe(true);
++  });
++});
+diff --git a/apps/backend/src/auth/__tests__/revoke-sessions-handler.test.ts b/apps/backend/src/auth/__tests__/revoke-sessions-handler.test.ts
+index 3ef70bf1..a439348b 100644
+--- a/apps/backend/src/auth/__tests__/revoke-sessions-handler.test.ts
++++ b/apps/backend/src/auth/__tests__/revoke-sessions-handler.test.ts
+@@ -1,108 +1,294 @@
++/**
++ * Unit coverage for the session-revocation handlers
++ * (`../revoke-sessions-handler.ts`).
++ *
++ * `revokeAllOwnSessionsHandler` (self sign-out-all) is unchanged.
++ *
++ * `adminRevokeUserSessionsHandler` — CONV-INFO-01 brought it up to the
++ * sibling admin-write pattern (`admin/clear-otp-lockout.ts`): required
++ * `Idempotency-Key` + `reason`, the ADR-017 idempotency guard (so a
++ * retry replays instead of firing a second fleet-wide logout), a
++ * durable audit envelope, and the Discord admin-audit fanout. The
++ * idempotency guard + Discord notifier are mocked (so the handler's own
++ * validation/branching runs for real); `buildAuditEnvelope` runs real.
++ */
+ import { describe, it, expect, vi, beforeEach } from 'vitest';
+ import type { Context } from 'hono';
+ 
++const state = vi.hoisted(() => ({
++  getUserByIdResult: { id: '', email: '' } as null | { id: string; email: string },
++  getUserByIdThrow: null as Error | null,
++  revokeCalls: [] as string[],
++  revokeThrow: null as Error | null,
++  priorSnapshot: null as null | { status: number; body: Record<string, unknown> },
++  storedSnapshot: null as null | Record<string, unknown>,
++  discordCalls: [] as Array<Record<string, unknown>>,
++}));
++
+ vi.mock('../../logger.js', () => ({
+   logger: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }) },
+ }));
+ 
+-const { revokeAllMock, getUserByIdMock } = vi.hoisted(() => ({
+-  revokeAllMock: vi.fn(),
+-  getUserByIdMock: vi.fn(),
+-}));
+ vi.mock('../refresh-tokens.js', () => ({
+-  revokeAllRefreshTokensForUser: (userId: string) => revokeAllMock(userId),
++  revokeAllRefreshTokensForUser: vi.fn(async (userId: string) => {
++    if (state.revokeThrow !== null) throw state.revokeThrow;
++    state.revokeCalls.push(userId);
++  }),
+ }));
++
+ vi.mock('../../db/users.js', () => ({
+-  getUserById: (id: string) => getUserByIdMock(id),
++  getUserById: vi.fn(async () => {
++    if (state.getUserByIdThrow !== null) throw state.getUserByIdThrow;
++    return state.getUserByIdResult;
++  }),
++}));
++
++vi.mock('../../admin/idempotency.js', () => ({
++  IDEMPOTENCY_KEY_MIN: 16,
++  IDEMPOTENCY_KEY_MAX: 128,
++  validateIdempotencyKey: (k: string | undefined): k is string =>
++    k !== undefined && k.length >= 16 && k.length <= 128,
++  withIdempotencyGuard: vi.fn(
++    async (
++      args: { adminUserId: string; key: string; method: string; path: string },
++      doWrite: () => Promise<{ status: number; body: Record<string, unknown> }>,
++    ) => {
++      if (state.priorSnapshot !== null) {
++        return {
++          replayed: true,
++          status: state.priorSnapshot.status,
++          body: state.priorSnapshot.body,
++        };
++      }
++      const { status, body } = await doWrite();
++      state.storedSnapshot = { ...args, status, body };
++      return { replayed: false, status, body };
++    },
++  ),
++}));
++
++vi.mock('../../discord.js', () => ({
++  notifyAdminAudit: vi.fn((args: Record<string, unknown>) => {
++    state.discordCalls.push(args);
++  }),
+ }));
+ 
+ import {
+   revokeAllOwnSessionsHandler,
+   adminRevokeUserSessionsHandler,
+ } from '../revoke-sessions-handler.js';
++import { revokeAllRefreshTokensForUser } from '../refresh-tokens.js';
+ 
+ const UID = '00000000-0000-4000-8000-000000000001';
++const adminUser = { id: '11111111-1111-1111-1111-111111111111', email: 'admin@loop.test' };
++const targetEmail = 'target@loop.test';
++const validKey = 'k'.repeat(32);
++const validReason = 'compromised account, incident #42';
+ 
+-function makeCtx(opts: {
+-  auth?: { kind: 'loop' | 'ctx'; userId?: string };
+-  user?: { id: string };
+-  param?: string;
+-}): Context {
++/** Context for the SELF handler (auth-context driven, no body). */
++function makeSelfCtx(opts: { auth?: { kind: 'loop' | 'ctx'; userId?: string } }): Context {
+   const store = new Map<string, unknown>();
+   if (opts.auth !== undefined) store.set('auth', opts.auth);
+-  if (opts.user !== undefined) store.set('user', opts.user);
+   return {
+-    req: { param: () => opts.param },
++    req: { param: () => undefined },
+     get: (k: string) => store.get(k),
+     json: (b: unknown, s?: number) => new Response(JSON.stringify(b), { status: s ?? 200 }),
+   } as unknown as Context;
+ }
+ 
++/** Context for the ADMIN handler (param + headers + JSON body + user). */
++function makeAdminCtx(args: {
++  userId?: string;
++  headers?: Record<string, string>;
++  body?: unknown;
++  user?: typeof adminUser | null;
++}): Context {
++  const resolved = args.user === null ? undefined : (args.user ?? adminUser);
++  const store = new Map<string, unknown>();
++  if (resolved !== undefined) store.set('user', resolved);
++  return {
++    req: {
++      param: (k: string) => (k === 'userId' ? (args.userId ?? UID) : undefined),
++      header: (k: string) => args.headers?.[k.toLowerCase()],
++      json: async () => {
++        if (args.body === undefined) throw new Error('no body');
++        return args.body;
++      },
++    },
++    get: (k: string) => store.get(k),
++    json: (body: unknown, status?: number) =>
++      new Response(JSON.stringify(body), {
++        status: status ?? 200,
++        headers: { 'content-type': 'application/json' },
++      }),
++  } as unknown as Context;
++}
++
+ beforeEach(() => {
+-  revokeAllMock.mockReset();
+-  revokeAllMock.mockResolvedValue(undefined);
+-  getUserByIdMock.mockReset();
++  vi.mocked(revokeAllRefreshTokensForUser).mockClear();
++  state.getUserByIdResult = { id: UID, email: targetEmail };
++  state.getUserByIdThrow = null;
++  state.revokeCalls = [];
++  state.revokeThrow = null;
++  state.priorSnapshot = null;
++  state.storedSnapshot = null;
++  state.discordCalls = [];
+ });
+ 
+ describe('revokeAllOwnSessionsHandler (self sign-out-all)', () => {
+   it('revokes all refresh tokens for a loop-native caller', async () => {
+-    const res = await revokeAllOwnSessionsHandler(makeCtx({ auth: { kind: 'loop', userId: UID } }));
++    const res = await revokeAllOwnSessionsHandler(
++      makeSelfCtx({ auth: { kind: 'loop', userId: UID } }),
++    );
+     expect(res.status).toBe(200);
+-    expect(revokeAllMock).toHaveBeenCalledWith(UID);
++    expect(state.revokeCalls).toEqual([UID]);
+   });
+ 
+   it('is a no-op success for a CTX-proxy caller (no local rows)', async () => {
+-    const res = await revokeAllOwnSessionsHandler(makeCtx({ auth: { kind: 'ctx' } }));
++    const res = await revokeAllOwnSessionsHandler(makeSelfCtx({ auth: { kind: 'ctx' } }));
+     expect(res.status).toBe(200);
+-    expect(revokeAllMock).not.toHaveBeenCalled();
++    expect(state.revokeCalls).toHaveLength(0);
+   });
+ 
+   it('401s with no auth context', async () => {
+-    const res = await revokeAllOwnSessionsHandler(makeCtx({}));
++    const res = await revokeAllOwnSessionsHandler(makeSelfCtx({}));
+     expect(res.status).toBe(401);
+-    expect(revokeAllMock).not.toHaveBeenCalled();
++    expect(state.revokeCalls).toHaveLength(0);
+   });
+ 
+   it('500s (does not throw) when the revoke fails', async () => {
+-    revokeAllMock.mockRejectedValue(new Error('db down'));
+-    const res = await revokeAllOwnSessionsHandler(makeCtx({ auth: { kind: 'loop', userId: UID } }));
++    state.revokeThrow = new Error('db down');
++    const res = await revokeAllOwnSessionsHandler(
++      makeSelfCtx({ auth: { kind: 'loop', userId: UID } }),
++    );
+     expect(res.status).toBe(500);
+   });
+ });
+ 
+ describe('adminRevokeUserSessionsHandler', () => {
+-  it('revokes the target user’s sessions', async () => {
+-    getUserByIdMock.mockResolvedValue({ id: UID });
++  const headers = { 'idempotency-key': validKey };
++  const body = { reason: validReason };
++
++  it('400s on a non-uuid target', async () => {
+     const res = await adminRevokeUserSessionsHandler(
+-      makeCtx({ user: { id: 'admin-1' }, param: UID }),
++      makeAdminCtx({ userId: 'not-a-uuid', headers, body }),
+     );
+-    expect(res.status).toBe(200);
+-    expect(revokeAllMock).toHaveBeenCalledWith(UID);
++    expect(res.status).toBe(400);
++    expect(state.revokeCalls).toHaveLength(0);
+   });
+ 
+-  it('400s on a non-uuid target', async () => {
++  // CONV-INFO-01 (RED before the fix — the handler took no idempotency
++  // key and returned 200): a missing Idempotency-Key is a 400.
++  it('400s (IDEMPOTENCY_KEY_REQUIRED) when the Idempotency-Key header is missing', async () => {
++    const res = await adminRevokeUserSessionsHandler(makeAdminCtx({ body }));
++    expect(res.status).toBe(400);
++    const b = (await res.json()) as { code: string };
++    expect(b.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
++    expect(state.revokeCalls).toHaveLength(0);
++  });
++
++  it('401s when the admin context (actor) is missing', async () => {
+     const res = await adminRevokeUserSessionsHandler(
+-      makeCtx({ user: { id: 'admin-1' }, param: 'not-a-uuid' }),
++      makeAdminCtx({ headers, body, user: null }),
+     );
++    expect(res.status).toBe(401);
++    expect(state.revokeCalls).toHaveLength(0);
++  });
++
++  it('400s when the body is invalid JSON', async () => {
++    const res = await adminRevokeUserSessionsHandler(makeAdminCtx({ headers }));
+     expect(res.status).toBe(400);
+-    expect(revokeAllMock).not.toHaveBeenCalled();
++    expect(state.revokeCalls).toHaveLength(0);
+   });
+ 
+-  it('404s when the target user does not exist', async () => {
+-    getUserByIdMock.mockResolvedValue(null);
++  // CONV-INFO-01 (RED before the fix — no reason was required): a
++  // missing/short reason is a 400 and nothing is revoked.
++  it('400s when reason is missing', async () => {
++    const res = await adminRevokeUserSessionsHandler(makeAdminCtx({ headers, body: {} }));
++    expect(res.status).toBe(400);
++    expect(state.revokeCalls).toHaveLength(0);
++  });
++
++  it('400s when reason is too short', async () => {
+     const res = await adminRevokeUserSessionsHandler(
+-      makeCtx({ user: { id: 'admin-1' }, param: UID }),
++      makeAdminCtx({ headers, body: { reason: 'x' } }),
+     );
++    expect(res.status).toBe(400);
++    expect(state.revokeCalls).toHaveLength(0);
++  });
++
++  it('404s when the target user does not exist (no snapshot burned, no audit)', async () => {
++    state.getUserByIdResult = null;
++    const res = await adminRevokeUserSessionsHandler(makeAdminCtx({ headers, body }));
+     expect(res.status).toBe(404);
+-    expect(revokeAllMock).not.toHaveBeenCalled();
++    expect(state.revokeCalls).toHaveLength(0);
++    expect(state.storedSnapshot).toBeNull();
++    expect(state.discordCalls).toHaveLength(0);
+   });
+ 
+-  it('500s when the revoke fails', async () => {
+-    getUserByIdMock.mockResolvedValue({ id: UID });
+-    revokeAllMock.mockRejectedValue(new Error('db down'));
+-    const res = await adminRevokeUserSessionsHandler(
+-      makeCtx({ user: { id: 'admin-1' }, param: UID }),
+-    );
++  it('500s when the target lookup throws', async () => {
++    state.getUserByIdThrow = new Error('db down');
++    const res = await adminRevokeUserSessionsHandler(makeAdminCtx({ headers, body }));
++    expect(res.status).toBe(500);
++    expect(state.revokeCalls).toHaveLength(0);
++  });
++
++  // CONV-INFO-01 (RED before the fix — the old response was
++  // `{ userId, message }` with no audit envelope and no Discord fanout):
++  // a fresh revoke returns the ADR-017 envelope and fires the audit.
++  it('revokes the target’s sessions and returns the audit envelope + fires Discord', async () => {
++    const res = await adminRevokeUserSessionsHandler(makeAdminCtx({ headers, body }));
++    expect(res.status).toBe(200);
++    expect(state.revokeCalls).toEqual([UID]);
++    const parsed = (await res.json()) as {
++      result: { userId: string; revoked: boolean };
++      audit: { actorUserId: string; actorEmail: string; idempotencyKey: string; replayed: boolean };
++    };
++    expect(parsed.result).toEqual({ userId: UID, revoked: true });
++    expect(parsed.audit.actorUserId).toBe(adminUser.id);
++    expect(parsed.audit.actorEmail).toBe(adminUser.email);
++    expect(parsed.audit.idempotencyKey).toBe(validKey);
++    expect(parsed.audit.replayed).toBe(false);
++    expect(state.discordCalls).toHaveLength(1);
++    expect(state.discordCalls[0]).toMatchObject({
++      actorUserId: adminUser.id,
++      targetUserId: UID,
++      reason: validReason,
++      idempotencyKey: validKey,
++      replayed: false,
++    });
++  });
++
++  // CONV-INFO-01 (RED before the fix — with no idempotency guard a retry
++  // fired a SECOND fleet-wide logout): a replayed key skips the revoke
++  // and re-fires the audit tagged replayed=true.
++  it('replays the stored snapshot on Idempotency-Key reuse WITHOUT re-revoking', async () => {
++    state.priorSnapshot = {
++      status: 200,
++      body: {
++        result: { userId: UID, revoked: true },
++        audit: {
++          actorUserId: adminUser.id,
++          actorEmail: adminUser.email,
++          idempotencyKey: validKey,
++          appliedAt: '2026-07-08T12:00:00.000Z',
++          replayed: false,
++        },
++      },
++    };
++    const res = await adminRevokeUserSessionsHandler(makeAdminCtx({ headers, body }));
++    expect(res.status).toBe(200);
++    // The compromised-session kill is NOT fired a second time.
++    expect(state.revokeCalls).toHaveLength(0);
++    // Discord still fires on a replay (full audit trail), tagged.
++    expect(state.discordCalls).toHaveLength(1);
++    expect(state.discordCalls[0]).toMatchObject({ replayed: true });
++  });
++
++  it('500s when the revoke fails, and fires no Discord audit', async () => {
++    state.revokeThrow = new Error('db down');
++    const res = await adminRevokeUserSessionsHandler(makeAdminCtx({ headers, body }));
+     expect(res.status).toBe(500);
++    expect(state.discordCalls).toHaveLength(0);
+   });
+ });
+diff --git a/apps/backend/src/auth/revoke-sessions-handler.ts b/apps/backend/src/auth/revoke-sessions-handler.ts
+index 51781097..caf05eb8 100644
+--- a/apps/backend/src/auth/revoke-sessions-handler.ts
++++ b/apps/backend/src/auth/revoke-sessions-handler.ts
+@@ -26,6 +26,14 @@ import { UUID_RE } from '../uuid.js';
+ import { getUserById, type User } from '../db/users.js';
+ import { revokeAllRefreshTokensForUser } from './refresh-tokens.js';
+ import type { LoopAuthContext } from './require-auth.js';
++import { notifyAdminAudit } from '../discord.js';
++import { buildAuditEnvelope, type AdminAuditEnvelope } from '../admin/audit-envelope.js';
++import {
++  IDEMPOTENCY_KEY_MIN,
++  IDEMPOTENCY_KEY_MAX,
++  validateIdempotencyKey,
++  withIdempotencyGuard,
++} from '../admin/idempotency.js';
+ import { logger } from '../logger.js';
+ 
+ const log = logger.child({ handler: 'revoke-sessions' });
+@@ -57,42 +65,115 @@ export async function revokeAllOwnSessionsHandler(c: Context): Promise<Response>
+   return c.json({ message: 'Signed out of all devices' });
+ }
+ 
+-export interface AdminRevokeSessionsResponse {
++export interface AdminRevokeSessionsResult {
+   userId: string;
+-  message: string;
++  revoked: true;
+ }
+ 
+ /**
+  * `POST /api/admin/users/:userId/revoke-sessions` — admin kills a
+- * target user's live sessions (incident response). Admin-tier;
+- * NOT step-up-gated (it moves no value and is reversible — the user
+- * just signs back in — so gating it on a fresh password re-entry would
+- * add friction to a fast-response security action; see the exempt-list
+- * entry in staff-route-gating.test.ts).
++ * target user's live sessions (incident response).
++ *
++ * TIER + STEP-UP: admin-tier; deliberately NOT step-up-gated. It moves
++ * no value and is reversible (the user just signs back in), so gating
++ * it on a fresh password re-entry would add friction to a fast-response
++ * security action — it is on the documented step-up exempt list in
++ * `__tests__/staff-route-gating.test.ts` (same posture as its sibling
++ * `clear-otp-lockout`). Whether that posture should change is a
++ * security-trade-off decision for humans; this handler leaves it as-is.
++ *
++ * CONV-INFO-01: brought up to the sibling admin-write pattern
++ * (`admin/clear-otp-lockout.ts`) — it now carries a required
++ * `Idempotency-Key`, a required `reason`, the ADR-017 idempotency guard
++ * (so a double-click / retry can't fire a second fleet-wide logout or a
++ * duplicate audit), a durable audit envelope, and the Discord
++ * admin-audit fanout. Previously it force-logged-out a user with only a
++ * warn log and no replay protection.
+  */
+ export async function adminRevokeUserSessionsHandler(c: Context): Promise<Response> {
+   const userId = c.req.param('userId');
+   if (userId === undefined || !UUID_RE.test(userId)) {
+     return c.json({ code: 'VALIDATION_ERROR', message: 'userId must be a uuid' }, 400);
+   }
++  const idempotencyKey = c.req.header('idempotency-key');
++  if (!validateIdempotencyKey(idempotencyKey)) {
++    return c.json(
++      {
++        code: 'IDEMPOTENCY_KEY_REQUIRED',
++        message: `Idempotency-Key header required (${IDEMPOTENCY_KEY_MIN}-${IDEMPOTENCY_KEY_MAX} chars)`,
++      },
++      400,
++    );
++  }
+   const actor = c.get('user') as User | undefined;
+-  const target = await getUserById(userId);
++  if (actor === undefined) {
++    return c.json({ code: 'UNAUTHORIZED', message: 'Admin context missing' }, 401);
++  }
++  let requestBody: unknown;
++  try {
++    requestBody = await c.req.json();
++  } catch {
++    return c.json({ code: 'VALIDATION_ERROR', message: 'Request body must be valid JSON' }, 400);
++  }
++  const reason =
++    requestBody !== null && typeof requestBody === 'object'
++      ? (requestBody as Record<string, unknown>)['reason']
++      : null;
++  if (typeof reason !== 'string' || reason.length < 2 || reason.length > 500) {
++    return c.json({ code: 'VALIDATION_ERROR', message: 'reason must be 2-500 chars' }, 400);
++  }
++
++  // Pre-classify outside the guard so a bad/unknown userId never burns
++  // an idempotency snapshot (mirrors clear-otp-lockout).
++  let target;
++  try {
++    target = await getUserById(userId);
++  } catch (err) {
++    log.error({ err, userId, adminUserId: actor.id }, 'B4: admin session-revoke target lookup failed');
++    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve target user' }, 500);
++  }
+   if (target === null) {
+     return c.json({ code: 'NOT_FOUND', message: 'Target user not found' }, 404);
+   }
++
++  const revokePath = `/api/admin/users/${userId}/revoke-sessions`;
++
++  let guardResult: Awaited<ReturnType<typeof withIdempotencyGuard>>;
+   try {
+-    await revokeAllRefreshTokensForUser(userId);
++    guardResult = await withIdempotencyGuard(
++      { adminUserId: actor.id, key: idempotencyKey, method: 'POST', path: revokePath },
++      async () => {
++        await revokeAllRefreshTokensForUser(userId);
++        const result: AdminRevokeSessionsResult = { userId, revoked: true };
++        const envelope: AdminAuditEnvelope<AdminRevokeSessionsResult> = buildAuditEnvelope({
++          result,
++          actor,
++          idempotencyKey,
++          appliedAt: new Date(),
++          replayed: false,
++        });
++        return { status: 200, body: envelope as unknown as Record<string, unknown> };
++      },
++    );
+   } catch (err) {
+-    log.error({ err, userId, adminUserId: actor?.id }, 'B4: admin session revoke failed');
++    log.error({ err, userId, adminUserId: actor.id }, 'B4: admin session revoke failed');
+     return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to revoke sessions' }, 500);
+   }
+-  log.warn(
+-    { userId, adminUserId: actor?.id },
+-    'B4: admin revoked all sessions for user (incident response)',
+-  );
+-  const body: AdminRevokeSessionsResponse = {
+-    userId,
+-    message: 'All sessions revoked',
+-  };
+-  return c.json(body);
++
++  if (guardResult.status === 200) {
++    log.warn(
++      { userId, adminUserId: actor.id, replayed: guardResult.replayed },
++      'B4: admin revoked all sessions for user (incident response)',
++    );
++    notifyAdminAudit({
++      actorUserId: actor.id,
++      endpoint: `POST /api/admin/users/${userId}/revoke-sessions`,
++      targetUserId: userId,
++      reason,
++      idempotencyKey,
++      replayed: guardResult.replayed,
++    });
++  }
++
++  return c.json(guardResult.body, guardResult.status as 200 | 500);
+ }
+diff --git a/apps/backend/src/db/__tests__/staff-roles.test.ts b/apps/backend/src/db/__tests__/staff-roles.test.ts
+index ad6ae1c3..7c5631ec 100644
+--- a/apps/backend/src/db/__tests__/staff-roles.test.ts
++++ b/apps/backend/src/db/__tests__/staff-roles.test.ts
+@@ -115,6 +115,16 @@ describe('grantStaffRole', () => {
+     expect(txState.updated[0]).toMatchObject({ isAdmin: true });
+   });
+ 
++  // SEC-rbac: a deliberate grant CLEARS the `admin_revoked` latch, so
++  // re-granting a previously revoked staff member lifts the suspension
++  // (and a normal grant of a never-revoked admin leaves it false). RED
++  // before the fix — the mirror update didn't set `admin_revoked`.
++  it('SEC-rbac: clears admin_revoked=false on grant (re-grant lifts a prior revoke)', async () => {
++    txState.selectResults = [[{ role: null }]];
++    await grantStaffRole({ userId: TARGET, role: 'admin', grantedByUserId: ACTOR, reason: 're-hire' });
++    expect(txState.updated[0]).toMatchObject({ isAdmin: true, adminRevoked: false });
++  });
++
+   it('refuses to demote the final effective admin', async () => {
+     txState.selectResults = [[{ role: 'admin' }], [{ n: 1 }]];
+     await expect(
+@@ -165,4 +175,15 @@ describe('revokeStaffRole', () => {
+     expect(out.priorRole).toBe('admin');
+     expect(txState.deleted).toBe(1);
+   });
++
++  // SEC-rbac: the revoke must LATCH `admin_revoked=true` so the
++  // env-allowlist login re-grant (upsertUserFromCtx /
++  // findOrCreateUserByEmail) can't resurrect `is_admin`. RED before the
++  // fix — the update set only `{ isAdmin:false }` and never touched
++  // `admin_revoked`, so this assertion would fail.
++  it('SEC-rbac: latches admin_revoked=true on revoke so env can’t re-grant at next login', async () => {
++    txState.selectResults = [[{ role: 'admin' }], [{ n: 3 }]];
++    await revokeStaffRole({ userId: TARGET });
++    expect(txState.updated[0]).toMatchObject({ isAdmin: false, adminRevoked: true });
++  });
+ });
+diff --git a/apps/backend/src/db/__tests__/users.test.ts b/apps/backend/src/db/__tests__/users.test.ts
+index 4622bf43..5ef634b2 100644
+--- a/apps/backend/src/db/__tests__/users.test.ts
++++ b/apps/backend/src/db/__tests__/users.test.ts
+@@ -249,3 +249,66 @@ describe('CF-30: findOrCreateUserByEmail honours the native admin allowlist', ()
+     expect(dbMock['update']!).not.toHaveBeenCalled();
+   });
+ });
++
++describe('SEC-rbac: findOrCreateUserByEmail honours a durable admin_revoked latch', () => {
++  // Incident-response revoke (`revokeStaffRole`) latches
++  // `admin_revoked=true` and clears the mirror. On the allowlisted
++  // admin's next OTP login the env re-grant MUST be suppressed. Before
++  // the fix the config-parity reconcile compared `existing.isAdmin`
++  // against `isAdminEmail(email)` alone (ignoring the latch), so it
++  // PROMOTED the revoked admin back to `isAdmin=true` — the fail-open
++  // this finding is about. These assertions are RED against that code.
++  it('does NOT re-grant admin to a revoked row even when the email is allowlisted', async () => {
++    returned.row = {
++      id: 'uuid-r1',
++      ctxUserId: null,
++      email: 'admin@loop.com',
++      isAdmin: false,
++      adminRevoked: true,
++    };
++    const user = await findOrCreateUserByEmail('admin@loop.com');
++    expect(user.isAdmin).toBe(false);
++    // Row already matches the suppressed value → no promote write at all.
++    expect(dbMock['update']!).not.toHaveBeenCalled();
++  });
++
++  it('demotes a revoked row whose is_admin mirror is stale-true, never re-granting', async () => {
++    returned.row = {
++      id: 'uuid-r2',
++      ctxUserId: null,
++      email: 'admin@loop.com',
++      isAdmin: true,
++      adminRevoked: true,
++    };
++    updateChain.returns = {
++      id: 'uuid-r2',
++      ctxUserId: null,
++      email: 'admin@loop.com',
++      isAdmin: false,
++      adminRevoked: true,
++    };
++    const user = await findOrCreateUserByEmail('admin@loop.com');
++    expect(user.isAdmin).toBe(false);
++    expect(updateChain.setCall).toEqual(expect.objectContaining({ isAdmin: false }));
++  });
++
++  it('a NON-revoked allowlisted row still reconciles to admin (fix does not break normal grant)', async () => {
++    returned.row = {
++      id: 'uuid-r3',
++      ctxUserId: null,
++      email: 'ops@loop.com',
++      isAdmin: false,
++      adminRevoked: false,
++    };
++    updateChain.returns = {
++      id: 'uuid-r3',
++      ctxUserId: null,
++      email: 'ops@loop.com',
++      isAdmin: true,
++      adminRevoked: false,
++    };
++    const user = await findOrCreateUserByEmail('ops@loop.com');
++    expect(user.isAdmin).toBe(true);
++    expect(updateChain.setCall).toEqual(expect.objectContaining({ isAdmin: true }));
++  });
++});
+diff --git a/apps/backend/src/db/migrations/0064_users_admin_revoked.sql b/apps/backend/src/db/migrations/0064_users_admin_revoked.sql
+new file mode 100644
+index 00000000..5f3c0262
+--- /dev/null
++++ b/apps/backend/src/db/migrations/0064_users_admin_revoked.sql
+@@ -0,0 +1,21 @@
++-- SEC-rbac: make an incident-response staff-role REVOKE stick for an
++-- env-allowlisted admin (ADMIN_EMAILS / ADMIN_CTX_USER_IDS).
++--
++-- Before this, `revokeStaffRole` deleted the `staff_roles` row and
++-- cleared the `users.is_admin` mirror, but the env-allowlist LOGIN
++-- re-grant paths (`upsertUserFromCtx` on a CTX request,
++-- `findOrCreateUserByEmail`'s config-parity reconcile on native OTP
++-- login) recompute `is_admin` from env on the admin's very next login
++-- and flip it back to true — so revoking an allowlisted admin FAILED
++-- OPEN: they were silently re-granted admin at next login. Removing
++-- them from the env allowlist required a redeploy, which is not an
++-- incident-response timescale.
++--
++-- `admin_revoked` is a durable "this staff member was explicitly
++-- revoked" latch that the env-allowlist re-grant paths now honor: while
++-- it is true, the env allowlist can no longer resurrect `is_admin`.
++-- `grantStaffRole` clears it (a deliberate re-grant lifts the
++-- suspension), so the normal env-allowlist grant for a NON-revoked
++-- admin is unaffected. Defaults false so every existing row keeps its
++-- current env-allowlist behaviour.
++ALTER TABLE "users" ADD COLUMN "admin_revoked" boolean DEFAULT false NOT NULL;
+diff --git a/apps/backend/src/db/migrations/meta/_journal.json b/apps/backend/src/db/migrations/meta/_journal.json
+index 941bb30a..e47ddfaf 100644
+--- a/apps/backend/src/db/migrations/meta/_journal.json
++++ b/apps/backend/src/db/migrations/meta/_journal.json
+@@ -449,6 +449,13 @@
+       "when": 1780189400000,
+       "tag": "0063_vault_float_reconciliation",
+       "breakpoints": true
++    },
++    {
++      "idx": 64,
++      "version": "7",
++      "when": 1780189500000,
++      "tag": "0064_users_admin_revoked",
++      "breakpoints": true
+     }
+   ]
+ }
+diff --git a/apps/backend/src/db/schema/users.ts b/apps/backend/src/db/schema/users.ts
+index ba84fbec..5f37dd53 100644
+--- a/apps/backend/src/db/schema/users.ts
++++ b/apps/backend/src/db/schema/users.ts
+@@ -52,6 +52,18 @@ export const users = pgTable(
+     ctxUserId: text('ctx_user_id'),
+     email: text('email').notNull(),
+     isAdmin: boolean('is_admin').notNull().default(false),
++    // SEC-rbac (migration 0064). Durable "this staff member was
++    // explicitly revoked" latch that the env-allowlist LOGIN re-grant
++    // paths honor. `is_admin` is recomputed from the env allowlists
++    // (`ADMIN_EMAILS` / `ADMIN_CTX_USER_IDS`) on every login, so without
++    // this a `revokeStaffRole` of an allowlisted admin was silently
++    // undone at their next login (fail-open). While `admin_revoked` is
++    // true, `upsertUserFromCtx` and `findOrCreateUserByEmail` refuse to
++    // re-grant `is_admin` from env, so an incident-response revoke holds
++    // without a redeploy. `grantStaffRole` clears it — a deliberate
++    // re-grant lifts the suspension. Defaults false so existing rows
++    // keep their current env-allowlist behaviour.
++    adminRevoked: boolean('admin_revoked').notNull().default(false),
+     homeCurrency: char('home_currency', { length: 3 }).notNull().default('USD'),
+     // ADR 015 — Stellar address the user wants their cashback paid
+     // to (when on-chain payout is available for their home currency).
+diff --git a/apps/backend/src/db/staff-roles.ts b/apps/backend/src/db/staff-roles.ts
+index 5c4e0ab4..387146ee 100644
+--- a/apps/backend/src/db/staff-roles.ts
++++ b/apps/backend/src/db/staff-roles.ts
+@@ -14,11 +14,19 @@
+  * Both writes also mirror the deprecated `users.is_admin` shim
+  * (grant admin → true, grant support / revoke → false). Without the
+  * mirror, revoking a Loop-native admin would be silently undone by
+- * `requireStaff`'s legacy fallback. CTX-allowlist admins
+- * (`ADMIN_CTX_USER_IDS`) are the documented exception: the CTX
+- * upsert recomputes `is_admin` from env on their next request, so
+- * revoking one of those also requires removing them from the env
+- * allowlist (see docs/runbooks/staff-role-revocation.md).
++ * `requireStaff`'s legacy fallback.
++ *
++ * SEC-rbac: env-allowlist admins (`ADMIN_EMAILS` /
++ * `ADMIN_CTX_USER_IDS`) recompute `is_admin` from env on every login,
++ * so clearing the mirror alone was not enough — `revokeStaffRole`
++ * therefore also latches `users.admin_revoked = true`, which the
++ * LOGIN re-grant paths (`upsertUserFromCtx`,
++ * `findOrCreateUserByEmail`) honor: while the latch is set, env can no
++ * longer resurrect `is_admin`, so an incident-response revoke holds
++ * without a redeploy. `grantStaffRole` clears the latch, so a
++ * deliberate re-grant lifts the suspension (and removing them from the
++ * env allowlist is still the durable config change — see
++ * docs/runbooks/staff-role-revocation.md).
+  */
+ import { eq, sql } from 'drizzle-orm';
+ import { alias } from 'drizzle-orm/pg-core';
+@@ -177,10 +185,13 @@ export async function grantStaffRole(args: {
+         },
+       });
+     // Mirror the deprecated shim so the legacy fallback agrees with
+-    // the table (see module docstring).
++    // the table (see module docstring). SEC-rbac: a deliberate grant
++    // also CLEARS the `admin_revoked` latch — re-granting a previously
++    // revoked staff member lifts the suspension, and a normal grant of a
++    // never-revoked admin leaves the (already-false) latch untouched.
+     await tx
+       .update(users)
+-      .set({ isAdmin: args.role === 'admin', updatedAt: sql`NOW()` })
++      .set({ isAdmin: args.role === 'admin', adminRevoked: false, updatedAt: sql`NOW()` })
+       .where(eq(users.id, args.userId));
+ 
+     return { priorRole, grantedAt };
+@@ -203,9 +214,17 @@ export async function revokeStaffRole(args: { userId: string }): Promise<{ prior
+     }
+ 
+     await tx.delete(staffRoles).where(eq(staffRoles.userId, args.userId));
++    // SEC-rbac: clear the mirror AND latch `admin_revoked` so the
++    // env-allowlist LOGIN re-grant paths (upsertUserFromCtx /
++    // findOrCreateUserByEmail) can't resurrect `is_admin` from env on
++    // this user's next login. Without the latch, revoking an
++    // ADMIN_EMAILS / ADMIN_CTX_USER_IDS admin failed open — they were
++    // re-granted admin at next login and holding the revoke required a
++    // redeploy. `grantStaffRole` clears the latch, so a later deliberate
++    // re-grant lifts the suspension.
+     await tx
+       .update(users)
+-      .set({ isAdmin: false, updatedAt: sql`NOW()` })
++      .set({ isAdmin: false, adminRevoked: true, updatedAt: sql`NOW()` })
+       .where(eq(users.id, args.userId));
+ 
+     return { priorRole };
+diff --git a/apps/backend/src/db/users.ts b/apps/backend/src/db/users.ts
+index 92e703f5..857e8eaa 100644
+--- a/apps/backend/src/db/users.ts
++++ b/apps/backend/src/db/users.ts
+@@ -58,8 +58,11 @@ export function isAdminEmail(email: string): boolean {
+  * a later request that has it.
+  *
+  * is_admin is derived from the `ADMIN_CTX_USER_IDS` env allowlist.
+- * Recomputing every upsert means adding/removing an admin is a
+- * config change, not a database write.
++ * Recomputing every upsert means adding an admin is a config change,
++ * not a database write. SEC-rbac exception: the recompute can only
++ * GRANT from env — it never overrides a durable `admin_revoked` latch
++ * set by `revokeStaffRole`, so an incident-response revoke of an
++ * allowlisted admin holds across re-upsert (was fail-open before).
+  */
+ export async function upsertUserFromCtx(args: {
+   ctxUserId: string;
+@@ -93,7 +96,14 @@ export async function upsertUserFromCtx(args: {
+       targetWhere: sql`${users.ctxUserId} IS NOT NULL`,
+       set: {
+         email: sql`COALESCE(EXCLUDED.email, ${users.email})`,
+-        isAdmin,
++        // SEC-rbac: env can only GRANT admin here, never override a
++        // durable revoke. `revokeStaffRole` latches `admin_revoked`, so
++        // an allowlisted-but-revoked admin stays `is_admin = false` on
++        // re-upsert instead of being silently re-granted at next login.
++        // A fresh grant (grantStaffRole) clears the latch. On the INSERT
++        // branch a brand-new row has `admin_revoked = false`, so the
++        // plain `isAdmin` in `.values()` is already correct there.
++        isAdmin: sql`${isAdmin} AND NOT ${users.adminRevoked}`,
+         updatedAt: sql`NOW()`,
+       },
+     })
+@@ -162,13 +172,21 @@ export async function findOrCreateUserByEmail(email: string): Promise<User> {
+     // If a grant/revoke was deployed after this row was created, bring
+     // `is_admin` in line on next verified login rather than leaving it
+     // stuck at the create-time value.
+-    if (existing.isAdmin !== isAdmin) {
++    //
++    // SEC-rbac: env can only re-GRANT admin here, never override a
++    // durable revoke. `revokeStaffRole` latches `admin_revoked`, so a
++    // revoked-but-allowlisted admin must NOT be promoted back on next
++    // login (that was the fail-open). `grantStaffRole` clears the latch
++    // to lift the suspension; a never-revoked allowlisted admin has the
++    // latch false and reconciles to admin exactly as before.
++    const effectiveIsAdmin = isAdmin && existing.adminRevoked !== true;
++    if (existing.isAdmin !== effectiveIsAdmin) {
+       const [updated] = await db
+         .update(users)
+-        .set({ isAdmin, updatedAt: sql`NOW()` })
++        .set({ isAdmin: effectiveIsAdmin, updatedAt: sql`NOW()` })
+         .where(eq(users.id, existing.id))
+         .returning();
+-      return updated ?? { ...existing, isAdmin };
++      return updated ?? { ...existing, isAdmin: effectiveIsAdmin };
+     }
+     return existing;
+   }
+@@ -194,13 +212,15 @@ export async function findOrCreateUserByEmail(email: string): Promise<User> {
+     throw new Error('findOrCreateUserByEmail: no row returned after conflict');
+   }
+   // CF-30: same config-parity reconcile on the raced winner.
+-  if (raced.isAdmin !== isAdmin) {
++  // SEC-rbac: same durable-revoke suppression as the existing-row path.
++  const racedEffectiveIsAdmin = isAdmin && raced.adminRevoked !== true;
++  if (raced.isAdmin !== racedEffectiveIsAdmin) {
+     const [updated] = await db
+       .update(users)
+-      .set({ isAdmin, updatedAt: sql`NOW()` })
++      .set({ isAdmin: racedEffectiveIsAdmin, updatedAt: sql`NOW()` })
+       .where(eq(users.id, raced.id))
+       .returning();
+-    return updated ?? { ...raced, isAdmin };
++    return updated ?? { ...raced, isAdmin: racedEffectiveIsAdmin };
+   }
+   return raced;
+ }
+diff --git a/apps/backend/src/openapi/admin-user-writes.ts b/apps/backend/src/openapi/admin-user-writes.ts
+index 2f52e7f0..847466f9 100644
+--- a/apps/backend/src/openapi/admin-user-writes.ts
++++ b/apps/backend/src/openapi/admin-user-writes.ts
+@@ -115,12 +115,22 @@ export function registerAdminUserWritesOpenApi(
+   });
+ 
+   // B4: admin session revocation (incident response). Admin-tier, NOT
+-  // step-up-gated (reversible, no value movement).
++  // step-up-gated (reversible, no value movement). CONV-INFO-01: carries
++  // the ADR-017 idempotency + reason + audit envelope like its sibling
++  // clear-otp-lockout.
+   const AdminRevokeSessionsResult = registry.register(
+     'AdminRevokeSessionsResult',
+     z.object({
+       userId: z.string().uuid(),
+-      message: z.string(),
++      revoked: z.literal(true),
++    }),
++  );
++
++  const AdminRevokeSessionsEnvelope = registry.register(
++    'AdminRevokeSessionsEnvelope',
++    z.object({
++      result: AdminRevokeSessionsResult,
++      audit: AdminWriteAudit,
+     }),
+   );
+ 
+@@ -198,23 +208,41 @@ export function registerAdminUserWritesOpenApi(
+     path: '/api/admin/users/{userId}/revoke-sessions',
+     summary: "Revoke all of a user's live sessions (hardening B4 — incident response).",
+     description:
+-      'Revokes every live refresh token for the target user — the incident-response lever for a compromised account. Access tokens are non-revocable by design (15-min TTL), so the session dies within at most that window. Admin-tier; NOT step-up-gated (reversible — the user just signs back in — and moves no value, so step-up friction during a fast security response is counterproductive).',
++      "Revokes every live refresh token for the target user — the incident-response lever for a compromised account. Access tokens are non-revocable by design (15-min TTL), so the session dies within at most that window. Admin-tier; NOT step-up-gated (reversible — the user just signs back in — and moves no value, so step-up friction during a fast security response is counterproductive). CONV-INFO-01: carries the ADR-017 admin-write envelope — `Idempotency-Key` header required, `reason` body field (2..500 chars), and a Discord audit fanout AFTER commit; a repeat with the same key replays the stored snapshot (`audit.replayed: true`) rather than firing a second fleet-wide logout.",
+     tags: ['Admin'],
+     security: [{ bearerAuth: [] }],
+     request: {
+       params: z.object({ userId: z.string().uuid() }),
++      headers: z.object({
++        'idempotency-key': z.string().min(16).max(128).openapi({
++          description:
++            'Required. Scoped to (admin_user_id, key); repeats replay the stored snapshot.',
++        }),
++      }),
++      body: {
++        content: {
++          'application/json': {
++            schema: z.object({
++              reason: z.string().min(2).max(500).openapi({
++                description: 'Incident-response justification recorded in the Discord audit.',
++              }),
++            }),
++          },
++        },
++      },
+     },
+     responses: {
+       200: {
+-        description: 'All sessions revoked',
+-        content: { 'application/json': { schema: AdminRevokeSessionsResult } },
++        description: 'All sessions revoked (or replayed from idempotency snapshot)',
++        content: { 'application/json': { schema: AdminRevokeSessionsEnvelope } },
+       },
+       400: {
+-        description: 'Non-uuid userId (`VALIDATION_ERROR`)',
++        description:
++          'Non-uuid userId, missing `Idempotency-Key`, or invalid `reason` (`VALIDATION_ERROR` / `IDEMPOTENCY_KEY_REQUIRED`)',
+         content: { 'application/json': { schema: errorResponse } },
+       },
+       401: {
+-        description: 'Missing or invalid bearer',
++        description: 'Missing or invalid bearer / missing admin context',
+         content: { 'application/json': { schema: errorResponse } },
+       },
+       404: {
+@@ -227,7 +255,8 @@ export function registerAdminUserWritesOpenApi(
+         content: { 'application/json': { schema: errorResponse } },
+       },
+       500: {
+-        description: 'Internal error revoking sessions (`INTERNAL_ERROR`)',
++        description:
++          'Internal error revoking sessions (`INTERNAL_ERROR`), or the stored replay snapshot for this Idempotency-Key is unreadable (`IDEMPOTENCY_SNAPSHOT_CORRUPT` — the write is never re-executed)',
+         content: { 'application/json': { schema: errorResponse } },
+       },
+     },

@@ -1,0 +1,479 @@
+{
+  "$comment": "Machine-readable resume state for the loop-app 2026-07 remediation campaign. Resume truth = this file (config, policy, gates, non-committed dispositions, wave plan) UNION the branch commit log (committed finding-ids live in 'Audit-Finding:' commit trailers — that is authoritative for FIXED, so this file never has to track them and can't drift on them). A resuming session reads this + `git log --format=%B remediation/audit-2026-07 | grep Audit-Finding` and continues from the remaining set.",
+  "campaign": "loop-app-audit-2026-07",
+  "branch": "fix/audit-2026-07-remediation",
+  "$branchNote": "Renamed from remediation/audit-2026-07 to satisfy the repo's branch-name convention hook (feat/fix/chore/... prefixes). Pushed to origin; PR #1665 open against main: https://github.com/LoopDevs/Loop/pull/1665",
+  "pr": "https://github.com/LoopDevs/Loop/pull/1665",
+  "baseSha": "83010533",
+  "auditDocs": [
+    "docs/full-taxonomy-audit-2026-07-11-SUMMARY.md",
+    "docs/full-taxonomy-audit-2026-07-11.md",
+    "docs/full-taxonomy-audit-2026-07-11-phase2-web-mobile.md"
+  ],
+  "policy": {
+    "autonomy": "full-autonomous-commit-all (CHANGED 2026-07-14 by Ash: no human-sign-off gates)",
+    "money": "commit ALL classes via the strongest DB-backed adversarial panel (flagged Review-After); NO hold — auth/crypto/migration/money now COMMIT once the panel clears. May push/PR/merge. Hard limits only: never force-push/rewrite-history, never live-deploy/secret-rotate/prod-migrate (migration FILE commits; RUNNING it against prod is a separate follow-up).",
+    "order": "safest-first; wave 1 was a cross-section to prove all paths",
+    "wave6CompletionCampaign": "Post-policy-change: fix+commit every previously-HELD wave6ProtectedHeld / needsDecision / decision item. Each gets a session-model fixer + a diverse-lens verifier panel (redness/correctness/regression) on real Postgres; commit on VERIFIED with a Review-After trailer. Auth in parallel; migrations SERIAL (each = SQL + journal + schema/allowlist + DB-test + parity)."
+  },
+  "$WAVE6_FINAL": "MERGED TO MAIN 2026-07-14 — PR #1665 squash-merged (merge commit 131d598c). 35 findings / 32 commits under commit-all policy; migration spine 0064-0070 + NS-10/NS-03/money/auth/crypto/security/UX, each panel-verified. All 5 required CI checks green; the 2 failing E2E checks are NON-required real-CTX leaflet-map/infra flakes (required mocked-CTX E2E + full unit/integration passed). Commit-message reword+force-push done for commitlint (code byte-identical). DEPLOY is a separate team-gated step: running 0064-0070 against prod is not done here; 0066/0067 need a zero-drift reconciliation sweep first; NS-10 needs backfill-redeem-encryption.ts run. Remaining audit findings = wave6SurfacedRemaining (latent INT-07 / prod-ops DAT-03 / business-decision / device-verify / CI-IaC). Committed findings = the squash-body Findings list + the pre-squash branch commits' Audit-Finding trailers.",
+  "wave6SurfacedRemaining": {
+    "$note": "Every remaining audit finding NOT committed in wave6, with why. None silently dropped. Nothing here is a blocker Ash can't act on; each needs a business decision, a real device/browser/crawler/e2e harness, prod-ops timing, or is latent.",
+    "LATENT": {
+      "INT-07": "interest-mint idempotency fences mismatched (snapshot keyed (user,asset,period) vs mirror (user,currency,period)); a legit mint SILENTLY DROPS if two asset_codes share a currency. UNREACHABLE today (GBPLOOP is the only mint-eligible asset; fiatOf knows 3 codes, all distinct currencies). Fix needs a ledger asset-discriminator (credit_transactions has no asset_code column -> a schema change touching the 0064/0066/0067 triggers). Do this future-proofing migration WHEN a 2nd same-currency LOOP asset is introduced; not worth a risky ledger schema change for a currently-unreachable bug."
+    },
+    "PROD_OPS": {
+      "DAT-03": "0036 created plain (non-CONCURRENT) indexes on 2 large growing tables. The indexes ALREADY EXIST and match schema; recreating CONCURRENTLY can't run inside the drizzle migrator txn and is a prod-ops maneuver on the running large table. RUNBOOK item (recreate CONCURRENTLY out-of-band during a low-traffic window), not a committable migration."
+    },
+    "DECISIONS": {
+      "MNY-06-vaultredemption": "0.5% REDEMPTION_SHARE_BUFFER_BPS is a RATIFIED invariant (INV-V2, ADR-031 D6, pinning tests). Overturning it (or relocating the +0.5% drift) is a product/treasury decision, not an engineering call. 3 questions in needsDecision.",
+      "NS-05": "admin retry/redrive/vault-redrive/operator-float paths lack a per-action VALUE cap. The cap VALUE per rail is a policy number; spans ~4 handlers. Coordinated + decision.",
+      "MNY-11-autorefund": "separating an auto-refund daily budget from the shared admin cap needs a NEW money constant (the budget value). onchainrail already makes on-chain auto-refunds count against the shared cap (safe default in place); a separate budget is a future decision.",
+      "MNY-22-FLOOR-VALUE": "LOOP_XLM_MIN_PRICE_<ccy> floor MECHANISM is committed (fail-open until set); the per-asset floor VALUE is a treasury number.",
+      "NS-04": "runtime kill/halt switches for deposit/payout/vault/refund rails = feature build (new switch state/migration + admin API + authz + enforcement wiring + halt policy). Kill-switch defaults are protected. Surface for design.",
+      "NS-08": "per-account freeze/AML-hold = feature build (schema migration + AML surface + enforcement at every debit + AML policy). Surface for design.",
+      "NS-13-recon": "the reconciliation sub-case (a fulfilled order with NO ctx_settlements row) needs a policy on the legitimate no-settlement baseline (pre-A4 orders, credit-funded fulfillments) to avoid false pages. The staleness watcher half is committed (NS-13).",
+      "AUD-08-full": "root-cause = server-paginate over the filtered (non-pending) set; needs a backend list-handler change touching the injection-sensitive query-param allowlist AND external CTX /gift-cards upstream union/negation support (unchangeable from here). The frontend user-trap MITIGATION is committed (AUD-08)."
+    },
+    "DEVICE_CRAWLER_E2E_DEFER": {
+      "$why": "a fixer can write the code but the defect/verification lives on a real device / browser / crawler / e2e harness not available here; committing an unverified platform fix violates the proven-red discipline.",
+      "items": "FE-01 (Android FLAG_SECURE), FE-02 (app-lock device), FE-03 (assetlinks/AASA OS link verification), FE-04 (TLS pinning device), FE-19 (RTL CSS sweep + visual verify), FE-22 (Phase2Gate crawler mismatch), FE-34 (vitest/vite version mismatch = deps/lockfile change + npm install), FE-35 (real-purchase e2e = Playwright+backend), FE-55 (biometric-failure feedback device), P2-14 (min-app-version ForceUpdateGate = Capacitor build), AGT-11 (Android soft-keyboard focus), FE-33 (shared Dialog primitive refactor, low-value), FE-20-DIR (SSR dir for RTL, latent - only en routed today)."
+    },
+    "CI_IAC": {
+      "P2-13": "branch-protection required_status_checks missing the e2e suites = a GitHub repo-admin SETTINGS change (not code-committable; do via repo settings/API as an admin).",
+      "FE-37": "no CI-driven web deploy (deployed artifact != CI-built) = deploy-pipeline design (CI/CD).",
+      "FE-38": "fly.toml health check probes / (a geo-redirect round-trip) = small IaC change; committable but needs deploy-time verification of the health-check behavior."
+    }
+  },
+  "gates": {
+    "web": {
+      "cwd": "apps/web",
+      "commands": ["npm run typecheck", "npx vitest run <scope>"],
+      "prereqs": "none (jsdom)",
+      "runsHere": true
+    },
+    "backend-unit": {
+      "cwd": "apps/backend",
+      "commands": ["npm run typecheck", "npx vitest run <scope>"],
+      "prereqs": "none",
+      "runsHere": true
+    },
+    "money": {
+      "cwd": "apps/backend",
+      "commands": [
+        "DATABASE_URL='postgres://loop:loop@localhost:5434/loop_test' npm run test:integration"
+      ],
+      "prereqs": "a Postgres on 5434 with loop+loop_test DBs (the integration harness auto-applies migrations + pins all other env vars)",
+      "runsHere": true,
+      "db": {
+        "container": "loop-remediation-db",
+        "image": "postgres:16",
+        "port": 5434,
+        "url": "postgres://loop:loop@localhost:5434/loop_test",
+        "bringUp": "docker run -d --name loop-remediation-db -p 5434:5432 -e POSTGRES_USER=loop -e POSTGRES_PASSWORD=loop -e POSTGRES_DB=loop postgres:16 && docker exec loop-remediation-db psql -U loop -d loop -c 'CREATE DATABASE loop_test;'",
+        "note": "Do NOT use 5433 — that is tallis-postgres (another project). The harness DATABASE_URL default is 5433; override with the 5434 URL. Baseline on this branch tip: 210 integration tests green."
+      },
+      "note": "Money gate is now RUNNABLE — money-logic fixes can commit (with the verifier panel), not just defer."
+    }
+  },
+  "protectedPaths": [
+    "migrations/**",
+    "*.sql",
+    "**/auth/**tokens*",
+    "**/auth/**session*",
+    "**/crypto/**",
+    "**/signer*",
+    ".github/workflows/**",
+    ".env*",
+    "**/*.tf",
+    "Dockerfile",
+    "fly.toml"
+  ],
+  "wavePlan": [
+    {
+      "id": 1,
+      "name": "cross-section (proof)",
+      "status": "done",
+      "findings": ["AUD-16", "AUD-07", "AUD-12", "CONV-MNY-01"]
+    },
+    {
+      "id": 2,
+      "name": "a11y quick-wins",
+      "status": "done",
+      "commit": "47f508c8",
+      "findings": ["P2-A", "P2-B", "P2-C"]
+    },
+    {
+      "id": 3,
+      "name": "hygiene / code-health / copy-drift (HLT/DOC)",
+      "status": "done",
+      "commits": ["66518e31", "5984f92a"],
+      "findings": ["AUD-11", "ONB-4", "P2-DATE"]
+    },
+    {
+      "id": 4,
+      "name": "i18n / UX — sibling formatDate sweep (part 1)",
+      "status": "done",
+      "commit": "788db667",
+      "findings": ["P2-DATE-SWEEP"]
+    },
+    {
+      "id": 5,
+      "name": "i18n date sweep (part 2) + UX",
+      "status": "pending",
+      "queued": [
+        "MobileHome.tsx:825/834 date locale",
+        "auth.tsx:342 date locale",
+        "admin.cashback.tsx:495 date (ADMIN_LOCALE?)",
+        "settings.cashback.tsx:94 consolidate onto formatDateTime",
+        "Retry-After plumbing (ONB-4 follow-up, cross-file)"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "detectability / observability / config / tests (OBS/CFG/TST/CID)",
+      "status": "pending"
+    },
+    { "id": 6, "name": "security / privacy non-crypto (SEC/PRV)", "status": "pending" },
+    { "id": 7, "name": "concurrency / reliability (CON/REL)", "status": "pending" },
+    { "id": 8, "name": "money-correctness (MNY/DOM) — needs DB gate", "status": "pending" }
+  ],
+  "nonCommittedDispositions": {},
+  "discoveredFollowUps": [
+    "MNY-06-REDEMPTION-DUST (flagged during MNY-06-hotfloat 0069): vault-redemptions.ts:609 has the IDENTICAL amountOutStroops/STROOPS_PER_MINOR truncation crediting the SAME vault_hot_float (netFloatDelta = amountOutMinor - row.valueMinor via applyHotFloatDeltaInTx), so the redemption SLOW path still drops amountOutStroops % 100000 of favorable-slippage proceeds. The carry_stroops column added by 0069 is designed to receive it — this is PURE LOGIC (reuse the column, no new migration). Do it right after MNY-06-hotfloat commits (same subsystem, serialize to avoid a carry-column conflict). Closes the float conservation completely.",
+    "MNY-22-FX-RATCHET (follow-up flagged during MNY-22-wedge round 2): validateRateJump now returns the ratcheted/capped value, but the FX feed price-feed-fx.ts ignores the return (out of scope) so it still has the single-cycle jump-to-corroborated-observation on recovery (bounded by its tighter maxRatio=0.1). One-line caller change there: minorPerUsdDollar[code] = validateRateJump({...}) — but its unit is a float rate ~0.78, so do NOT apply the XLM feed's integer Math.round; consume the ratcheted value as-is. Coordinated follow-up.",
+    "MNY-22-FLOOR-VALUE (NEEDS-DECISION surfaced 2026-07-14): the MNY-22-wedge fix wired an absolute per-asset XLM min-price floor read from LOOP_XLM_MIN_PRICE_<CCY> (major units/XLM), applied even on cold cache, but FAIL-OPEN (unset/malformed = today's behavior, nothing silently rejected). The floor VALUE per asset (USD/GBP/EUR) is a money/treasury policy number with no defensible engineering default — pick a conservative per-asset minimum XLM price that no legit market move crosses (loose enough to survive a real crash, tight enough to reject a glitched near-zero rate). Mechanism committed; set the env values to activate. Also: staleness enforced only on the CTX adapter (CoinGecko override carries no timestamp, stays fail-open); floor/staleness rejections log error but don't page Discord (jump path still pages) — a dedicated notifier is a follow-up.",
+    "CONV-MNY-01: add an end-to-end integration test driving applyAdminEmission through the shared-mirror over-emission path, asserting the typed 409 (not 500).",
+    "OBS-04 (new SEC finding): Sentry scrubber only redacts STRING secret values (typeof==='string') — a numeric/non-string secret slips; and exception.values[].value / event.user regions are not key-walked. Pre-existing, orthogonal to the drift.",
+    "P2-DATE class: audit undercounted host-locale date sites (~2 found → ~7 swept).",
+    "ONB-4 follow-up: surface backend Retry-After (cross-file plumbing).",
+    "PAYOUT-TXHASHNULL-STRAND (new, panel-verified residual on M5a, NOT introduced by the fix): a submitted row with attempts>=maxAttempts and txHash IS NULL matches neither listClaimablePayouts clause, so it is not auto-re-picked. Reachable ONLY via a hard process crash (SIGKILL/OOM/eviction) between the attempts-bump commit and onSigned hash-persist — no logic path reaches it (the panel proved the final exhaustion attempt always terminalizes when txHash is null). Pre-existing (the base attempts<max clause excluded these before too); a recoverable stranded-funds case (admin resetPayoutToPending -> attempts=0), NOT a double-pay or unbacked mint. Low priority follow-up.",
+    "PAYOUT-EXPIRY-MARGIN-30S (documented residual on M5a/FT-05, not a deterministic bug): the only residual double-pay requires >=~29s Horizon indexing lag or worker/network clock skew beyond the 30s expiry margin (60s timebound + 30s). Pathological infra, bounded/documented. Widening the margin or a hash-history schema would harden it further (schema = HUMAN-HOLD).",
+    "PAYOUT-HASHHISTORY (new, verifier-discovered during M5a): the payout row keeps a SINGLE tx-hash column, so under deep Horizon ingestion lag a landed tx can have its anchor overwritten when the expiry-guard clears and a re-submit path writes a new hash — losing the durable link to the funds that actually moved. The robust fix is to refuse overwriting a non-null hash / keep a hash history (schema change). Narrow (needs deep-lag + specific interleave) but real; deferred as a schema follow-up (migration = HUMAN-HOLD).",
+    "BK-otpatomic-stepup (flagged during BK-otpatomic): admin/step-up-handler.ts:122 has the IDENTICAL read-then-mark OTP race (findLiveOtp + markOtpConsumed) that BK-otpatomic fixed in native.ts. tryConsumeOtp already exists (added by BK-otpatomic) — swap it in there too. RECONCILE with SEC-02-stepup (which is editing admin-step-up.ts / step-up token single-use) — it may already cover this; if not, one-line follow-up.",
+    "NS-13-recon (deferred half of NS-13): the staleness watcher (settlement confirmed_at IS NULL past 15min) is committed; the RECONCILIATION sub-case -- a fulfilled order with NO ctx_settlements row at all -- is NOT covered. No migration needed, but it needs a policy decision on the legitimate no-settlement baseline (pre-A4 orders, credit/non-CTX-funded fulfillments, backfill timing) to avoid noisy false-positive pages. NEEDS-COORDINATION on scope.",
+    "MNY-15-vaultredemption-watchdog (new, fixer-flagged during MNY-15-vaultpending): vault-redemptions.ts VAULT_REDEMPTION_STUCK_STATES=['collecting','redeemed'] omits 'pending' -- the identical money-owed strand gap MNY-15 fixed on the emission side, in the redemption direction. One-line fix (add 'pending' + a DB-backed test), same as MNY-15. Fix next round.",
+    "MNY-11-CAPSCOPE (new, panel-discovered during MNY-11-emissioncap): the daily-emission-value cap query filters by EXACT assetCode, but multiple LOOP codes share one mirror currency (e.g. USDLOOP + LOOPUSD -> USD). An attacker/rogue-admin could split emissions across two mirror-sharing asset codes to get ~2x the intended per-currency daily cap. Pre-existing (cap was already assetCode-scoped), orthogonal to the minor-vs-stroops fix. Fix: scope the cap by mirror CURRENCY (fiatOf/mirror mapping), not raw assetCode. New finding.",
+    "MNY-11-EMISSION-HARDENING (follow-up flagged during MNY-11-emissioncap): the fix rebinds the daily-CAP check to minted stroops, but the per-call balance guard + the app-layer conservation check still read the caller-supplied args.amountMinor (backstopped by the 0044 assert_emission_conservation DB trigger which measures real amount_stroops). A full A4-021-style top-of-applyAdminEmission reject-on-mismatch guard (assert amountMinor == amountStroops/STROOPS_PER_MINOR) would cover all three fences at once. Follow-up hardening.",
+    "OPFLOAT-DATEFRAG (new bug, discovered during MNY-04): computeUnlinkedManualDelta in operator-float-reconciliation.ts builds a raw sql`${effectiveAt} >= ${baseline.createdAt}` fragment interpolating a JS Date, which THROWS through the postgres-js client ('The string argument must be... Received an instance of Date') -> the FULL operator-float reconciliation e2e ERRORS whenever an active baseline exists (masked today only because the module fails-closed to needs_baseline until an operator sets a baseline; live the moment they do). One-line fix: use a column-aware operator (gte(col, date)) or ${date.toISOString()}::timestamptz. TODO: fix as fast follow-up (same file as MNY-04, do after MNY-04 commits).",
+    "FE-43-OTHER-BUTTONS (fixer-flagged during FE-43): the shared useOnline() hook was applied to the primary PayWithLoopBalance button; other money/network-dependent buttons (RedeemFlow open-webview, PurchaseContainer/AmountSelection create-order, admin RefundOrderPanel/CreditAdjustmentForm/OrderRedrivePanel/StepUpModal) remain enabled offline — drop-in useOnline() adoption is the follow-up. OfflineBanner.tsx still inlines the same pattern (refactor onto the hook later).",
+    "FE-25-DESKTOP-GRID (new PRF, fixer-flagged during FE-25): the DESKTOP directory grid in apps/web/app/routes/home.tsx (~304-326) renders the same ~982 groups un-windowed. Out of FE-25's scope (native/MobileHome is the worst case). Same fix (reuse the extracted computeGridWindow/useWindowedGrid) applies to desktop web. Follow-up.",
+    "PAYMENTURI-UNGATED (new SEC, verifier-discovered during P2-03): paymentUri is a SERVER-supplied field rendered ungated as an anchor href (LoopPaymentStep.tsx ~314, PaymentStep.tsx ~251), distinct from the redeemUrl P2-03 closed. If the server/upstream can be induced to return a javascript:/data: paymentUri it is the same XSS class. Should be scheme-gated the same way (safeRedeemHref/assertSafeUrl) OR confirmed to be a hardcoded web+stellar: literal only. New finding — verify server-controllability then gate.",
+    "FE-20-DIR (new, fixer-flagged during FE-20): SSR <html dir> for RTL scripts is still applied only by the client effect (not in the SSR Layout like lang now is), so an RTL locale's first paint is LTR until hydration. Adjacent I18N follow-up; only en routes today so latent. Fix mirrors FE-20 (derive dir from locale in Layout) once an RTL locale is routed."
+  ],
+  "strayFiles": "apps/backend/src/__tests__/sharp-*.ts + final-verdict-test.ts are UNTRACKED junk (prior session) with lint errors; they contaminate a local apps/backend typecheck but are not on the branch. Delete them for a clean local gate.",
+  "resume": {
+    "howTo": "1) confirm on branch remediation/audit-2026-07; 2) committedIds = git log --format=%B baseSha..HEAD | grep -oE 'Audit-Finding: [A-Z0-9-]+'; 3) skip committedIds + terminal held/needs-decision from nonCommittedDispositions; 4) re-enter the wave engine for the remaining findings (re-triage from auditDocs only for waves not yet expanded). In-flight worktree work is NOT durable — those findings simply re-run.",
+    "invariant": "only committed fixes survive a session death; uncommitted/worktree state is discarded and safely re-fixed."
+  },
+  "wave6Completion": {
+    "$note": "Completion campaign under the NEW full-autonomous-commit-all policy (2026-07-14). Previously-HELD protected items are now being fixed + committed via the strongest panel. Git Audit-Finding trailers remain authoritative.",
+    "committedThisCampaign": {
+      "MNY-19": "4a5ad0bd — Soroban vault signing uses env.LOOP_STELLAR_NETWORK_PASSPHRASE. Panel VERIFIED (crypto).",
+      "BK-otpatomic": "073bcf25 — atomic tryConsumeOtp CAS gates the mint; loser 401. Panel VERIFIED (auth).",
+      "COR-11": "01083712 — logout no longer clobbers replaced_by_jti (only with explicit successor); rotation lineage preserved. 2-lens panel VERIFIED (auth).",
+      "FT-13": "eab1768c — migration 0064_ledger_immutability: BEFORE UPDATE OR DELETE trigger on credit_transactions, DELETE-guard on user_credits; parity allowlist. 2-lens panel VERIFIED.",
+      "P2-05": "6242160b — onboarding OTP double-verify guard (synchronous in-flight ref). Panel VERIFIED (client-auth).",
+      "MNY-15-vaultredemption-watchdog": "ff0ba139 — added 'pending' to VAULT_REDEMPTION_STUCK_STATES (no_vault strand); alerting-only. Panel VERIFIED.",
+      "MNY-11-CAPSCOPE": "a1d6387a — daily-emission cap scoped by mirror currency (loop_asset_mirror_currency) not raw assetCode. Panel VERIFIED.",
+      "P2-06+FE-06+FE-07": "960a19fe — client step-up cluster: concurrency queue, step-up-401 classification (bypass refresh), isFresh() freshness gate. Panel VERIFIED.",
+      "PAYMENTURI-UNGATED": "bdef0ca9 — safePaymentUriHref scheme-gate at both LoopPaymentStep sites (server paymentUri XSS). Panel VERIFIED.",
+      "AUD-08": "389cf3db — orders all-pending-page trap fixed (empty state off raw page, pagination always shown). Panel VERIFIED. Root-cause server-pagination = deferred follow-up.",
+      "SEC-02-stepup+BK-otpatomic-stepup": "8600255f — migration 0065_admin_step_up_consumptions: step-up tokens now class-bound + single-use (consume via jti PK, INSERT..ON CONFLICT), middleware consumes, handler scope-required, web re-mint-per-row across 10 callers, retention purge; step-up OTP now atomic (tryConsumeOtp). 2-lens panel VERIFIED + integrated via 3-way merge (resolved use-admin-step-up.ts P2-06-queue + api-client.ts FE-06 overlaps by hand; full gate green; parity 614)."
+    },
+    "inVerification": {
+      "DAT-01-inv1": "wt-dat01 — migration 0066_user_credits_mirror_invariant PROVEN (DEFERRABLE INITIALLY DEFERRED constraint trigger both sides: user_credits.balance_minor == SUM(credit_transactions.amount_minor) per user/ccy at COMMIT; custom SQLSTATE 23M01; parity 619; + a (user_id,currency) index). Returned NEEDS-COORDINATION: the invariant correctly trips ~13 integration suites whose fixtures seed ONE-SIDED mirror state (balance w/o ledger, impossible IRL) — the product writers themselves maintain it (a matched write commits, deferral proven). COORDINATED reconciliation IN FLIGHT: shared seedUserCreditsWithBackingLedger helper (balance + matching opening ledger row = consistent) adopted across the balance-only fixtures; intentional-drift tests (ledger-immutability balance-UPDATE case, ledger-invariant-orphan, asset-drift-watcher) seed under session_replication_role='replica' (superuser bypass) to model pre-constraint historical data. PROD PREREQUISITE (deploy step, not ours): reconcile/zero-drift existing balances before enabling 0066 in prod (scripts/check-ledger-invariant.ts / admin reconciliation).",
+      "MNY-22-wedge": "wt-mny22wedge — ROUND 2 (round 1 REJECTED: corroboration recovery walked the anchor to an arbitrary rate in 1 cycle). Round 2 = directional bounded ratchet (validateRateJump returns capped value; ≤1 maxRatio step/cycle, each paged; ~18 cycles to walk 1000x). Anti-manipulation verifier re-running. Floor VALUE still NEEDS-DECISION (MNY-22-FLOOR-VALUE)."
+    },
+    "FILE_OVERLAP_WEBAUTH": "apps/web/app/hooks/use-admin-step-up.ts is touched by BOTH the web step-up cluster (P2-06 queue fix) AND the SEC-02-stepup coordinated fixer (web client per-action mint). They fixed in separate worktrees. Integration order: commit the web cluster FIRST (independently proven), then when SEC-02 integrates, reconcile its use-admin-step-up.ts hunks onto the post-cluster tip (git apply may conflict — re-apply SEC-02's mint-scope hunks manually or via a small reconciliation fixer; re-run the web gate). P2-06 changes the concurrency QUEUE; SEC-02 changes the token MINT scope — logically compatible, just same-file. SECOND overlap: apps/backend/src/__tests__/integration/admin-writes.test.ts — MNY-11-CAPSCOPE (committed) ADDS a test block; SEC-02 rewrites the seed().stepUp helper + ~30 reuse sites in the same file. Both reconcile when SEC-02 integrates onto the post-MNY-11/post-cluster tip (git apply will conflict on both files → re-apply SEC-02's hunks manually + re-run backend+web gates).",
+    "MIGRATION_ORDERING": "FT-13 = 0064 (authoritative). SEC-02-stepup's fixer independently also wrote 0064 (admin_step_up_consumptions) — COLLISION. SEC-02 migration MUST be renumbered to 0065 when its coordinated fix is built. Build SEC-02 AFTER FT-13 commits so 0064 is already taken on the branch and 0065 falls out naturally. Next free migration after both = 0066.",
+    "SEC-02-stepup": "NEEDS-COORDINATION (core done + proven in wt-sec02): added consumeAdminStepUpToken (class-bound: claims.scope===action, NO wildcard bypass; single-use via INSERT..ON CONFLICT(jti) into new admin_step_up_consumptions table; jti stamped on every token; legacy jti-less fails closed). To CLOSE the live path (coordinated set, land as one commit): (1) admin-step-up-middleware.ts requireAdminStepUp(action) calls consumeAdminStepUpToken instead of verify+wildcard-scope-check; map scope_mismatch->STEP_UP_PURPOSE_MISMATCH, add already_consumed code, not_consumable->STEP_UP_INVALID; (2) step-up-handler.ts make scope REQUIRED in StepUpBody (drop wildcard default); (3) web/admin client mints a FRESH scoped token per write (batch flows re-mint per row); (4) rewrite the ~30 reuse sites in admin-writes.test.ts + admin-deposit-refund-envelope.test.ts + staff-route-gating.test.ts to mint per request; (5) follow-up: admin_step_up_consumptions retention purge in the auth-row-purge worker. DECISION (decide-don't-park): strict single-use, re-mint-per-row (fail-closed/least-privilege) — Review-After. Renumber migration 0064->0065."
+  },
+  "lastUpdated": "2026-07-14 (wave6 completion campaign under new commit-all policy: MNY-19 4a5ad0bd + BK-otpatomic 073bcf25 committed; COR-11 + FT-13(0064 ledger-immutability) in 2-lens panel verification; SEC-02-stepup core proven, needs coordinated wiring + migration renumber to 0065 after FT-13 commits.)",
+  "lastUpdatedPrior": "2026-07-13 (M5b money trio committed at 2db94fe2 — FT-03/MNY-15-procure/MNY-22-band; DB-backed panel VERIFIED; full integration suite re-run against tip. M5a payout-double-pay retry in flight after the panel caught a 4th reachable double-pay on the compensate 404 path. FT-02 Soroban held w/ coordination doc.)",
+  "committedFindings": [
+    "AUD-16",
+    "AUD-07",
+    "AUD-12",
+    "P2-A",
+    "P2-B",
+    "P2-C",
+    "AUD-11",
+    "ONB-4",
+    "P2-DATE",
+    "P2-DATE-SWEEP",
+    "P2-DATE-SWEEP2",
+    "CONV-MNY-01",
+    "OBS-04",
+    "FT-06",
+    "P2-01",
+    "P2-02",
+    "FE-49",
+    "FE-31",
+    "FE-32",
+    "FE-13",
+    "FE-14",
+    "FE-15",
+    "FE-50",
+    "FE-51",
+    "FE-52",
+    "FE-53",
+    "FE-54",
+    "FE-11",
+    "FE-46",
+    "FT-03",
+    "MNY-15-procure",
+    "MNY-22-band",
+    "REL-05",
+    "BK-fleetsize",
+    "BK-bodylimit",
+    "FE-23",
+    "P2-09",
+    "FE-57",
+    "FE-20",
+    "FT-01",
+    "FT-05",
+    "BK-retryexh",
+    "FE-12",
+    "P2-03",
+    "FE-08",
+    "P2-07",
+    "CONV-WATCH-01",
+    "FE-25",
+    "AUD-13",
+    "FE-41",
+    "FE-43",
+    "MNY-13-depositrefund",
+    "MNY-04-opfloat",
+    "OPFLOAT-DATEFRAG",
+    "FE-17",
+    "FE-18",
+    "FE-39",
+    "MNY-11-emissioncap",
+    "DOM-03",
+    "MNY-15-vaultpending",
+    "MNY-10",
+    "MNY-04-hotfloat",
+    "MNY-20",
+    "AUD-10",
+    "FE-40",
+    "TST-07",
+    "TST-04",
+    "COR-14-enum",
+    "AGT-06-replay",
+    "FT-04",
+    "NS-13",
+    "FE-36",
+    "P2-04",
+    "P2-08",
+    "MNY-11-onchainrail"
+  ],
+  "$FINAL": "128 findings committed / 76 commits on remediation/audit-2026-07 (off 83010533). Committable remediation COMPLETE; every finding dispositioned (committed / held / deferred / no-op). Money wave fully closed via the DB-backed adversarial panel (which caught FT-06 phantom-delivery, the M5a double-pay + liveness-wedge, and the MNY-11-onchainrail refund-cap concurrency window). Held = the irreducible classes (migrations/auth-token/crypto/infra/documented-invariant/business-decision) with handoffs in wave6ProtectedHeld/held/needsDecision. Deferred = device/browser/crawler/e2e-verification web items in webTailDispositions. Branch never pushed -- PR is the deliverable for human review. DBs (5434 + loop_test2/3/4) can be torn down: docker rm -f loop-remediation-db.",
+  "$backendWave4Tail": "DONE (123 committed): TST-07 a550a5a9 (truncate 4 CASCADE-orphan tables), TST-04 997d9db1 (credit-order writer real-pg concurrency coverage, no bug found), COR-14-enum 8ee503b6 (db-check parity guard for 4 money/order enums), AGT-06-replay f0a11141 (id-token replay retention sweep, panel-VERIFIED w/ corrected docstring), FT-04 d152dead (exclude burns from crypto-payouts tax total, panel-VERIFIED). DOM-related was ALREADY committed (7188e576). NS-04 DESIGN-HELD (runtime kill-switch feature build). Remaining: money cluster (NS-05 broad, NS-06 reconciler, MNY-22-wedge/ratesanity partly-decision, MNY-11-autorefund/onchainrail/orderrefund refund-cap, MNY-19 crypto-signing HOLD), backend wave-6 protected (~14 mostly HOLD), web (P2-08, P2-04, FE-34/36, protected P2-05/06/FE-06/07/09, browser/mobile ~10 mostly defer).",
+  "$moneyMediumBatch2": "DONE: MNY-11-emissioncap 9f0ae616, DOM-03 0affee5a, OPFLOAT-DATEFRAG 78f33f61 committed; MNY-06-hotfloat HELD (migration).",
+  "$moneyMediumBatch3": "DONE (118 committed): MNY-15-vaultpending f9b625b4 (vault stuck-watchdog covers pending), MNY-10 5baff03b (emission dest pinned to registered wallet), MNY-04-hotfloat d8af00c8 (GREATEST clamp avoids CHECK abort), MNY-20 45e90244 (record unrecognized_deposit skip, never auto-refund unattributable) — all DB-panel VERIFIED. Web: AUD-10 ce1154ee (wallet error+retry), FE-40 46645a43 (session-expiry re-auth, auth machinery byte-unchanged). FE-16 NO-OP (support==admin reads per ADR-037). New follow-ups discovered: MNY-15-vaultredemption-watchdog, MNY-11-CAPSCOPE, MNY-11-EMISSION-HARDENING, FAILUREREASON-HYGIENE, MNY-10 openapi-doc-drift. Remaining money: NS-05 (broad multi-path cap), NS-06 (hot-float reconciler), MNY-22-wedge/ratesanity (price-feed cold-start, partly decision), MNY-11-autorefund/onchainrail/orderrefund (refund-cap cluster), FT-04 (quarterly-tax double-count), MNY-19.",
+  "$moneyMediumBatch1": "MNY-13-depositrefund COMMITTED fe092a2f (backend ADR-017 fence + web caller + openapi, atomic; panel VERIFIED, flagged). MNY-04-opfloat in panel. MNY-06-vaultredemption HELD (decision: documented 0.5% buffer invariant). INT-07 HELD (migration). Discovered: OPFLOAT-DATEFRAG bug (fix as follow-up).",
+  "$checkpoint": "102 findings committed. Money wave: M5a (payout, 3 panel rounds) + M5b (procure) VERIFIED+committed; FT-02 Soroban held. Backend wave-4 concurrency tail done (REL-05, fleetsize, bodylimit, CONV-WATCH-01). Web i18n/UX/SEC batches 1-3 done (FE-23,P2-09,FE-57,FE-20,FE-12,P2-03,FE-08,P2-07,FE-25,AUD-13). Full integration suite 243 green on tip. Remaining: backend money mediums (~20, DB-gated, panel), backend wave-4 tail (NS-04,COR-14-enum,TST-04,TST-07,AGT-06-replay-HOLD), backend wave-6 protected (~15 mostly HOLD), web (~35: FE-17/18/P2-08/16/40/41/42/43/AUD-10/34/36/39 + protected P2-05/06/FE-06/07/09 + browser/mobile many).",
+  "$committedFindings_note": "This array is a convenience mirror; the AUTHORITATIVE committed set is the git Audit-Finding: trailers. M5b (FT-03/MNY-15-procure/MNY-22-band) landed at commit 2db94fe2.",
+  "wave6ProtectedHeld": {
+    "$note": "Backend wave-6 = the 'irreducible' classes the policy holds for human review: DB migrations, auth-token logic, crypto, infra. Each below is a real, confirmed defect with a clear approach; the fix is a migration / auth-redesign / crypto-config / infra change that must NOT be auto-committed. NS-13 (settlement watcher, app-logic) is being FIXED separately, not held.",
+    "migrations_HOLD": {
+      "FT-13": "credit_transactions/user_credits have NO DB-tier immutability -- 'append-only' is app-convention only; a rogue UPDATE/DELETE on the ledger is not blocked at the DB. Fix = a migration adding row-immutability (a BEFORE UPDATE/DELETE trigger raising on credit_transactions, or REVOKE + rules). HUMAN-HOLD (migration on the financial ledger).",
+      "DAT-01-inv1": "INV-1 (user_credits.balance_minor == SUM(credit_transactions.amount_minor) per user/currency) has no DB-tier enforcement. Fix = a migration adding a deferred constraint trigger asserting the mirror equality on each ledger write. HUMAN-HOLD (migration).",
+      "MNY-01-INV3": "The 0044 emission-conservation trigger does NOT fire on fresh order_cashback/interest_mint INSERTs (only on the emission path), so those mints aren't conservation-checked at the DB. Fix = extend the trigger (migration 0044-followup) to cover those insert paths. HUMAN-HOLD (migration on a money trigger).",
+      "DAT-03": "0036 created plain (non-CONCURRENT) indexes on the two largest growing tables, which lock writes for the duration on a large prod table. Fix = a migration recreating them CREATE INDEX CONCURRENTLY (outside a txn). HUMAN-HOLD (migration + prod-ops timing).",
+      "BK-pctcheck": "orders.wholesale_pct/user_cashback_pct/loop_margin_pct lack a non-negative CHECK (siblings have it). Fix = a migration adding CHECK (>= 0). HUMAN-HOLD (migration).",
+      "NS-16": "orders amount CHECKs are >= 0 not > 0, so a zero-value order passes. Fix = a migration tightening to > 0 (after confirming no legitimate zero-value order exists / backfill). HUMAN-HOLD (migration + data audit).",
+      "NS-03": "The durable admin audit trail (admin_idempotency_keys / audit rows) self-deletes after 24h, so the sole durable admin money-move record is ephemeral. Fix = a migration/retention change extending retention (regulatory-grade) + likely an archive. HUMAN-HOLD (migration + retention policy decision)."
+    },
+    "authToken_HOLD": {
+      "SEC-02-stepup": "Flat admin tier + wildcard step-up: one OTP mints a 5-min, unlimited-use, all-class step-up token. Fix = scope step-up tokens to a single action-class + single-use (or a tight use-count), a redesign of admin-step-up.ts token semantics. HUMAN-HOLD (auth-token logic).",
+      "NS-09": "Access tokens + admin bearers are non-revocable until expiry (no token-version bump / revocation list). Fix = a token-version/revocation mechanism (a user/session token_version bumped on logout/compromise, checked on every verify). HUMAN-HOLD (auth-token logic + likely migration).",
+      "BK-otpatomic": "OTP single-use is not atomically enforced: two concurrent verify-otp with the same code can both succeed (read-then-mark, no atomic CAS). Fix = an atomic UPDATE ... WHERE consumed_at IS NULL RETURNING (consume-and-check in one statement) so exactly one wins. EXPLOITABLE security race. HUMAN-HOLD (auth-token logic) -- but small; a ready patch is worth producing.",
+      "COR-11": "Loop-native refresh logout overwrites replaced_by_jti, destroying the rotation-chain audit lineage (can't trace a stolen-token rotation). Fix = on logout use a distinct terminal marker instead of overwriting replaced_by_jti. HUMAN-HOLD (auth-token logic); small."
+    },
+    "crypto_HOLD": {
+      "NS-10": "Redeem code/PIN encryption is opt-in (LOOP_REDEEM_ENCRYPTION_KEY, boot-warn-only) -- unset = plaintext redeem codes/PINs at rest. Fix = make encryption mandatory (fail-closed at boot if the key is unset in prod) + a backfill migration to encrypt existing plaintext. HUMAN-HOLD (crypto + env + migration).",
+      "MNY-19": "Vault Soroban txs are signed with a HARDCODED testnet/mainnet network passphrase, ignoring env.LOOP_STELLAR_NETWORK_PASSPHRASE (vault-client.ts) -- if the hardcoded value ever mismatches the deployed network the signature is invalid on the intended network (or valid on the wrong one). Fix = sign with env.LOOP_STELLAR_NETWORK_PASSPHRASE (single source of truth). Small, clear, testable, but on the crypto/SIGNING path = HUMAN-HOLD per policy; a ready patch is worth producing."
+    },
+    "infra_HOLD": {
+      "NS-07": "No PITR / offsite / drilled restore for the durable money record + the 24h audit trail (compounds NS-03). Fix = infra/ops (managed-PG PITR, offsite backups, a restore drill). Not code -- HUMAN/ops."
+    }
+  },
+  "webTailDispositions": {
+    "$note": "Every remaining web finding's disposition. Committable ones (P2-04, P2-08, FE-36) are in flight. The rest are HOLD (protected client-security/auth) or DEFER (need a real device / browser / crawler / e2e infra to verify a fix -- a fixer can write the code but cannot prove it on the platform where the bug lives) or CI/IaC HOLD.",
+    "protectedAuth_HOLD": {
+      "P2-05": "Onboarding client-side native double-verify race lets one one-time OTP be consumed twice. Auth/OTP client race -> HOLD (client-security). Related server-side: BK-otpatomic (backend OTP atomicity, also held).",
+      "P2-06": "Shared single-slot step-up queue (use-admin-step-up) drops one of two concurrent step-up requests. Auth client concurrency -> HOLD.",
+      "FE-06": "Step-up 401 misread as access-token expiry in api-client -> a transient refresh on a step-up challenge. Auth-transport -> HOLD (distinct from FE-40 which exempted step-up from the session-expiry EMIT; FE-06 is the refresh-retry misclassification).",
+      "FE-07": "isFresh() step-up freshness guard is dead code (never read) -> step-up freshness not actually enforced client-side. Auth -> HOLD; small, a ready patch is worth producing.",
+      "FE-09": "Refresh token + email stored in web sessionStorage (script-readable) -> XSS can exfiltrate the refresh token. Token-storage architecture -> HOLD (auth-token storage decision: httpOnly cookie vs in-memory)."
+    },
+    "deviceOrCrawlerVerification_DEFER": {
+      "$why": "A fixer can write the fix but the defect + verification live on a real device / browser / crawler / e2e harness not available here; committing an unverified platform fix would violate the proven-red discipline. Flagged for a device/browser session.",
+      "P2-10_P2-11": "Conversion pages soft-404 / missing proper SEO status+meta for crawlers (sitemap.tsx, cashback.$slug.tsx, gift-card/brand). Code-fixable (status codes + meta) but needs crawler/SSR verification.",
+      "P2-14": "No min-app-version / forced-update gate (ForceUpdateGate + /api/config). Feature build + needs a Capacitor build to verify.",
+      "FE-01": "Mobile 'prevent screenshots' overclaim: no FLAG_SECURE. Needs Android device.",
+      "FE-02": "App-lock off-by-default / fail-open / cold-start-only. Needs device.",
+      "FE-03": "assetlinks.json / apple-app-site-association 404 by default -> App-Link verification fails. Protected (.well-known) + needs OS link verification.",
+      "FE-04": "No TLS pinning/attestation (ADR-027 deferred). Protected + needs device.",
+      "FE-05": "Clipboard copy of gift-card code/PIN with no auto-clear. Code-fixable but needs a real clipboard/browser to verify the auto-clear timing.",
+      "FE-10": "Web admin flashes 'Sign in' to authed staff on hard reload (auth-restore hydration flash). Needs a browser to verify the hydration timing.",
+      "FE-19": "Zero RTL CSS despite AED/SAR markets (physical pl-/pr- everywhere). Large CSS sweep + needs visual RTL verification.",
+      "FE-22": "Phase2Gate hides content its meta() promises -> crawler mismatch. Needs crawler verification.",
+      "FE-24": "/styleguide reachable in prod (noindex only, no gate). Code-fixable (route gate) but needs prod-routing verification.",
+      "FE-35": "The one real-purchase e2e is a single happy-path test. Needs the e2e harness (Playwright + real backend).",
+      "FE-55": "Onboarding biometric-failure is silent (no user feedback). Needs a device with biometrics.",
+      "AGT-11": "inert a11y fix defeated the Android soft-keyboard focus. Needs an Android device.",
+      "FE-33": "No shared Dialog primitive (3 hand-rolled <dialog> wrappers). Refactor; low-value, defer.",
+      "FE-34": "vitest/vite version-resolution mismatch (tests run on vite@7.3.2 not the shipped 8.0.16). Needs a package.json/lockfile change + npm install (a deps change a fixer can't run in a worktree) -> COORDINATION (deps/toolchain).",
+      "P2-12": "entry.server security-header wiring untested + excluded from vitest. Code-fixable (un-exclude + add a test) but SSR-header testing needs care; candidate for a follow-up backend/web test pass."
+    },
+    "ciIac_HOLD": {
+      "P2-13": ".github/branch-protection: required_status_checks doesn't include the real-purchase + admin e2e suites. CI config -> HOLD.",
+      "FE-37": ".github/workflows: no CI-driven web deploy (deployed artifact != CI-built). CI/CD -> HOLD.",
+      "FE-38": "apps/web/fly.toml health check probes / (a geo-redirect round-trip). IaC -> HOLD."
+    }
+  },
+  "worklists": {
+    "web": "scratchpad/worklist-web.json (70 defects)",
+    "backend": "scratchpad/worklist-backend.json (117 defects)",
+    "integrateHelper": "scratchpad/integrate.sh (zsh-safe cp+commit)",
+    "note": "~185 unique defects total; grinding all. Fixers now instructed to run eslint (husky enforces it). FE-58/FE-60 are dupes of committed AUD-11/ONB-4."
+  },
+  "webDupesAlreadyCommitted": ["FE-58=AUD-11", "FE-60=ONB-4"],
+  "webDeferred": [
+    "FE-47 (dead dark: sweep, huge blast radius)",
+    "FE-61 (bundle-budget comment — .github/workflows PROTECTED→human-hold)",
+    "FE-62 (generated native artifacts — skip)"
+  ],
+  "backendWave1Committed": [
+    "DOC-03",
+    "API-03",
+    "DOC-06",
+    "API-02-parity",
+    "AGT-06-catalog",
+    "NTF-16",
+    "MNY-05",
+    "AGT-08",
+    "TST-01",
+    "AGT-07",
+    "COR-04",
+    "AGT-06-deadcredit",
+    "BK-orphan"
+  ],
+  "held": [
+    {
+      "id": "BK-hmacdead",
+      "reason": "deletes a crypto/signing (HMAC webhook-verify) module — provably unreferenced on this branch, but prior audits call it an intentionally-staged primitive for the not-yet-built Privy webhook handler (ADR-030). Delete-vs-keep is a human decision.",
+      "patch": "held/BK-hmacdead.patch"
+    },
+    {
+      "id": "FT-10",
+      "reason": "CODEOWNERS required-reviewer rule inert because @LoopDevs/engineering team does not exist — fix needs the correct GitHub team name (only the user knows it). NEEDS-DECISION.",
+      "patch": null
+    },
+    {
+      "id": "CONV-MNY-01-followup",
+      "reason": "add end-to-end integration test for shared-mirror 409-vs-500 (verifier-flagged gap)",
+      "patch": null
+    },
+    {
+      "id": "MNY-06-hotfloat",
+      "reason": "hot-float replenish credits balance_minor via bigint floor amountOutStroops/STROOPS_PER_MINOR, dropping up to ~0.99 minor of real USDC per tick permanently (proven: 5-minor leak over 10 ticks, unbounded; R3-1 records full stroops so balance_minor drifts BELOW accounted). Conservation-correct cure = carry the sub-minor remainder forward (mirroring interest-mint splitPayable + interest_mint_snapshots.carry_after_stroops), which needs a NEW durable column carry_stroops on vault_hot_float = MIGRATION = HUMAN-HOLD. Direction is UNAMBIGUOUS (carry-forward; ceil/round would over-credit=phantom backing, forbidden) so NOT a decision. Fails safe (under-credits, never phantom). Repro + migration handoff saved to held/MNY-06-hotfloat-repro.test.ts. Handoff: add carry_stroops bigint NOT NULL DEFAULT 0 CHECK(>=0 AND <100000); in runHotFloatReplenishTick payable=carry+amountOutStroops, credit payable/PER, set carry=payable%PER in the existing txn; convert repro to DB-backed integration test.",
+      "patch": "held/MNY-06-hotfloat-repro.test.ts"
+    },
+    {
+      "id": "INT-07",
+      "reason": "interest-mint's two idempotency fences key at different granularities (snapshot on asset_code vs credit_transactions on currency) -> a legit mint is silently dropped once two asset_codes share a currency. Safe alignment needs a MIGRATION (asset discriminator on the credit_transactions interest idempotency index) = HUMAN-HOLD. NOT exploitable today (ONCHAIN_MINT_ELIGIBLE_ASSETS={GBPLOOP} + DB CHECKs pin asset). Code-only hack rejected (loosens legacy fence -> double-mint). Skipped regression test + migration handoff saved. Sequence the migration BEFORE widening ONCHAIN_MINT_ELIGIBLE_ASSETS.",
+      "patch": "held/INT-07-migration-handoff.patch"
+    }
+  ],
+  "backendWave2Committed": [
+    "CFG-01",
+    "CFG-02",
+    "SEC-10",
+    "CFG-05",
+    "CFG-06(flagged-review: kill-switch validation)",
+    "FT-09",
+    "OBS-01",
+    "OBS-config-history",
+    "PRV-read-audit",
+    "DAT-09",
+    "BK-testnetwalk",
+    "BK-migparity",
+    "BK-ctxrates",
+    "API-02-wellknown"
+  ],
+  "noOps": [
+    "DAT-11-apy (finding claimed integer division; code uses floats — empirically zero delta, no vacuous fix)",
+    "DOM-velocity (finding claimed counts created-but-unpaid orders; empirically no defect)",
+    "FE-16 (premise false: STAFF_ROLES is only admin+support with admin superset-of support; ADR-037 deliberately gives support==admin read access; the rendered failureReason/Horizon JSON is on-chain-public or curated operator strings. A client whitelist would diverge from ADR-037 + break the ops surface = regression. Verified NO-OP. Follow-up: FAILUREREASON-HYGIENE — backend write-path should never write raw err.message/stack/secret into failureReason (current callers pass controlled values like 'procurement_timeout'; a lint/guard would be defense-in-depth).)"
+  ],
+  "needsDecision": [
+    "AGT-06-fly (staging/prod email gate — fix belongs in app code not the protected fly.toml; correct staging-email behavior is an undecided business rule, no ADR)",
+    "AUD-08 orders-pending-filter (COORDINATION-HOLD: bug confirmed live — orders.tsx paginates over ALL statuses then drops pending client-side, so an all-pending page shows a false 'No orders yet' AND hides Prev/Next, trapping the user from later completed orders. Correct fix = server-paginate over the filtered set, which needs (1) GET /api/orders list-handler to accept exclude-pending/multi-status + Loop->upstream status translation on the REQUEST path (touching the injection-sensitive ALLOWED_LIST_QUERY_PARAMS allowlist), AND (2) external CTX /gift-cards upstream to support a fulfilled|refunded|expired union/negation — external, unverifiable/unchangeable from here. Frontend-only MITIGATION available (gate empty state on allOrders.length===0 && !hasNext && !hasPrev and always show pagination) kills the trap but keeps variable-rows-per-page. Held pending human decision on backend+upstream approach vs the mitigation.)",
+    "MNY-06-vaultredemption (DECISION-HOLD, touchesProtectedClass: the 0.5% REDEMPTION_SHARE_BUFFER_BPS over-collects shares from the user's wallet vs debiting only value_minor -> full-balance redemptions fail closed + 0.5% backing drift into the operator float (liabilities-exceed-backing; not caught by the value-denominated conservation trigger). But the buffer is a DOCUMENTED money invariant (INV-V2 redemption, ADR-031 D6, pinning unit tests). Every remedy overturns the ratified invariant/constant (HUMAN-HOLD) OR relocates drift to the operator pool OR weakens slow-path liveness OR needs a treasury reserve/refund flow (cross-module). 3 decisions for a human: (1) is a user-sourced 0.5% share buffer acceptable in the V4 user-holds-shares model, and is the +0.5%-into-float intended revenue or drift; (2) if kept, where do the extra shares come from (operator reserve/excess-refund, treasury-touching); (3) if dropped (rely on minAmountsOut), accept slow-path adverse-move reverts + update INV-V2/ADR/2 pinning tests. Full re-derivation in the agent transcript.)",
+    "MNY-11-orderrefund (RESOLVED-BY-MNY-11-onchainrail, not separately committed): the admin order-refund on-chain branch (order-refund.ts:311) dispatches to applyOrderAutoRefund -> applyOnChainOrderAutoRefund, the exact primitive MNY-11-onchainrail gated with the shared both-rails cap. So onchainrail already gates the admin on-chain order-refund path, with a strictly-better both-rails counter than orderrefund's handler-level credit-only check. The redundant handler check was dropped to avoid a double cap-check. Verify onchainrail covers this branch in the PR.",
+    "MNY-11-autorefund (DECISION-HOLD: separating the auto-refund budget from the shared admin daily cap requires INVENTING a new money CONSTANT (the auto-refund daily budget value + whether it's a separate pool or a sub-allocation) -- a business/policy decision, no existing unwired budget. onchainrail's fix makes on-chain auto-refunds correctly COUNT against the current shared cap (consistent with intent); a separate budget is a future decision. Held.)",
+    "NS-05 admin-value-cap (COORDINATION/DECISION-HOLD: admin retry/redrive/float paths (payouts-retry, order-redrive, vault-redrive, operator-float-adjust) have no per-action VALUE cap -- a fat-finger/compromised admin can move an unbounded amount. Fix = apply a daily/per-action value cap to those paths, but the CAP VALUE(s) are a policy decision (what's the ceiling per rail?) and it spans ~4 admin handlers = coordinated + decision. Held for human cap-policy decision.)",
+    "NS-06 hotfloat-reconciler (COORDINATION-HOLD: vault_hot_float.balance_minor has no reconciler, yet solvency trusts it -- there's no periodic check that the recorded float balance matches the real on-chain USDC held. Fix = build a hot-float reconciler (like the operator-float one), a sizeable new subsystem; likely needs the R3-1 reconciliation design. Feature-scale, held for design.)",
+    "MNY-22-wedge+ratesanity (PARTIAL/DECISION-HOLD: price-feed sanity bound (price-feed.ts / rate-sanity.ts) permanently WEDGES deposit settlement after a legit >maxRatio move, and accepts ANY rate on a cold cache with no absolute floor/staleness. The recovery-from-wedge logic is committable, but the fix also needs an ABSOLUTE floor + staleness bound whose VALUES are a money-policy decision (what's a sane min rate / max staleness per asset?). Held pending the floor/staleness policy; recovery-half could be done separately if desired.)",
+    "P2-07-wiring (IN PROGRESS not held: modal-side pendingAction capability built+tested; being wired store-centralized through admin-step-up.store.ts + use-admin-step-up.ts + 10 admin callers to close the blind-authorization vuln end-to-end)",
+    "NS-04 kill-switches (DESIGN-HOLD: 'add runtime kill/halt switches + an admin API for the deposit/payout/vault/refund rails (not boot-flags)' is a feature build -- needs new switch state (likely a DB table or a durable config store = migration), an admin API surface with authz, enforcement wiring at every rail's entry, and a policy on what a halt does to in-flight ops. Kill-switch defaults are a protected class. Too large + policy-laden to auto-fix; surface for human design. Note: CFG-06 already added kill-switch VALIDATION semantics; this is the missing RUNTIME-halt capability.)",
+    "NS-08 account-freeze (DESIGN-HOLD: 'add per-account freeze/AML-hold capability' is a feature build, not a remediation fix — needs a schema migration (frozen/hold column or account_holds table = HUMAN-HOLD), an admin/AML surface to set/clear it, enforcement wiring at every debit/withdraw path, and an AML policy decision on what a hold blocks. Too large + policy-laden to auto-fix; surface for human design.)"
+  ],
+  "wave4TailInFlight": {
+    "nonDbFixers_DONE": [
+      "REL-05 committed 1f4d2f83 (SSE buffer cap, verified)",
+      "BK-fleetsize committed 3ac260db (divisor high-water bias, verified)",
+      "BK-bodylimit committed 6a0a23e7 (middleware order, verified)"
+    ],
+    "dbFixersQueued": [
+      "CONV-WATCH-01 (vault-watchdog-alert.ts txn+FOR UPDATE fence)",
+      "TST-04 (repo-credit-order.ts real-pg concurrency coverage)"
+    ],
+    "dbSerializationNote": "DB-gated fixers run one-at-a-time against the shared 5434 test DB to avoid truncation collisions with each other and the M5a retry's gate.",
+    "alsoRemainingWave4": [
+      "AGT-06-replay (auth/id-token-replay.ts — auth-token → HUMAN-HOLD patch)",
+      "NS-04 (kill-switches.ts — kill-switch surface, likely flag/validation; panel-review)",
+      "COR-14-enum (packages/shared/src/order-state.ts — shared contract, care)",
+      "TST-07 (integration/db-test-setup.ts — test-infra)"
+    ]
+  },
+  "backendWave3Committed": [
+    "SEC-SSRF-allowlist(flagged)",
+    "SEC-SSRF-nat64(flagged)",
+    "FT-14(flagged)",
+    "FT-08",
+    "FT-15",
+    "COR-14-bulk",
+    "NTF-18",
+    "BK-healthrecon(flagged)"
+  ],
+  "flaggedForReview": [
+    "CFG-06 (kill-switch validation semantics)",
+    "OBS-04 (Sentry scrubber)",
+    "CONV-MNY-01 (money)",
+    "SSRF+FT-14 commit 1f03ad78 (security egress + secret-in-log)",
+    "BK-healthrecon (health bearer-gate)",
+    "M5b/2db94fe2 FT-03+MNY-15-procure+MNY-22-band (money: auto-refund on terminal ctx-pay failures + usdc-denominated payment band; VERIFIED by DB-backed panel, touchesProtectedClass co-sign)",
+    "M5a/5c49a664 FT-01+FT-05+BK-retryexh (money: close on-chain payout double-pay + in-flight liveness wedge; VERIFIED by a 3rd-round DB-backed adversarial panel after two prior REJECTs caught a double-pay then a wedge; touchesProtectedClass co-sign; residuals: crash-only txHash-null strand + 30s expiry margin, both pre-existing/infra-bounded)",
+    "MNY-13/fe092a2f depositrefund (money: ADR-017 idempotency+audit fence on the only unfenced admin money-move; atomic backend+web-caller+openapi contract change; DB-backed panel VERIFIED no double-refund/poison; touchesProtectedClass co-sign)",
+    "P2-03/4197d625 (security: javascript: XSS scheme-gate on redeemUrl anchors)",
+    "FE-08/3b5d58d0 (security: CSP nonce in SSR meta, drops unsafe-inline)",
+    "P2-07/416ae62f (security/UX: admin step-up modal now echoes the amount+destination the OTP authorizes)"
+  ],
+  "authClusterResolved": {
+    "committed-flagged": ["SEC-15", "SEC-clearotp"],
+    "held": [
+      "SEC-rbac (migration+authz → held/SEC-rbac_CONV-INFO-01.patch)",
+      "CONV-INFO-01 idempotency/audit (→ same held patch)"
+    ],
+    "needsDecision": [
+      "CONV-AUTH-01 (recovery decoupling needs a step-up policy + ceiling)",
+      "CONV-INFO-01 step-up (revoke-sessions is deliberately step-up-exempt; adding it overturns a tested decision)"
+    ]
+  },
+  "progress": "85 findings committed at 2026-07-13 (M5b money trio 2db94fe2 the latest). Money wave 5 in progress: M5b (procure) VERIFIED+committed; M5a (payout FT-01/FT-05/BK-retryexh) retry in flight — the DB-backed panel REJECTED the first attempt because a 4th reachable double-pay survives on the terminal handleSubmitError compensate 404 path (retry-exhaustion + transient_horizon + in-flight 404 landed===null falls through to markPayoutFailed+autoCompensate, then the in-flight tx lands); retry extends the FT-05 expiry-guard to that branch. M5c (FT-02 Soroban) held with 4-step coordination doc. Authoritative committed list = git log Audit-Finding trailers. Remaining: backend wave4 concurrency tail(~10), wave5 money mediums(~22), wave6 protected→hold(15); web waves 2(23)/3(8)/4(10)/5(8). Resolved-non-commit: held patches (BK-hmacdead, SEC-rbac+CONV-INFO-01, FT-02-soroban), 1 no-op (DAT-11-apy), 4 decisions (FT-10, CONV-AUTH-01, CONV-INFO-01-stepup, AGT-06-fly). Verifier-discovered new residuals: (a) payout single-hash-column overwrite under deep Horizon lag — needs a hash-history schema, follow-up; (b) M5a compensate double-pay — being fixed in the retry."
+}
