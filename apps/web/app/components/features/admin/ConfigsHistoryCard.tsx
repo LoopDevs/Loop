@@ -84,7 +84,7 @@ function ConfigHistoryRow({ row }: { row: AdminConfigHistoryEntry }): React.JSX.
             margin{row.active ? '' : ' · inactive'}
           </div>
         </div>
-        <div className="shrink-0 text-right text-xs text-gray-500 dark:text-gray-400">
+        <div className="shrink-0 text-end text-xs text-gray-500 dark:text-gray-400">
           <div className="tabular-nums">{fmtRelative(row.changedAt)}</div>
           <div className="truncate" title={row.changedBy}>
             by {truncId(row.changedBy)}

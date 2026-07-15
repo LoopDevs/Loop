@@ -293,7 +293,7 @@ function AdminMerchantDetailRouteInner(): React.JSX.Element {
                   {['Changed', 'Wholesale', 'User', 'Loop margin', 'By', 'Active'].map((h) => (
                     <th
                       key={h}
-                      className="px-6 py-2 text-left text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400"
+                      className="px-6 py-2 text-start text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400"
                     >
                       {h}
                     </th>

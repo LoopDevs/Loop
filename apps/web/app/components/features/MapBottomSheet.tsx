@@ -128,7 +128,7 @@ export function MapBottomSheet({ merchant, onClose }: MapBottomSheetProps): Reac
         role="dialog"
         aria-modal="true"
         aria-label={`${merchant.name} purchase`}
-        className={`fixed left-0 right-0 z-[1050] ${isClosing ? '' : 'animate-slide-up'}`}
+        className={`fixed start-0 end-0 z-[1050] ${isClosing ? '' : 'animate-slide-up'}`}
         style={{
           // Sit the sheet directly above the bottom tab bar so the
           // tab bar stays visible and the sheet's bottom edge isn't
@@ -195,7 +195,7 @@ export function MapBottomSheet({ merchant, onClose }: MapBottomSheetProps): Reac
               type="button"
               onClick={startClose}
               aria-label={`Close ${merchant.name} details`}
-              className="absolute top-2 right-2 z-10 pointer-events-auto h-9 w-9 rounded-full bg-black/45 text-white backdrop-blur-md shadow flex items-center justify-center"
+              className="absolute top-2 end-2 z-10 pointer-events-auto h-9 w-9 rounded-full bg-black/45 text-white backdrop-blur-md shadow flex items-center justify-center"
             >
               <svg
                 viewBox="0 0 16 16"
@@ -209,7 +209,7 @@ export function MapBottomSheet({ merchant, onClose }: MapBottomSheetProps): Reac
               </svg>
             </button>
             <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/70 via-black/30 to-transparent pointer-events-none" />
-            <div className="absolute bottom-3 left-4 right-4 flex items-center gap-3 pointer-events-none">
+            <div className="absolute bottom-3 start-4 end-4 flex items-center gap-3 pointer-events-none">
               <div className="h-12 w-12 rounded-lg bg-white dark:bg-gray-800 shadow-sm flex items-center justify-center overflow-hidden flex-shrink-0">
                 {logoUrl !== undefined ? (
                   <LazyImage

@@ -332,8 +332,9 @@ html.native body::before {
   content: '';
   position: fixed;
   top: 0;
-  left: 0;
-  right: 0;
+  /* FE-19: full-width backdrop — logical inline inset so it stays edge-to-edge
+     regardless of writing direction (identical to `left:0;right:0` in LTR). */
+  inset-inline: 0;
   /* Extended well beyond safe-top so the strong top stops have
      visible real-estate before the fade. With a small height the
      gradient crushes the top 80% alpha into just a few pixels and
@@ -473,7 +474,11 @@ html.native .route-enter {
   }
 }
 
-/* Toast slide-in animation */
+/* Toast slide-in animation. Toasts anchor to the inline-end edge
+   (`ToastContainer` uses `end-4`), so the slide should come from that same
+   edge: from the right in LTR, from the left in RTL. LTR keeps the original
+   `translateX(100%)` keyframe verbatim; RTL swaps to a mirrored keyframe via
+   the `[dir='rtl']` override (FE-19). */
 @keyframes slide-in-right {
   from {
     opacity: 0;
@@ -485,8 +490,23 @@ html.native .route-enter {
   }
 }
 
+@keyframes slide-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
 .animate-slide-in {
   animation: slide-in-right 0.3s ease-out;
+}
+
+[dir='rtl'] .animate-slide-in {
+  animation-name: slide-in-left;
 }
 
 /* Bottom sheet animations */

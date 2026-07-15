@@ -153,7 +153,7 @@ function Chart({
                 aria-hidden="true"
               />
             </span>
-            <span className="shrink-0 w-24 tabular-nums text-right text-gray-700 dark:text-gray-300">
+            <span className="shrink-0 w-24 tabular-nums text-end text-gray-700 dark:text-gray-300">
               {fmtMinor(d.wholesaleMinor, currency)}
             </span>
           </li>

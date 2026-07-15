@@ -46,7 +46,7 @@ function SearchDropdown({
     <div
       role="listbox"
       id="search-listbox"
-      className="absolute top-full left-0 right-0 mt-2 rounded-lg shadow-lg z-[999999] bg-surface border border-line overflow-hidden"
+      className="absolute top-full start-0 end-0 mt-2 rounded-lg shadow-lg z-[999999] bg-surface border border-line overflow-hidden"
     >
       {results.map((r, i) => (
         <button
@@ -58,7 +58,7 @@ function SearchDropdown({
           role="option"
           aria-selected={i === selectedIndex}
           onClick={() => onSelect(r)}
-          className={`w-full px-3 py-2.5 text-left flex items-center gap-3 cursor-pointer transition-colors hover:bg-gray-50 ${
+          className={`w-full px-3 py-2.5 text-start flex items-center gap-3 cursor-pointer transition-colors hover:bg-gray-50 ${
             i === selectedIndex ? 'bg-gray-50' : ''
           }`}
         >
@@ -215,7 +215,7 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
             aria-activedescendant={
               selectedIndex >= 0 ? `search-option-${selectedIndex}` : undefined
             }
-            className="w-full pl-9 pr-3 py-2 text-sm rounded-md border border-line bg-gray-50 text-ink placeholder:text-ink-subtle transition-[border-color,box-shadow,background-color] duration-150 focus:outline-none focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/12"
+            className="w-full ps-9 pe-3 py-2 text-sm rounded-md border border-line bg-gray-50 text-ink placeholder:text-ink-subtle transition-[border-color,box-shadow,background-color] duration-150 focus:outline-none focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/12"
             onChange={(e) => {
               setQuery(e.target.value);
               setOpen(true);
@@ -245,7 +245,7 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
             }}
           />
           <svg
-            className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-subtle"
+            className="absolute start-3 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-subtle"
             fill="none"
             stroke="currentColor"
             strokeWidth={2}
@@ -270,7 +270,7 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
           // "searched, found nothing" state without moving focus.
           <div
             role="status"
-            className="absolute top-full left-0 right-0 mt-2 rounded-lg shadow-lg z-[999999] bg-surface border border-line px-4 py-6 text-center text-sm text-ink-muted"
+            className="absolute top-full start-0 end-0 mt-2 rounded-lg shadow-lg z-[999999] bg-surface border border-line px-4 py-6 text-center text-sm text-ink-muted"
           >
             {t('search.noResults', { query: trimmedQuery })}
           </div>
@@ -280,7 +280,7 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
           // should read as "search is broken right now".
           <div
             role="status"
-            className="absolute top-full left-0 right-0 mt-2 rounded-lg shadow-lg z-[999999] bg-surface border border-line px-4 py-6 text-center text-sm text-ink-muted"
+            className="absolute top-full start-0 end-0 mt-2 rounded-lg shadow-lg z-[999999] bg-surface border border-line px-4 py-6 text-center text-sm text-ink-muted"
           >
             {t('search.error')}
           </div>
@@ -352,7 +352,7 @@ function AccountMenu({ showCashbackNav }: { showCashbackNav: boolean }): React.J
       {open && (
         <div
           role="menu"
-          className="absolute right-0 top-full mt-2 w-60 rounded-lg bg-surface border border-line shadow-lg overflow-hidden z-[999999]"
+          className="absolute end-0 top-full mt-2 w-60 rounded-lg bg-surface border border-line shadow-lg overflow-hidden z-[999999]"
         >
           <div className="px-4 py-3 border-b border-line">
             <p className="text-xs text-ink-subtle">{t('account.signedInAs')}</p>
@@ -382,7 +382,7 @@ function AccountMenu({ showCashbackNav }: { showCashbackNav: boolean }): React.J
                   void navigate('/');
                 })();
               }}
-              className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
+              className="block w-full text-start px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
             >
               {t('account.signOut')}
             </button>
@@ -421,7 +421,7 @@ export function Navbar(_props: NavbarProps = {}): React.JSX.Element {
   return (
     <nav
       data-nav="top"
-      className="fixed top-0 left-0 right-0 z-[1100] bg-white border-b border-line"
+      className="fixed top-0 start-0 end-0 z-[1100] bg-white border-b border-line"
       style={{
         // calc(100vw - 100%) = scrollbar width; keeps nav content aligned
         // with page content whether or not a scrollbar is present.
@@ -437,7 +437,7 @@ export function Navbar(_props: NavbarProps = {}): React.JSX.Element {
           until focused. */}
       <a
         href="#main"
-        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-2 focus:z-[1200] focus:rounded-md focus:bg-blue-600 focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-white"
+        className="sr-only focus:not-sr-only focus:absolute focus:start-4 focus:top-2 focus:z-[1200] focus:rounded-md focus:bg-blue-600 focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-white"
       >
         {t('skipToContent')}
       </a>
@@ -445,7 +445,7 @@ export function Navbar(_props: NavbarProps = {}): React.JSX.Element {
         <div className="flex items-center gap-3 py-3 sm:py-4">
           {/* Logo — web only (native shows the launcher mark). */}
           {!isNative && (
-            <Link to="/" className="flex items-center flex-shrink-0 pr-1 text-ink">
+            <Link to="/" className="flex items-center flex-shrink-0 pe-1 text-ink">
               <LoopLogo className="h-6 md:h-7 w-auto mt-0.5" />
             </Link>
           )}
@@ -456,7 +456,7 @@ export function Navbar(_props: NavbarProps = {}): React.JSX.Element {
           </div>
 
           {/* Desktop nav links. */}
-          <div className="hidden md:flex items-center gap-0.5 ml-2">
+          <div className="hidden md:flex items-center gap-0.5 ms-2">
             <Link to="/" className={navLinkClass('/')}>
               {t('nav.directory')}
             </Link>
@@ -476,7 +476,7 @@ export function Navbar(_props: NavbarProps = {}): React.JSX.Element {
           </div>
 
           {/* Account area — pushed to the right edge. */}
-          <div className="flex items-center gap-2 ml-auto">
+          <div className="flex items-center gap-2 ms-auto">
             <CountrySelector />
             {isAuthenticated ? (
               <AccountMenu showCashbackNav={showCashbackNav} />

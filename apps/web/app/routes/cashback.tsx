@@ -102,7 +102,7 @@ function CashbackIndexBody(): React.JSX.Element {
           <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">
             {t('index.howItWorks.heading')}
           </h2>
-          <ol className="list-decimal list-outside pl-6 space-y-3 text-gray-700 dark:text-gray-300">
+          <ol className="list-decimal list-outside ps-6 space-y-3 text-gray-700 dark:text-gray-300">
             <li>{t('index.howItWorks.step1')}</li>
             <li>{t('index.howItWorks.step2')}</li>
             <li>{t('index.howItWorks.step3')}</li>
@@ -140,11 +140,11 @@ function MerchantRow({ merchant }: { merchant: TopCashbackMerchant }): React.JSX
             {merchant.name}
           </p>
         </div>
-        <div className="shrink-0 text-right">
+        <div className="shrink-0 text-end">
           <span className="text-xl font-semibold text-green-700 dark:text-green-400 tabular-nums">
             {merchant.userCashbackPct}%
           </span>
-          <span className="ml-1 text-xs text-gray-500 dark:text-gray-400">
+          <span className="ms-1 text-xs text-gray-500 dark:text-gray-400">
             {t('index.rowBack')}
           </span>
         </div>

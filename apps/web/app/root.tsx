@@ -305,18 +305,24 @@ export function Layout({ children }: { children: React.ReactNode }): React.JSX.E
     .map((d) => d.trim())
     .filter((d) => !/^(frame-ancestors|report-uri|sandbox)\b/.test(d))
     .join('; ');
-  // FE-20 / A11Y-011 / I18N-003: derive the SSR `<html lang>` from the
-  // negotiated ADR-034 route locale (`/:country/:lang`), not a hardcoded
-  // `"en"`. The framework mounts `Layout` as the root route's element
-  // (`<Layout><App/></Layout>`), so it renders *inside* the router — the same
-  // `useLocale()` (→ `useParams()`) the rest of the app reads resolves the URL
-  // segments here too. This is the value in the first server byte, so a crawler
-  // or screen reader on a `/de/de` page sees the real language instead of `en`.
-  // BCP-47-safe: we emit the language subtag (`en`, `de`); `App`'s effect keeps
-  // it in agreement across client-side locale navigation and syncs `<html dir>`.
+  // FE-20 / FE-20-DIR / A11Y-011 / I18N-003: derive the SSR `<html lang>` AND
+  // `<html dir>` from the negotiated ADR-034 route locale (`/:country/:lang`),
+  // not a hardcoded `"en"` / `"ltr"`. The framework mounts `Layout` as the root
+  // route's element (`<Layout><App/></Layout>`), so it renders *inside* the
+  // router — the same `useLocale()` (→ `useParams()`) the rest of the app reads
+  // resolves the URL segments here too. Both attributes are in the first server
+  // byte, so a crawler or screen reader on a `/de/de` page sees the real
+  // language, and an RTL locale (`/eg/ar`) paints right-to-left on the FIRST
+  // paint instead of flashing LTR until hydration. `getLangDir` maps the
+  // language subtag → `'ltr' | 'rtl'` (RTL for ar/he/fa/ur). BCP-47-safe: we
+  // emit the language subtag (`en`, `de`). Because `Layout` re-renders on
+  // client-side locale navigation (its `useLocale()` reads `useParams()`),
+  // React reconciles both `<html lang>` and `<html dir>` itself — no imperative
+  // sync needed (mirrors how `lang` has always worked). `App`'s effect only
+  // keeps the i18next active language in agreement with the route.
   const locale = useLocale();
   return (
-    <html lang={locale.lang} suppressHydrationWarning>
+    <html lang={locale.lang} dir={getLangDir(locale.lang)} suppressHydrationWarning>
       <head>
         <meta charSet="utf-8" />
         {csp !== undefined && <meta httpEquiv="Content-Security-Policy" content={csp} />}
@@ -556,19 +562,19 @@ export default function App(): React.JSX.Element {
   const { isRestoring } = useSessionRestore();
   const { isNative } = useNativePlatform();
   const isAuthenticated = useAuthStore((s) => s.accessToken !== null);
-  // A11Y-011 / I18N-003 / CF-35 / FE-20: the SSR `<html lang>` is now set in
-  // `Layout` from the negotiated ADR-034 locale (see there) — `Layout` renders
-  // inside the router, so it already knows the URL locale on the server. This
-  // effect keeps `<html dir>` and the i18next active language in agreement with
-  // the route on the client, including client-side locale navigation where the
-  // document shell re-renders (React reconciles `<html lang>` itself). Today a
-  // no-op (only `en` ships, `SUPPORTED_LANGS === ['en']`), but this is the seam
-  // a second `/:country/:lang` language drops into with no code change: `<html
-  // dir>` flips for an RTL script and `t()`'s language follows the URL.
+  // A11Y-011 / I18N-003 / CF-35 / FE-20 / FE-20-DIR: the SSR `<html lang>` AND
+  // `<html dir>` are now set declaratively in `Layout` from the negotiated
+  // ADR-034 locale (see there) — `Layout` renders inside the router, so it
+  // already knows the URL locale on the server, and re-renders on client-side
+  // locale navigation, so React reconciles both `<html>` attributes itself (no
+  // imperative `setAttribute` needed — same as `lang` has always worked). This
+  // effect only keeps the i18next active language in agreement with the route
+  // (translation strings follow the URL). Today a no-op (only `en` ships,
+  // `SUPPORTED_LANGS === ['en']`), but this is the seam a second
+  // `/:country/:lang` language drops into with no code change: `<html dir>`
+  // flips for an RTL script and `t()`'s language follows the URL.
   const locale = useLocale();
   useEffect(() => {
-    const el = document.documentElement;
-    el.setAttribute('dir', getLangDir(locale.lang));
     void i18n.changeLanguage(locale.lang);
   }, [locale.lang]);
   // Pins the onboarding UI once we enter it so a mid-flow

@@ -180,7 +180,7 @@ export function AdminAuditTail(): React.JSX.Element {
           cap so a day's worth of writes is usually reachable
           without leaving the dashboard. */}
       {!query.isPending && !query.isError && query.data.rows.length >= DEFAULT_LIMIT ? (
-        <footer className="border-t border-gray-200 dark:border-gray-800 px-6 py-2 text-right">
+        <footer className="border-t border-gray-200 dark:border-gray-800 px-6 py-2 text-end">
           <button
             type="button"
             onClick={() => setExpanded((prev) => !prev)}

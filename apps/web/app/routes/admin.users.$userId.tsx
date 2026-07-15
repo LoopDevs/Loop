@@ -230,7 +230,7 @@ function AdminUserDetailRouteInner(): React.JSX.Element {
                 {['Currency', 'Balance', 'Last updated'].map((h) => (
                   <th
                     key={h}
-                    className="px-6 py-2 text-left font-medium text-gray-500 dark:text-gray-400"
+                    className="px-6 py-2 text-start font-medium text-gray-500 dark:text-gray-400"
                   >
                     {h}
                   </th>

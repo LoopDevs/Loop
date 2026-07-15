@@ -120,7 +120,7 @@ export function PendingCashbackChip(): React.JSX.Element | null {
   return (
     <section
       aria-label="Cashback settling"
-      className="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-left dark:border-blue-900/60 dark:bg-blue-900/20"
+      className="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-start dark:border-blue-900/60 dark:bg-blue-900/20"
     >
       <div className="flex items-baseline justify-between">
         <div className="text-xs font-medium uppercase tracking-wide text-blue-700 dark:text-blue-300">

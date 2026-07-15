@@ -110,7 +110,7 @@ function TrustlinesBody(): React.JSX.Element {
           <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">
             {t('wallets.heading')}
           </h2>
-          <ul className="list-disc list-outside pl-6 space-y-2 text-gray-700 dark:text-gray-300">
+          <ul className="list-disc list-outside ps-6 space-y-2 text-gray-700 dark:text-gray-300">
             <li>
               <a
                 href={FREIGHTER_URL}

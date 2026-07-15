@@ -148,7 +148,7 @@ function DayRow({ day }: { day: PaymentMethodActivityDay }): React.JSX.Element {
           </>
         )}
       </span>
-      <span className="shrink-0 w-10 tabular-nums text-right text-gray-700 dark:text-gray-300">
+      <span className="shrink-0 w-10 tabular-nums text-end text-gray-700 dark:text-gray-300">
         {total}
       </span>
     </li>

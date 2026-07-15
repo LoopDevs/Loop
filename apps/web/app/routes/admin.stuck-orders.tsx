@@ -104,7 +104,7 @@ function AdminStuckOrdersRouteInner(): React.JSX.Element {
                 {['Order', 'User', 'Merchant', 'State', 'Rail', 'Age', 'CTX order'].map((h) => (
                   <th
                     key={h}
-                    className="px-3 py-2 text-left font-medium text-gray-500 dark:text-gray-400"
+                    className="px-3 py-2 text-start font-medium text-gray-500 dark:text-gray-400"
                   >
                     {h}
                   </th>
@@ -236,7 +236,7 @@ function StuckPayoutsSection(): React.JSX.Element {
                   (h) => (
                     <th
                       key={h}
-                      className="px-3 py-2 text-left font-medium text-gray-500 dark:text-gray-400"
+                      className="px-3 py-2 text-start font-medium text-gray-500 dark:text-gray-400"
                     >
                       {h}
                     </th>

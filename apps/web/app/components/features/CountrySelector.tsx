@@ -204,7 +204,7 @@ export function CountrySelector(): React.JSX.Element {
                       tabIndex={-1}
                       onClick={() => choose(c.code)}
                       onMouseEnter={() => setActiveIndex(i)}
-                      className={`flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm transition-colors ${
+                      className={`flex w-full items-center gap-2.5 px-4 py-2.5 text-start text-sm transition-colors ${
                         isActive ? 'bg-gray-100' : 'hover:bg-gray-50'
                       } ${selected ? 'font-semibold text-blue-600' : 'text-ink'}`}
                     >

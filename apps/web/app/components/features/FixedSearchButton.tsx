@@ -24,11 +24,11 @@ export function FixedSearchButton({ value, onChange }: FixedSearchButtonProps): 
 
   return (
     <div
-      className="lg:hidden fixed top-0 left-0 z-[1200] p-3"
+      className="lg:hidden fixed top-0 start-0 z-[1200] p-3"
       style={{ paddingTop: 'calc(env(safe-area-inset-top) + 0.75rem)' }}
     >
       {open ? (
-        <div className="flex items-center gap-2 bg-white/95 dark:bg-gray-900/95 rounded-full shadow-lg backdrop-blur-md pl-3 pr-1 py-1 w-[min(85vw,22rem)]">
+        <div className="flex items-center gap-2 bg-white/95 dark:bg-gray-900/95 rounded-full shadow-lg backdrop-blur-md ps-3 pe-1 py-1 w-[min(85vw,22rem)]">
           <SearchIcon className="h-4 w-4 text-gray-500 dark:text-gray-400 flex-shrink-0" />
           <input
             type="search"

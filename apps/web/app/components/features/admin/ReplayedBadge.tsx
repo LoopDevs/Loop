@@ -24,7 +24,7 @@ export function ReplayedBadge({ replayed }: { replayed: boolean }): React.JSX.El
       role="note"
       aria-label="Replayed from idempotency snapshot"
       title="This Idempotency-Key matched a prior request. The backend returned the stored snapshot; your new reason/body was NOT re-applied (ADR 017 §5)."
-      className="ml-2 inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-800 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-200"
+      className="ms-2 inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-800 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-200"
     >
       Replayed
     </span>

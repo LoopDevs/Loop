@@ -317,13 +317,13 @@ function AdminAssetDetailRouteInner(): React.JSX.Element {
             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800 text-sm">
               <thead className="bg-gray-50 dark:bg-gray-900/50">
                 <tr>
-                  <th className="px-3 py-2 text-left font-medium text-gray-500 dark:text-gray-400">
+                  <th className="px-3 py-2 text-start font-medium text-gray-500 dark:text-gray-400">
                     User
                   </th>
-                  <th className="px-3 py-2 text-right font-medium text-gray-500 dark:text-gray-400">
+                  <th className="px-3 py-2 text-end font-medium text-gray-500 dark:text-gray-400">
                     In-flight
                   </th>
-                  <th className="px-3 py-2 text-right font-medium text-gray-500 dark:text-gray-400">
+                  <th className="px-3 py-2 text-end font-medium text-gray-500 dark:text-gray-400">
                     Payouts
                   </th>
                 </tr>
@@ -339,10 +339,10 @@ function AdminAssetDetailRouteInner(): React.JSX.Element {
                         {e.email}
                       </Link>
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-gray-900 dark:text-white">
+                    <td className="px-3 py-2 text-end tabular-nums text-gray-900 dark:text-white">
                       {fmtStroops(e.totalStroops, upper)}
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-gray-500 dark:text-gray-400">
+                    <td className="px-3 py-2 text-end tabular-nums text-gray-500 dark:text-gray-400">
                       {e.payoutCount}
                     </td>
                   </tr>
@@ -415,7 +415,7 @@ function SettlementChart({
                 aria-hidden="true"
               />
             </span>
-            <span className="shrink-0 w-32 tabular-nums text-right text-gray-700 dark:text-gray-300">
+            <span className="shrink-0 w-32 tabular-nums text-end text-gray-700 dark:text-gray-300">
               {r.count > 0 ? fmtStroops(r.stroops, assetCode) : '—'}
             </span>
           </li>

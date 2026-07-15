@@ -45,11 +45,11 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
 
     const paddingClass =
       leftIcon !== undefined && rightIcon !== undefined
-        ? 'pl-10 pr-10'
+        ? 'ps-10 pe-10'
         : leftIcon !== undefined
-          ? 'pl-10'
+          ? 'ps-10'
           : rightIcon !== undefined
-            ? 'pr-10'
+            ? 'pe-10'
             : '';
 
     const inputClass =
@@ -60,12 +60,12 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
         {label !== undefined && (
           <label htmlFor={inputId} className="block text-sm font-medium text-ink mb-1.5">
             {label}
-            {required === true && <span className="text-red-500 ml-1">*</span>}
+            {required === true && <span className="text-red-500 ms-1">*</span>}
           </label>
         )}
         <div className="relative">
           {leftIcon !== undefined && (
-            <div className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-subtle">
+            <div className="absolute start-3 top-1/2 -translate-y-1/2 text-ink-subtle">
               {leftIcon}
             </div>
           )}
@@ -90,7 +90,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
             {...props}
           />
           {rightIcon !== undefined && (
-            <div className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-subtle">
+            <div className="absolute end-3 top-1/2 -translate-y-1/2 text-ink-subtle">
               {rightIcon}
             </div>
           )}

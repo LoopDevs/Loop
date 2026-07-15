@@ -273,22 +273,22 @@ function SpendTable({ rows }: { rows: SupplierSpendRow[] }): React.JSX.Element {
       <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800 text-sm">
         <thead className="bg-gray-50 dark:bg-gray-900/50">
           <tr>
-            <th className="px-3 py-2 text-left font-medium text-gray-500 dark:text-gray-400">
+            <th className="px-3 py-2 text-start font-medium text-gray-500 dark:text-gray-400">
               Currency
             </th>
-            <th className="px-3 py-2 text-right font-medium text-gray-500 dark:text-gray-400">
+            <th className="px-3 py-2 text-end font-medium text-gray-500 dark:text-gray-400">
               Count
             </th>
-            <th className="px-3 py-2 text-right font-medium text-gray-500 dark:text-gray-400">
+            <th className="px-3 py-2 text-end font-medium text-gray-500 dark:text-gray-400">
               Face value
             </th>
-            <th className="px-3 py-2 text-right font-medium text-gray-500 dark:text-gray-400">
+            <th className="px-3 py-2 text-end font-medium text-gray-500 dark:text-gray-400">
               Wholesale
             </th>
-            <th className="px-3 py-2 text-right font-medium text-gray-500 dark:text-gray-400">
+            <th className="px-3 py-2 text-end font-medium text-gray-500 dark:text-gray-400">
               Cashback
             </th>
-            <th className="px-3 py-2 text-right font-medium text-gray-500 dark:text-gray-400">
+            <th className="px-3 py-2 text-end font-medium text-gray-500 dark:text-gray-400">
               Margin
             </th>
           </tr>
@@ -297,17 +297,17 @@ function SpendTable({ rows }: { rows: SupplierSpendRow[] }): React.JSX.Element {
           {rows.map((r) => (
             <tr key={r.currency}>
               <td className="px-3 py-2 font-medium text-gray-900 dark:text-white">{r.currency}</td>
-              <td className="px-3 py-2 text-right tabular-nums">{r.count}</td>
-              <td className="px-3 py-2 text-right tabular-nums">
+              <td className="px-3 py-2 text-end tabular-nums">{r.count}</td>
+              <td className="px-3 py-2 text-end tabular-nums">
                 {fmtMinor(r.faceValueMinor, r.currency)}
               </td>
-              <td className="px-3 py-2 text-right tabular-nums font-medium">
+              <td className="px-3 py-2 text-end tabular-nums font-medium">
                 {fmtMinor(r.wholesaleMinor, r.currency)}
               </td>
-              <td className="px-3 py-2 text-right tabular-nums text-green-700 dark:text-green-400">
+              <td className="px-3 py-2 text-end tabular-nums text-green-700 dark:text-green-400">
                 {fmtMinor(r.userCashbackMinor, r.currency)}
               </td>
-              <td className="px-3 py-2 text-right tabular-nums text-blue-700 dark:text-blue-400">
+              <td className="px-3 py-2 text-end tabular-nums text-blue-700 dark:text-blue-400">
                 {fmtMinor(r.loopMarginMinor, r.currency)}
               </td>
             </tr>
@@ -342,24 +342,24 @@ function ActivityChart({ days }: { days: OperatorActivityDay[] }): React.JSX.Ele
             </span>
             <span className="relative flex h-3 flex-1 overflow-hidden rounded bg-gray-100 dark:bg-gray-800">
               <span
-                className="absolute inset-y-0 left-0 bg-gray-400/40 dark:bg-gray-500/30"
+                className="absolute inset-y-0 start-0 bg-gray-400/40 dark:bg-gray-500/30"
                 style={{ width: `${createdPct}%` }}
                 aria-hidden="true"
               />
               <span
-                className="absolute inset-y-0 left-0 bg-green-500/80 dark:bg-green-400/70"
+                className="absolute inset-y-0 start-0 bg-green-500/80 dark:bg-green-400/70"
                 style={{ width: `${fulfilledPct}%` }}
                 aria-hidden="true"
               />
               {d.failed > 0 ? (
                 <span
-                  className="absolute inset-y-0 right-0 bg-rose-500/70 dark:bg-rose-400/60"
+                  className="absolute inset-y-0 end-0 bg-rose-500/70 dark:bg-rose-400/60"
                   style={{ width: `${failedPct}%` }}
                   aria-hidden="true"
                 />
               ) : null}
             </span>
-            <span className="shrink-0 w-24 tabular-nums text-right text-gray-700 dark:text-gray-300">
+            <span className="shrink-0 w-24 tabular-nums text-end text-gray-700 dark:text-gray-300">
               {d.fulfilled}/{d.created}
               {d.failed > 0 ? (
                 <span className="text-rose-600 dark:text-rose-400"> · {d.failed}✗</span>

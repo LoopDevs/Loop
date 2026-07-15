@@ -22,12 +22,14 @@ export function NativeBackButton(): React.JSX.Element | null {
     <button
       type="button"
       onClick={() => void navigate(-1)}
-      className="fixed top-0 left-0 z-[1200] flex items-center gap-1 px-4 text-blue-600 dark:text-blue-400 font-medium text-sm native-safe-top"
+      className="fixed top-0 start-0 z-[1200] flex items-center gap-1 px-4 text-blue-600 dark:text-blue-400 font-medium text-sm native-safe-top"
       style={{ paddingTop: 'calc(env(safe-area-inset-top) + 0.5rem)' }}
       aria-label="Go back"
     >
       <svg
-        className="w-5 h-5"
+        // FE-19: chevron points left (back). Mirror horizontally under RTL so
+        // the back affordance points the correct way for RTL locales.
+        className="w-5 h-5 rtl:-scale-x-100"
         fill="none"
         stroke="currentColor"
         strokeWidth={2}

@@ -134,11 +134,11 @@ function CurrencyTable({
       <div className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">{currency}</div>
       <table className="min-w-full text-xs">
         <thead>
-          <tr className="text-left text-gray-500 dark:text-gray-400">
-            <th className="py-1 pr-3 font-medium">Month</th>
-            <th className="py-1 pr-3 font-medium">Minted</th>
-            <th className="py-1 pr-3 font-medium">Settled</th>
-            <th className="py-1 pr-3 font-medium">Net (Δ liability)</th>
+          <tr className="text-start text-gray-500 dark:text-gray-400">
+            <th className="py-1 pe-3 font-medium">Month</th>
+            <th className="py-1 pe-3 font-medium">Minted</th>
+            <th className="py-1 pe-3 font-medium">Settled</th>
+            <th className="py-1 pe-3 font-medium">Net (Δ liability)</th>
           </tr>
         </thead>
         <tbody>
@@ -153,17 +153,17 @@ function CurrencyTable({
                 currency,
               )}`}
             >
-              <td className="py-1.5 pr-3 tabular-nums text-gray-500 dark:text-gray-400">
+              <td className="py-1.5 pe-3 tabular-nums text-gray-500 dark:text-gray-400">
                 {monthLabel(r.month)}
               </td>
-              <td className="py-1.5 pr-3">
+              <td className="py-1.5 pe-3">
                 <Bar
                   widthPct={barWidth(r.mintedMinor, maxBar)}
                   colour="bg-green-500/80 dark:bg-green-400/70"
                   label={formatMinor(r.mintedMinor.toString(), currency)}
                 />
               </td>
-              <td className="py-1.5 pr-3">
+              <td className="py-1.5 pe-3">
                 <Bar
                   widthPct={barWidth(r.settledMinor, maxBar)}
                   colour="bg-blue-500/80 dark:bg-blue-400/70"
@@ -171,7 +171,7 @@ function CurrencyTable({
                 />
               </td>
               <td
-                className={`py-1.5 pr-3 tabular-nums font-medium ${
+                className={`py-1.5 pe-3 tabular-nums font-medium ${
                   r.netMinor > 0n
                     ? 'text-orange-700 dark:text-orange-300'
                     : r.netMinor < 0n

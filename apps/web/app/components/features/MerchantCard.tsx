@@ -165,13 +165,13 @@ export function MerchantCard({
               specific value and reads like an addition on top of the
               headline discount. */}
           {merchant.savingsPercentage !== undefined && merchant.savingsPercentage > 0 && (
-            <span className="absolute top-2 right-2 text-xs font-semibold text-green-700 bg-white/95 px-2 py-0.5 rounded-md shadow-xs backdrop-blur-sm tabular">
+            <span className="absolute top-2 end-2 text-xs font-semibold text-green-700 bg-white/95 px-2 py-0.5 rounded-md shadow-xs backdrop-blur-sm tabular">
               Save {merchant.savingsPercentage.toFixed(1)}%
             </span>
           )}
           {cashbackLabel !== null && (
             <span
-              className={`absolute right-2 text-xs font-semibold text-blue-700 bg-white/95 px-2 py-0.5 rounded-md shadow-xs backdrop-blur-sm tabular ${
+              className={`absolute end-2 text-xs font-semibold text-blue-700 bg-white/95 px-2 py-0.5 rounded-md shadow-xs backdrop-blur-sm tabular ${
                 merchant.savingsPercentage !== undefined && merchant.savingsPercentage > 0
                   ? 'top-9'
                   : 'top-2'
@@ -184,7 +184,7 @@ export function MerchantCard({
               collides with the savings/cashback badges in the
               top-right. Self-gated on isAuthenticated — renders
               nothing for signed-out visitors. */}
-          <FavoriteToggleButton merchantId={merchant.id} className="absolute top-2 left-2" />
+          <FavoriteToggleButton merchantId={merchant.id} className="absolute top-2 start-2" />
         </div>
 
         <div className="p-4">

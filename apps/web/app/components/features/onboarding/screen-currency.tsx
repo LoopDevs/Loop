@@ -121,7 +121,7 @@ export function CurrencyPickerScreen({
                 onClick={() => onSelect(opt.code)}
                 onKeyDown={(e) => onKeyDown(e, i)}
                 className={[
-                  'w-full rounded-2xl px-5 py-4 border text-left flex items-center gap-4 cursor-pointer active:scale-[0.98] transition-transform',
+                  'w-full rounded-2xl px-5 py-4 border text-start flex items-center gap-4 cursor-pointer active:scale-[0.98] transition-transform',
                   isSelected
                     ? 'border-blue-600 bg-blue-50 ring-1 ring-blue-600'
                     : 'border-line bg-white hover:border-line-strong',
@@ -136,7 +136,7 @@ export function CurrencyPickerScreen({
                 <span className="flex-1 flex flex-col gap-0.5">
                   <span className="text-[16px] font-semibold text-gray-950 dark:text-white">
                     {opt.label}
-                    <span className="ml-2 text-gray-500 dark:text-gray-400 font-normal">
+                    <span className="ms-2 text-gray-500 dark:text-gray-400 font-normal">
                       {opt.code}
                     </span>
                   </span>

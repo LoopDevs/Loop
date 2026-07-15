@@ -56,7 +56,7 @@ export function PageHeader({
       // Frosted-bar treatment to match the web Navbar so the visual
       // language carries across platforms. Theme-aware bg + border
       // via Tailwind dark: variants.
-      className="fixed top-0 left-0 right-0 z-[1100] bg-white/80 dark:bg-gray-950/60 backdrop-blur-md border-b border-black/10 dark:border-white/10"
+      className="fixed top-0 start-0 end-0 z-[1100] bg-white/80 dark:bg-gray-950/60 backdrop-blur-md border-b border-black/10 dark:border-white/10"
       style={{ paddingTop: 'var(--safe-top, 0px)' }}
     >
       <div className="relative flex items-center h-14 px-3">
@@ -82,7 +82,7 @@ export function PageHeader({
         {/* Absolutely-centred title so it doesn't drift when the
             back button's width flexes (it's a fixed 40px square,
             but defensive against future additions on either side). */}
-        <h1 className="absolute left-0 right-0 mx-auto w-fit max-w-[60vw] truncate text-center text-base font-semibold text-gray-900 dark:text-white pointer-events-none">
+        <h1 className="absolute start-0 end-0 mx-auto w-fit max-w-[60vw] truncate text-center text-base font-semibold text-gray-900 dark:text-white pointer-events-none">
           {title}
         </h1>
       </div>

@@ -151,7 +151,7 @@ function OrderRow({
           {payoutState !== null ? <PayoutDot state={payoutState} /> : null}
         </div>
       </div>
-      <div className="flex items-center gap-3 ml-4">
+      <div className="flex items-center gap-3 ms-4">
         <span className="text-sm font-semibold text-gray-900 dark:text-white">
           {formatMoney(order.amount, order.currency, locale)}
         </span>
