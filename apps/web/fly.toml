@@ -18,6 +18,12 @@ primary_region = "iad"
   # (no init call), same behaviour as the pre-A4-072 baseline.
   [build.args]
     VITE_API_URL = "https://api.loopfinance.io"
+    # FE-22: SSR/first-paint default for the Phase-1 launch gate. Keep in
+    # lockstep with the backend `LOOP_PHASE_1_ONLY` (apps/backend/fly.toml)
+    # so a crawler (SSR HTML) and a real runtime gate on the same value.
+    # `true` = Phase-1 (gated), matching prod today; flip BOTH to `false`
+    # to launch Phase 2.
+    VITE_PHASE_1_ONLY = "true"
     # Empty defaults so an operator who hasn't yet plumbed the
     # secret still gets a working bundle. Production deploys MUST
     # override via `--build-arg VITE_SENTRY_DSN=...` for Sentry to

@@ -14,9 +14,13 @@ import { useAppConfig } from '~/hooks/use-app-config';
  * require an app store resubmission.
  *
  * Renders the children verbatim when the flag is off. NOTE:
- * `useAppConfig` currently defaults `phase1Only` to `true` (the
- * shipping reality), so SSR, first paint, and a /api/config outage
- * render the "coming soon" panel until config confirms otherwise.
+ * `useAppConfig` resolves `/api/config` only after hydration, so SSR,
+ * first paint, and a /api/config outage render with its fallback. FE-22:
+ * that fallback's `phase1Only` is deploy-aware (`VITE_PHASE_1_ONLY`,
+ * mirroring the backend's `LOOP_PHASE_1_ONLY`), so a crawler indexing the
+ * SSR HTML and a real runtime that later fetches config land on the SAME
+ * gate decision instead of diverging. Unset → `true`, so an
+ * unconfigured/outage render still shows the safe "coming soon" panel.
  * Feature tests for gated pages must therefore mock `useAppConfig`
  * with `phase1Only: false` (see the settings.wallet / settings.cashback
  * / LinkWalletNudge tests) to exercise the page instead of the gate.
