@@ -1,5 +1,6 @@
-import { useEffect, useId, useRef } from 'react';
+import { useId, useRef } from 'react';
 import { Button } from '~/components/ui/Button';
+import { Dialog } from '~/components/ui/Dialog';
 
 /**
  * A4-052 / A4-053: second-step confirmation gate for destructive
@@ -9,8 +10,9 @@ import { Button } from '~/components/ui/Button';
  * for the reason itself; this one just renders the parsed summary
  * and asks "are you sure?".
  *
- * Native HTML <dialog> handles focus trap, ESC dismissal, and
- * aria-modal=true for free.
+ * FE-33: the native `<dialog>` shell (focus trap, ESC dismissal,
+ * aria-modal, scrim) lives in the shared `Dialog` primitive; this
+ * component supplies only the confirm/cancel body.
  */
 export interface ConfirmDialogProps {
   open: boolean;
@@ -37,39 +39,19 @@ export function ConfirmDialog({
   confirmVariant = 'destructive',
   onResolve,
 }: ConfirmDialogProps): React.JSX.Element | null {
-  const dialogRef = useRef<HTMLDialogElement | null>(null);
   const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
   const helperId = useId();
-
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (dialog === null) return;
-    if (open && !dialog.open) {
-      dialog.showModal();
-      requestAnimationFrame(() => cancelButtonRef.current?.focus());
-    } else if (!open && dialog.open) {
-      dialog.close();
-    }
-  }, [open]);
 
   const cancel = (): void => onResolve(false);
   const confirm = (): void => onResolve(true);
 
-  const handleClose = (): void => {
-    if (open) onResolve(false);
-  };
-
   return (
-    <dialog
-      ref={dialogRef}
-      onClose={handleClose}
-      onCancel={(e) => {
-        e.preventDefault();
-        cancel();
-      }}
-      className="rounded-lg shadow-xl backdrop:bg-black/60 p-0 max-w-md w-[90vw] bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
-      aria-labelledby={`${helperId}-title`}
-      aria-describedby={`${helperId}-desc`}
+    <Dialog
+      open={open}
+      onClose={cancel}
+      initialFocusRef={cancelButtonRef}
+      labelledBy={`${helperId}-title`}
+      describedBy={`${helperId}-desc`}
     >
       <form
         method="dialog"
@@ -94,6 +76,6 @@ export function ConfirmDialog({
           </Button>
         </div>
       </form>
-    </dialog>
+    </Dialog>
   );
 }

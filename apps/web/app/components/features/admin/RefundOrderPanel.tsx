@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ApiException, type AdminOrderRefundResult } from '@loop/shared';
 import { useAdminStepUp } from '~/hooks/use-admin-step-up';
@@ -7,6 +7,7 @@ import { useStaffRole } from '~/hooks/use-staff-role';
 import { generateIdempotencyKey, refundOrder } from '~/services/admin';
 import { useUiStore } from '~/stores/ui.store';
 import { Button } from '~/components/ui/Button';
+import { Dialog } from '~/components/ui/Dialog';
 import { StepUpModal } from './StepUpModal';
 
 /**
@@ -159,8 +160,8 @@ export function RefundOrderPanel({
  * prominent double-spend warning + a REQUIRED "code is unused/unusable"
  * attestation checkbox and note. Submit stays disabled on a fulfilled
  * order until the checkbox is ticked and the note is 2-500 chars.
- * Native `<dialog>` for the focus-trap / ESC / aria-modal semantics,
- * same pattern as `ReasonDialog` / `StepUpModal`.
+ * FE-33: the native `<dialog>` shell (focus-trap / ESC / aria-modal)
+ * comes from the shared `Dialog` primitive (`size="lg"`).
  */
 function RefundDialog({
   open,
@@ -173,7 +174,6 @@ function RefundDialog({
   onCancel: () => void;
   onSubmit: (reason: string, attestationNote?: string) => void;
 }): React.JSX.Element {
-  const dialogRef = useRef<HTMLDialogElement | null>(null);
   const reasonRef = useRef<HTMLTextAreaElement | null>(null);
   const [reason, setReason] = useState('');
   const [codeUnused, setCodeUnused] = useState(false);
@@ -181,20 +181,14 @@ function RefundDialog({
   const [error, setError] = useState<string | null>(null);
   const ids = useId();
 
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (dialog === null) return;
-    if (open && !dialog.open) {
-      setReason('');
-      setCodeUnused(false);
-      setAttestationNote('');
-      setError(null);
-      dialog.showModal();
-      requestAnimationFrame(() => reasonRef.current?.focus());
-    } else if (!open && dialog.open) {
-      dialog.close();
-    }
-  }, [open]);
+  // Reset all fields on each reopen. `Dialog` calls this on the
+  // closed→open transition, before it focuses the reason textarea.
+  const resetOnOpen = (): void => {
+    setReason('');
+    setCodeUnused(false);
+    setAttestationNote('');
+    setError(null);
+  };
 
   const reasonValid = reason.trim().length >= NOTE_MIN && reason.trim().length <= NOTE_MAX;
   const noteValid =
@@ -226,17 +220,13 @@ function RefundDialog({
   };
 
   return (
-    <dialog
-      ref={dialogRef}
-      onClose={() => {
-        if (open) onCancel();
-      }}
-      onCancel={(e) => {
-        e.preventDefault();
-        onCancel();
-      }}
-      className="rounded-lg shadow-xl backdrop:bg-black/60 p-0 max-w-lg w-[90vw] bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
-      aria-labelledby={`${ids}-title`}
+    <Dialog
+      open={open}
+      onClose={onCancel}
+      onOpen={resetOnOpen}
+      initialFocusRef={reasonRef}
+      size="lg"
+      labelledBy={`${ids}-title`}
     >
       <form
         method="dialog"
@@ -333,6 +323,6 @@ function RefundDialog({
           </Button>
         </div>
       </form>
-    </dialog>
+    </Dialog>
   );
 }

@@ -1,11 +1,12 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { Button } from '~/components/ui/Button';
+import { Dialog } from '~/components/ui/Dialog';
 
 /**
  * A2-1107: a11y-friendly replacement for `window.prompt` on admin
- * write forms. Rendered as a native HTML `<dialog>` element so the
- * browser handles focus trap, ESC dismissal, and `aria-modal=true`
- * for free — no extra deps and no manual focus management.
+ * write forms. FE-33: the native `<dialog>` shell (focus trap, ESC
+ * dismissal, aria-modal) lives in the shared `Dialog` primitive; this
+ * component owns the reason textarea + validation.
  *
  * The 2-500 character validation matches the existing window.prompt
  * sites (ADR-017 reason length contract); enforcement lives here so
@@ -38,27 +39,18 @@ export function ReasonDialog({
   confirmLabel = 'Confirm',
   onResolve,
 }: ReasonDialogProps): React.JSX.Element | null {
-  const dialogRef = useRef<HTMLDialogElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const [value, setValue] = useState('');
   const [error, setError] = useState<string | null>(null);
   const helperId = useId();
 
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (dialog === null) return;
-    if (open && !dialog.open) {
-      setValue('');
-      setError(null);
-      dialog.showModal();
-      // Focus the textarea after the dialog opens — the browser
-      // would otherwise focus the first focusable child, which is
-      // the close button.
-      requestAnimationFrame(() => inputRef.current?.focus());
-    } else if (!open && dialog.open) {
-      dialog.close();
-    }
-  }, [open]);
+  // Reset the field + error on each reopen. `Dialog` calls this on the
+  // closed→open transition, before it focuses the textarea — the same
+  // order the pre-refactor effect used.
+  const resetOnOpen = (): void => {
+    setValue('');
+    setError(null);
+  };
 
   const submit = (): void => {
     const trimmed = value.trim();
@@ -76,24 +68,14 @@ export function ReasonDialog({
     onResolve(null);
   };
 
-  // The native dialog's `close` event fires for ESC + form-submit
-  // method="dialog" + dialog.close(). Map ESC → cancel (we handle
-  // submit explicitly via the button click).
-  const handleClose = (): void => {
-    if (open) onResolve(null);
-  };
-
   return (
-    <dialog
-      ref={dialogRef}
-      onClose={handleClose}
-      onCancel={(e) => {
-        e.preventDefault();
-        cancel();
-      }}
-      className="rounded-lg shadow-xl backdrop:bg-black/60 p-0 max-w-md w-[90vw] bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
-      aria-labelledby={`${helperId}-title`}
-      aria-describedby={description !== undefined ? `${helperId}-desc` : undefined}
+    <Dialog
+      open={open}
+      onClose={cancel}
+      onOpen={resetOnOpen}
+      initialFocusRef={inputRef}
+      labelledBy={`${helperId}-title`}
+      describedBy={description !== undefined ? `${helperId}-desc` : undefined}
     >
       <form
         method="dialog"
@@ -148,6 +130,6 @@ export function ReasonDialog({
           <Button type="submit">{confirmLabel}</Button>
         </div>
       </form>
-    </dialog>
+    </Dialog>
   );
 }
