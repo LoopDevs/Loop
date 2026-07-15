@@ -292,9 +292,22 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
   // the click gesture so Android's WebView raises the keyboard. The
   // EmailEntry screen is pre-mounted (all screens render with
   // opacity), so the ref is valid before the state change commits.
+  //
+  // AGT-11: the A11Y-019 `inert` on inactive slides silently defeated
+  // this focus call. `next()` only *schedules* the step change, so at
+  // the moment we call `.focus()` the DOM still reflects the previous
+  // render where the email slide is `inert` — and `.focus()` on a
+  // descendant of an `inert` subtree is a no-op, so Android never got
+  // the gesture-bound focus and the keyboard stayed down. Clear `inert`
+  // on the target slide imperatively first, still inside the click
+  // gesture: React re-asserts the correct `inert` on the next render
+  // (the email slide is becoming active, so it stays non-inert), and
+  // the synchronous focus now lands and raises the keyboard.
   const goToEmail = (): void => {
+    const input = emailInputRef.current;
+    input?.closest('[data-onboard-slide]')?.removeAttribute('inert');
     next();
-    emailInputRef.current?.focus();
+    input?.focus();
   };
 
   // CTA label for the biometric step. Always "Enable Face ID" so
@@ -470,6 +483,7 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
           return (
             <div
               key={i}
+              data-onboard-slide
               className="absolute inset-0 flex flex-col pb-[112px]"
               style={{
                 opacity: state === 'active' ? 1 : 0,

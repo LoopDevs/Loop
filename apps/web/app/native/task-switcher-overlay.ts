@@ -12,10 +12,19 @@ import { Capacitor } from '@capacitor/core';
  * needs `WindowManager.FLAG_SECURE` on Android (blocks both the
  * recents thumbnail and the screenshot button) and a
  * `UserDidTakeScreenshot` listener on iOS (no API to block the
- * shortcut, but you can detect + warn). Both require native plugins
- * we haven't shipped yet — see ADR-005 §"Phase-1 known limitations"
- * for the deferred decision. The rename keeps this codepath honest:
- * it's a task-switcher privacy overlay, not a screenshot guard.
+ * shortcut, but you can detect + warn). The rename keeps this
+ * codepath honest: it's a task-switcher privacy overlay, not a
+ * screenshot guard.
+ *
+ * FE-01 (2026-07): Android `FLAG_SECURE` now ships — set app-wide in
+ * `MainActivity.onCreate` (native-overlays/.../MainActivity.java), so
+ * on Android the OS itself blocks screenshots / screen-recording and
+ * renders the recents thumbnail blank. This JS overlay is therefore
+ * belt-and-braces on Android and the *primary* app-switcher privacy
+ * control on iOS, which has no FLAG_SECURE equivalent (screenshot
+ * blocking is impossible there; only after-the-fact detection). The
+ * iOS `UserDidTakeScreenshot` detect-and-warn listener remains
+ * unshipped — see ADR-027 for the deferred native-plugin decisions.
  *
  * Returns a cleanup function.
  */

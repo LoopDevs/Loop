@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({
   enabled: true,
@@ -88,5 +88,76 @@ describe('registerAppLockGuard (native)', () => {
     );
 
     cleanup();
+  });
+
+  // FE-02: foreground re-lock after the grace window.
+  describe('foreground re-lock', () => {
+    let nowSpy: ReturnType<typeof vi.spyOn>;
+    let clock: number;
+
+    beforeEach(() => {
+      clock = 1_000_000;
+      nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    });
+
+    async function coldStartThenUnlock(): Promise<() => void> {
+      // available=false + deviceSecure=true + authOk=true → cold-start
+      // prompt succeeds and the overlay is dismissed, leaving us unlocked.
+      const cleanup = registerAppLockGuard();
+      await flushEffects();
+      expect(state.checkBiometricsMock).toHaveBeenCalledTimes(1);
+      // Let the 200ms fade-out remove the old overlay element.
+      await new Promise((resolve) => window.setTimeout(resolve, 220));
+      return cleanup;
+    }
+
+    it('re-locks on resume after more than the grace window in the background', async () => {
+      const cleanup = await coldStartThenUnlock();
+
+      clock = 1_000_000; // background timestamp
+      document.dispatchEvent(new Event('pause'));
+      clock = 1_000_000 + 61_000; // 61s later — past the 60s grace window
+      document.dispatchEvent(new Event('resume'));
+      await flushEffects();
+
+      // A second lock check fired on resume.
+      expect(state.checkBiometricsMock).toHaveBeenCalledTimes(2);
+      expect(document.getElementById('app-lock-overlay')).not.toBeNull();
+
+      cleanup();
+    });
+
+    it('does NOT re-lock on a brief background switch (within the grace window)', async () => {
+      const cleanup = await coldStartThenUnlock();
+
+      clock = 1_000_000;
+      document.dispatchEvent(new Event('pause'));
+      clock = 1_000_000 + 5_000; // only 5s — a glance at a notification
+      document.dispatchEvent(new Event('resume'));
+      await flushEffects();
+
+      // No second lock check, no overlay.
+      expect(state.checkBiometricsMock).toHaveBeenCalledTimes(1);
+      expect(document.getElementById('app-lock-overlay')).toBeNull();
+
+      cleanup();
+    });
+
+    it('stops re-locking after cleanup (listeners removed)', async () => {
+      const cleanup = await coldStartThenUnlock();
+      cleanup();
+
+      clock = 1_000_000;
+      document.dispatchEvent(new Event('pause'));
+      clock = 1_000_000 + 120_000;
+      document.dispatchEvent(new Event('resume'));
+      await flushEffects();
+
+      expect(state.checkBiometricsMock).toHaveBeenCalledTimes(1);
+    });
+
+    afterEach(() => {
+      nowSpy.mockRestore();
+    });
   });
 });

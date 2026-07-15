@@ -113,7 +113,7 @@ const DEFAULT_TIMEOUT_MS = 30_000;
  * `android`. `X-Client-Platform` gives ops a quick Grafana filter
  * without inferring it from the User-Agent.
  */
-const CLIENT_VERSION =
+export const CLIENT_VERSION =
   (typeof import.meta !== 'undefined' &&
     typeof import.meta.env !== 'undefined' &&
     (import.meta.env['VITE_CLIENT_VERSION'] as string | undefined)) ||

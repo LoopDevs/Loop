@@ -735,6 +735,31 @@ jobs:
             echo "AndroidManifest.xml is missing android:fullBackupContent (A-033)" >&2
             exit 1
           fi
+          # AGT-11: soft-keyboard resize — the focused input must scroll
+          # into view rather than sit behind the keyboard. A bare `cap sync`
+          # regenerates the activity with no windowSoftInputMode, so the
+          # overlay patch (apply-native-overlays.sh) gets a CI assertion.
+          if ! grep -q 'android:windowSoftInputMode="adjustResize"' "$manifest"; then
+            echo "AndroidManifest.xml is missing windowSoftInputMode=adjustResize (AGT-11)" >&2
+            exit 1
+          fi
+      # FE-01: FLAG_SECURE (screenshot / screen-record block + blank
+      # recents thumbnail) is set in the MainActivity overlay. `cap add
+      # android` regenerates a default no-op MainActivity, so — like every
+      # other overlay — assert the flag survives the regeneration + overlay
+      # re-apply rather than discovering a silent drop on a device.
+      - name: Verify Android FLAG_SECURE screenshot block
+        run: |
+          set -euo pipefail
+          mainactivity=apps/mobile/android/app/src/main/java/io/loopfinance/app/MainActivity.java
+          if [ ! -f "$mainactivity" ]; then
+            echo "MainActivity.java was not copied into the Android project (FE-01)" >&2
+            exit 1
+          fi
+          if ! grep -q 'FLAG_SECURE' "$mainactivity"; then
+            echo "MainActivity.java is missing WindowManager.FLAG_SECURE (FE-01)" >&2
+            exit 1
+          fi
       # M-3 (deep linking): a bare `cap sync` regenerates AndroidManifest.xml
       # with no App Links intent-filter at all — same silent-drop hazard as
       # the M-4 overlays above, so it gets the same CI-enforced assertion.

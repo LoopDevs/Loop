@@ -137,13 +137,16 @@
       "enabled": "{{type}} enabled",
       "scanning": "Scanning…",
       "unavailable": "Not available",
-      "use": "Use {{type}}"
+      "use": "Use {{type}}",
+      "failed": "Couldn’t verify"
     },
     "sub": {
       "enabled": "You’ll use {{type}} or your device passcode to unlock Loop on app launch.",
       "unavailable": "We’ll skip this — you can turn it on later from your account.",
-      "default": "Lock Loop on app launch and fall back to your device passcode if biometrics are unavailable."
+      "default": "Lock Loop on app launch and fall back to your device passcode if biometrics are unavailable.",
+      "failed": "We couldn’t confirm your {{type}}. Tap Enable to try again, or skip for now."
     },
+    "skip": "Skip for now",
     "privacyNote": "Face data stays on your device. Loop never sees it.",
     "enableReason": "Enable app lock"
   },
