@@ -24,8 +24,9 @@ on:
   workflow_dispatch:
 
 # Least privilege — the deploy needs nothing from the GitHub API beyond
-# reading the repo it checks out. The Fly credential is a scoped repo
-# secret, not the GITHUB_TOKEN.
+# reading the repo it checks out. The Fly credentials are per-app scoped
+# deploy tokens (FLY_API_TOKEN_API / FLY_API_TOKEN_WEB) in repo secrets,
+# not the GITHUB_TOKEN.
 permissions:
   contents: read
 
@@ -78,7 +79,9 @@ jobs:
           --app loopfinance-api
           --remote-only
         env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          # Per-app deploy token (least privilege): a leaked web token
+          # cannot deploy the API and vice-versa. flyctl reads FLY_API_TOKEN.
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN_API }}
 
   deploy-web:
     name: Deploy web (loopfinance-web)
@@ -103,7 +106,7 @@ jobs:
           --app loopfinance-web
           --remote-only
         env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN_WEB }}
 
   notify:
     name: Discord notification
