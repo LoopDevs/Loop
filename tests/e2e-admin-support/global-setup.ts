@@ -154,16 +154,24 @@ export default async function globalSetup(): Promise<void> {
          'credit', '70.00', '5.00', '25.00',
          3500, 250, 1250, 'fulfilled', NOW())
     `);
-    await db.execute(sql`
-      INSERT INTO credit_transactions
-        (user_id, type, amount_minor, currency, reference_type, reference_id)
-      VALUES
-        (${TARGET_USER_ID}, 'cashback', 250, 'USD', 'order', ${FULFILLED_ORDER_ID})
-    `);
-    await db.execute(sql`
-      INSERT INTO user_credits (user_id, currency, balance_minor)
-      VALUES (${TARGET_USER_ID}, 'USD', 250)
-    `);
+    // Both writes MUST land in ONE transaction: migration 0066's
+    // credit_transactions_mirror_invariant / user_credits_mirror_invariant
+    // (CONSTRAINT TRIGGER DEFERRABLE INITIALLY DEFERRED, INV-1) is checked
+    // at COMMIT, so the ledger row and the mirrored balance must be
+    // committed together — else the ledger-only commit trips
+    // "balance_minor 0 <> ledger SUM 250". Same fix as the flywheel seed.
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`
+        INSERT INTO credit_transactions
+          (user_id, type, amount_minor, currency, reference_type, reference_id)
+        VALUES
+          (${TARGET_USER_ID}, 'cashback', 250, 'USD', 'order', ${FULFILLED_ORDER_ID})
+      `);
+      await tx.execute(sql`
+        INSERT INTO user_credits (user_id, currency, balance_minor)
+        VALUES (${TARGET_USER_ID}, 'USD', 250)
+      `);
+    });
 
     // Seed: A5-3's "locked" OTP state for the target user, so
     // AuthStatePanel has something to show besides the all-clear
