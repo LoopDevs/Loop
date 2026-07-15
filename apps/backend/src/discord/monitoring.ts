@@ -769,6 +769,15 @@ export {
   notifyVaultFloatDesync,
 } from './monitoring-vault-drift.js';
 
+// `notifyHotFloatBackingShortfall` (NS-06) — the pager for the hot-float
+// USDC-BACKING reconciler (`treasury/hot-float-backing-reconciliation.ts`),
+// the balance twin of `notifyVaultFloatDesync`. Lives in its own leaf
+// module; re-exported so existing import sites resolve unchanged.
+export {
+  notifyHotFloatBackingShortfall,
+  type HotFloatBackingShortfallArgs,
+} from './monitoring-hot-float-backing.js';
+
 // `notifyStuckProcurementSwept` (A2-621) and
 // `notifyPaymentWatcherStuck` (A2-626) — the two stuck-row sweeper
 // notifiers — live in `./monitoring-stuck-sweepers.ts`. Re-exported

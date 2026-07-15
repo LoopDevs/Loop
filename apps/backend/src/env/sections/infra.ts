@@ -382,6 +382,34 @@ export const infraEnvFields = {
   // absorb) — see the module header for why a gap here is meaningful.
   LOOP_VAULT_FLOAT_SHARES_THRESHOLD_STROOPS: z.coerce.bigint().nonnegative().default(1_000_000n),
 
+  // NS-06: hot-float USDC-BACKING reconciliation
+  // (`treasury/hot-float-backing-reconciliation.ts`) — the balance twin
+  // of the share-desync reconciler above. Checks the RECORDED hot-float
+  // balance the INV-V2 solvency check trusts as backing
+  // (Σ `vault_hot_float.balance_minor * 100000 + carry_stroops` over the
+  // active USDC-backed vaults) against the operator's ACTUAL on-chain
+  // USDC — catching a float RECORDED as backing that isn't physically
+  // held. Daily default, matching R3-1 / the share reconciler (an
+  // accounting reconciliation, not latency-sensitive). Runs under
+  // LOOP_WORKERS_ENABLED AND LOOP_VAULTS_ENABLED.
+  LOOP_HOT_FLOAT_BACKING_RECONCILIATION_INTERVAL_HOURS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(24),
+
+  // Shortfall tolerance in the underlying-asset 7-decimal smallest unit
+  // (USDC stroops). Only the SHORTFALL direction (recorded float exceeds
+  // real on-chain USDC) is drift — the surplus direction is expected,
+  // since the operator/deposit account commingles the float with
+  // user-deposit / CTX USDC (see the reconciler's module header for why
+  // the check is one-directional). 1e8 = $10, matching
+  // LOOP_VAULT_DRIFT_SOLVENCY_THRESHOLD_STROOPS: this reconciler guards
+  // the SAME backing figure that solvency check counts, so the tolerance
+  // on cross-read/commingling timing skew is kept consistent between
+  // them.
+  LOOP_HOT_FLOAT_BACKING_THRESHOLD_STROOPS: z.coerce.bigint().nonnegative().default(100_000_000n),
+
   // ADR 031 §Detailed design D8, V5b: APY snapshot cron
   // (`credits/vaults/vault-apy-snapshot.ts`) — periodically records
   // each active vault's live share price into

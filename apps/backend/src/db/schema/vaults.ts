@@ -538,3 +538,71 @@ export const vaultFloatReconciliationRuns = pgTable(
     ),
   ],
 );
+
+export const HOT_FLOAT_BACKING_RECONCILIATION_STATES = ['ok', 'drift', 'error'] as const;
+export type HotFloatBackingReconciliationState =
+  (typeof HOT_FLOAT_BACKING_RECONCILIATION_STATES)[number];
+
+/**
+ * Audit trail for `treasury/hot-float-backing-reconciliation.ts` (NS-06,
+ * migration 0071) — one row per (network, underlying_asset_code) per
+ * tick. The USDC-BALANCE sibling of `vaultFloatReconciliationRuns`
+ * (which reconciles operator vault-SHARE holdings): this compares the
+ * RECORDED hot-float balance the INV-V2 solvency check trusts as backing
+ * (Σ `vault_hot_float.balance_minor * 100000 + carry_stroops` across the
+ * active USDC-backed vaults on the network) against the operator's ACTUAL
+ * on-chain USDC held.
+ *
+ * A recorded balance that EXCEEDS the real on-chain USDC beyond
+ * `threshold_stroops` is a `drift` — the float is claiming solvency
+ * backing that is not physically present (`shortfall_stroops` positive).
+ * The complementary surplus direction (on-chain USDC exceeds the recorded
+ * float) is EXPECTED, because the operator/deposit account commingles the
+ * hot float with user-deposit / CTX-settlement USDC, so it is recorded
+ * `ok`, never `drift` (one-directional, exactly like INV-V2's solvency
+ * breach term — see the reconciler's module header).
+ */
+export const hotFloatBackingRuns = pgTable(
+  'hot_float_backing_runs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    network: text('network').notNull(),
+    underlyingAssetCode: text('underlying_asset_code').notNull(),
+    account: text('account').notNull(),
+    recordedFloatStroops: bigint('recorded_float_stroops', { mode: 'bigint' }),
+    onchainUsdcStroops: bigint('onchain_usdc_stroops', { mode: 'bigint' }),
+    shortfallStroops: bigint('shortfall_stroops', { mode: 'bigint' }),
+    thresholdStroops: bigint('threshold_stroops', { mode: 'bigint' }).notNull(),
+    state: text('state').notNull().$type<HotFloatBackingReconciliationState>(),
+    error: text('error'),
+    checkedAt: timestamp('checked_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('hot_float_backing_runs_network_checked').on(t.network, t.checkedAt),
+    check('hot_float_backing_runs_network_known', sql`${t.network} IN ('testnet', 'mainnet')`),
+    // Future-proofs an EURC-backed vault (LOOPEUR) without a follow-up
+    // migration; only 'USDC' is written today (see the reconciler's
+    // R3-1-scope note).
+    check(
+      'hot_float_backing_runs_underlying_known',
+      sql`${t.underlyingAssetCode} IN ('USDC', 'EURC')`,
+    ),
+    check('hot_float_backing_runs_state_known', sql`${t.state} IN ('ok', 'drift', 'error')`),
+    check('hot_float_backing_runs_threshold_non_negative', sql`${t.thresholdStroops} >= 0`),
+    // A computed run (`ok`/`drift`) MUST carry all three numeric columns;
+    // an `error` run leaves them NULL — same structural distinction as
+    // `vault_float_reconciliation_runs_shape` (migration 0063).
+    check(
+      'hot_float_backing_runs_shape',
+      sql`
+        (${t.state} = 'error')
+        OR (
+          ${t.state} IN ('ok', 'drift')
+          AND ${t.recordedFloatStroops} IS NOT NULL
+          AND ${t.onchainUsdcStroops} IS NOT NULL
+          AND ${t.shortfallStroops} IS NOT NULL
+        )
+      `,
+    ),
+  ],
+);

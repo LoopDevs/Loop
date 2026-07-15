@@ -39,6 +39,7 @@ export {
   notifyVaultSolvencyBreach,
   notifyVaultSolvencyRecovered,
   notifyVaultFloatDesync,
+  notifyHotFloatBackingShortfall,
   notifyLedgerDrift,
   notifyLoopAssetOverpayment,
   notifyStuckProcurementSwept,
