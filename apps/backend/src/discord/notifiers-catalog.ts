@@ -128,6 +128,12 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
       "Fires on every bad-state run (not fire-once — same at-least-once-reminder posture as notifyOperatorFloatDrift) of treasury/hot-float-reconciliation.ts's float/pool desync check: the operator's actual on-chain vault-share balance disagrees with what the emission/redemption bookkeeping expects, beyond tolerance (ADR 031 §D4, V5) — the reconciler for the V4-accepted slow-withdraw-race residual.",
   },
   {
+    name: 'notifyHotFloatBackingShortfall',
+    channel: 'monitoring',
+    description:
+      "NS-06: fires on every bad-state run (drift or error, not fire-once — same at-least-once-reminder posture as notifyVaultFloatDesync / notifyOperatorFloatDrift) of treasury/hot-float-backing-reconciliation.ts, the USDC-BALANCE twin of the share reconciler. Drift means the RECORDED hot-float balance the INV-V2 solvency check trusts as backing (Σ vault_hot_float.balance_minor*100000 + carry_stroops over the active USDC-backed vaults) exceeds the operator/deposit account's ACTUAL on-chain USDC beyond tolerance — the float may be partially unbacked. One-directional (surplus is the expected commingled state); alert-only, never auto-corrected. Error means the on-chain USDC was unreadable. Triage /api/admin/treasury and the vault_hot_float rows.",
+  },
+  {
     name: 'notifyCircuitBreaker',
     channel: 'monitoring',
     description:

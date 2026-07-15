@@ -53,6 +53,10 @@ import {
   stopVaultFloatReconciliationWatcher,
 } from './treasury/hot-float-reconciliation.js';
 import {
+  startHotFloatBackingReconciliationWatcher,
+  stopHotFloatBackingReconciliationWatcher,
+} from './treasury/hot-float-backing-reconciliation.js';
+import {
   startVaultApySnapshotWorker,
   stopVaultApySnapshotWorker,
 } from './credits/vaults/vault-apy-snapshot.js';
@@ -329,6 +333,11 @@ if (env.LOOP_WORKERS_ENABLED) {
     // unstarted watcher here is consistent, not merely inert.
     startVaultDriftWatcher();
     startVaultFloatReconciliationWatcher();
+    // NS-06 — hot-float USDC-BACKING reconciliation (the balance twin of
+    // the SHARE reconciler above). Same gating: with vaults off there is
+    // no vault hot float to reconcile, so an unstarted watcher here is
+    // consistent, not merely inert.
+    startHotFloatBackingReconciliationWatcher();
     // ADR 031 §D8 (V5b) — APY snapshot cron. Same gating reasoning:
     // with vaults off there's no live share price to snapshot (the
     // registry is only ever read when `vaultsEnabled()`), so an
@@ -339,6 +348,7 @@ if (env.LOOP_WORKERS_ENABLED) {
     markWorkerDisabled('vault_redemption_sweep', 'LOOP_VAULTS_ENABLED is false');
     markWorkerDisabled('vault_drift_watcher', 'LOOP_VAULTS_ENABLED is false');
     markWorkerDisabled('vault_float_reconciliation', 'LOOP_VAULTS_ENABLED is false');
+    markWorkerDisabled('hot_float_backing_reconciliation', 'LOOP_VAULTS_ENABLED is false');
     markWorkerDisabled('vault_apy_snapshot', 'LOOP_VAULTS_ENABLED is false');
   }
 } else {
@@ -401,6 +411,7 @@ function shutdown(signal: string): void {
   stopVaultRedemptionSweep();
   stopVaultDriftWatcher();
   stopVaultFloatReconciliationWatcher();
+  stopHotFloatBackingReconciliationWatcher();
   stopVaultApySnapshotWorker();
 
   server.close(() => {

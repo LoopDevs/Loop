@@ -61,6 +61,11 @@ export const TABLES_TO_TRUNCATE = [
   // list (a standalone per-(asset_code, network, tick) run row) —
   // same "CASCADE never reaches it" reasoning as `vault_hot_float`.
   'vault_float_reconciliation_runs',
+  // NS-06 (migration 0071): the hot-float USDC-BACKING reconciliation's
+  // audit trail. Standalone per-(network, underlying, tick) run row with
+  // no FK to anything else in this list — same "CASCADE never reaches
+  // it" reasoning as `vault_float_reconciliation_runs` above.
+  'hot_float_backing_runs',
   'interest_pool_alert_state',
   'watchdog_alert_state',
   'otp_attempt_counters',

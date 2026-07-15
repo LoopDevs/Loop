@@ -498,6 +498,13 @@
       "when": 1780190100000,
       "tag": "0070_users_token_version",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1780190200000,
+      "tag": "0071_hot_float_backing_runs",
+      "breakpoints": true
     }
   ]
 }

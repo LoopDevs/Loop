@@ -264,7 +264,8 @@ export type MoneyIntegritySignalName =
   | 'vault_share_drift'
   | 'vault_solvency'
   | 'operator_float'
-  | 'vault_float';
+  | 'vault_float'
+  | 'hot_float_backing';
 
 export interface MoneyIntegritySignalState {
   /** True when the last completed evaluation of this invariant found a standing breach. */
