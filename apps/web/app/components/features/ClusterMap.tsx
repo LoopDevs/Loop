@@ -647,7 +647,7 @@ export default function ClusterMap({
         onClick={handleLocate}
         disabled={locating}
         aria-label="Locate me"
-        className="absolute right-3 bottom-16 h-10 w-10 rounded-full bg-white/90 dark:bg-gray-900/90 text-gray-900 dark:text-white shadow-lg flex items-center justify-center backdrop-blur-sm z-[400] active:scale-[0.96] transition-transform disabled:opacity-50"
+        className="absolute end-3 bottom-16 h-10 w-10 rounded-full bg-white/90 dark:bg-gray-900/90 text-gray-900 dark:text-white shadow-lg flex items-center justify-center backdrop-blur-sm z-[400] active:scale-[0.96] transition-transform disabled:opacity-50"
       >
         {locating ? (
           <svg
@@ -672,7 +672,7 @@ export default function ClusterMap({
         )}
       </button>
       {locateError !== null && (
-        <div className="absolute right-3 bottom-28 max-w-[16rem] bg-white/95 dark:bg-gray-900/95 text-[12px] text-gray-700 dark:text-gray-200 px-3 py-2 rounded-md shadow backdrop-blur-sm z-[400]">
+        <div className="absolute end-3 bottom-28 max-w-[16rem] bg-white/95 dark:bg-gray-900/95 text-[12px] text-gray-700 dark:text-gray-200 px-3 py-2 rounded-md shadow backdrop-blur-sm z-[400]">
           {locateError}
         </div>
       )}
@@ -686,7 +686,7 @@ export default function ClusterMap({
         aria-label={creditsOpen ? 'Hide map credits' : 'Show map credits'}
         aria-expanded={creditsOpen}
         onClick={() => setCreditsOpen((v) => !v)}
-        className="absolute bottom-3 right-3 h-7 w-7 rounded-full bg-white/85 dark:bg-gray-900/85 text-gray-700 dark:text-gray-200 shadow flex items-center justify-center text-xs font-semibold backdrop-blur-sm z-[400]"
+        className="absolute bottom-3 end-3 h-7 w-7 rounded-full bg-white/85 dark:bg-gray-900/85 text-gray-700 dark:text-gray-200 shadow flex items-center justify-center text-xs font-semibold backdrop-blur-sm z-[400]"
       >
         i
       </button>
@@ -694,7 +694,7 @@ export default function ClusterMap({
         <div
           role="dialog"
           aria-label="Map credits"
-          className="absolute bottom-12 right-3 max-w-[16rem] bg-white/95 dark:bg-gray-900/95 text-[11px] text-gray-700 dark:text-gray-300 px-3 py-2 rounded-md shadow backdrop-blur-sm z-[400]"
+          className="absolute bottom-12 end-3 max-w-[16rem] bg-white/95 dark:bg-gray-900/95 text-[11px] text-gray-700 dark:text-gray-300 px-3 py-2 rounded-md shadow backdrop-blur-sm z-[400]"
         >
           &copy;{' '}
           <a

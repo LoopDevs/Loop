@@ -175,7 +175,7 @@ function OrderDetailBody({ order, now }: { order: Order; now: number }): React.J
           </h1>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{createdLabel}</p>
         </div>
-        <div className="text-right flex-shrink-0">
+        <div className="text-end flex-shrink-0">
           <div className="text-lg font-bold text-gray-900 dark:text-white tabular-nums">
             {formatMoney(order.amount, order.currency, locale)}
           </div>

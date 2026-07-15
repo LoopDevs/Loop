@@ -56,7 +56,7 @@ export function OrderRowSkeleton(): React.JSX.Element {
         <Skeleton className="h-4 w-40" />
         <Skeleton className="h-3 w-24" />
       </div>
-      <div className="flex items-center gap-3 ml-4">
+      <div className="flex items-center gap-3 ms-4">
         <Skeleton className="h-4 w-16" />
         <Skeleton className="h-5 w-20 rounded-full" />
       </div>

@@ -99,17 +99,17 @@ export function MerchantGroupCard({
           )}
           {/* "N options" pill — the brand-group marker. Top-left so it never
               collides with the savings/cashback badges in the top-right. */}
-          <span className="absolute top-2 left-2 text-xs font-semibold text-ink bg-white/95 px-2 py-0.5 rounded-md shadow-xs backdrop-blur-sm tabular">
+          <span className="absolute top-2 start-2 text-xs font-semibold text-ink bg-white/95 px-2 py-0.5 rounded-md shadow-xs backdrop-blur-sm tabular">
             {group.members.length} options
           </span>
           {maxSavings > 0 && (
-            <span className="absolute top-2 right-2 text-xs font-semibold text-green-700 bg-white/95 px-2 py-0.5 rounded-md shadow-xs backdrop-blur-sm tabular">
+            <span className="absolute top-2 end-2 text-xs font-semibold text-green-700 bg-white/95 px-2 py-0.5 rounded-md shadow-xs backdrop-blur-sm tabular">
               Save up to {maxSavings.toFixed(1)}%
             </span>
           )}
           {cashbackLabel !== null && (
             <span
-              className={`absolute right-2 text-xs font-semibold text-blue-700 bg-white/95 px-2 py-0.5 rounded-md shadow-xs backdrop-blur-sm tabular ${
+              className={`absolute end-2 text-xs font-semibold text-blue-700 bg-white/95 px-2 py-0.5 rounded-md shadow-xs backdrop-blur-sm tabular ${
                 maxSavings > 0 ? 'top-9' : 'top-2'
               }`}
             >

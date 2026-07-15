@@ -109,15 +109,15 @@ function LoopOrderRow({ order }: { order: LoopOrderView }): React.JSX.Element {
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="flex items-center justify-between w-full px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-gray-800/40 transition-colors"
+        className="flex items-center justify-between w-full px-4 py-3 text-start hover:bg-gray-50 dark:hover:bg-gray-800/40 transition-colors"
         aria-expanded={expanded}
       >
         <div className="flex-1 min-w-0">
           <div className="font-medium text-gray-900 dark:text-white truncate">{merchantName}</div>
           <div className="text-xs text-gray-500 dark:text-gray-400">{date}</div>
         </div>
-        <div className="flex items-center gap-3 ml-4">
-          <div className="text-right">
+        <div className="flex items-center gap-3 ms-4">
+          <div className="text-end">
             <div className="text-sm font-semibold text-gray-900 dark:text-white tabular-nums">
               {amount}
             </div>

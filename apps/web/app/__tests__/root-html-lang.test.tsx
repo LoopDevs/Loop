@@ -73,5 +73,9 @@ describe('root Layout SSR <html lang> (FE-20)', () => {
     );
     expect(html).toContain('lang="de"');
     expect(html).not.toContain('lang="en"');
+    // FE-20-DIR: German is LTR — the default direction must be emitted too, so
+    // the SSR `dir` never regresses to RTL for a non-RTL locale.
+    expect(html).toContain('dir="ltr"');
+    expect(html).not.toContain('dir="rtl"');
   });
 });

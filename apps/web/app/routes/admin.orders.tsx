@@ -424,7 +424,7 @@ function OrdersTableHeader(): React.JSX.Element {
       <div>Split</div>
       <div>CTX</div>
       <div>User</div>
-      <div className="text-right">State</div>
+      <div className="text-end">State</div>
     </div>
   );
 }
@@ -526,7 +526,7 @@ function OrderRow({ row }: { row: AdminOrderView }): React.JSX.Element {
           </Link>
         )}
       </div>
-      <div className="text-right">
+      <div className="text-end">
         <span
           className={`inline-block rounded-full px-2.5 py-0.5 text-[11px] font-medium ${stateClass}`}
         >

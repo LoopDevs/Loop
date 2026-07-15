@@ -147,7 +147,7 @@ function CashbackMerchantLandingBody(): React.JSX.Element {
           <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">
             {t('merchant.howItWorks.heading')}
           </h2>
-          <ol className="list-decimal list-outside pl-6 space-y-3 text-gray-700 dark:text-gray-300">
+          <ol className="list-decimal list-outside ps-6 space-y-3 text-gray-700 dark:text-gray-300">
             <li>{t('merchant.howItWorks.step1')}</li>
             <li>{t('merchant.howItWorks.step2')}</li>
             <li>{t('merchant.howItWorks.step3')}</li>

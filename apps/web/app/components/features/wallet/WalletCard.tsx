@@ -56,7 +56,7 @@ export function WalletCard(): React.JSX.Element | null {
     return (
       <section
         aria-labelledby="wallet-balance-heading"
-        className="mb-6 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-4 text-left"
+        className="mb-6 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-4 text-start"
       >
         <h2
           id="wallet-balance-heading"
@@ -100,7 +100,7 @@ export function WalletCard(): React.JSX.Element | null {
   return (
     <section
       aria-labelledby="wallet-balance-heading"
-      className="mb-6 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-4 text-left"
+      className="mb-6 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-4 text-start"
     >
       <h2
         id="wallet-balance-heading"

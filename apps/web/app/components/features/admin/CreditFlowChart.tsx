@@ -120,7 +120,7 @@ function Legend(): React.JSX.Element {
         />
         <span>Debited (out)</span>
       </li>
-      <li className="inline-flex items-center gap-1.5 ml-2">
+      <li className="inline-flex items-center gap-1.5 ms-2">
         <span className="font-semibold text-amber-700 dark:text-amber-400">Net</span>
         <span>= delta in outstanding liability</span>
       </li>
@@ -230,7 +230,7 @@ function DayRow({
           />
         </span>
       </span>
-      <span className={`shrink-0 w-24 tabular-nums text-right font-semibold ${netClass}`}>
+      <span className={`shrink-0 w-24 tabular-nums text-end font-semibold ${netClass}`}>
         {netDisplay}
       </span>
     </li>

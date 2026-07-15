@@ -325,7 +325,7 @@ function CashbackHistoryCard({
   if (isError) return null;
   const shown = entries?.slice(0, 5) ?? [];
   return (
-    <div className="mb-6 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-4 text-left">
+    <div className="mb-6 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-4 text-start">
       <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
         {t('history.heading')}
       </p>
@@ -543,7 +543,7 @@ export default function AuthRoute(): React.JSX.Element {
               {isNative && <BiometricLockRow />}
               <Link
                 to="/settings/wallet"
-                className="block w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-3 text-left text-gray-900 dark:text-white hover:border-gray-400 dark:hover:border-gray-600 transition-colors"
+                className="block w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-3 text-start text-gray-900 dark:text-white hover:border-gray-400 dark:hover:border-gray-600 transition-colors"
               >
                 <div className="flex items-center justify-between">
                   <span className="font-medium">{t('account.walletLinkTitle')}</span>
@@ -558,7 +558,7 @@ export default function AuthRoute(): React.JSX.Element {
                   Apple Guideline 5.1.1(v) require an in-app path. */}
               <Link
                 to="/settings/privacy"
-                className="block w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-3 text-left text-gray-900 dark:text-white hover:border-gray-400 dark:hover:border-gray-600 transition-colors"
+                className="block w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-3 text-start text-gray-900 dark:text-white hover:border-gray-400 dark:hover:border-gray-600 transition-colors"
               >
                 <div className="flex items-center justify-between">
                   <span className="font-medium">{t('account.privacyLinkTitle')}</span>
@@ -623,7 +623,7 @@ export default function AuthRoute(): React.JSX.Element {
       <div className="relative hidden lg:block lg:w-1/2">
         <img src="/login-hero.jpg" alt="" className="absolute inset-0 h-full w-full object-cover" />
         <div className="absolute inset-0 bg-gradient-to-t from-blue-950/55 via-blue-900/10 to-transparent" />
-        <div className="absolute bottom-10 left-10 right-10">
+        <div className="absolute bottom-10 start-10 end-10">
           <p className="text-3xl font-semibold leading-tight tracking-[-0.02em] text-white">
             {t('quote.line1')}
             <br />
@@ -636,7 +636,7 @@ export default function AuthRoute(): React.JSX.Element {
       <main id="main" className="flex flex-1 items-center justify-center bg-surface px-6 py-12">
         <div className="w-full max-w-sm">
           <BackToSite />
-          <div className="mb-8 text-center lg:text-left">
+          <div className="mb-8 text-center lg:text-start">
             <LoopLogo className="h-8 w-auto mb-4 text-ink mx-auto lg:mx-0" />
             <h1 className="text-2xl font-bold text-ink">
               {step === 'email' ? t('step.signInHeading') : t('step.checkEmailHeading')}

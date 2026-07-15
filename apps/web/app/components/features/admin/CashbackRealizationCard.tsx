@@ -74,23 +74,23 @@ export function CashbackRealizationCard(): React.JSX.Element | null {
         <table className="mt-4 w-full text-xs tabular-nums">
           <thead className="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
             <tr>
-              <th className="pb-1 text-left font-medium">Currency</th>
-              <th className="pb-1 text-right font-medium">Earned</th>
-              <th className="pb-1 text-right font-medium">Spent</th>
-              <th className="pb-1 text-right font-medium">Recycled</th>
+              <th className="pb-1 text-start font-medium">Currency</th>
+              <th className="pb-1 text-end font-medium">Earned</th>
+              <th className="pb-1 text-end font-medium">Spent</th>
+              <th className="pb-1 text-end font-medium">Recycled</th>
             </tr>
           </thead>
           <tbody className="text-gray-700 dark:text-gray-300">
             {perCurrency.map((r) => (
               <tr key={r.currency ?? ''}>
                 <td className="py-0.5 font-mono">{r.currency}</td>
-                <td className="py-0.5 text-right">
+                <td className="py-0.5 text-end">
                   {formatMinor(r.earnedMinor, r.currency ?? 'USD')}
                 </td>
-                <td className="py-0.5 text-right">
+                <td className="py-0.5 text-end">
                   {formatMinor(r.spentMinor, r.currency ?? 'USD')}
                 </td>
-                <td className="py-0.5 text-right">{formatBps(r.recycledBps)}</td>
+                <td className="py-0.5 text-end">{formatBps(r.recycledBps)}</td>
               </tr>
             ))}
           </tbody>

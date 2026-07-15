@@ -134,7 +134,7 @@ export default function GiftCardRoute(): React.JSX.Element {
           button, so a second chevron would be clutter. */}
       {isNative && (
         <header
-          className="fixed top-0 left-0 z-[1200] flex items-center gap-2 pl-3 pr-4 pointer-events-none"
+          className="fixed top-0 start-0 z-[1200] flex items-center gap-2 ps-3 pe-4 pointer-events-none"
           style={{ paddingTop: 'var(--safe-top)' }}
         >
           <button

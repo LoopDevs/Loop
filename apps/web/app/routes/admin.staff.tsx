@@ -137,7 +137,7 @@ function AdminStaffRouteInner(): React.JSX.Element {
                   {['Email', 'Role', 'Granted', 'Granted by', 'Reason', ''].map((h, i) => (
                     <th
                       key={`${h}-${String(i)}`}
-                      className="px-6 py-2 text-left font-medium text-gray-500 dark:text-gray-400"
+                      className="px-6 py-2 text-start font-medium text-gray-500 dark:text-gray-400"
                     >
                       {h}
                     </th>
@@ -189,7 +189,7 @@ function AdminStaffRouteInner(): React.JSX.Element {
                     >
                       {member.reason ?? '—'}
                     </td>
-                    <td className="px-6 py-3 text-right">
+                    <td className="px-6 py-3 text-end">
                       <button
                         type="button"
                         onClick={() => setRevokeTarget(member)}

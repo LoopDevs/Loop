@@ -19,7 +19,9 @@ export function BackToSite({
       className={`mb-8 inline-flex h-9 w-9 items-center justify-center rounded-md border border-line bg-white text-ink-muted transition-colors hover:bg-gray-50 hover:text-ink ${className}`.trim()}
     >
       <svg
-        className="h-4 w-4"
+        // FE-19: the chevron points left (a back affordance). Under an RTL
+        // locale "back" points the other way, so mirror it horizontally.
+        className="h-4 w-4 rtl:-scale-x-100"
         fill="none"
         stroke="currentColor"
         strokeWidth={2}

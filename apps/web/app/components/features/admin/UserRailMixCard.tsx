@@ -108,7 +108,7 @@ function Body({
     <div className="overflow-x-auto">
       <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800 text-sm">
         <thead>
-          <tr className="text-left text-xs font-medium text-gray-500 dark:text-gray-400">
+          <tr className="text-start text-xs font-medium text-gray-500 dark:text-gray-400">
             <th className="px-3 py-2">Rail</th>
             <th className="px-3 py-2">Orders</th>
             <th className="px-3 py-2">% orders</th>

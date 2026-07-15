@@ -111,7 +111,7 @@ export function Sparkline(props: SparklineProps): React.JSX.Element {
       <div className="mt-1 flex items-center justify-between text-[10px] text-gray-500 dark:text-gray-400">
         {props.series.map((s) => (
           <span key={s.label}>
-            <span className={`inline-block w-2 h-2 rounded-sm mr-1 ${s.swatchClass}`} />
+            <span className={`inline-block w-2 h-2 rounded-sm me-1 ${s.swatchClass}`} />
             {s.label}
           </span>
         ))}

@@ -53,7 +53,7 @@ function SlidePanel(): React.JSX.Element {
   // No autoplay — the user advances the slideshow with the arrows / dots.
 
   return (
-    <div className="relative hidden lg:flex lg:w-1/2 flex-col overflow-hidden border-r border-line bg-surface-subtle">
+    <div className="relative hidden lg:flex lg:w-1/2 flex-col overflow-hidden border-e border-line bg-surface-subtle">
       {/* The live onboarding screen, capped at 600px and centred. `key`
           remounts on change so the screen's enter animations (count-up,
           tile reveal) re-fire. */}

@@ -290,7 +290,7 @@ function AdminSkipsRouteInner(): React.JSX.Element {
                   (h, i) => (
                     <th
                       key={`${h}-${String(i)}`}
-                      className="px-3 py-2 text-left font-medium text-gray-500 dark:text-gray-400"
+                      className="px-3 py-2 text-start font-medium text-gray-500 dark:text-gray-400"
                     >
                       {h}
                     </th>
@@ -347,7 +347,7 @@ function AdminSkipsRouteInner(): React.JSX.Element {
                       timeStyle: 'short',
                     })}
                   </td>
-                  <td className="px-3 py-2 text-right">
+                  <td className="px-3 py-2 text-end">
                     {row.status === 'abandoned' ? (
                       <div className="flex justify-end gap-2">
                         <button

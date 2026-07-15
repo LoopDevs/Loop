@@ -419,7 +419,7 @@ export function MobileHome(): React.JSX.Element {
             strokeWidth="2"
             strokeLinecap="round"
             strokeLinejoin="round"
-            className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 dark:text-white/50 pointer-events-none"
+            className="absolute start-3.5 top-1/2 -translate-y-1/2 text-gray-400 dark:text-white/50 pointer-events-none"
             aria-hidden="true"
           >
             <circle cx="11" cy="11" r="8" />
@@ -432,14 +432,14 @@ export function MobileHome(): React.JSX.Element {
             placeholder="Search 500+ brands"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            className="w-full pl-10 pr-9 py-2.5 rounded-xl bg-gray-100 dark:bg-white/10 text-[15px] text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-white/60 outline-none border-0"
+            className="w-full ps-10 pe-9 py-2.5 rounded-xl bg-gray-100 dark:bg-white/10 text-[15px] text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-white/60 outline-none border-0"
           />
           {query.length > 0 && (
             <button
               type="button"
               onClick={() => setQuery('')}
               aria-label="Clear search"
-              className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full flex items-center justify-center text-gray-500 dark:text-white/70 hover:bg-black/5 dark:hover:bg-white/10"
+              className="absolute end-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full flex items-center justify-center text-gray-500 dark:text-white/70 hover:bg-black/5 dark:hover:bg-white/10"
             >
               <svg
                 width="14"
@@ -653,13 +653,13 @@ export function SavingsHero({
         {empty ? emptySubtitle : t('hero.activitySub', { count: ordersCount })}
       </div>
       <div className="grid grid-cols-2 gap-0 border-t border-white/10 pt-3.5">
-        <div className="text-left">
+        <div className="text-start">
           <div className="text-[16px] font-bold" style={{ fontVariantNumeric: 'tabular-nums' }}>
             {ordersCount}
           </div>
           <div className="text-[11px] opacity-55 mt-0.5">{t('hero.ordersLabel')}</div>
         </div>
-        <div className="text-right">
+        <div className="text-end">
           <div className="text-[16px] font-bold" style={{ fontVariantNumeric: 'tabular-nums' }}>
             {empty ? '—' : avgBackLabel(cashbackCents, ordersCount, currency, locale)}
           </div>
@@ -854,13 +854,13 @@ function ActivityRow({
         }}
         size={40}
       />
-      <div className="flex-1 min-w-0 text-left">
+      <div className="flex-1 min-w-0 text-start">
         <div className="text-[14px] font-semibold text-gray-900 dark:text-white truncate">
           {merchantName}
         </div>
         <div className="text-[12px] text-gray-500 dark:text-gray-400">{when}</div>
       </div>
-      <div className="text-right">
+      <div className="text-end">
         <div
           className="text-[14px] font-bold text-gray-900 dark:text-white"
           style={{ fontVariantNumeric: 'tabular-nums' }}

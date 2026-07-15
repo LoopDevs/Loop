@@ -100,7 +100,7 @@ export function CashbackByMerchantCard(): React.JSX.Element | null {
                   {row.orderCount} {row.orderCount === 1 ? 'order' : 'orders'}
                 </p>
               </div>
-              <p className="ml-3 shrink-0 text-sm font-semibold tabular-nums text-green-700 dark:text-green-400">
+              <p className="ms-3 shrink-0 text-sm font-semibold tabular-nums text-green-700 dark:text-green-400">
                 +{fmtCashback(row.cashbackMinor, currency, locale)}
               </p>
             </li>

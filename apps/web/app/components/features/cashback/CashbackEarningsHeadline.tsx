@@ -65,7 +65,7 @@ export function CashbackEarningsHeadline(): React.JSX.Element | null {
           </div>
         </div>
         {hasMonthlyCashback ? (
-          <div className="text-right">
+          <div className="text-end">
             <div className="text-[11px] uppercase tracking-wide font-medium text-green-700 dark:text-green-400">
               This month
             </div>

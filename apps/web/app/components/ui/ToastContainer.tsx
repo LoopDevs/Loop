@@ -18,7 +18,7 @@ export function ToastContainer(): React.JSX.Element | null {
 
   return (
     <div
-      className="fixed top-4 right-4 z-[9999] flex flex-col gap-2 max-w-sm native-safe-top"
+      className="fixed top-4 end-4 z-[9999] flex flex-col gap-2 max-w-sm native-safe-top"
       style={{ paddingTop: 'env(safe-area-inset-top)' }}
     >
       {toasts.map((toast) => (

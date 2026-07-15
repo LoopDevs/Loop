@@ -165,13 +165,13 @@ function AdminTreasuryRouteInner(): React.JSX.Element {
           <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800 text-sm">
             <thead className="bg-gray-50 dark:bg-gray-900/50">
               <tr>
-                <th className="px-3 py-2 text-left font-medium text-gray-500 dark:text-gray-400">
+                <th className="px-3 py-2 text-start font-medium text-gray-500 dark:text-gray-400">
                   Currency
                 </th>
                 {KNOWN_TYPES.map((t) => (
                   <th
                     key={t}
-                    className="px-3 py-2 text-right font-medium text-gray-500 dark:text-gray-400 capitalize"
+                    className="px-3 py-2 text-end font-medium text-gray-500 dark:text-gray-400 capitalize"
                   >
                     {t}
                   </th>
@@ -197,7 +197,7 @@ function AdminTreasuryRouteInner(): React.JSX.Element {
                       {KNOWN_TYPES.map((t) => (
                         <td
                           key={t}
-                          className="px-3 py-2 text-right tabular-nums text-gray-700 dark:text-gray-300"
+                          className="px-3 py-2 text-end tabular-nums text-gray-700 dark:text-gray-300"
                         >
                           {bucket[t] !== undefined ? fmtMinor(bucket[t], c) : '—'}
                         </td>
@@ -246,22 +246,22 @@ function AdminTreasuryRouteInner(): React.JSX.Element {
             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800 text-sm">
               <thead className="bg-gray-50 dark:bg-gray-900/50">
                 <tr>
-                  <th className="px-3 py-2 text-left font-medium text-gray-500 dark:text-gray-400">
+                  <th className="px-3 py-2 text-start font-medium text-gray-500 dark:text-gray-400">
                     Currency
                   </th>
-                  <th className="px-3 py-2 text-right font-medium text-gray-500 dark:text-gray-400">
+                  <th className="px-3 py-2 text-end font-medium text-gray-500 dark:text-gray-400">
                     Orders
                   </th>
-                  <th className="px-3 py-2 text-right font-medium text-gray-500 dark:text-gray-400">
+                  <th className="px-3 py-2 text-end font-medium text-gray-500 dark:text-gray-400">
                     Face value
                   </th>
-                  <th className="px-3 py-2 text-right font-medium text-gray-500 dark:text-gray-400">
+                  <th className="px-3 py-2 text-end font-medium text-gray-500 dark:text-gray-400">
                     CTX wholesale
                   </th>
-                  <th className="px-3 py-2 text-right font-medium text-gray-500 dark:text-gray-400">
+                  <th className="px-3 py-2 text-end font-medium text-gray-500 dark:text-gray-400">
                     User cashback
                   </th>
-                  <th className="px-3 py-2 text-right font-medium text-gray-500 dark:text-gray-400">
+                  <th className="px-3 py-2 text-end font-medium text-gray-500 dark:text-gray-400">
                     Loop margin
                   </th>
                 </tr>
@@ -274,19 +274,19 @@ function AdminTreasuryRouteInner(): React.JSX.Element {
                       <td className="px-3 py-2 font-medium text-gray-900 dark:text-white">
                         {currency}
                       </td>
-                      <td className="px-3 py-2 text-right tabular-nums text-gray-700 dark:text-gray-300">
+                      <td className="px-3 py-2 text-end tabular-nums text-gray-700 dark:text-gray-300">
                         {flow.count}
                       </td>
-                      <td className="px-3 py-2 text-right tabular-nums text-gray-700 dark:text-gray-300">
+                      <td className="px-3 py-2 text-end tabular-nums text-gray-700 dark:text-gray-300">
                         {fmtMinor(flow.faceValueMinor, currency)}
                       </td>
-                      <td className="px-3 py-2 text-right tabular-nums text-gray-700 dark:text-gray-300">
+                      <td className="px-3 py-2 text-end tabular-nums text-gray-700 dark:text-gray-300">
                         {fmtMinor(flow.wholesaleMinor, currency)}
                       </td>
-                      <td className="px-3 py-2 text-right tabular-nums text-gray-700 dark:text-gray-300">
+                      <td className="px-3 py-2 text-end tabular-nums text-gray-700 dark:text-gray-300">
                         {fmtMinor(flow.userCashbackMinor, currency)}
                       </td>
-                      <td className="px-3 py-2 text-right tabular-nums text-gray-700 dark:text-gray-300">
+                      <td className="px-3 py-2 text-end tabular-nums text-gray-700 dark:text-gray-300">
                         {fmtMinor(flow.loopMarginMinor, currency)}
                       </td>
                     </tr>

@@ -81,19 +81,19 @@ export function SettlementLagCard(): React.JSX.Element | null {
         <table className="mt-4 w-full text-xs tabular-nums">
           <thead className="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
             <tr>
-              <th className="pb-1 text-left font-medium">Asset</th>
-              <th className="pb-1 text-right font-medium">n</th>
-              <th className="pb-1 text-right font-medium">p50</th>
-              <th className="pb-1 text-right font-medium">p95</th>
+              <th className="pb-1 text-start font-medium">Asset</th>
+              <th className="pb-1 text-end font-medium">n</th>
+              <th className="pb-1 text-end font-medium">p50</th>
+              <th className="pb-1 text-end font-medium">p95</th>
             </tr>
           </thead>
           <tbody className="text-gray-700 dark:text-gray-300">
             {perAsset.map((r) => (
               <tr key={r.assetCode ?? ''}>
                 <td className="py-0.5 font-mono">{r.assetCode}</td>
-                <td className="py-0.5 text-right">{r.sampleCount}</td>
-                <td className="py-0.5 text-right">{formatSeconds(r.p50Seconds)}</td>
-                <td className="py-0.5 text-right">{formatSeconds(r.p95Seconds)}</td>
+                <td className="py-0.5 text-end">{r.sampleCount}</td>
+                <td className="py-0.5 text-end">{formatSeconds(r.p50Seconds)}</td>
+                <td className="py-0.5 text-end">{formatSeconds(r.p95Seconds)}</td>
               </tr>
             ))}
           </tbody>

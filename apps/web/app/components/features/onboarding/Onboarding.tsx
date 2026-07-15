@@ -498,7 +498,7 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
       </div>
 
       <div
-        className="absolute left-0 right-0 bottom-0 flex flex-col gap-2 px-6 pt-4 bg-gray-50 dark:bg-gray-950"
+        className="absolute start-0 end-0 bottom-0 flex flex-col gap-2 px-6 pt-4 bg-gray-50 dark:bg-gray-950"
         style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 16px), 28px)' }}
       >
         <button

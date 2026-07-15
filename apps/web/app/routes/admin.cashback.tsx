@@ -272,7 +272,7 @@ function AdminCashbackRouteInner(): React.JSX.Element {
 
       <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800">
         <table className="min-w-full text-sm">
-          <thead className="bg-gray-50 dark:bg-gray-900/40 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+          <thead className="bg-gray-50 dark:bg-gray-900/40 text-start text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
             <tr>
               <th className="px-3 py-2">Merchant</th>
               <th className="px-3 py-2">Wholesale %</th>
@@ -503,7 +503,7 @@ const HISTORY_DATE_OPTIONS: Intl.DateTimeFormatOptions = {
 function HistoryTable({ rows }: { rows: MerchantCashbackConfigHistoryEntry[] }): React.JSX.Element {
   return (
     <table className="w-full text-xs">
-      <thead className="text-left text-gray-500 dark:text-gray-400">
+      <thead className="text-start text-gray-500 dark:text-gray-400">
         <tr>
           <th className="pb-1 font-medium">Changed</th>
           <th className="pb-1 font-medium">By</th>
@@ -516,14 +516,14 @@ function HistoryTable({ rows }: { rows: MerchantCashbackConfigHistoryEntry[] }):
       <tbody>
         {rows.map((row) => (
           <tr key={row.id} className="text-gray-700 dark:text-gray-200">
-            <td className="py-1 pr-2 whitespace-nowrap">
+            <td className="py-1 pe-2 whitespace-nowrap">
               {formatDateTime(row.changedAt, ADMIN_LOCALE, HISTORY_DATE_OPTIONS)}
             </td>
-            <td className="py-1 pr-2 font-mono text-[11px]">{row.changedBy}</td>
-            <td className="py-1 pr-2">{row.wholesalePct}%</td>
-            <td className="py-1 pr-2">{row.userCashbackPct}%</td>
-            <td className="py-1 pr-2">{row.loopMarginPct}%</td>
-            <td className="py-1 pr-2">{row.active ? 'Yes' : 'No'}</td>
+            <td className="py-1 pe-2 font-mono text-[11px]">{row.changedBy}</td>
+            <td className="py-1 pe-2">{row.wholesalePct}%</td>
+            <td className="py-1 pe-2">{row.userCashbackPct}%</td>
+            <td className="py-1 pe-2">{row.loopMarginPct}%</td>
+            <td className="py-1 pe-2">{row.active ? 'Yes' : 'No'}</td>
           </tr>
         ))}
       </tbody>

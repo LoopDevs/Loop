@@ -130,7 +130,7 @@ export function NativeTabBar(): React.JSX.Element | null {
   return (
     <nav
       data-nav="tab"
-      className="lg:hidden fixed bottom-0 left-0 right-0 z-[1100] bg-white dark:bg-gray-950 border-t border-gray-200 dark:border-gray-800 native-safe-bottom native-safe-x"
+      className="lg:hidden fixed bottom-0 start-0 end-0 z-[1100] bg-white dark:bg-gray-950 border-t border-gray-200 dark:border-gray-800 native-safe-bottom native-safe-x"
     >
       <div className="flex items-center justify-around h-16">
         {TABS.map((tab) => {
