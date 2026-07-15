@@ -1,0 +1,150 @@
+name: Deploy
+
+# FE-37: CI-driven production deploy. Before this workflow, prod was
+# deployed by an operator running `fly deploy` from a laptop — the
+# deployed artifact was whatever was on that machine, not provably the
+# CI-validated commit. This closes that gap: prod is deployed by GitHub,
+# from the exact SHA that CI passed, so "what's live" == "what CI built".
+#
+# Trigger model — deploy ONLY after the CI workflow has fully succeeded
+# on a push to main. `workflow_run` fires when CI *completes* (success OR
+# failure, on PRs AND pushes), so the job-level `if` below narrows it to
+# the one case we deploy on. `workflow_dispatch` gives an operator a
+# manual redeploy button (Actions tab → Deploy → Run workflow) for
+# rollbacks / secret changes / infra events without a code push.
+#
+# Because branch protection already requires CI's checks to pass before a
+# PR can merge, every commit that lands on main is CI-validated on the PR;
+# this workflow re-confirms against the post-merge CI run and then ships
+# that same commit.
+on:
+  workflow_run:
+    workflows: ['CI']
+    types: [completed]
+  workflow_dispatch:
+
+# Least privilege — the deploy needs nothing from the GitHub API beyond
+# reading the repo it checks out. The Fly credentials are per-app scoped
+# deploy tokens (FLY_API_TOKEN_API / FLY_API_TOKEN_WEB) in repo secrets,
+# not the GITHUB_TOKEN.
+permissions:
+  contents: read
+
+# Never run two production deploys at once, and never cancel one that is
+# mid-flight (cancel-in-progress: false). A cancelled `fly deploy` can
+# leave a release half-applied — for a money app the correct behavior is
+# to let the running deploy finish and queue the next.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy-api:
+    name: Deploy API (loopfinance-api)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # The `production` environment is the safety valve: leave it as-is for
+    # fully-automatic continuous deploy, or add a required reviewer in
+    # repo Settings → Environments → production to gate every prod deploy
+    # behind a manual approval click — no workflow change needed.
+    environment: production
+    # Deploy only on a genuinely-green CI run for a push to main, or on a
+    # deliberate manual dispatch. Anything else (CI failure, a PR's CI run,
+    # a run on another branch) is skipped.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main')
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
+        with:
+          # Deploy the EXACT commit CI validated, not whatever main's tip
+          # happens to be by the time this job runs (a later merge could
+          # have moved it). On workflow_dispatch there is no workflow_run
+          # context, so fall back to the dispatched ref.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # v1.6
+      # The API deploy runs the Drizzle migration chain as its Fly release
+      # command (apps/backend/fly.toml → migrate-cli). A failed migration
+      # aborts the release with a non-zero exit and the old machines keep
+      # serving — so a bad migration fails the deploy instead of taking
+      # prod down. `--remote-only` builds on Fly's builders (no Docker in
+      # CI). Build context is the repo root for the monorepo Dockerfile.
+      - name: Deploy loopfinance-api
+        run: >-
+          flyctl deploy
+          --config apps/backend/fly.toml
+          --dockerfile apps/backend/Dockerfile
+          --app loopfinance-api
+          --remote-only
+        env:
+          # Per-app deploy token (least privilege): a leaked web token
+          # cannot deploy the API and vice-versa. flyctl reads FLY_API_TOKEN.
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN_API }}
+
+  deploy-web:
+    name: Deploy web (loopfinance-web)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    # Web depends on the API at runtime and shares its schema expectations,
+    # so it ships AFTER the API (and its migrations) are live. `needs`
+    # also means web is skipped whenever deploy-api is skipped or fails —
+    # the `if` gate on deploy-api transitively guards this job too.
+    needs: deploy-api
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # v1.6
+      - name: Deploy loopfinance-web
+        run: >-
+          flyctl deploy
+          --config apps/web/fly.toml
+          --dockerfile apps/web/Dockerfile
+          --app loopfinance-web
+          --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN_WEB }}
+
+  notify:
+    name: Discord notification
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [deploy-api, deploy-web]
+    # Report the deploy outcome even when a job failed or was skipped, so
+    # a red/absent deploy is visible in the same channel as CI status.
+    if: always() && needs.deploy-api.result != 'skipped'
+    steps:
+      - name: Notify Discord
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_DEPLOYMENTS }}
+          API_RESULT: ${{ needs.deploy-api.result }}
+          WEB_RESULT: ${{ needs.deploy-web.result }}
+          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ACTOR: ${{ github.actor }}
+          SERVER_URL: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [ "$API_RESULT" = "success" ] && [ "$WEB_RESULT" = "success" ]; then
+            STATUS="🚀 DEPLOYED — api + web live"
+            COLOR=3066993
+          else
+            STATUS="❌ DEPLOY FAILED (api=$API_RESULT web=$WEB_RESULT)"
+            COLOR=15158332
+          fi
+          SHORT_SHA=$(printf '%s' "$SHA" | cut -c1-7)
+          DESCRIPTION=$(printf '**Commit:** %s\n**By:** %s' "$SHORT_SHA" "$ACTOR")
+          URL="$SERVER_URL/$REPO/actions/runs/$RUN_ID"
+          TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          PAYLOAD=$(jq -cn \
+            --arg title "$STATUS" \
+            --arg desc  "$DESCRIPTION" \
+            --argjson color $COLOR \
+            --arg url   "$URL" \
+            --arg ts    "$TIMESTAMP" \
+            '{embeds:[{title:$title,description:$desc,color:$color,url:$url,timestamp:$ts}]}')
+          curl -s -H "Content-Type: application/json" -d "$PAYLOAD" "$DISCORD_WEBHOOK" || true
