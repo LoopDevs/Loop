@@ -89,6 +89,11 @@ export function registerAdminPayoutsClusterWritesOpenApi(
           "Retrying would exceed the un-emitted liability (`EMISSION_EXCEEDS_UNEMITTED_BALANCE`) — the failed row's value was already re-materialised while it sat failed; compensate or investigate instead of retrying (hardening A1/C10 re-entry conservation trigger)",
         content: { 'application/json': { schema: errorResponse } },
       },
+      422: {
+        description:
+          "NS-05: the payout's pinned value exceeds the per-action value cap (`ADMIN_ACTION_VALUE_CAP_EXCEEDED`) — the failed→pending flip is rolled back so the submit worker never sees it; no money moved. Cap is `LOOP_ADMIN_ACTION_VALUE_CAP_MINOR` (default 100_000 minor = 1,000 units of the payout asset's currency).",
+        content: { 'application/json': { schema: errorResponse } },
+      },
       429: {
         description: 'Rate limit exceeded (20/min per IP)',
         content: { 'application/json': { schema: errorResponse } },

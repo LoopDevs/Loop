@@ -114,6 +114,17 @@ export const ApiErrorCode = {
   // NS-08: releasing an `account_holds` row that is already released
   // (409). Distinct from a fresh release; the write never mutated twice.
   HOLD_ALREADY_RELEASED: 'HOLD_ALREADY_RELEASED',
+  // NS-05: a single admin money-move action (payout retry, order
+  // redrive, vault emission/redemption redrive, operator-float manual
+  // movement) whose value exceeds the per-action cap
+  // (`LOOP_ADMIN_ACTION_VALUE_CAP_MINOR`, default 100_000 minor =
+  // 1,000 major units of the action's OWN currency). Returned 422 by
+  // every one of those handlers BEFORE any money moves — a fat-finger
+  // or compromised admin can't push an unbounded amount through a
+  // single action. The cap is compared per-currency (never converted
+  // across currencies), so USD/GBP/EUR actions are each bounded to
+  // 1,000 units of their own denomination.
+  ADMIN_ACTION_VALUE_CAP_EXCEEDED: 'ADMIN_ACTION_VALUE_CAP_EXCEEDED',
   // Image proxy specific
   IMAGE_TOO_LARGE: 'IMAGE_TOO_LARGE',
   NOT_AN_IMAGE: 'NOT_AN_IMAGE',

@@ -104,6 +104,11 @@ export function registerAdminVaultRecoveryOpenApi(
           'Vault emission already `mirrored` (`VAULT_EMISSION_ALREADY_MIRRORED`), changed state mid-redrive (`VAULT_EMISSION_REDRIVE_RACE`, likely a concurrent redrive), or the emission sweep currently holds the single-flight lock the re-drive must serialise against (`VAULT_EMISSION_REDRIVE_SWEEP_IN_PROGRESS` — retry once the sweep releases)',
         content: { 'application/json': { schema: errorResponse } },
       },
+      422: {
+        description:
+          "NS-05: the emission's cashback value exceeds the per-action value cap (`ADMIN_ACTION_VALUE_CAP_EXCEEDED`) — refused before any Soroban deposit/transfer; no money moved. Cap is `LOOP_ADMIN_ACTION_VALUE_CAP_MINOR` (default 100_000 minor = 1,000 units of the vault currency).",
+        content: { 'application/json': { schema: errorResponse } },
+      },
       429: {
         description: 'Rate limit exceeded (10/min per IP)',
         content: { 'application/json': { schema: errorResponse } },
@@ -189,6 +194,11 @@ export function registerAdminVaultRecoveryOpenApi(
       409: {
         description:
           'Vault redemption already `settled` (`VAULT_REDEMPTION_ALREADY_SETTLED`), needs a manual refund (`VAULT_REDEMPTION_NEEDS_REFUND`), or changed state mid-redrive (`VAULT_REDEMPTION_REDRIVE_RACE`)',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      422: {
+        description:
+          "NS-05: the redemption's value exceeds the per-action value cap (`ADMIN_ACTION_VALUE_CAP_EXCEEDED`) — refused before any Soroban collect/payout; no money moved. Cap is `LOOP_ADMIN_ACTION_VALUE_CAP_MINOR` (default 100_000 minor = 1,000 units of the vault currency).",
         content: { 'application/json': { schema: errorResponse } },
       },
       429: {

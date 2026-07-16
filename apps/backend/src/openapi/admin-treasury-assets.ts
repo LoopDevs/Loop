@@ -435,6 +435,11 @@ export function registerAdminTreasuryAssetsOpenApi(
         description: 'Admin privileges required; masked as not found by the admin middleware.',
         content: { 'application/json': { schema: errorResponse } },
       },
+      422: {
+        description:
+          "NS-05: the admin-supplied movement value exceeds the per-action value cap (`ADMIN_ACTION_VALUE_CAP_EXCEEDED`) — rejected before any write; nothing recorded. Cap is `LOOP_ADMIN_ACTION_VALUE_CAP_MINOR` (default 100_000 minor = 1,000 units of the asset; for XLM that is 1,000 XLM in the asset's own unit, no price oracle).",
+        content: { 'application/json': { schema: errorResponse } },
+      },
       429: {
         description: 'Rate limited (20/min per IP).',
         content: { 'application/json': { schema: errorResponse } },
