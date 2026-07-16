@@ -115,6 +115,15 @@ export const STEP_UP_SCOPES = [
   // and payout-retry. A captured bearer alone must not be able to
   // trigger either.
   'vault-redrive',
+  // NS-04: halting/resuming a money rail (deposit/payout/vault/refund)
+  // is a durable, money-flow-controlling toggle — halting freezes new
+  // ops fleet-wide, resuming re-enables money movement mid-incident.
+  // Both directions are destructive enough to warrant step-up (a
+  // captured bearer must not be able to freeze the deposit rail as a
+  // DoS, nor un-halt a rail an operator deliberately stopped). Separate
+  // scopes per direction so a halt token can't be replayed to resume.
+  'rail-halt',
+  'rail-resume',
 ] as const;
 export type AdminStepUpScope = (typeof STEP_UP_SCOPES)[number];
 

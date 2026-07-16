@@ -45,6 +45,7 @@ import {
 import { attachUserWalletSignature } from '../../wallet/user-signer.js';
 import type { WalletProvider } from '../../wallet/provider.js';
 import { submitPreSignedTransaction } from '../../payments/payout-submit.js';
+import { assertRailNotHalted, killSwitchService } from '../../rail-kill-switches/index.js';
 
 /** Thrown by every exported function here when `LOOP_VAULTS_ENABLED` is false. */
 export class VaultDisabledError extends Error {
@@ -106,6 +107,23 @@ export class VaultNotImplementedError extends Error {
 
 function requireVaultsEnabled(): void {
   if (!vaultsEnabled()) throw new VaultDisabledError();
+}
+
+/**
+ * NS-04: whole-rail halt for the vault rail. Called at each MUTATING
+ * vault op (deposit / withdraw / share-transfer) right AFTER
+ * `requireVaultsEnabled()`, so the two "stop" signals compose as a
+ * logical OR (design §7 Q8): boot-disabled (`VaultDisabledError`) OR
+ * row-halted (`RailHaltedError`). Ordering matters — `requireVaultsEnabled`
+ * runs first, so a `rail_kill_switches` row can never force a
+ * boot-disabled vault subsystem back on. Read-only ops (`readVaultState`
+ * / `getShareBalance`) deliberately DON'T call this — a halt blocks new
+ * money movement, not reads. Block-new-only: an op already mid-submit is
+ * unaffected (it passed this gate before the halt landed). Fails CLOSED
+ * via `killSwitchService.isHalted` (an unreadable switch → halted).
+ */
+async function assertVaultRailNotHalted(): Promise<void> {
+  await assertRailNotHalted(killSwitchService, 'vault');
 }
 
 /**
@@ -261,6 +279,7 @@ export interface DepositToVaultResult {
 /** `deposit(amounts_desired=[underlyingAmount], amounts_min=[minShares], from=operator, invest=true)`. */
 export async function depositToVault(args: DepositToVaultArgs): Promise<DepositToVaultResult> {
   requireVaultsEnabled();
+  await assertVaultRailNotHalted();
   assertPositiveBigint(args.underlyingAmount, 'depositToVault: underlyingAmount');
   assertPositiveBigint(args.minShares, 'depositToVault: minShares (slippage floor)');
 
@@ -345,6 +364,7 @@ export async function withdrawFromVault(
   args: WithdrawFromVaultArgs,
 ): Promise<WithdrawFromVaultResult> {
   requireVaultsEnabled();
+  await assertVaultRailNotHalted();
   assertPositiveBigint(args.shares, 'withdrawFromVault: shares');
   assertPositiveBigint(args.minAmountsOut, 'withdrawFromVault: minAmountsOut (slippage floor)');
 
@@ -461,6 +481,7 @@ export interface TransferSharesResult {
  */
 export async function transferShares(args: TransferSharesArgs): Promise<TransferSharesResult> {
   requireVaultsEnabled();
+  await assertVaultRailNotHalted();
   assertPositiveBigint(args.amount, 'transferShares: amount');
 
   if (args.signWith === 'provider') {

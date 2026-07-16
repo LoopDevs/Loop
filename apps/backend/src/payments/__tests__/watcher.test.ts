@@ -1,4 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+// NS-04: stub the rail kill-switch barrel. This unit suite mocks the DB,
+// so the real `killSwitchService.isHalted` read would throw and (correctly)
+// fail CLOSED — halting the deposit rail and breaking every happy-path
+// assertion. Treat the rail as OPEN here; the DB-backed halt/resume
+// enforcement is proven in `__tests__/integration/rail-kill-switches.test.ts`.
+vi.mock('../../rail-kill-switches/index.js', () => ({
+  killSwitchService: { isHalted: async () => false },
+  assertRailNotHalted: async () => {},
+  RailHaltedError: class RailHaltedError extends Error {},
+  RAILS: ['deposit', 'payout', 'vault', 'refund'],
+}));
 import type { HorizonPayment } from '../horizon.js';
 import type * as HorizonModule from '../horizon.js';
 import type * as SchemaModule from '../../db/schema.js';

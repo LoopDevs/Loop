@@ -106,6 +106,7 @@ import { mountAdminUserClusterRoutes } from './admin-user-cluster.js';
 import { mountAdminStaffRoutes } from './admin-staff.js';
 import { mountAdminSupportOpsRoutes } from './admin-support-ops.js';
 import { mountAdminVaultRecoveryRoutes } from './admin-vault-recovery.js';
+import { mountAdminRailsRoutes } from './admin-rails.js';
 
 /** Mounts all `/api/admin/*` routes on the supplied Hono app. */
 export function mountAdminRoutes(app: Hono): void {
@@ -305,6 +306,11 @@ export function mountAdminRoutes(app: Hono): void {
   // discipline as the credit writes; lives in its own file because
   // it isn't a credit/refund/emission.
   mountAdminUserWritesRoutes(app);
+
+  // NS-04 — runtime rail kill switches: list + halt + resume for the
+  // four money rails (deposit/payout/vault/refund). Admin-tier, step-up
+  // gated (rail-halt / rail-resume), idempotent + audited money writes.
+  mountAdminRailsRoutes(app);
 
   // ADR-028 / A4-063: step-up token endpoint. Mounted under the
   // standard admin middleware stack (cache-control / requireAuth /

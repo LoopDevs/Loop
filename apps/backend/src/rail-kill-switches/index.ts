@@ -1,20 +1,14 @@
 /**
- * NS-04 — durable runtime rail kill/halt switches (DESIGN SCAFFOLD).
+ * NS-04 — durable runtime rail kill/halt switches (barrel).
  *
- * Barrel for the rail-halt types + service interface + (unwired)
- * enforcement helper. See `types.ts`, `service.ts`, and
+ * Types + service interface + `RailHaltedError` + the `assertRailNotHalted`
+ * enforcement helper, plus the table-backed `DbKillSwitchService` and the
+ * process-wide `killSwitchService` singleton the rails + admin API share.
+ *
+ * See `types.ts`, `service.ts`, `db-service.ts`, and
  * `docs/audit/audit-2026-07/ns-04-kill-switches-design.md`.
- *
- * NOT wired into any live rail — importing from here has no runtime
- * effect on the rails until the `rail_kill_switches` migration (0071+)
- * lands and enforcement is deliberately wired under an agreed policy.
  */
 export type { HaltArgs, Rail, RailHaltState, ResumeArgs } from './types.js';
 export { RAILS } from './types.js';
-export {
-  assertRailNotHalted,
-  KillSwitchNotProvisionedError,
-  RailHaltedError,
-  UnwiredKillSwitchService,
-  type KillSwitchService,
-} from './service.js';
+export { assertRailNotHalted, RailHaltedError, type KillSwitchService } from './service.js';
+export { DbKillSwitchService, killSwitchService } from './db-service.js';

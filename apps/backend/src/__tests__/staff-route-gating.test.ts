@@ -419,16 +419,18 @@ describe('ADR 037 mount inventory (default-deny)', () => {
       (g) => !g.gates.includes('requireStaff(admin)') && g.gates.includes('requireStaff(support)'),
     );
     const riders = groups.length - adminTier.length - supportExplicit.length;
-    // 42 = 23 CSV exports + 11 non-CSV admin writes (3 credit writes,
+    // 45 = 23 CSV exports + 11 non-CSV admin writes (3 credit writes,
     //      home-currency, cashback-config PUT, merchants/resync,
     //      B4 revoke-sessions, A5-3 clear-otp-lockout, A6 deposit-refund,
     //      R3-1 operator-float baseline/manual explanations) + payout
     //      retry/compensate + A5-1 order redrive + A5-4 order refund
     //      + ADR 031 V7 vault-emissions/vault-redemptions redrive (2)
-    //      + 3 Discord surfaces + step-up mint... see the mount-by-mount
-    //      table in the PR; the exact membership is pinned by the
-    //      matrix test above and the money-write list below.
-    expect(adminTier).toHaveLength(42);
+    //      + 3 Discord surfaces + step-up mint
+    //      + NS-04 rail kill switches (GET list + POST halt + POST resume)
+    //      ... see the mount-by-mount table in the PR; the exact
+    //      membership is pinned by the matrix test above and the
+    //      money-write list below.
+    expect(adminTier).toHaveLength(45);
     // 10 = lookup, watcher-skips ×3, wallet ×2, refetch-redemption,
     //      ledger (A5-8 fleet-wide ledger browser), audit timeline
     //      (A5-7 per-subject audit timeline), auth-state (A5-3
@@ -455,6 +457,10 @@ describe('ADR 037 mount inventory (default-deny)', () => {
       'POST /api/admin/step-up',
       'PUT /api/admin/staff/:userId/role',
       'DELETE /api/admin/staff/:userId/role',
+      // NS-04: halting/resuming a money rail is a durable money-flow
+      // control — admin-tier + step-up on both directions.
+      'POST /api/admin/rails/:rail/halt',
+      'POST /api/admin/rails/:rail/resume',
     ];
     const groups = new Map(adminRouteGroups().map((g) => [`${g.method} ${g.path}`, g]));
     for (const key of mustBeAdmin) {
@@ -498,6 +504,10 @@ describe('ADR 037 mount inventory (default-deny)', () => {
       // R3-1: changes the baseline/explanation set for the operator float invariant.
       'POST /api/admin/operator-float/baselines': 'requireAdminStepUp(operator-float)',
       'POST /api/admin/operator-float/manual-movements': 'requireAdminStepUp(operator-float)',
+      // NS-04: halting/resuming a money rail — separate scope per direction
+      // so a halt token can't be replayed to resume.
+      'POST /api/admin/rails/:rail/halt': 'requireAdminStepUp(rail-halt)',
+      'POST /api/admin/rails/:rail/resume': 'requireAdminStepUp(rail-resume)',
     };
     const groups = new Map(adminRouteGroups().map((g) => [`${g.method} ${g.path}`, g]));
     for (const [key, gate] of Object.entries(mustCarryStepUp)) {

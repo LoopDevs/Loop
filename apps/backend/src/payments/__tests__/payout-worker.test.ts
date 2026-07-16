@@ -1,4 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+// NS-04: stub the rail kill-switch barrel — this unit suite mocks the DB,
+// so the real `killSwitchService.isHalted` read would fail CLOSED and halt
+// the payout rail, breaking the happy paths. Treat the rail as OPEN; the
+// DB-backed enforcement is proven in the rail-kill-switches integration suite.
+vi.mock('../../rail-kill-switches/index.js', () => ({
+  killSwitchService: { isHalted: async () => false },
+  assertRailNotHalted: async () => {},
+  RailHaltedError: class RailHaltedError extends Error {},
+  RAILS: ['deposit', 'payout', 'vault', 'refund'],
+}));
 
 // Stable, single handle (not a fresh object per `.child()` call) so
 // tests can assert on `log.error`/`log.warn` calls — notably the S4-1

@@ -9,6 +9,7 @@ import {
   text,
   bigint,
   char,
+  boolean,
   timestamp,
   integer,
   index,
@@ -18,6 +19,45 @@ import {
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { users } from './users.js';
+
+/**
+ * NS-04 — durable, admin-toggleable runtime halt for the four money
+ * rails (deposit / payout / vault / refund). One row per rail; `halted`
+ * defaults FALSE (the "not halted" default is a PROTECTED CLASS). A
+ * missing row is also read as "not halted"; the migration seeds all four
+ * open. Enforcement reads this at each rail's entry point (block-new-only)
+ * and fails CLOSED on a read error. The admin API (halt/resume/list) is
+ * the only writer. See migration 0072 and
+ * `docs/audit/audit-2026-07/ns-04-kill-switches-design.md`.
+ *
+ * Distinct from the env/secret kill switches in `../../kill-switches.ts`:
+ * that names env subsystems flipped via Fly secrets; this names DB-backed
+ * rails toggled via an admin API.
+ */
+export const railKillSwitches = pgTable(
+  'rail_kill_switches',
+  {
+    rail: text('rail').primaryKey().$type<'deposit' | 'payout' | 'vault' | 'refund'>(),
+    halted: boolean('halted').notNull().default(false),
+    /** Operator-supplied reason for the current state; null when never toggled. */
+    reason: text('reason'),
+    /** Admin who last toggled this rail; null at seed / when never toggled. */
+    actorUserId: uuid('actor_user_id').references(() => users.id, { onDelete: 'restrict' }),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      'rail_kill_switches_rail_known',
+      sql`${t.rail} IN ('deposit', 'payout', 'vault', 'refund')`,
+    ),
+    // A halted switch MUST carry who + why (audit completeness); an open
+    // switch may retain them from the last toggle, or be null at seed.
+    check(
+      'rail_kill_switches_halted_has_reason',
+      sql`${t.halted} = false OR (${t.reason} IS NOT NULL AND ${t.actorUserId} IS NOT NULL)`,
+    ),
+  ],
+);
 
 /**
  * Admin idempotency store (ADR 017). Each row is the snapshot of a

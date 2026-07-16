@@ -97,6 +97,11 @@ export const ApiErrorCode = {
   UPSTREAM_UNAVAILABLE: 'UPSTREAM_UNAVAILABLE',
   SERVICE_UNAVAILABLE: 'SERVICE_UNAVAILABLE',
   SUBSYSTEM_DISABLED: 'SUBSYSTEM_DISABLED',
+  // NS-04: a money rail (deposit/payout/vault/refund) is halted by an
+  // admin runtime kill switch. Returned 503 by the enforced rail
+  // surfaces (refund + vault HTTP paths), matching the SUBSYSTEM_DISABLED
+  // shape so web/mobile render it as a transient retry.
+  RAIL_HALTED: 'RAIL_HALTED',
   // Image proxy specific
   IMAGE_TOO_LARGE: 'IMAGE_TOO_LARGE',
   NOT_AN_IMAGE: 'NOT_AN_IMAGE',
