@@ -465,6 +465,47 @@ describe('adminRetryPayoutHandler (ADR 017)', () => {
     expect(res.status).toBe(500);
   });
 
+  // NS-05: per-action value cap. baseRow.amountStroops is stroops of a
+  // fiat-pegged LOOP asset; valueMinor = amountStroops / 100_000. The
+  // default cap is 100_000 minor ($1,000), so the failed→pending flip is
+  // rejected (and rolled back — no snapshot) above 1,000 units of value.
+  it('422 ADMIN_ACTION_VALUE_CAP_EXCEEDED when the payout value exceeds the cap', async () => {
+    // 100_001 minor ($1,000.01) — one minor over the cap.
+    resetMock.mockResolvedValue({
+      ...resetRow,
+      assetCode: 'USDLOOP',
+      amountStroops: (100_000n + 1n) * 100_000n,
+    });
+    const res = await adminRetryPayoutHandler(
+      makeRetryCtx({
+        headers: { 'idempotency-key': validKey },
+        body: { reason: 'fat-finger retry of a huge payout' },
+      }),
+    );
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as { code: string }).code).toBe('ADMIN_ACTION_VALUE_CAP_EXCEEDED');
+    // Rolled back: no replay snapshot persisted, so the submit worker
+    // never sees a pending row — no money moved.
+    expect(idempotencyState.storedSnapshot).toBeNull();
+    expect(idempotencyState.discordCalls).toHaveLength(0);
+  });
+
+  it('200 at exactly the cap boundary (100_000 minor / $1,000) — proceeds', async () => {
+    resetMock.mockResolvedValue({
+      ...resetRow,
+      assetCode: 'USDLOOP',
+      amountStroops: 100_000n * 100_000n, // exactly the cap
+    });
+    const res = await adminRetryPayoutHandler(
+      makeRetryCtx({
+        headers: { 'idempotency-key': validKey },
+        body: { reason: 'exactly at the cap, allowed' },
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(idempotencyState.storedSnapshot).not.toBeNull();
+  });
+
   it('replay path returns stored snapshot, fires Discord replayed, skips apply', async () => {
     idempotencyState.priorSnapshot = {
       status: 200,

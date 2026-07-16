@@ -407,6 +407,50 @@ describe('adminOperatorFloatManualMovementCreateHandler', () => {
     expect(state.txState.discordCalls).toHaveLength(0);
   });
 
+  // NS-05: the manual-movement amount is admin-SUPPLIED (the realest
+  // fat-finger surface). The cap is checked before any write — no txn,
+  // no insert, no snapshot, no audit. amountStroops is stroops of the
+  // asset; valueMinor = amountStroops / 100_000; default cap 100_000
+  // minor ($1,000 for usdc / 1,000 XLM for xlm in the asset's own unit).
+  it('422 ADMIN_ACTION_VALUE_CAP_EXCEEDED when the movement value exceeds the cap', async () => {
+    const res = await adminOperatorFloatManualMovementCreateHandler(
+      // 100_001 minor ($1,000.01 of usdc) — one minor over the cap.
+      manualMovementCtx({ amountStroops: String((100_000n + 1n) * 100_000n) }),
+    );
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toMatchObject({
+      code: 'ADMIN_ACTION_VALUE_CAP_EXCEEDED',
+    });
+    // Rejected before the guard/transaction: nothing written, no audit.
+    expect(state.txState.insertValues).toHaveLength(0);
+    expect(state.txState.storedSnapshot).toBeNull();
+    expect(state.txState.discordCalls).toHaveLength(0);
+  });
+
+  it('RED without the cap: this over-limit adjustment would otherwise be written straight through', async () => {
+    // Documents the pre-NS-05 hole: the amount is unbounded admin input,
+    // so the ONLY thing stopping a $1,000,000 float adjustment is the
+    // cap. Same input, asserting the guarded outcome.
+    const res = await adminOperatorFloatManualMovementCreateHandler(
+      manualMovementCtx({ asset: 'usdc', amountStroops: String(1_000_000_00n * 100_000n) }),
+    );
+    expect(res.status).toBe(422);
+    expect(state.txState.insertValues).toHaveLength(0);
+  });
+
+  it('200 at exactly the cap boundary (100_000 minor) — writes the movement', async () => {
+    const res = await adminOperatorFloatManualMovementCreateHandler(
+      manualMovementCtx({
+        amountStroops: String(100_000n * 100_000n), // exactly the cap
+        // linkage isn't the subject here — unlinked keeps it a pure
+        // insert (no FOR-UPDATE match needed).
+        movementPaymentId: undefined,
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(state.txState.insertValues).toHaveLength(1);
+  });
+
   it('F7: 400 when the linked movement is already classified — refuses to reclassify', async () => {
     state.txState.linkedMovementRows = [
       {

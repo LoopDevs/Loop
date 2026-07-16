@@ -300,6 +300,20 @@ export const coreEnvFields = {
   // UTC day, across all admins; `0` disables the check.
   ADMIN_DAILY_WITHDRAWAL_CAP_MINOR: z.coerce.bigint().nonnegative().default(100_000_000n),
 
+  // NS-05: per-ACTION value cap (minor units) on the admin money-move
+  // levers — payout retry, order redrive, vault emission/redemption
+  // redrive, and operator-float manual movement. Unlike the DAILY caps
+  // above (an aggregate across a UTC day), this bounds a SINGLE action:
+  // a fat-finger or compromised admin can't push an unbounded amount
+  // through one retry/redrive/adjust. Owner's decision: $1,000 per
+  // action → 100_000 minor. Compared against each action's value in ITS
+  // OWN currency's minor units (never FX-converted), so a £/€/$ action
+  // is bounded to 1,000 units of its own denomination; a non-fiat asset
+  // (XLM) is bounded to 1,000 units of that asset (no price oracle).
+  // Fail-CLOSED: `.positive()` (unlike the `0`-disables daily caps) so
+  // a security control can't be silently zeroed — loosen by raising it.
+  LOOP_ADMIN_ACTION_VALUE_CAP_MINOR: z.coerce.bigint().positive().default(100_000n),
+
   // ADR 045 (B-3): Phase-1 fraud/abuse velocity limits on order
   // creation. Two independent dimensions, both per-user (not per-IP —
   // see ADR 045 for why the existing per-IP rate limiter doesn't

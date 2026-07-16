@@ -14,6 +14,11 @@ import {
 } from '../db/schema.js';
 import type { User } from '../db/users.js';
 import { notifyAdminAudit } from '../discord.js';
+import {
+  assertAdminActionValueWithinCap,
+  AdminActionValueCapExceededError,
+  stroopsToMinorFloor,
+} from './action-value-cap.js';
 import { buildAuditEnvelope, type AdminAuditEnvelope } from './audit-envelope.js';
 import {
   IDEMPOTENCY_KEY_MAX,
@@ -279,6 +284,26 @@ export async function adminOperatorFloatManualMovementCreateHandler(c: Context):
       { code: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid body' },
       400,
     );
+  }
+
+  // NS-05: bound the value of this admin-SUPPLIED float adjustment
+  // BEFORE anything is written. Unlike the retry/redrive levers (whose
+  // value is pinned on an existing row), the amount here is typed in by
+  // the admin, so it is the realest fat-finger surface. `amountStroops`
+  // is on-chain stroops of the movement's asset — convert to that
+  // asset's minor units and cap per-currency. For USDC that is $1,000;
+  // for XLM (no fiat peg, no oracle) that is 1,000 XLM in the asset's
+  // own unit. Checked here (pre-guard) so no snapshot/txn is even opened.
+  try {
+    assertAdminActionValueWithinCap({
+      valueMinor: stroopsToMinorFloor(parsed.data.amountStroops),
+      currency: parsed.data.asset,
+    });
+  } catch (err) {
+    if (err instanceof AdminActionValueCapExceededError) {
+      return c.json({ code: 'ADMIN_ACTION_VALUE_CAP_EXCEEDED', message: err.message }, 422);
+    }
+    throw err;
   }
 
   const path = '/api/admin/operator-float/manual-movements';

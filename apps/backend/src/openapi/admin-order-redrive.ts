@@ -93,6 +93,11 @@ export function registerAdminOrderRedriveOpenApi(
           'Order is currently `procuring` (`ORDER_REDRIVE_IN_PROGRESS`) — refused; stuck procuring orders are auto-recovered by the recovery sweep, and force-re-procuring is a double-pay / stranding risk',
         content: { 'application/json': { schema: errorResponse } },
       },
+      422: {
+        description:
+          "NS-05: the order's face value exceeds the per-action value cap (`ADMIN_ACTION_VALUE_CAP_EXCEEDED`) — refused before any CTX payment; no money moved. Cap is `LOOP_ADMIN_ACTION_VALUE_CAP_MINOR` (default 100_000 minor = 1,000 units of the order currency).",
+        content: { 'application/json': { schema: errorResponse } },
+      },
       429: {
         description:
           'Rate limit exceeded (10/min per IP — every call can be a CTX round-trip + redemption wait)',

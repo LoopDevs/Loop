@@ -37,6 +37,11 @@ import { notifyAdminAudit } from '../discord.js';
 import { logger } from '../logger.js';
 import { buildAuditEnvelope, type AdminAuditEnvelope } from './audit-envelope.js';
 import {
+  assertAdminActionValueWithinCap,
+  AdminActionValueCapExceededError,
+  stroopsToMinorFloor,
+} from './action-value-cap.js';
+import {
   IDEMPOTENCY_KEY_MIN,
   IDEMPOTENCY_KEY_MAX,
   validateIdempotencyKey,
@@ -194,6 +199,17 @@ export async function adminRetryPayoutHandler(c: Context): Promise<Response> {
           // see PayoutNotRetryableError above.
           throw new PayoutNotRetryableError(id);
         }
+        // NS-05: bound the value this retry re-queues for the submit
+        // worker. The pinned `amountStroops` is on-chain stroops of a
+        // fiat-pegged LOOP asset (`assetCode`, e.g. USDLOOP = $1:1) —
+        // convert to that currency's minor units and cap per-currency.
+        // Thrown here → the guard txn rolls back the failed→pending flip
+        // (nothing is left for the worker to pick up) and stores no
+        // snapshot; the outer catch maps it to a 422.
+        assertAdminActionValueWithinCap({
+          valueMinor: stroopsToMinorFloor(row.amountStroops),
+          currency: row.assetCode,
+        });
         log.info({ payoutId: id, adminUserId: actor.id }, 'Payout reset to pending by admin retry');
         const result = toView(row as PayoutRow);
         const envelope: AdminAuditEnvelope<AdminPayoutView> = buildAuditEnvelope({
@@ -207,6 +223,11 @@ export async function adminRetryPayoutHandler(c: Context): Promise<Response> {
       },
     );
   } catch (err) {
+    if (err instanceof AdminActionValueCapExceededError) {
+      // NS-05: no money moved — the guard rolled back the failed→pending
+      // flip, so the submit worker never sees this row.
+      return c.json({ code: 'ADMIN_ACTION_VALUE_CAP_EXCEEDED', message: err.message }, 422);
+    }
     if (err instanceof PayoutNotRetryableError) {
       return c.json({ code: 'NOT_FOUND', message: 'Payout not found or not in failed state' }, 404);
     }

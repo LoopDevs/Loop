@@ -114,6 +114,11 @@ function makeRow(overrides: Partial<Record<string, unknown>> = {}): Record<strin
     payoutPath: null,
     redeemedAt: null,
     lastError: 'Soroban RPC timeout',
+    // NS-05: a real redemption row carries the value being redeemed
+    // (vault currency minor units) + asset the value cap reads. Default
+    // well under the 100_000 minor cap so happy-path cases pass the gate.
+    valueMinor: 5_000n,
+    assetCode: 'LOOPUSD',
     ...overrides,
   };
 }
@@ -205,6 +210,26 @@ describe('adminRedriveVaultRedemptionHandler — already-terminal / not-found', 
     expect(res.status).toBe(404);
     expect(((await res.json()) as { code: string }).code).toBe('NOT_FOUND');
     expect(state.driveCalls).toEqual([]);
+  });
+});
+
+describe('adminRedriveVaultRedemptionHandler — NS-05 per-action value cap', () => {
+  // Default cap is 100_000 minor ($1,000). driveOneVaultRedemption
+  // collects shares + pays value out on-chain, so the cap rejects first.
+  it('422 ADMIN_ACTION_VALUE_CAP_EXCEEDED when value > cap — never drives, no snapshot', async () => {
+    state.rows.set(ID, makeRow({ valueMinor: 100_001n, assetCode: 'LOOPUSD' }));
+    const res = await redrive();
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as { code: string }).code).toBe('ADMIN_ACTION_VALUE_CAP_EXCEEDED');
+    expect(state.driveCalls).toEqual([]); // no money moved
+    expect(state.snapshotStored).toBe(false); // rolled back, replay stays free
+  });
+
+  it('200 at exactly the cap boundary (100_000 minor) — reclaims and drives', async () => {
+    state.rows.set(ID, makeRow({ valueMinor: 100_000n, assetCode: 'LOOPUSD' }));
+    const res = await redrive();
+    expect(res.status).toBe(200);
+    expect(state.driveCalls).toHaveLength(1); // proceeds: money move authorised
   });
 });
 

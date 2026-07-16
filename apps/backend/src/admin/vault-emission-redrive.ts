@@ -80,6 +80,10 @@ import { notifyAdminAudit } from '../discord.js';
 import { logger } from '../logger.js';
 import { buildAuditEnvelope, type AdminAuditEnvelope } from './audit-envelope.js';
 import {
+  assertAdminActionValueWithinCap,
+  AdminActionValueCapExceededError,
+} from './action-value-cap.js';
+import {
   IDEMPOTENCY_KEY_MIN,
   IDEMPOTENCY_KEY_MAX,
   validateIdempotencyKey,
@@ -161,6 +165,16 @@ export async function adminRedriveVaultEmissionHandler(c: Context): Promise<Resp
             throw new RedriveNotApplicableError('already_mirrored');
           }
 
+          // NS-05: bound the value this redrive can deposit/transfer
+          // on-chain BEFORE `driveOneVaultEmission` submits. `cashbackMinor`
+          // is already in the vault currency's (USD/EUR) minor units, so
+          // the cap is compared per-currency. Thrown inside the guard →
+          // txn rolls back, no snapshot stored, mapped to 422.
+          assertAdminActionValueWithinCap({
+            valueMinor: existing.cashbackMinor,
+            currency: existing.assetCode,
+          });
+
           const priorState = existing.state;
           let toDrive: VaultEmissionRow;
           let resumedFromState: string;
@@ -230,6 +244,10 @@ export async function adminRedriveVaultEmissionHandler(c: Context): Promise<Resp
       },
     );
   } catch (err) {
+    if (err instanceof AdminActionValueCapExceededError) {
+      // NS-05: no money moved — the guard rolled back before the drive.
+      return c.json({ code: 'ADMIN_ACTION_VALUE_CAP_EXCEEDED', message: err.message }, 422);
+    }
     if (err instanceof RedriveNotApplicableError) {
       if (err.kind === 'not_found') {
         return c.json({ code: 'NOT_FOUND', message: 'Vault emission not found' }, 404);

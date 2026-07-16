@@ -129,6 +129,11 @@ function makeOrder(overrides: Partial<Record<string, unknown>> = {}): Record<str
     id: ORDER_ID,
     state: 'paid',
     procuredAt: null,
+    // NS-05: real orders always carry a face value + currency; the
+    // per-action value cap reads these. Default well under the 100_000
+    // minor ($1,000) cap so the happy-path cases pass the gate.
+    faceValueMinor: 5_000n,
+    currency: 'USD',
     ...overrides,
   };
 }
@@ -226,6 +231,36 @@ describe('adminRedriveOrderHandler — ineligible / not-found states', () => {
       expect(state.snapshotStored).toBe(false);
     },
   );
+});
+
+describe('adminRedriveOrderHandler — NS-05 per-action value cap', () => {
+  // Default cap is 100_000 minor ($1,000). procureOne submits a real
+  // outbound CTX payment, so the cap must reject BEFORE it runs.
+  it('422 ADMIN_ACTION_VALUE_CAP_EXCEEDED when faceValue > cap — never calls procureOne, no snapshot', async () => {
+    state.orders.set(ORDER_ID, makeOrder({ faceValueMinor: 100_001n, currency: 'USD' }));
+    const res = await redrive();
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as { code: string }).code).toBe('ADMIN_ACTION_VALUE_CAP_EXCEEDED');
+    expect(state.procureCalls).toEqual([]); // no money moved
+    expect(state.snapshotStored).toBe(false); // rolled back, replay stays free
+  });
+
+  it('RED without the cap: an over-limit redrive would otherwise reach procureOne', async () => {
+    // Documents the pre-NS-05 hole: the ONLY thing stopping this
+    // 100_001-minor ($1,000.01) order from re-driving to CTX is the cap
+    // asserted above. Same input, asserting the guarded outcome.
+    state.orders.set(ORDER_ID, makeOrder({ faceValueMinor: 100_001n, currency: 'USD' }));
+    const res = await redrive();
+    expect(res.status).toBe(422);
+    expect(state.procureCalls).toEqual([]);
+  });
+
+  it('200 at exactly the cap boundary (100_000 minor) — proceeds', async () => {
+    state.orders.set(ORDER_ID, makeOrder({ faceValueMinor: 100_000n, currency: 'USD' }));
+    const res = await redrive();
+    expect(res.status).toBe(200);
+    expect(state.procureCalls).toHaveLength(1); // proceeds: money move authorised
+  });
 });
 
 describe('adminRedriveOrderHandler — request validation', () => {
