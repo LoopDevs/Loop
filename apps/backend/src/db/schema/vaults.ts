@@ -293,8 +293,10 @@ export type VaultRedemptionPayoutPath = (typeof VAULT_REDEMPTION_PAYOUT_PATHS)[n
  *
  * Sub-step resume markers (why there are only 4 live states + failed,
  * fewer than `vault_emissions`'s 5): `shares_to_redeem` is computed
- * ONCE from a live share-price read (with a small buffer, ADR 031 §D6
- * step 2) and persisted BEFORE the collect transfer is built — a
+ * ONCE from a live share-price read, CAPPED at the user's on-chain
+ * holding (MNY-06 — no user-side buffer; a full-balance redemption
+ * collects the whole holding and never more), and persisted BEFORE the
+ * collect transfer is built — a
  * resume within `collecting` reuses the persisted value rather than
  * recomputing (unlike `vault_emissions.min_shares_used`, which IS
  * recomputed each attempt — that's safe there because it is only a
@@ -324,8 +326,9 @@ export const vaultRedemptions = pgTable(
     // Fiat value being redeemed, in the vault currency's minor units —
     // fixed at claim time (the order's chargeMinor for a spend). The
     // mirror debit + burn audit row always use THIS value, never a
-    // value derived from the (buffered) share count actually
-    // collected — see the table doc comment.
+    // value derived from the share count actually collected — see the
+    // table doc comment. The user receives EXACTLY this value (MNY-06);
+    // the operator float absorbs any slow-path proceeds delta.
     valueMinor: bigint('value_minor', { mode: 'bigint' }).notNull(),
     // The user's activated embedded wallet — the source of the
     // provider-signed share transfer (ADR 031 §D1).

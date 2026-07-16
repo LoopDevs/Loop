@@ -213,10 +213,10 @@ Cashback of $X (USD home) — every step idempotent on the cashback event id:
 
 ### D6. Withdraw / spend flow
 
-1. User taps "Withdraw $50". Backend computes shares `N = 50 / share_price + buffer`.
+1. User taps "Withdraw $50". Backend computes shares `N = min(50 / share_price, user's on-chain holding)` — **MNY-06: no user-side buffer, and capped at the holding**, so a full-balance redemption collects the user's entire holding (never more, so 100% cash-out always succeeds and the position drains to zero) and a partial collects exactly what `value_minor` is worth (no backing drift into the float). The user is paid EXACTLY `value_minor`; the operator float absorbs `amountOut − value_minor` in either direction (a buffer is not needed on the user side).
 2. Wallet provider signs `share.transfer(user → operator, N)` — the only user-side signature in the whole system.
 3. **Fast path:** operator pays the user from the **hot float** (canonical USDC/EURC) immediately — settles in seconds; the received shares replenish the float asynchronously via a batched `vault.withdraw`.
-4. **Slow path (float exhausted / mass withdraw):** operator `vault.withdraw(N)` synchronously, then pays out; above hot-float capacity, queue with a visible ETA (the EMI pattern, §Liquidity safeguard).
+4. **Slow path (float exhausted / mass withdraw):** operator `vault.withdraw(N)` synchronously with a `minAmountsOut` CATASTROPHIC-slippage floor (`value_minor` less a 0.5% band; a real de-peg reverts, ordinary slippage is absorbed by the float in either direction), then pays out `value_minor`; above hot-float capacity, queue with a visible ETA (the EMI pattern, §Liquidity safeguard).
 5. Gift-card spend uses the same redeem mechanic, routing the underlying USDC to the order's payment path.
 
 ### D7. Fee accounting — reconciled with deploy-by-config

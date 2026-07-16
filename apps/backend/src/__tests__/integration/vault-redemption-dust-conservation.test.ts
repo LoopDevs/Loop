@@ -75,6 +75,10 @@ const { vaultClientState, vaultClientMocks } = vi.hoisted(() => ({
       totalManaged: 1_000_000_000n,
       sharePricePpm: 1_000_000n,
     })),
+    // MNY-06: `computeSharesToRedeem` caps at the user's on-chain
+    // holding — far above any of this suite's redemptions, so the
+    // collect is always exactly `baseShares` (a partial).
+    getShareBalance: vi.fn(async () => 1_000_000_000_000n),
     resolveOperatorPublicKey: vi.fn(() => Keypair.random().publicKey()),
   },
 }));
@@ -85,6 +89,8 @@ vi.mock('../../credits/vaults/vault-client.js', () => ({
     vaultClientMocks.withdrawFromVault(...args),
   readVaultState: (...args: Parameters<typeof vaultClientMocks.readVaultState>) =>
     vaultClientMocks.readVaultState(...args),
+  getShareBalance: (...args: Parameters<typeof vaultClientMocks.getShareBalance>) =>
+    vaultClientMocks.getShareBalance(...args),
   resolveOperatorPublicKey: () => vaultClientMocks.resolveOperatorPublicKey(),
 }));
 
