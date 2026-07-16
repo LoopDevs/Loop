@@ -71,6 +71,13 @@ export const TABLES_TO_TRUNCATE = [
   // alongside the rest (a CASCADE from users never reaches it — RESTRICT
   // would instead block a user delete while a toggle row references them).
   'rail_kill_switches',
+  // NS-08 (migration 0073): the per-account freeze / AML-hold ledger. FKs
+  // to users (user_id + placed_by_user_id ON DELETE RESTRICT), so — like
+  // rail_kill_switches above — a CASCADE from users never reaches it and
+  // RESTRICT would block a user delete while a hold references them;
+  // truncate it explicitly. (The users.frozen_at/frozen_scope mirror is
+  // cleared by the users truncate, a root below.)
+  'account_holds',
   'interest_pool_alert_state',
   'watchdog_alert_state',
   'otp_attempt_counters',

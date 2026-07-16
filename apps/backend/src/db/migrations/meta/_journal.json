@@ -512,6 +512,13 @@
       "when": 1780190300000,
       "tag": "0072_rail_kill_switches",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1780190400000,
+      "tag": "0073_account_holds",
+      "breakpoints": true
     }
   ]
 }

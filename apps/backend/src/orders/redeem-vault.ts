@@ -36,6 +36,7 @@ import {
   isVaultEligibleCurrency,
 } from '../credits/vaults/vault-redemptions.js';
 import type { Order } from './repo.js';
+import { guardAccountNotFrozen } from '../fraud/account-freeze-http.js';
 
 const log = logger.child({ handler: 'redeem-vault' });
 
@@ -104,6 +105,18 @@ export async function redeemLoopOrderViaVault(
       },
       400,
     );
+  }
+
+  // NS-08 (design §5A #3): per-account freeze / AML-hold gate. The vault
+  // fork collects the user's shares to the operator (money OUT) — ANY
+  // live hold blocks it. Belt-and-suspenders with the entry gate in
+  // `redeem.ts` (§5A #2, before the fork); this covers a direct/future
+  // caller and keeps the fork self-guarding. BEFORE the fence +
+  // `claimVaultRedemption` so no row is claimed for a frozen account.
+  const frozen = await guardAccountNotFrozen(c, userId, 'user_withdrawal');
+  if (frozen !== null) {
+    log.warn({ orderId: order.id, userId }, 'Vault redemption refused — account frozen (NS-08)');
+    return frozen;
   }
 
   const assetCode = vaultAssetForCurrency(order.chargeCurrency);

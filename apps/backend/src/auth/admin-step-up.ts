@@ -124,6 +124,14 @@ export const STEP_UP_SCOPES = [
   // scopes per direction so a halt token can't be replayed to resume.
   'rail-halt',
   'rail-resume',
+  // NS-08: placing / releasing a per-account freeze (AML-hold). Placing
+  // a hold refuses every debit path for one account; RELEASING it
+  // re-opens money movement, so both directions are money-relevant and
+  // step-up-gated. Separate scopes per direction so a freeze token can't
+  // be replayed to unfreeze (unfreeze is the money-OUT-re-enabling
+  // direction a captured bearer must not be able to trigger silently).
+  'account-freeze',
+  'account-unfreeze',
 ] as const;
 export type AdminStepUpScope = (typeof STEP_UP_SCOPES)[number];
 

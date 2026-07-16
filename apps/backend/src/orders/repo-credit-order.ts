@@ -21,6 +21,7 @@ import { db } from '../db/client.js';
 import { orders, userCredits, creditTransactions } from '../db/schema.js';
 import type { Order } from './repo.js';
 import { InsufficientCreditError } from './repo-errors.js';
+import { assertAccountNotFrozen } from '../fraud/account-freeze.js';
 
 /**
  * The columns the `createOrder` parent computes once and passes to
@@ -77,6 +78,17 @@ export async function insertCreditOrderTxn(values: CreditOrderBaseValues): Promi
     if (balance < values.chargeMinor) {
       throw new InsufficientCreditError();
     }
+
+    // NS-08 (design §5B #5): AUTHORITATIVE freeze check, in-txn, right
+    // beside the balance re-read — this is "the only balance guard on the
+    // credit path", so it is also the durable freeze guard. Reading the
+    // mirror on the SAME `tx` (which already holds the FOR UPDATE balance
+    // lock) means a freeze placed AFTER the HTTP entry gate (§5A #1) but
+    // before this commit can't be raced past: it throws
+    // `AccountFrozenError` and the whole txn (order insert + debit) rolls
+    // back, leaving no order and no debit. Fail-closed (an unreadable
+    // mirror resolves to frozen). Any live hold blocks a spend.
+    await assertAccountNotFrozen(values.userId, 'user_spend', tx);
 
     // Ledger: type='spend' carries a NEGATIVE amount per schema CHECK
     // (`spend`/`withdrawal` amount<0). Reference this order so

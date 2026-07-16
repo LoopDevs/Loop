@@ -81,3 +81,83 @@ export const fraudSignals = pgTable(
     check('fraud_signals_type_known', sql`${t.signalType} IN ('shared_funding_source')`),
   ],
 );
+
+/**
+ * NS-08 — per-account freeze / AML-hold ledger (migration 0073).
+ *
+ * APPEND-ONLY audit trail + source of truth for account freezes. One
+ * row per freeze action; `releasedAt IS NULL` ⇒ the hold is LIVE. A user
+ * is frozen iff they have ≥1 live hold. Rows are never mutated except
+ * the one-time release stamp (`released_at` / `released_by_user_id` /
+ * `release_reason`), landing together via the release-shape CHECK.
+ *
+ * Dual-layer with the hot-path `users.frozen_at` / `users.frozen_scope`
+ * MIRROR (the per-debit read, kept in sync inside the same transaction
+ * as every place/release write — see `fraud/account-freeze-service.ts`),
+ * exactly like `credit_transactions` (ledger) + `user_credits`
+ * (materialized balance), and `staff_roles` + `users.is_admin`.
+ *
+ * The `scope` / `reason_code` CHECKs are the DB twin of the
+ * `ACCOUNT_HOLD_SCOPES` / `ACCOUNT_HOLD_REASON_CODES` TS unions in
+ * `fraud/account-freeze.ts` — literal here (like `staff_roles_role_known`)
+ * so widening the set is a CHECK migration, not an `ALTER TYPE` dance.
+ */
+export const accountHolds = pgTable(
+  'account_holds',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    scope: text('scope').notNull(),
+    reasonCode: text('reason_code').notNull(),
+    /** Operator rationale (ADR-017 contract, 2..500 — same as credit_transactions.reason). */
+    reason: text('reason').notNull(),
+    placedByUserId: uuid('placed_by_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    placedAt: timestamp('placed_at', { withTimezone: true }).notNull().defaultNow(),
+    /** NULL while the hold is live; set on release. */
+    releasedAt: timestamp('released_at', { withTimezone: true }),
+    releasedByUserId: uuid('released_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    releaseReason: text('release_reason'),
+  },
+  (t) => [
+    // Admin holds dashboard: live holds newest-first. `.desc().nullsFirst()`
+    // mirrors the migration's `placed_at DESC` exactly (Postgres DESC
+    // defaults to NULLS FIRST; drizzle's bare `.desc()` would emit NULLS
+    // LAST — the reconciliation.ts / vaults.ts precedent).
+    index('account_holds_live')
+      .on(t.placedAt.desc().nullsFirst())
+      .where(sql`${t.releasedAt} IS NULL`),
+    // Per-user history (admin user-detail) + the mirror-recompute's
+    // "live holds for this user" scan.
+    index('account_holds_user').on(t.userId, t.placedAt.desc().nullsFirst()),
+    // At most ONE live hold per (user, scope): a repeat freeze at the
+    // same scope is a no-op, not a duplicate row. Partial unique over
+    // live rows only.
+    uniqueIndex('account_holds_one_live_per_user_scope')
+      .on(t.userId, t.scope)
+      .where(sql`${t.releasedAt} IS NULL`),
+    check('account_holds_scope_known', sql`${t.scope} IN ('full', 'debits_only')`),
+    check(
+      'account_holds_reason_code_known',
+      sql`${t.reasonCode} IN ('aml_review', 'sanctions_screening', 'suspected_fraud', 'account_compromise', 'law_enforcement_request', 'chargeback_investigation', 'other')`,
+    ),
+    check(
+      'account_holds_reason_length',
+      sql`length(${t.reason}) >= 2 AND length(${t.reason}) <= 500`,
+    ),
+    // Release fields land together or not at all.
+    check(
+      'account_holds_release_shape',
+      sql`(${t.releasedAt} IS NULL) = (${t.releasedByUserId} IS NULL)`,
+    ),
+    check(
+      'account_holds_release_reason_length',
+      sql`${t.releaseReason} IS NULL OR (length(${t.releaseReason}) >= 2 AND length(${t.releaseReason}) <= 500)`,
+    ),
+  ],
+);

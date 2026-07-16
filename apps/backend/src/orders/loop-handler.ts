@@ -39,6 +39,8 @@ import { isFirstLoopAssetOrder } from './loop-create-checks.js';
 import { getWalletProvider } from '../wallet/provider.js';
 import { buildLoopCreateResponse } from './loop-create-response.js';
 import { checkOrderVelocity, VelocityCheckUnavailableError } from '../fraud/velocity.js';
+import { guardAccountNotFrozen } from '../fraud/account-freeze-http.js';
+import { AccountFrozenError } from '../fraud/account-freeze.js';
 
 const log = logger.child({ handler: 'loop-orders' });
 
@@ -309,6 +311,18 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
     throw err;
   }
 
+  // NS-08 (design §5A #1): per-account freeze / AML-hold gate. Beside the
+  // velocity check — same "read-only, fails-closed, before any money
+  // write" shape. A live hold (any scope blocks debits) refuses order
+  // creation across ALL payment methods (credit / loop_asset / xlm /
+  // usdc). Defence-in-depth: the credit path is ALSO gated in-txn at the
+  // durable debit primitive (`insertCreditOrderTxn`, §5B #5).
+  const frozen = await guardAccountNotFrozen(c, auth.userId, 'user_spend');
+  if (frozen !== null) {
+    log.warn({ userId: auth.userId }, 'Order create refused — account frozen (NS-08)');
+    return frozen;
+  }
+
   // A4-017: global face-value ceiling. Caught here before we do any
   // merchant/FX/balance work so a malformed bigint request can't
   // burn cycles or upstream calls.
@@ -549,6 +563,21 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
       return c.json(
         { code: 'INSUFFICIENT_CREDIT', message: 'Loop credit balance is below the order amount' },
         400,
+      );
+    }
+    // NS-08 (design §5B #5): a freeze placed AFTER the entry gate (§5A #1)
+    // but before `insertCreditOrderTxn` committed is caught by the
+    // in-txn authoritative check; the whole txn rolled back (no order, no
+    // debit). Surface the same 403 ACCOUNT_FROZEN as the entry gate.
+    if (err instanceof AccountFrozenError) {
+      log.warn({ userId: auth.userId }, 'Order create refused in-txn — account frozen (NS-08)');
+      return c.json(
+        {
+          code: err.code,
+          message:
+            'Your account is on hold and can’t complete this action. Please contact support.',
+        },
+        403,
       );
     }
     log.error({ err, userId: auth.userId }, 'Loop-native order creation failed');

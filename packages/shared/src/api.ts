@@ -102,6 +102,18 @@ export const ApiErrorCode = {
   // surfaces (refund + vault HTTP paths), matching the SUBSYSTEM_DISABLED
   // shape so web/mobile render it as a transient retry.
   RAIL_HALTED: 'RAIL_HALTED',
+  // NS-08: the account has a live per-account freeze / AML-hold, so a
+  // debit / withdraw / spend it attempted was refused. Returned 403 by
+  // every user-initiated money-OUT surface (order create, redeem,
+  // redeem-vault, legacy order create, and the credit-order debit
+  // primitive) when the account carries any live hold; the admin
+  // emission surface returns it 409 (an admin write can't 403 — see the
+  // openapi-parity admin-403 rule). Distinct from RAIL_HALTED (a
+  // fleet-wide rail toggle) — this is scoped to ONE frozen account.
+  ACCOUNT_FROZEN: 'ACCOUNT_FROZEN',
+  // NS-08: releasing an `account_holds` row that is already released
+  // (409). Distinct from a fresh release; the write never mutated twice.
+  HOLD_ALREADY_RELEASED: 'HOLD_ALREADY_RELEASED',
   // Image proxy specific
   IMAGE_TOO_LARGE: 'IMAGE_TOO_LARGE',
   NOT_AN_IMAGE: 'NOT_AN_IMAGE',

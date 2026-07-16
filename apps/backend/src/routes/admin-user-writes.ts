@@ -27,6 +27,12 @@ import { adminHomeCurrencySetHandler } from '../admin/home-currency-set.js';
 import { adminRevokeUserSessionsHandler } from '../auth/revoke-sessions-handler.js';
 import { adminDepositRefundHandler } from '../admin/deposit-refund-handler.js';
 import { adminClearOtpLockoutHandler } from '../admin/clear-otp-lockout.js';
+import {
+  adminPlaceAccountHoldHandler,
+  adminReleaseAccountHoldHandler,
+  adminListUserAccountHoldsHandler,
+  adminListActiveAccountHoldsHandler,
+} from '../admin/account-holds.js';
 
 export function mountAdminUserWritesRoutes(app: Hono): void {
   app.post(
@@ -74,5 +80,41 @@ export function mountAdminUserWritesRoutes(app: Hono): void {
     requireStaff('admin'),
     requireAdminStepUp('deposit-refund'),
     adminDepositRefundHandler,
+  );
+
+  // NS-08: per-account freeze / AML-hold. Placing a hold refuses every
+  // debit path for one account; releasing it re-opens money movement.
+  // Both are admin-tier + step-up (separate scope per direction so a
+  // freeze token can't be replayed to unfreeze) + idempotent + reasoned
+  // + Discord-audited.
+  //
+  // Reads (`GET`) are support-tier: they ride the parent admin stack's
+  // `requireStaff('support')` blanket (GET, non-CSV, non-Discord — the
+  // ADR-037 matrix shape), so no explicit gate is needed here. Literal
+  // `/api/admin/holds` is a distinct method+path from the param routes;
+  // no mount-order collision.
+  app.post(
+    '/api/admin/users/:userId/holds',
+    rateLimit('POST /api/admin/users/:userId/holds', 20, 60_000),
+    requireStaff('admin'),
+    requireAdminStepUp('account-freeze'),
+    adminPlaceAccountHoldHandler,
+  );
+  app.post(
+    '/api/admin/holds/:holdId/release',
+    rateLimit('POST /api/admin/holds/:holdId/release', 20, 60_000),
+    requireStaff('admin'),
+    requireAdminStepUp('account-unfreeze'),
+    adminReleaseAccountHoldHandler,
+  );
+  app.get(
+    '/api/admin/users/:userId/holds',
+    rateLimit('GET /api/admin/users/:userId/holds', 60, 60_000),
+    adminListUserAccountHoldsHandler,
+  );
+  app.get(
+    '/api/admin/holds',
+    rateLimit('GET /api/admin/holds', 60, 60_000),
+    adminListActiveAccountHoldsHandler,
   );
 }

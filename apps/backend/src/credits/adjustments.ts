@@ -99,6 +99,15 @@ export async function applyAdminCreditAdjustment(args: {
   adminUserId: string;
   reason: string;
 }): Promise<CreditAdjustment> {
+  // NS-08 (design §5B #8 / §6 Q6): admin credit adjustments DELIBERATELY
+  // BYPASS the per-account freeze. A negative adjustment here debits the
+  // user — but this is an admin REMEDIATION action (e.g. an operator
+  // zeroing a fraudulent balance on a frozen account), which the freeze
+  // must NOT obstruct. This bypass is intentional and explicit (the
+  // enforcement point was considered, not missed): the enforced money-OUT
+  // paths are the USER-initiated ones (spend / redeem), gated at §5A/§5B
+  // #1-#5. Admin emissions (§5B #10), by contrast, DO respect a `full`
+  // hold (money IN to a possibly-attacker wallet).
   return db.transaction(async (tx) => {
     // A2-1610: pre-flight daily cap check. Sum of absolute adjustment
     // values for this admin in this currency since UTC-start-of-day.

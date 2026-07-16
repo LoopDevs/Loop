@@ -114,6 +114,12 @@ vi.mock('../../db/users.js', () => ({
   getUserById: vi.fn(async () => userState.row),
 }));
 
+// NS-08: neutralize the account-freeze entry gate (not-frozen default) —
+// freeze enforcement is covered in the integration suite. NS-04 pattern.
+vi.mock('../../fraud/account-freeze-http.js', () => ({
+  guardAccountNotFrozen: vi.fn(async () => null),
+}));
+
 const { providerState } = vi.hoisted(() => ({
   providerState: { enabled: true, rawSign: vi.fn() },
 }));

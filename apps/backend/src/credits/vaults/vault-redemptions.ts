@@ -767,6 +767,17 @@ async function mirrorStep(
   row: VaultRedemptionRow,
   vault: LoopVaultRow,
 ): Promise<VaultRedemptionRow> {
+  // NS-08 (design §5B #7): this vault mirror debit runs AFTER
+  // `collectSharesStep` has already transferred the user's vault shares
+  // to the operator (the money already left the wallet on-chain). The
+  // freeze is enforced at the vault REDEMPTION ENTRY GATE
+  // (redeem-vault.ts §5A #3), which refuses to claim/collect for a frozen
+  // account. By the time we reach here the shares are collected, so this
+  // debit merely RECONCILES the off-chain mirror — and per design §6 Q7
+  // (let in-flight settlement complete) we deliberately do NOT block it:
+  // blocking would leave the mirror un-debited while the shares are gone,
+  // an INV-1 desync that CREDITS the frozen user. Documented, not
+  // silently skipped.
   try {
     if (row.sharesToRedeem === null || row.collectTxHash === null || row.payoutPath === null) {
       throw new Error(

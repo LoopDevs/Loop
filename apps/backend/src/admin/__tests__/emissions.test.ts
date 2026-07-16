@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type * as AccountFreezeModule from '../../fraud/account-freeze.js';
 import type { Context } from 'hono';
 
 /**
@@ -112,6 +113,14 @@ vi.mock('../../credits/adjustments.js', () => ({
 vi.mock('../../db/users.js', () => ({
   getUserById: getUserByIdMock,
 }));
+
+// NS-08: neutralize the account-freeze read for these unit tests (target
+// not-frozen by default) — the emission #10 freeze block is covered
+// end-to-end in the integration suite. Keeps the real errors/helpers.
+vi.mock('../../fraud/account-freeze.js', async (importActual) => {
+  const actual = await importActual<typeof AccountFreezeModule>();
+  return { ...actual, isFrozenForIntent: vi.fn(async () => false) };
+});
 
 vi.mock('../../credits/payout-asset.js', () => ({
   payoutAssetFor: payoutAssetForMock,
