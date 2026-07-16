@@ -22,7 +22,7 @@
  */
 import { and, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { pendingPayouts } from '../db/schema.js';
+import { pendingPayouts, payoutTxHashes } from '../db/schema.js';
 
 export type PendingPayout = typeof pendingPayouts.$inferSelect;
 
@@ -78,16 +78,54 @@ export async function markPayoutSubmitted(id: string): Promise<PendingPayout | n
 }
 
 /**
- * CF-18: persist the deterministic tx hash on a `submitted` row BEFORE
- * the network submit lands it. State stays `submitted` (this is not a
- * confirmation — the tx may not be in a ledger yet); we only stamp the
- * hash so a later re-pick can ask Horizon "did THIS tx land?" directly,
+ * Result of {@link recordPayoutTxHash}.
+ *
+ * `row === null` is the historical "raced" signal — the row moved out of
+ * `submitted` between claim and stamp, so the caller aborts the in-flight
+ * submit (unchanged contract). `overwriteRefused` is the PAYOUT-HASHHISTORY
+ * signal: a DIFFERING non-null anchor was already present, so the anchor
+ * was PRESERVED and the new hash appended to `payout_tx_hashes` only —
+ * the caller alerts ops (a differing re-submit hash under a landed anchor
+ * is a potential double-pay to reconcile).
+ */
+export interface RecordTxHashResult {
+  row: PendingPayout | null;
+  overwriteRefused: boolean;
+  /** The preserved anchor hash when `overwriteRefused`; else null. */
+  existingTxHash: string | null;
+}
+
+/**
+ * CF-18 + PAYOUT-HASHHISTORY: persist the deterministic tx hash on a
+ * `submitted` row BEFORE the network submit lands it, and append it to the
+ * append-only `payout_tx_hashes` history. State stays `submitted` (this is
+ * not a confirmation — the tx may not be in a ledger yet); we only stamp
+ * the hash so a later re-pick can ask Horizon "did THIS tx land?" directly,
  * with no dependence on the bounded memo-scan window.
  *
- * State-guarded on `submitted` so it only ever writes a row the worker
- * has already claimed for this attempt. Returns null on a race (the row
- * moved out from under us) — the caller treats that as a transient
- * persist failure and fails closed, aborting the submit.
+ * PAYOUT-HASHHISTORY — the anchor is DURABLE: `pending_payouts.tx_hash`
+ * holds a SINGLE hash, the link to the funds that FIRST moved. Under deep
+ * Horizon ingestion lag the FT-05 expiry guard can clear (a landed tx still
+ * reads 404 past its timebound) and the re-submit path would sign a fresh
+ * hash — the OLD behaviour OVERWROTE the anchor here, losing the durable
+ * link to value that actually moved on-chain. Now:
+ *
+ *   - First write (`tx_hash IS NULL`): stamp the anchor — the happy path,
+ *     PRESERVED EXACTLY — and append the hash to history ('first-submit').
+ *   - Same hash re-recorded (a double `onSigned` in one attempt): anchor
+ *     unchanged; the history insert is an `ON CONFLICT DO NOTHING` no-op.
+ *   - DIFFERING non-null anchor: REFUSE to overwrite. The anchor is kept;
+ *     the new hash is appended to history ('resubmit-refused') so the funds
+ *     link is never lost; `overwriteRefused` is returned so the caller
+ *     pages ops. The re-submit itself still proceeds (the FT-05 pre-check
+ *     in `payOne` already proved it safe to re-submit) — freezing the
+ *     anchor never blocks the submit, it only preserves the record.
+ *
+ * The read+write is wrapped in a transaction with a `FOR UPDATE` row lock,
+ * so the anchor decision (and the paired history append) is serialized
+ * against a concurrent confirm / fail / record — strictly stronger than the
+ * prior single state-guarded UPDATE, and the `state !== 'submitted'` guard
+ * preserves the exact "raced → null → abort submit" contract.
  *
  * Deliberately does NOT bump attempts or touch timestamps — it's a pure
  * hash stamp within an in-flight submit.
@@ -95,13 +133,68 @@ export async function markPayoutSubmitted(id: string): Promise<PendingPayout | n
 export async function recordPayoutTxHash(args: {
   id: string;
   txHash: string;
-}): Promise<PendingPayout | null> {
-  const [row] = await db
-    .update(pendingPayouts)
-    .set({ txHash: args.txHash })
-    .where(and(eq(pendingPayouts.id, args.id), eq(pendingPayouts.state, 'submitted')))
-    .returning();
-  return row ?? null;
+}): Promise<RecordTxHashResult> {
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .select()
+      .from(pendingPayouts)
+      .where(eq(pendingPayouts.id, args.id))
+      .for('update');
+    // Same guard the prior single-UPDATE encoded: only a row the worker
+    // still holds in `submitted` is writable. A gone/moved row → null →
+    // caller aborts the in-flight submit (unchanged contract).
+    if (row === undefined || row.state !== 'submitted') {
+      return { row: null, overwriteRefused: false, existingTxHash: null };
+    }
+    const existing = row.txHash;
+
+    if (existing === null) {
+      // Happy path (first hash write) — stamp the durable anchor.
+      const [updated] = await tx
+        .update(pendingPayouts)
+        .set({ txHash: args.txHash })
+        .where(and(eq(pendingPayouts.id, args.id), eq(pendingPayouts.state, 'submitted')))
+        .returning();
+      await tx
+        .insert(payoutTxHashes)
+        .values({
+          payoutId: args.id,
+          txHash: args.txHash,
+          attempt: row.attempts,
+          reason: 'first-submit',
+        })
+        .onConflictDoNothing();
+      return { row: updated ?? null, overwriteRefused: false, existingTxHash: null };
+    }
+
+    if (existing === args.txHash) {
+      // Idempotent re-record of the SAME hash — anchor unchanged; ensure
+      // it's in history (dedup no-op via the (payout_id, tx_hash) unique).
+      await tx
+        .insert(payoutTxHashes)
+        .values({
+          payoutId: args.id,
+          txHash: args.txHash,
+          attempt: row.attempts,
+          reason: 'first-submit',
+        })
+        .onConflictDoNothing();
+      return { row, overwriteRefused: false, existingTxHash: existing };
+    }
+
+    // DIFFERING non-null anchor — REFUSE to overwrite. Preserve the durable
+    // anchor; append the new hash so the funds link is never lost.
+    await tx
+      .insert(payoutTxHashes)
+      .values({
+        payoutId: args.id,
+        txHash: args.txHash,
+        attempt: row.attempts,
+        reason: 'resubmit-refused',
+      })
+      .onConflictDoNothing();
+    return { row, overwriteRefused: true, existingTxHash: existing };
+  });
 }
 
 /**
@@ -188,6 +281,57 @@ export async function resetPayoutToPending(id: string): Promise<PendingPayout | 
         eq(pendingPayouts.id, id),
         eq(pendingPayouts.state, 'failed'),
         sql`${pendingPayouts.compensatedAt} IS NULL`,
+      ),
+    )
+    .returning();
+  return row ?? null;
+}
+
+/**
+ * PAYOUT-TXHASHNULL-STRAND (liveness): recover a retry-EXHAUSTED
+ * `submitted` row that carries NO persisted tx hash by resetting it to
+ * `pending` with a fresh attempt budget.
+ *
+ * Such a row is stranded: `listClaimablePayouts`'s watchdog clause
+ * excludes it (`attempts >= maxAttempts`) and its exhausted-reclaim clause
+ * excludes it (`tx_hash IS NULL`), so no path ever re-picks it — it wedges
+ * in `submitted` forever even though it is recoverable. It arises only from
+ * a hard crash BETWEEN the attempts-bump commit (`markPayoutSubmitted` /
+ * `reclaimSubmittedPayout`) and the `onSigned` hash-persist, repeated until
+ * the budget exhausts.
+ *
+ * DOUBLE-PAY SAFETY — the `tx_hash IS NULL` guard is load-bearing:
+ * `recordPayoutTxHash` (in `onSigned`) commits the hash STRICTLY BEFORE
+ * `submitPayout` issues the network POST (payout-submit.ts: `onSigned` is
+ * awaited before `server.submitTransaction`). So `tx_hash IS NULL` ⟺ no
+ * Stellar tx for this row ever reached the network ⟺ no funds moved
+ * on-chain — resetting can never re-pay a landed tx. The guard is enforced
+ * IN the UPDATE (`state='submitted' AND tx_hash IS NULL`), so if a
+ * concurrent live worker records a hash (or confirms/fails the row) in the
+ * meantime, this UPDATE matches nothing → null → no reset. That same CAS is
+ * the single-flight guarantee: two workers racing to recover the row see
+ * exactly one win (the loser's `state='submitted'` predicate fails after the
+ * winner commits `state='pending'`).
+ *
+ * `submitted_at` is nulled so the recovered row reads as a fresh, never-yet-
+ * submitted `pending` row (the next `markPayoutSubmitted` re-stamps it);
+ * `attempts` resets to 0 for the full retry budget — matching
+ * `resetPayoutToPending`'s REL-09 rationale.
+ */
+export async function resetStrandedSubmittedToPending(id: string): Promise<PendingPayout | null> {
+  const [row] = await db
+    .update(pendingPayouts)
+    .set({
+      state: 'pending',
+      submittedAt: null,
+      lastError: null,
+      attempts: 0,
+    })
+    .where(
+      and(
+        eq(pendingPayouts.id, id),
+        eq(pendingPayouts.state, 'submitted'),
+        sql`${pendingPayouts.txHash} IS NULL`,
       ),
     )
     .returning();

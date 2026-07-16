@@ -45,11 +45,19 @@ const { repoMocks } = vi.hoisted(() => ({
       id: args.id,
       attempts: args.expectedAttempts + 1,
     })),
-    // CF-18: hash stamp on a `submitted` row before the network submit.
-    // Default returns a row (success); tests that exercise the
-    // persist-failure path override it to null.
+    // CF-18 / PAYOUT-HASHHISTORY: hash stamp on a `submitted` row before the
+    // network submit. Default returns a RecordTxHashResult with a non-null
+    // row (success, first write); tests that exercise the persist-failure
+    // path override `row` to null.
     recordPayoutTxHash: vi.fn<(args: { id: string; txHash: string }) => Promise<unknown>>(
-      async (args: { id: string; txHash: string }) => ({ id: args.id, txHash: args.txHash }),
+      async (args: { id: string; txHash: string }) => ({
+        row: { id: args.id, txHash: args.txHash },
+        overwriteRefused: false,
+        existingTxHash: null,
+      }),
+    ),
+    resetStrandedSubmittedToPending: vi.fn<(id: string) => Promise<unknown>>(
+      async (id: string) => ({ id, state: 'pending' }),
     ),
     // CF2-07: re-fetch of the row on an ambiguous (transient_horizon)
     // retry-exhaustion failure. Default: no fresh hash persisted (the
@@ -83,6 +91,7 @@ vi.mock('../../credits/pending-payouts.js', () => ({
   reclaimSubmittedPayout: (args: { id: string; expectedAttempts: number }) =>
     repoMocks.reclaimSubmittedPayout(args),
   recordPayoutTxHash: (args: { id: string; txHash: string }) => repoMocks.recordPayoutTxHash(args),
+  resetStrandedSubmittedToPending: (id: string) => repoMocks.resetStrandedSubmittedToPending(id),
 }));
 vi.mock('../../credits/pending-payouts-admin.js', () => ({
   getPayoutForAdmin: (id: string) => repoMocks.getPayoutForAdmin(id),
@@ -178,11 +187,14 @@ const { discordMock } = vi.hoisted(() => ({
   discordMock: {
     notifyPayoutFailed: vi.fn<(args: unknown) => void>(() => undefined),
     notifyPayoutAwaitingTrustline: vi.fn<(args: unknown) => void>(() => undefined),
+    notifyPayoutTxHashOverwriteRefused: vi.fn<(args: unknown) => void>(() => undefined),
   },
 }));
 vi.mock('../../discord.js', () => ({
   notifyPayoutFailed: (args: unknown) => discordMock.notifyPayoutFailed(args),
   notifyPayoutAwaitingTrustline: (args: unknown) => discordMock.notifyPayoutAwaitingTrustline(args),
+  notifyPayoutTxHashOverwriteRefused: (args: unknown) =>
+    discordMock.notifyPayoutTxHashOverwriteRefused(args),
 }));
 
 import { Keypair } from '@stellar/stellar-sdk';
@@ -355,8 +367,14 @@ beforeEach(() => {
     reason: args.reason,
   }));
   repoMocks.recordPayoutTxHash.mockImplementation(async (args: { id: string; txHash: string }) => ({
-    id: args.id,
-    txHash: args.txHash,
+    row: { id: args.id, txHash: args.txHash },
+    overwriteRefused: false,
+    existingTxHash: null,
+  }));
+  repoMocks.resetStrandedSubmittedToPending.mockReset();
+  repoMocks.resetStrandedSubmittedToPending.mockImplementation(async (id: string) => ({
+    id,
+    state: 'pending',
   }));
   horizonMock.findOutboundPaymentByMemo.mockResolvedValue(null);
   horizonMock.getOutboundPaymentByTxHash.mockResolvedValue(null);
@@ -368,6 +386,7 @@ beforeEach(() => {
   );
   discordMock.notifyPayoutFailed.mockClear();
   discordMock.notifyPayoutAwaitingTrustline.mockClear();
+  discordMock.notifyPayoutTxHashOverwriteRefused.mockClear();
   compensationMock.applyAdminPayoutCompensation.mockReset();
   compensationMock.applyAdminPayoutCompensation.mockResolvedValue({
     id: 'comp-1',
@@ -777,11 +796,15 @@ describe('runPayoutTick', () => {
   });
 
   it('CF-18: a hash-persist failure aborts the submit (fail-closed)', async () => {
-    // recordPayoutTxHash returning null means the row moved out from
+    // recordPayoutTxHash returning a null `row` means the row moved out from
     // under us between claim and stamp. onSigned throws → submitPayout
     // surfaces it as terminal_other → the row is not double-submitted.
     repoMocks.listClaimablePayouts.mockResolvedValue([makeRow()]);
-    repoMocks.recordPayoutTxHash.mockResolvedValue(null);
+    repoMocks.recordPayoutTxHash.mockResolvedValue({
+      row: null,
+      overwriteRefused: false,
+      existingTxHash: null,
+    });
     // Use the REAL submitPayout contract: onSigned throws inside it →
     // it would throw PayoutSubmitError('terminal_other'). Simulate that
     // by having the mock invoke onSigned and surface its throw.

@@ -376,6 +376,46 @@ export function notifyPayoutFailed(args: {
 }
 
 /**
+ * PAYOUT-HASHHISTORY: a re-submit tried to overwrite a payout's durable
+ * tx-hash anchor with a DIFFERING hash, and `recordPayoutTxHash` refused —
+ * the anchor (the link to the funds that first moved) was preserved and the
+ * new hash appended to the `payout_tx_hashes` history. This is rare and
+ * benign in the normal case (the prior tx provably expired before the
+ * re-submit), but under deep Horizon ingestion lag the prior tx may have
+ * actually LANDED while reading 404 past its timebound — in which case the
+ * fresh submit is a potential DOUBLE-PAY. Page ops so they can reconcile
+ * both hashes against Horizon via `payout_tx_hashes`.
+ *
+ * Not throttled: a genuine anchor-overwrite refusal is a money-integrity
+ * event worth one page each; it fires at most once per re-submit attempt.
+ */
+export function notifyPayoutTxHashOverwriteRefused(args: {
+  payoutId: string;
+  userId: string;
+  /** The preserved durable anchor hash. */
+  anchorTxHash: string;
+  /** The re-submit hash that was appended to history (not made the anchor). */
+  newTxHash: string;
+  attempts: number;
+}): void {
+  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+    title: '🟠 Payout tx-hash overwrite refused',
+    description: truncate(
+      `Re-submit of payout ${args.payoutId.slice(-8)} signed a new tx hash while a durable anchor was already set. The anchor was PRESERVED and the new hash appended to \`payout_tx_hashes\`. If the anchored tx also landed (deep Horizon lag), this may be a double-pay — reconcile both hashes against Horizon.`,
+      DESCRIPTION_MAX,
+    ),
+    color: ORANGE,
+    fields: [
+      { name: 'User', value: `\`${args.userId.slice(-8)}\``, inline: true },
+      { name: 'Payout', value: `\`${args.payoutId.slice(-8)}\``, inline: true },
+      { name: 'Attempts', value: String(args.attempts), inline: true },
+      { name: 'Anchor hash', value: `\`${args.anchorTxHash.slice(0, 12)}…\``, inline: false },
+      { name: 'New hash', value: `\`${args.newTxHash.slice(0, 12)}…\``, inline: false },
+    ],
+  });
+}
+
+/**
  * Notify: a payout's destination account is missing the required
  * trustline (ADR 015 / ADR 016 §"trustline-probe before payout
  * submit"). The payout-worker holds the row in `pending` rather
