@@ -35,12 +35,17 @@ import {
   runCtxSettlementStuckWatchdog,
   CTX_SETTLEMENT_STUCK_WATCHDOG_INTERVAL_MS,
 } from './ctx-settlement-stuck-watchdog.js';
+import {
+  runCtxSettlementReconcileWatchdog,
+  CTX_SETTLEMENT_RECONCILE_WATCHDOG_INTERVAL_MS,
+} from './ctx-settlement-reconcile-watchdog.js';
 
 const log = logger.child({ area: 'procurement' });
 
 let procurementTimer: ReturnType<typeof setInterval> | null = null;
 let sweepTimer: ReturnType<typeof setInterval> | null = null;
 let ctxSettlementWatchdogTimer: ReturnType<typeof setInterval> | null = null;
+let ctxSettlementReconcileTimer: ReturnType<typeof setInterval> | null = null;
 
 // `PROCUREMENT_TIMEOUT_MS` now lives in `./procurement-constants.js`
 // (A5-6 — see that file's docstring) and is re-exported here so
@@ -92,9 +97,22 @@ export function startProcurementWorker(args: { intervalMs: number; limit?: numbe
       log.error({ err }, 'Stuck CTX-settlement watchdog tick failed');
     }
   };
+  // NS-13 (reconciliation half): the missing-settlement watchdog rides the
+  // same procurement-worker lifecycle as the stuck sibling, single-flighted
+  // fleet-wide on its own slower accounting cadence. A settlement is only
+  // ever written by `payCtxOrder` (reached from procurement), so this worker
+  // is its natural home too.
+  const ctxSettlementReconcileTick = async (): Promise<void> => {
+    try {
+      await runCtxSettlementReconcileWatchdog();
+    } catch (err) {
+      log.error({ err }, 'Missing CTX-settlement reconciliation watchdog tick failed');
+    }
+  };
   void tick();
   void sweep();
   void ctxSettlementWatchdogTick();
+  void ctxSettlementReconcileTick();
   procurementTimer = setInterval(() => void tick(), args.intervalMs);
   procurementTimer.unref();
   sweepTimer = setInterval(() => void sweep(), SWEEP_INTERVAL_MS);
@@ -104,6 +122,11 @@ export function startProcurementWorker(args: { intervalMs: number; limit?: numbe
     CTX_SETTLEMENT_STUCK_WATCHDOG_INTERVAL_MS,
   );
   ctxSettlementWatchdogTimer.unref();
+  ctxSettlementReconcileTimer = setInterval(
+    () => void ctxSettlementReconcileTick(),
+    CTX_SETTLEMENT_RECONCILE_WATCHDOG_INTERVAL_MS,
+  );
+  ctxSettlementReconcileTimer.unref();
 }
 
 export function stopProcurementWorker(): void {
@@ -118,6 +141,10 @@ export function stopProcurementWorker(): void {
   if (ctxSettlementWatchdogTimer !== null) {
     clearInterval(ctxSettlementWatchdogTimer);
     ctxSettlementWatchdogTimer = null;
+  }
+  if (ctxSettlementReconcileTimer !== null) {
+    clearInterval(ctxSettlementReconcileTimer);
+    ctxSettlementReconcileTimer = null;
   }
   markWorkerStopped('procurement_worker');
   log.info('Procurement worker stopped');
