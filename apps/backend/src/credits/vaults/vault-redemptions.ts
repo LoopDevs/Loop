@@ -34,11 +34,14 @@
  *                    on-chain call) — the cross-machine double-collect
  *                    guard, mirroring V3's `depositing`.
  *   2. (within      `computeSharesStep` persists `sharesToRedeem` from
- *      collecting)  a fresh share-price read + a small buffer (§D6
- *                    step 2) BEFORE any transfer is built — persisted
- *                    once, reused on every resume (never recomputed —
- *                    see the schema doc comment for why this differs
- *                    from `vault_emissions.min_shares_used`).
+ *      collecting)  a fresh share-price read, CAPPED at the user's
+ *                    on-chain share holding (MNY-06 — no user-side
+ *                    buffer; a full-balance redemption collects the
+ *                    user's ENTIRE holding and never more), BEFORE any
+ *                    transfer is built — persisted once, reused on every
+ *                    resume (never recomputed — see the schema doc
+ *                    comment for why this differs from
+ *                    `vault_emissions.min_shares_used`).
  *                    `collectSharesStep` then does the ONE user-wallet
  *                    signature in the whole vault system:
  *                    `transferShares({ signWith: 'provider' })`
@@ -46,14 +49,18 @@
  *                    pays out `value_minor` — FAST (hot float) or SLOW
  *                    (a synchronous `vault.withdraw`) — landing the row
  *                    on `redeemed`.
- *   3. redeemed     shares collected AND `value_minor` paid out.
+ *   3. redeemed     shares collected AND `value_minor` paid out (the
+ *                    user always receives EXACTLY `value_minor`).
  *                    `payout_path` + (for slow) `redeem_tx_hash`
- *                    persisted. INV-V2 (redemption solvency): the
- *                    slow-path payout is bounded below by
- *                    `value_minor` via `withdrawFromVault`'s
- *                    `minAmountsOut` floor — this row is NEVER marked
- *                    `redeemed` having paid out less than
- *                    `value_minor` is worth.
+ *                    persisted. INV-V2 (redemption solvency, MNY-06):
+ *                    the slow-path withdraw's `minAmountsOut` is a
+ *                    CATASTROPHIC-slippage floor (`value_minor` less the
+ *                    `REDEMPTION_SLIPPAGE_TOLERANCE_BPS` band), not an
+ *                    exact `value_minor` floor — within the band the
+ *                    operator float absorbs `amountOut − value_minor` in
+ *                    EITHER direction; a shortfall beyond it reverts
+ *                    (`VaultPostSubmitSlippageError`) rather than draining
+ *                    the float on a real de-peg.
  *   4. settled      the off-chain `user_credits` liability is debited
  *                    by `value_minor` AND a `pending_payouts
  *                    kind='burn'` conservation-trigger audit row is
@@ -171,6 +178,7 @@ import {
   transferShares,
   withdrawFromVault,
   readVaultState,
+  getShareBalance,
   resolveOperatorPublicKey,
 } from './vault-client.js';
 import { generatePayoutMemo } from '../payout-builder.js';
@@ -197,8 +205,23 @@ const STROOPS_PER_MINOR = 100_000n;
 /** Consecutive step failures before a row moves `-> 'failed'`. Mirrors `VAULT_EMISSION_MAX_ATTEMPTS`. */
 export const VAULT_REDEMPTION_MAX_ATTEMPTS = 5;
 
-/** Buffer added to the computed share count so a small adverse share-price move between quote and collect still covers `value_minor` (ADR 031 §D6 step 2). */
-const REDEMPTION_SHARE_BUFFER_BPS = 50n; // 0.5%
+/**
+ * MNY-06: slippage tolerance on the SLOW-path withdraw's `minAmountsOut`
+ * floor — INV-V2's CATASTROPHIC-slippage backstop. There is no longer a
+ * user-side share buffer (removed in MNY-06 so a full-balance redemption
+ * can always cash out 100%; see `computeSharesToRedeem`), so a
+ * buffer-free `sharesToRedeem` withdraws to ~`value_minor` give or take
+ * integer truncation and a small share-price tick between the quote and
+ * the withdraw. An EXACT `value_minor` floor would therefore fail-closed
+ * on ordinary rounding. This 0.5% band — the SAME tolerance the deposit
+ * (`DEPOSIT_SLIPPAGE_TOLERANCE_BPS`) and float-replenish
+ * (`REPLENISH_SLIPPAGE_TOLERANCE_BPS`) withdraws already use — lets the
+ * operator float absorb ordinary slippage in EITHER direction, while a
+ * real de-peg / oracle failure (a shortfall beyond 0.5%) still throws
+ * `VaultPostSubmitSlippageError` and reverts: an ops incident, never a
+ * silent float drain. NOT weakened to a no-op — it stays a real floor.
+ */
+const REDEMPTION_SLIPPAGE_TOLERANCE_BPS = 50n; // 0.5%
 
 /**
  * Money-review P1-B: the COLLECT claim lease. A `collect_claimed_at`
@@ -332,16 +355,53 @@ async function recordStepFailure(
   return updated;
 }
 
-/** A fresh, bounded share count for `valueMinor` — a live `readVaultState` price + a small buffer (ADR 031 §D6 step 2), never 0. */
-async function computeSharesToRedeem(vault: LoopVaultRow, valueMinor: bigint): Promise<bigint> {
+/**
+ * The share count to collect from the user's wallet for `valueMinor` —
+ * a live `readVaultState` price, CAPPED at the user's actual on-chain
+ * share holding (MNY-06). Never returns more than the user holds, and
+ * never 0.
+ *
+ * ── MNY-06: no user-side buffer, cap at the holding ─────────────────
+ * `baseShares` is what `valueMinor` is worth at the fresh share price.
+ * The old code collected `baseShares + 0.5%`, which BROKE two ways:
+ *   1. A user redeeming their FULL balance holds ONLY `baseShares` (a
+ *      no-yield position is worth exactly `baseShares × price`), so
+ *      `transfer(user → operator, baseShares + 0.5%)` asks for more
+ *      shares than the user holds and FAILS CLOSED on-chain — 100%
+ *      cash-out was impossible.
+ *   2. On a partial, that extra 0.5% of backing drifted from the user
+ *      into the operator float on every redemption.
+ * The user is paid EXACTLY `value_minor` regardless (see `payoutStep`;
+ * the float absorbs `amountOut − value_minor` in EITHER direction, ADR
+ * 031 §D6 / INV-V2), so the buffer only ever over-collected SHARES.
+ *
+ * The fix: collect `min(baseShares, held)`.
+ *   - Partial (`baseShares < held`): collect exactly `baseShares` — the
+ *     precise backing for `value_minor`, no drift.
+ *   - Full balance (`baseShares ≥ held`, because the position is worth
+ *     `value_minor`): collect the user's ENTIRE remaining holding,
+ *     draining the position to zero value with no stranded share dust,
+ *     and — critically — always succeeding, since we never ask for more
+ *     shares than the user actually holds. (Yield is non-rebasing and
+ *     accrues to the USER as share appreciation, ADR 031 §Share-price
+ *     model: a user who has NOT redeemed their full value still holds
+ *     `held > baseShares` and correctly keeps the surplus yield shares.)
+ */
+async function computeSharesToRedeem(
+  vault: LoopVaultRow,
+  valueMinor: bigint,
+  fromAddress: string,
+): Promise<bigint> {
   const state = await readVaultState({ vault });
   const underlyingStroops = valueMinor * STROOPS_PER_MINOR;
   const baseShares = (underlyingStroops * 1_000_000n) / state.sharePricePpm;
-  const buffered = baseShares + (baseShares * REDEMPTION_SHARE_BUFFER_BPS) / 10_000n;
-  const sharesToRedeem = buffered > baseShares ? buffered : baseShares + 1n;
+  // Cap at the user's REAL holding — never over-collect (a transfer for
+  // more shares than the user holds fails closed on-chain).
+  const held = await getShareBalance({ vault, address: fromAddress });
+  const sharesToRedeem = baseShares < held ? baseShares : held;
   if (sharesToRedeem <= 0n) {
     throw new Error(
-      `computeSharesToRedeem: computed non-positive sharesToRedeem (${sharesToRedeem}) for valueMinor=${valueMinor}, sharePricePpm=${state.sharePricePpm}`,
+      `computeSharesToRedeem: computed non-positive sharesToRedeem (${sharesToRedeem}) for valueMinor=${valueMinor}, sharePricePpm=${state.sharePricePpm}, held=${held}`,
     );
   }
   return sharesToRedeem;
@@ -436,7 +496,7 @@ async function collectSharesStep(
 
     // Compute the share count ONCE (inside the claim), pin it.
     if (current.sharesToRedeem === null) {
-      const shares = await computeSharesToRedeem(vault, current.valueMinor);
+      const shares = await computeSharesToRedeem(vault, current.valueMinor, current.fromAddress);
       const [withShares] = await db
         .update(vaultRedemptions)
         .set({ sharesToRedeem: shares })
@@ -586,10 +646,21 @@ async function payoutStep(
 
     // SLOW path — the float couldn't cover it (or a prior attempt
     // already committed to this path). `minAmountsOut` is INV-V2's
-    // floor: `withdrawFromVault` throws `VaultPostSubmitSlippageError`
-    // rather than let this row be marked `redeemed` for less than
-    // `value_minor` is worth.
-    const minAmountsOut = row.valueMinor * STROOPS_PER_MINOR;
+    // CATASTROPHIC-slippage floor: `withdrawFromVault` throws
+    // `VaultPostSubmitSlippageError` rather than let this row settle when
+    // the withdraw returns LESS than `value_minor` worth by more than the
+    // `REDEMPTION_SLIPPAGE_TOLERANCE_BPS` band. MNY-06: this band is
+    // deliberately > 0 (was an exact `value_minor` floor) — with the
+    // user-side share buffer removed, `sharesToRedeem` withdraws to
+    // ~`value_minor` ± integer truncation ± a small tick, so an exact
+    // floor would fail-closed on ordinary rounding. Within the band the
+    // operator float ABSORBS `amountOut − value_minor` in either
+    // direction (the user is still paid exactly `value_minor`); beyond it,
+    // a real de-peg / oracle failure still reverts (ops incident, not a
+    // silent drain). The band is NOT weakened to a no-op.
+    const expectedOutStroops = row.valueMinor * STROOPS_PER_MINOR;
+    const minAmountsOut =
+      expectedOutStroops - (expectedOutStroops * REDEMPTION_SLIPPAGE_TOLERANCE_BPS) / 10_000n;
     const result = await withdrawFromVault({
       vault,
       shares: sharesToRedeem,
@@ -607,7 +678,16 @@ async function payoutStep(
       throw new Error(`vault redemption ${row.id}: withdrawFromVault returned an empty amountsOut`);
     }
     const amountOutMinor = amountOutStroops / STROOPS_PER_MINOR;
-    // Guaranteed >= 0 by the minAmountsOut floor above.
+    // MNY-06: this can now be slightly NEGATIVE on an adverse tick (before,
+    // the removed user-side buffer biased proceeds ~0.5% high, keeping it
+    // positive). `applyHotFloatDeltaInTx` applies it as a SIGNED balance
+    // delta, so a negative value simply DRAWS the operator float down —
+    // the owner-accepted "float subsidises adverse slippage, funded by
+    // yield/revenue" posture. Bounded below by `minAmountsOut`
+    // (REDEMPTION_SLIPPAGE_TOLERANCE_BPS) and by the float's own
+    // `vault_hot_float_balance_non_negative` CHECK (the float can never go
+    // negative — a slow redemption against a near-empty float and an
+    // adverse tick fails closed and retries/pages, an ops incident).
     const netFloatDelta = amountOutMinor - row.valueMinor;
     // MNY-06-REDEMPTION-DUST: `amountOutMinor` TRUNCATES the sub-minor
     // remainder of the REAL on-chain proceeds — `amountOutStroops %

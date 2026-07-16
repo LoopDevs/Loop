@@ -52,13 +52,27 @@ const { vaultClientState, vaultClientMocks } = vi.hoisted(() => ({
   vaultClientState: {
     transferResult: null as null | { txHash: string },
     withdrawResult: null as null | { txHash: string; amountsOut: bigint[] },
+    // MNY-06: the user's on-chain share holding `computeSharesToRedeem`
+    // caps the collect at. Defaults far above any test's redemption so
+    // `min(baseShares, held) === baseShares` (a partial); the full-balance
+    // test overrides it to EXACTLY baseShares.
+    shareBalance: 1_000_000_000_000n as bigint,
   },
   vaultClientMocks: {
-    transferShares: vi.fn(async (args: { onSigned: (h: string) => Promise<void> | void }) => {
-      const r = vaultClientState.transferResult ?? { txHash: 'default-collect-tx' };
-      await args.onSigned(r.txHash);
-      return { txHash: r.txHash, deduped: false };
-    }),
+    transferShares: vi.fn(
+      async (args: { amount: bigint; onSigned: (h: string) => Promise<void> | void }) => {
+        // Faithful on-chain SEP-41 reality: a transfer for MORE shares
+        // than the holder has fails closed.
+        if (args.amount > vaultClientState.shareBalance) {
+          throw new Error(
+            `transfer: insufficient share balance (amount=${args.amount} > held=${vaultClientState.shareBalance})`,
+          );
+        }
+        const r = vaultClientState.transferResult ?? { txHash: 'default-collect-tx' };
+        await args.onSigned(r.txHash);
+        return { txHash: r.txHash, deduped: false };
+      },
+    ),
     withdrawFromVault: vi.fn(async (args: { onSigned: (h: string) => Promise<void> | void }) => {
       const r = vaultClientState.withdrawResult ?? {
         txHash: 'default-withdraw-tx',
@@ -72,6 +86,7 @@ const { vaultClientState, vaultClientMocks } = vi.hoisted(() => ({
       totalManaged: 1_000_000_000n,
       sharePricePpm: 1_000_000n,
     })),
+    getShareBalance: vi.fn(async () => vaultClientState.shareBalance),
     resolveOperatorPublicKey: vi.fn(() => Keypair.random().publicKey()),
   },
 }));
@@ -82,6 +97,8 @@ vi.mock('../../credits/vaults/vault-client.js', () => ({
     vaultClientMocks.withdrawFromVault(...args),
   readVaultState: (...args: Parameters<typeof vaultClientMocks.readVaultState>) =>
     vaultClientMocks.readVaultState(...args),
+  getShareBalance: (...args: Parameters<typeof vaultClientMocks.getShareBalance>) =>
+    vaultClientMocks.getShareBalance(...args),
   resolveOperatorPublicKey: () => vaultClientMocks.resolveOperatorPublicKey(),
 }));
 
@@ -237,6 +254,7 @@ describeIf('vault-redemptions integration — real postgres (ADR 031 V4)', () =>
     await truncateAllTables();
     vaultClientState.transferResult = null;
     vaultClientState.withdrawResult = null;
+    vaultClientState.shareBalance = 1_000_000_000_000n;
     vaultClientMocks.transferShares.mockClear();
     vaultClientMocks.withdrawFromVault.mockClear();
     await seedVault();
@@ -358,6 +376,97 @@ describeIf('vault-redemptions integration — real postgres (ADR 031 V4)', () =>
     expect(redemptionRow?.redeemTxHash).toBe('withdraw-tx-int-1');
 
     expect(vaultClientMocks.withdrawFromVault).toHaveBeenCalledTimes(1);
+  });
+
+  it('MNY-06 HEADLINE: a FULL-balance redemption (user holds EXACTLY baseShares) settles, collecting the ENTIRE holding — the +0.5% buffer used to make this fail closed (real postgres)', async () => {
+    const user = await seedUser();
+    await seedUserCreditsBalance(user.id, 'USD', 500n); // their WHOLE balance
+    await seedHotFloat(5_000n); // fast payout
+    const orderId = await seedOrder({ userId: user.id, chargeMinor: 500n });
+
+    // The user holds EXACTLY baseShares: valueMinor 500 × PER at a 1:1
+    // share price = 50_000_000 shares, and NOT one share more. Under the
+    // old code, `computeSharesToRedeem` returned `baseShares + 0.5%`,
+    // which the transfer mock (and a real vault) reject as an
+    // over-collection → the redemption could never settle.
+    const baseShares = 500n * 100_000n; // 50_000_000 at sharePricePpm 1:1
+    vaultClientState.shareBalance = baseShares;
+
+    const row = await claimVaultRedemption({
+      sourceType: 'order_redeem',
+      sourceId: orderId,
+      userId: user.id,
+      assetCode: 'LOOPUSD',
+      network: 'testnet',
+      valueMinor: 500n,
+      fromAddress: user.walletAddress,
+    });
+    const outcome = await driveOneVaultRedemption(row);
+    expect(outcome).toBe('settled');
+
+    const [redemptionRow] = await db
+      .select()
+      .from(vaultRedemptions)
+      .where(eq(vaultRedemptions.sourceId, orderId));
+    expect(redemptionRow?.state).toBe('settled');
+    // Collected the user's ENTIRE holding — position drained to zero, no
+    // stranded share dust — and never more than they held.
+    expect(redemptionRow?.sharesToRedeem).toBe(baseShares);
+
+    // Order paid; user_credits debited by EXACTLY valueMinor (500 -> 0).
+    const [freshOrder] = await db.select().from(orders).where(eq(orders.id, orderId));
+    expect(freshOrder?.state).toBe('paid');
+    const [balance] = await db
+      .select()
+      .from(userCredits)
+      .where(and(eq(userCredits.userId, user.id), eq(userCredits.currency, 'USD')));
+    expect(balance?.balanceMinor).toBe(0n);
+  });
+
+  it('MNY-06: a SLOW-path ADVERSE tick (proceeds within the 0.5% band, below valueMinor) DRAWS the float down — the real vault_hot_float_balance_non_negative CHECK accepts the negative delta', async () => {
+    const user = await seedUser();
+    await seedUserCreditsBalance(user.id, 'USD', 10_000n);
+    await seedHotFloat(400n); // < valueMinor → slow path, but has balance to absorb a small draw-down
+    const orderId = await seedOrder({ userId: user.id, chargeMinor: 500n });
+    // Proceeds = 498 minor worth of stroops: 2 minor BELOW valueMinor,
+    // inside the 0.5% band (min floor = 497.5 minor), so the withdraw
+    // passes and the NEGATIVE net delta (-2) is applied to the float.
+    vaultClientState.withdrawResult = {
+      txHash: 'withdraw-tx-adverse',
+      amountsOut: [498n * 100_000n],
+    };
+
+    const row = await claimVaultRedemption({
+      sourceType: 'order_redeem',
+      sourceId: orderId,
+      userId: user.id,
+      assetCode: 'LOOPUSD',
+      network: 'testnet',
+      valueMinor: 500n,
+      fromAddress: user.walletAddress,
+    });
+    const outcome = await driveOneVaultRedemption(row);
+    expect(outcome).toBe('settled'); // NOT rejected by the CHECK
+
+    const [redemptionRow] = await db
+      .select()
+      .from(vaultRedemptions)
+      .where(eq(vaultRedemptions.sourceId, orderId));
+    expect(redemptionRow?.payoutPath).toBe('slow');
+
+    // Real CHECK-constrained float: 400 + (498 - 500) = 398, still >= 0.
+    const [floatRow] = await db
+      .select()
+      .from(vaultHotFloat)
+      .where(and(eq(vaultHotFloat.assetCode, 'LOOPUSD'), eq(vaultHotFloat.network, 'testnet')));
+    expect(floatRow?.balanceMinor).toBe(398n);
+
+    // User still received EXACTLY valueMinor despite the shortfall.
+    const [balance] = await db
+      .select()
+      .from(userCredits)
+      .where(and(eq(userCredits.userId, user.id), eq(userCredits.currency, 'USD')));
+    expect(balance?.balanceMinor).toBe(9_500n);
   });
 
   it('vault_redemptions_source_unique fires as a real 23505 on a genuine duplicate INSERT', async () => {

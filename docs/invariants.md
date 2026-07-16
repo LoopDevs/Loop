@@ -412,19 +412,44 @@ row per spend event: `pending → collecting → redeemed → settled`
 order; with the flag off, the classic on-chain redemption is
 byte-identical.
 
-### INV-V2 (redemption) — Never pay out more value than the collected shares are worth
+### INV-V2 (redemption) — The user always receives exactly `value_minor`; the float absorbs the slippage; a real de-peg still reverts
 
-The value paid for a redemption (`value_minor`) is bounded below by
-what the collected shares actually redeem to.
+The user is paid EXACTLY `value_minor` on every redemption (partial or
+full). The operator float absorbs the difference between the on-chain
+redeem proceeds and `value_minor` in EITHER direction — funded by
+yield/revenue — and a real de-peg / oracle failure still reverts rather
+than draining the float.
 
-- **runtime**: the SLOW path's `withdrawFromVault({ minAmountsOut =
-value_minor × stroops })` throws `VaultPostSubmitSlippageError` rather
-  than let a row reach `redeemed` for less than `value_minor` is worth;
-  `shares_to_redeem` is computed from a FRESH `readVaultState` price
-  (plus a bounded buffer, `REDEMPTION_SHARE_BUFFER_BPS`), pinned once,
-  never recomputed across retries.
-- **test**: `credits/vaults/__tests__/vault-redemptions.test.ts`
-  (below-floor withdraw → `recordStepFailure`, row never `redeemed`).
+- **MNY-06 — no user-side share buffer; collect is capped at the
+  holding**: `shares_to_redeem = min(baseShares, held)` where `held` is
+  the user's REAL on-chain share balance (`getShareBalance`) at compute
+  time. A partial collects exactly `baseShares` (no backing drift into
+  the float); a FULL-balance redemption collects the user's ENTIRE
+  holding and NEVER more, so a 100% cash-out always succeeds and drains
+  the position to zero with no stranded share dust. (The old code
+  collected `baseShares + 0.5%`, which exceeded a full-balance holder's
+  shares and failed closed — 100% cash-out was impossible — and drifted
+  0.5% of backing into the float on partials.) `shares_to_redeem` is
+  pinned once, never recomputed across retries.
+- **runtime (catastrophic-slippage backstop)**: the SLOW path's
+  `withdrawFromVault({ minAmountsOut = value_minor × stroops −
+REDEMPTION_SLIPPAGE_TOLERANCE_BPS })` throws
+  `VaultPostSubmitSlippageError` (reverts) only when proceeds fall MORE
+  than the 0.5% tolerance band below `value_minor` — a de-peg / oracle
+  failure, an ops incident, never a silent loss. Within the band the
+  float absorbs `amountOut − value_minor` (now signed: positive on a
+  favorable tick, negative on an adverse one, drawing the float down; the
+  `vault_hot_float_balance_non_negative` CHECK keeps the float ≥ 0, so an
+  adverse slow redemption against a near-empty float fails closed and
+  retries/pages rather than going negative). The 0.5% band matches the
+  deposit / float-replenish withdraw tolerances; it is a real floor, not
+  a no-op.
+- **test**: `credits/vaults/__tests__/vault-redemptions.test.ts` (no
+  buffer; `min(baseShares, held)`; full-balance drains to zero; float
+  delta both directions; catastrophic below-band withdraw →
+  `recordStepFailure`, row never `redeemed`) + `__tests__/integration/
+vault-redemptions.test.ts` (real postgres — full-balance redemption
+  settles, float `balance_minor` CHECK accepts a negative delta).
 
 ### INV-V1 (redemption) — Mirror debit == burn == value_minor; both halves extinguished exactly once
 

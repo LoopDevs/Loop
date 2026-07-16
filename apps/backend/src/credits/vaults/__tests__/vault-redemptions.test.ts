@@ -686,6 +686,9 @@ const { vaultClientMocks } = vi.hoisted(() => ({
     transferShares: vi.fn(),
     withdrawFromVault: vi.fn(),
     readVaultState: vi.fn(),
+    // MNY-06: `computeSharesToRedeem` now reads the user's REAL on-chain
+    // share holding and collects `min(baseShares, held)`.
+    getShareBalance: vi.fn(),
     resolveOperatorPublicKey: vi.fn(),
   },
 }));
@@ -693,6 +696,7 @@ vi.mock('../vault-client.js', () => ({
   transferShares: (...args: unknown[]) => vaultClientMocks.transferShares(...args),
   withdrawFromVault: (...args: unknown[]) => vaultClientMocks.withdrawFromVault(...args),
   readVaultState: (...args: unknown[]) => vaultClientMocks.readVaultState(...args),
+  getShareBalance: (...args: unknown[]) => vaultClientMocks.getShareBalance(...args),
   resolveOperatorPublicKey: () => vaultClientMocks.resolveOperatorPublicKey(),
 }));
 
@@ -812,6 +816,11 @@ beforeEach(() => {
     totalManaged: 1_000_000_000n,
     sharePricePpm: 1_000_000n, // 1:1
   });
+  vaultClientMocks.getShareBalance.mockReset();
+  // Default: the user holds far MORE shares than any test's redemption
+  // needs, so `min(baseShares, held) === baseShares` (a partial) — tests
+  // exercising the full-balance / capped-at-holding path override this.
+  vaultClientMocks.getShareBalance.mockResolvedValue(1_000_000_000_000n);
   vaultClientMocks.resolveOperatorPublicKey.mockReset();
   vaultClientMocks.resolveOperatorPublicKey.mockReturnValue(OPERATOR_PUBLIC);
   discordMocks.notifyVaultRedemptionFailed.mockReset();
@@ -979,7 +988,11 @@ describe('driveOneVaultRedemption — happy path SLOW (synchronous vault.withdra
         // this point, proving the fast branch was attempted first
         // (scenario 9).
         expect(state.hotFloatRows.get('LOOPUSD:testnet')?.balanceMinor ?? 0n).toBe(0n);
-        expect(args.minAmountsOut).toBe(500n * 100_000n);
+        // MNY-06: the floor is `value_minor × PER` less the 0.5%
+        // catastrophic-slippage band (REDEMPTION_SLIPPAGE_TOLERANCE_BPS),
+        // not an exact `value_minor × PER`.
+        const expectedOut = 500n * 100_000n;
+        expect(args.minAmountsOut).toBe(expectedOut - (expectedOut * 50n) / 10_000n);
         // CF-18: the real withdrawFromVault persists the hash via
         // onSigned BEFORE returning — mirror that here so payoutStep's
         // final update actually has a redeemTxHash to preserve.
@@ -1346,8 +1359,8 @@ describe('collectSharesStep — P2-5 wallet-not-activated blocks collect', () =>
   });
 });
 
-describe('driveOneVaultRedemption — INV-V2 (payout never lands below valueMinor)', () => {
-  it('a slow-path withdrawFromVault failure (e.g. a slippage floor violation) is recorded as a retryable step failure, never marked redeemed', async () => {
+describe('driveOneVaultRedemption — INV-V2 (catastrophic-slippage backstop still reverts)', () => {
+  it('a slow-path withdrawFromVault failure (proceeds beyond the 0.5% band → VaultPostSubmitSlippageError) is recorded as a retryable step failure, never marked redeemed', async () => {
     vaultClientMocks.transferShares.mockResolvedValue({ txHash: 'collect-tx-6', deduped: false });
     // Float stays empty (0) so the fast attempt is skipped and the
     // slow path is the only one exercised.
@@ -1431,17 +1444,20 @@ describe('driveOneVaultRedemption — atomic rollback on a missed payout CAS (P7
   });
 });
 
-describe('computeSharesToRedeem — ADR 031 §D6 step 2 buffer', () => {
-  it('computes a sharesToRedeem strictly greater than the naive (unbuffered) share count at the current price', async () => {
-    vaultClientMocks.readVaultState.mockResolvedValue({
-      totalSupply: 1_000_000_000n,
-      totalManaged: 1_000_000_000n,
-      sharePricePpm: 1_000_000n, // 1:1
-    });
+describe('computeSharesToRedeem — MNY-06: no user-side buffer, capped at the holding', () => {
+  const STROOPS_PER_MINOR = 100_000n;
+  const baseSharesFor = (valueMinor: bigint): bigint =>
+    (valueMinor * STROOPS_PER_MINOR * 1_000_000n) / 1_000_000n; // sharePricePpm 1:1
+
+  it('a PARTIAL redemption collects EXACTLY baseShares (no 0.5% buffer, no over-collection drift)', async () => {
     vaultClientMocks.transferShares.mockResolvedValue({ txHash: 'collect-tx-11', deduped: false });
     state.seedFloat('LOOPUSD', 'testnet', 10_000n, 0n);
 
     const valueMinor = 500n;
+    const baseShares = baseSharesFor(valueMinor);
+    // The user holds far more than this redemption needs → a partial.
+    vaultClientMocks.getShareBalance.mockResolvedValue(baseShares * 10n);
+
     const row = await claimVaultRedemption({
       sourceType: 'order_redeem',
       sourceId: 'order-11',
@@ -1455,12 +1471,121 @@ describe('computeSharesToRedeem — ADR 031 §D6 step 2 buffer', () => {
     expect(outcome).toBe('settled');
 
     const final = state.redemptionRows.get(row.id)!;
-    const STROOPS_PER_MINOR = 100_000n;
-    const naiveShares = (valueMinor * STROOPS_PER_MINOR * 1_000_000n) / 1_000_000n; // sharePricePpm 1:1
-    const expectedBuffered = naiveShares + (naiveShares * 50n) / 10_000n; // REDEMPTION_SHARE_BUFFER_BPS = 50 (0.5%)
+    // EXACTLY baseShares — no buffer added (the old code asserted
+    // `> baseShares`); the extra 0.5% no longer drifts into the float.
+    expect(final.sharesToRedeem).toBe(baseShares);
+  });
 
-    expect(final.sharesToRedeem).toBe(expectedBuffered);
-    expect(final.sharesToRedeem! > naiveShares).toBe(true);
+  it('HEADLINE (MNY-06): a FULL-balance redemption — user holds EXACTLY baseShares — succeeds and drains the position to zero (the old +0.5% buffer made this fail closed)', async () => {
+    // A no-yield position worth `valueMinor` holds exactly `baseShares`.
+    const valueMinor = 500n;
+    const held = baseSharesFor(valueMinor); // user holds EXACTLY baseShares
+    vaultClientMocks.getShareBalance.mockResolvedValue(held);
+    // Fund the float so the payout takes the fast path and settles.
+    state.seedFloat('LOOPUSD', 'testnet', 10_000n, 0n);
+
+    // Faithfully model the on-chain SEP-41 transfer: it FAILS CLOSED if
+    // asked to move MORE shares than the user holds. This is exactly the
+    // on-chain reality the old +0.5% buffer tripped.
+    vaultClientMocks.transferShares.mockImplementation(async (args: { amount: bigint }) => {
+      if (args.amount > held) {
+        throw new Error(
+          `transfer: insufficient share balance (amount=${args.amount} > held=${held})`,
+        );
+      }
+      return { txHash: 'collect-tx-full', deduped: false };
+    });
+
+    const row = await claimVaultRedemption({
+      sourceType: 'order_redeem',
+      sourceId: 'order-full',
+      userId: USER_ID,
+      assetCode: 'LOOPUSD',
+      network: 'testnet',
+      valueMinor,
+      fromAddress: USER_WALLET,
+    });
+    const outcome = await driveOneVaultRedemption(row);
+
+    // GREEN post-fix: settles. (RED pre-fix: the buffered
+    // `baseShares + 0.5%` exceeds `held`, the transfer throws, and the
+    // row is stuck in `collecting` with attempts>0 — 100% cash-out was
+    // impossible.)
+    expect(outcome).toBe('settled');
+    const final = state.redemptionRows.get(row.id)!;
+    // Collected the user's ENTIRE holding — position drained to zero, no
+    // stranded share dust — and NEVER more than they held.
+    expect(final.sharesToRedeem).toBe(held);
+    expect(final.sharesToRedeem! <= held).toBe(true);
+    expect(final.attempts).toBe(0); // never a failed collect attempt
+    // User still debited EXACTLY valueMinor.
+    expect(state.userCreditsBalances.get(`${USER_ID}:USD`)).toBe(-valueMinor);
+  });
+
+  it('caps at the holding: when baseShares would exceed the user`s shares (e.g. a stale/high quote), collects only `held`, never more', async () => {
+    vaultClientMocks.transferShares.mockResolvedValue({ txHash: 'collect-tx-cap', deduped: false });
+    state.seedFloat('LOOPUSD', 'testnet', 10_000n, 0n);
+
+    const valueMinor = 500n;
+    const baseShares = baseSharesFor(valueMinor);
+    const held = baseShares - 7n; // user holds slightly fewer than baseShares
+    vaultClientMocks.getShareBalance.mockResolvedValue(held);
+
+    const row = await claimVaultRedemption({
+      sourceType: 'order_redeem',
+      sourceId: 'order-cap',
+      userId: USER_ID,
+      assetCode: 'LOOPUSD',
+      network: 'testnet',
+      valueMinor,
+      fromAddress: USER_WALLET,
+    });
+    const outcome = await driveOneVaultRedemption(row);
+    expect(outcome).toBe('settled');
+
+    const final = state.redemptionRows.get(row.id)!;
+    expect(final.sharesToRedeem).toBe(held); // capped, never > held
+  });
+});
+
+describe('payoutStep — MNY-06: float absorbs the slow-path delta in BOTH directions', () => {
+  it('an ADVERSE tick (proceeds within the 0.5% band, below valueMinor) yields a NEGATIVE netFloatDelta that DRAWS the float down (not rejected)', async () => {
+    vaultClientMocks.transferShares.mockResolvedValue({ txHash: 'collect-tx-adv', deduped: false });
+    // Seed the float with SOME balance but less than valueMinor, so the
+    // fast draw fails (forcing the slow path) yet there is balance for a
+    // small negative delta to draw down.
+    state.seedFloat('LOOPUSD', 'testnet', 400n, 0n);
+
+    const valueMinor = 500n;
+    // Proceeds = 498 minor worth of stroops — 2 minor BELOW valueMinor,
+    // well inside the 0.5% band (2.5 minor), so the withdraw passes its
+    // minAmountsOut floor and returns.
+    vaultClientMocks.withdrawFromVault.mockImplementation(
+      async (args: { onSigned: (h: string) => Promise<void> | void }) => {
+        await args.onSigned('withdraw-tx-adv');
+        return { txHash: 'withdraw-tx-adv', amountsOut: [498n * 100_000n], deduped: false };
+      },
+    );
+
+    const row = await claimVaultRedemption({
+      sourceType: 'order_redeem',
+      sourceId: 'order-adv',
+      userId: USER_ID,
+      assetCode: 'LOOPUSD',
+      network: 'testnet',
+      valueMinor,
+      fromAddress: USER_WALLET,
+    });
+    const outcome = await driveOneVaultRedemption(row);
+    expect(outcome).toBe('settled');
+
+    const final = state.redemptionRows.get(row.id)!;
+    expect(final.payoutPath).toBe('slow');
+    // netFloatDelta = 498 - 500 = -2 → float drawn DOWN by 2 (400 → 398).
+    const float = state.hotFloatRows.get('LOOPUSD:testnet')!;
+    expect(float.balanceMinor).toBe(398n);
+    // User still debited EXACTLY valueMinor despite the shortfall.
+    expect(state.userCreditsBalances.get(`${USER_ID}:USD`)).toBe(-valueMinor);
   });
 });
 
@@ -1588,10 +1713,11 @@ describe('runVaultRedemptionSweepTick', () => {
     // Row C: pending, already at MAX_ATTEMPTS-1 — its collect is forced
     // to fail (matched by its own deterministic computed share count,
     // via valueMinor=999n), so this ONE more failure moves it terminal.
+    // MNY-06: with the default (huge) holding, `computeSharesToRedeem`
+    // returns exactly `baseShares` (no buffer), so match THAT.
     const failValueMinor = 999n;
     const STROOPS_PER_MINOR = 100_000n;
-    const naiveShares = (failValueMinor * STROOPS_PER_MINOR * 1_000_000n) / 1_000_000n;
-    const failShares = naiveShares + (naiveShares * 50n) / 10_000n;
+    const failShares = (failValueMinor * STROOPS_PER_MINOR * 1_000_000n) / 1_000_000n;
     state.seedRow({
       sourceType: 'order_redeem',
       sourceId: 'order-c',
