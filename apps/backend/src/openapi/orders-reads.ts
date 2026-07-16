@@ -94,13 +94,17 @@ export function registerOrdersReadsOpenApi(
     tags: ['Orders'],
     security: [{ bearerAuth: [] }],
     request: {
-      // Only these three are forwarded to upstream; unknown params
-      // are stripped — see `ALLOWED_LIST_QUERY_PARAMS` in
-      // `orders/handler.ts`.
+      // `page` / `perPage` / `status` are the only CTX-native params
+      // forwarded to upstream verbatim; unknown params are stripped —
+      // see `ALLOWED_LIST_QUERY_PARAMS` in `orders/list-handler.ts`.
+      // `excludePending` (AUD-08) is a Loop-side control: when true
+      // the backend server-paginates over the non-pending set and
+      // never forwards it to CTX.
       query: z.object({
         page: z.coerce.number().int().min(1).optional(),
         perPage: z.coerce.number().int().min(1).max(100).optional(),
         status: z.string().max(32).optional(),
+        excludePending: z.enum(['true', 'false', '1', '0']).optional(),
       }),
     },
     responses: {
