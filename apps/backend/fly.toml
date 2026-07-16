@@ -18,6 +18,14 @@ primary_region = "iad"
   NODE_ENV = "production"
   GIFT_CARD_API_BASE_URL = "https://spend.ctx.com"
   LOG_LEVEL = "info"
+  # MNY-22: XLM min-price floor (major units per XLM). A price feed below
+  # the floor is rejected as a glitched/near-zero read; unset = fail open.
+  # Moderate level (~25-27% of a ~$0.11 XLM): rejects glitches + stale
+  # feeds, only false-rejects on a >70% crash. USD anchor $0.03; GBP/EUR
+  # set proportionally to their current XLM price.
+  LOOP_XLM_MIN_PRICE_USD = "0.03"
+  LOOP_XLM_MIN_PRICE_GBP = "0.024"
+  LOOP_XLM_MIN_PRICE_EUR = "0.026"
   # Audit A-025: image-proxy SSRF allowlist is enforced in production.
   # `spend.ctx.com` hosts merchant card / logo URLs; the S3 bucket hosts
   # the raw image blobs CTX links from. Anything outside this list gets
