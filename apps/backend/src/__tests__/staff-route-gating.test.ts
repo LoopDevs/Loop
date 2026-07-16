@@ -427,10 +427,13 @@ describe('ADR 037 mount inventory (default-deny)', () => {
     //      + ADR 031 V7 vault-emissions/vault-redemptions redrive (2)
     //      + 3 Discord surfaces + step-up mint
     //      + NS-04 rail kill switches (GET list + POST halt + POST resume)
+    //      + NS-08 account-freeze writes (POST place hold + POST release)
     //      ... see the mount-by-mount table in the PR; the exact
     //      membership is pinned by the matrix test above and the
-    //      money-write list below.
-    expect(adminTier).toHaveLength(45);
+    //      money-write list below. NS-08's two GET reads (per-user hold
+    //      history + live-holds dashboard) are support-tier blanket
+    //      riders, not admin-tier, so they land in `riders` below.
+    expect(adminTier).toHaveLength(47);
     // 10 = lookup, watcher-skips ×3, wallet ×2, refetch-redemption,
     //      ledger (A5-8 fleet-wide ledger browser), audit timeline
     //      (A5-7 per-subject audit timeline), auth-state (A5-3
@@ -461,6 +464,11 @@ describe('ADR 037 mount inventory (default-deny)', () => {
       // control — admin-tier + step-up on both directions.
       'POST /api/admin/rails/:rail/halt',
       'POST /api/admin/rails/:rail/resume',
+      // NS-08: placing/releasing a per-account freeze — placing refuses
+      // every debit path for one account; releasing re-opens money
+      // movement. Admin-tier + step-up on both directions.
+      'POST /api/admin/users/:userId/holds',
+      'POST /api/admin/holds/:holdId/release',
     ];
     const groups = new Map(adminRouteGroups().map((g) => [`${g.method} ${g.path}`, g]));
     for (const key of mustBeAdmin) {
@@ -508,6 +516,11 @@ describe('ADR 037 mount inventory (default-deny)', () => {
       // so a halt token can't be replayed to resume.
       'POST /api/admin/rails/:rail/halt': 'requireAdminStepUp(rail-halt)',
       'POST /api/admin/rails/:rail/resume': 'requireAdminStepUp(rail-resume)',
+      // NS-08: freeze/unfreeze an account — separate scope per direction
+      // so a freeze token can't be replayed to unfreeze (unfreeze is the
+      // money-OUT-re-enabling direction).
+      'POST /api/admin/users/:userId/holds': 'requireAdminStepUp(account-freeze)',
+      'POST /api/admin/holds/:holdId/release': 'requireAdminStepUp(account-unfreeze)',
     };
     const groups = new Map(adminRouteGroups().map((g) => [`${g.method} ${g.path}`, g]));
     for (const [key, gate] of Object.entries(mustCarryStepUp)) {

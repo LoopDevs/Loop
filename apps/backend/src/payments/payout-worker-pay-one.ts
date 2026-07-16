@@ -34,6 +34,7 @@ import {
   PayoutNotCompensableError,
 } from '../credits/payout-compensation.js';
 import { isLoopAssetCode, currencyForLoopAsset } from '@loop/shared';
+import { isFrozenForIntent } from '../fraud/account-freeze.js';
 
 const log = logger.child({ area: 'payout-worker' });
 
@@ -198,6 +199,29 @@ async function probeTrustline(row: PendingPayout): Promise<PayOutcome | null> {
 }
 
 export async function payOne(row: PendingPayout, args: PayOneArgs): Promise<PayOutcome> {
+  // NS-08 (design §5C #9 / ASH strict-AML tiebreak): PAUSE earned payouts
+  // to a FROZEN wallet. ANY live hold — `debits_only` OR `full` — holds
+  // money IN to the user's wallet (AML-safe: don't send funds to a
+  // possibly-attacker-controlled address); a flagged account receives
+  // NOTHING until cleared (`isFrozenForIntent(system_payout)` is true for
+  // either scope). Deferred, not failed: leave a fresh PENDING row
+  // untouched so it re-drains on the next tick after the hold is released
+  // (accrue → pay on unfreeze). Worker-driven, so it re-evaluates each tick.
+  //   - Only fresh 'pending' rows are held: a 'submitted' row already
+  //     moved money on-chain and only needs convergence (below), which we
+  //     must not wedge.
+  //   - 'burn' rows are EXEMPT: their destination is the asset ISSUER
+  //     (extinguishing the on-chain half), not the user's wallet — a
+  //     freeze never gates them (design §5C #9).
+  if (row.state === 'pending' && row.kind !== 'burn') {
+    if (await isFrozenForIntent(row.userId, 'system_payout')) {
+      log.info(
+        { payoutId: row.id, userId: row.userId, kind: row.kind },
+        'payout deferred — account frozen (NS-08); left pending for post-release sweep',
+      );
+      return 'retriedLater';
+    }
+  }
   // FT-compensate-guard (liveness): resolve a retry-EXHAUSTED submitted
   // row (`attempts >= maxAttempts`) that still carries a persisted tx hash
   // WITHOUT re-entering the submit pipeline. Such a row is one whose final

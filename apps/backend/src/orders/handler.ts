@@ -5,6 +5,8 @@ import { getUpstreamCircuit, CircuitOpenError } from '../circuit-breaker.js';
 import { upstreamUrl } from '../upstream.js';
 import { scrubUpstreamBody } from '../upstream-body-scrub.js';
 import { notifyCtxSchemaDrift, notifyOrderCreated } from '../discord.js';
+import type { LoopAuthContext } from '../auth/handler.js';
+import { guardAccountNotFrozen } from '../fraud/account-freeze-http.js';
 import {
   summariseZodIssues,
   upstreamHeaders,
@@ -38,6 +40,25 @@ export async function createOrderHandler(c: Context): Promise<Response> {
       { code: 'VALIDATION_ERROR', message: 'merchantId and positive amount are required' },
       400,
     );
+  }
+
+  // NS-08 (design §5A #4): per-account freeze / AML-hold gate. This
+  // legacy CTX-proxy path initiates a gift-card purchase on the user's
+  // behalf (pays in XLM) — money OUT, so a frozen account must be
+  // blocked (design: "gate it until this path is retired with ADR 013
+  // Phase C"). The freeze is keyed on the Loop `users.id`, which is only
+  // resolved for a Loop-native bearer (`kind: 'loop'`); an AML-frozen
+  // user IS Loop-native (that's who the admin freeze API targets) and
+  // authenticates with a Loop token, so gating the loop-kind auth covers
+  // the real threat. A pure legacy CTX bearer (`kind: 'ctx'`) carries no
+  // resolved Loop identity here and predates the freeze system.
+  const auth = c.get('auth') as LoopAuthContext | undefined;
+  if (auth?.kind === 'loop') {
+    const frozen = await guardAccountNotFrozen(c, auth.userId, 'user_spend');
+    if (frozen !== null) {
+      log.warn({ userId: auth.userId }, 'Legacy order create refused — account frozen (NS-08)');
+      return frozen;
+    }
   }
 
   // bearerToken + clientId handled by upstreamHeaders(c)

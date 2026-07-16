@@ -34,6 +34,7 @@ import { registerAdminCashbackConfigOpenApi } from './admin-cashback-config.js';
 import { registerAdminCreditWritesOpenApi } from './admin-credit-writes.js';
 import { registerAdminUserWritesOpenApi } from './admin-user-writes.js';
 import { registerAdminRailsOpenApi } from './admin-rails.js';
+import { registerAdminAccountHoldsOpenApi } from './admin-account-holds.js';
 import { registerAdminCsvExportsOpenApi } from './admin-csv-exports.js';
 import { registerAdminDashboardClusterOpenApi } from './admin-dashboard-cluster.js';
 import { registerAdminFleetMonthlyOpenApi } from './admin-fleet-monthly.js';
@@ -170,6 +171,11 @@ export function registerAdminOpenApi(
   // four money rails. Same ADR-017/028 audit-envelope contract on the
   // two writes; the list is a plain read.
   registerAdminRailsOpenApi(registry, errorResponse, AdminWriteAudit);
+
+  // NS-08 — per-account freeze / AML-hold: place + release (admin-tier,
+  // step-up, audited) + the two support-tier read lists. Same
+  // ADR-017/028 audit-envelope contract on the two writes.
+  registerAdminAccountHoldsOpenApi(registry, errorResponse, AdminWriteAudit);
 
   // ADR 037 — staff role management (admin-tier; step-up writes)
   // and the support-ops cluster (watcher-skip browser + reopen,

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type * as AccountFreezeModule from '../../fraud/account-freeze.js';
 // NS-04: stub the rail kill-switch barrel — this unit suite mocks the DB,
 // so the real `killSwitchService.isHalted` read would fail CLOSED and halt
 // the payout rail, breaking the happy paths. Treat the rail as OPEN; the
@@ -235,6 +236,22 @@ const { killMock } = vi.hoisted(() => ({ killMock: { isKilled: vi.fn((_s: string
 vi.mock('../../kill-switches.js', () => ({
   isKilled: (subsystem: string) => killMock.isKilled(subsystem),
 }));
+
+// NS-08: the account-freeze seam. Default: nobody frozen, so `payOne`
+// never defers on the freeze branch. The freeze DEFER (#9) is covered
+// end-to-end in __tests__/integration/account-freeze.test.ts. Same
+// pattern as the kill-switch seam above.
+const { freezeMock } = vi.hoisted(() => ({
+  freezeMock: { isFrozenForIntent: vi.fn(async (_u: string, _i: string) => false) },
+}));
+vi.mock('../../fraud/account-freeze.js', async (importActual) => {
+  const actual = await importActual<typeof AccountFreezeModule>();
+  return {
+    ...actual,
+    isFrozenForIntent: (userId: string, intent: string) =>
+      freezeMock.isFrozenForIntent(userId, intent),
+  };
+});
 
 const { lifecycleMocks } = vi.hoisted(() => ({
   lifecycleMocks: {

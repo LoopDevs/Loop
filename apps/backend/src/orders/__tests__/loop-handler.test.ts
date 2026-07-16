@@ -184,6 +184,14 @@ vi.mock('../../fraud/velocity.js', () => ({
   VelocityCheckUnavailableError,
 }));
 
+// NS-08: neutralize the account-freeze entry gate for these unit tests
+// (not-frozen default) — the freeze enforcement is covered end-to-end in
+// __tests__/integration/account-freeze.test.ts. Same pattern NS-04 used
+// for the rail-kill-switch gate.
+vi.mock('../../fraud/account-freeze-http.js', () => ({
+  guardAccountNotFrozen: vi.fn(async () => null),
+}));
+
 import { loopCreateOrderHandler, validateMerchantDenomination } from '../loop-handler.js';
 
 interface FakeCtx {

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type * as AccountFreezeModule from '../../fraud/account-freeze.js';
 import type * as SchemaModule from '../../db/schema.js';
 
 // Mock the env module so per-test overrides of
@@ -116,6 +117,13 @@ vi.mock('../../db/client.js', () => ({
     },
   },
 }));
+// NS-08: neutralize the in-txn account-freeze check (not-frozen default)
+// — the frozen credit-order rollback (#5) is covered end-to-end in
+// __tests__/integration/account-freeze.test.ts against real postgres.
+vi.mock('../../fraud/account-freeze.js', async (importActual) => {
+  const actual = await importActual<typeof AccountFreezeModule>();
+  return { ...actual, assertAccountNotFrozen: vi.fn(async () => undefined) };
+});
 vi.mock('../../db/schema.js', async () => {
   const actual = await vi.importActual<typeof SchemaModule>('../../db/schema.js');
   return {

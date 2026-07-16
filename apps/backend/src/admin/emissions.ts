@@ -42,6 +42,7 @@ import {
 } from '../credits/emissions.js';
 import { InsufficientBalanceError, DailyAdjustmentLimitError } from '../credits/adjustments.js';
 import { notifyAdminAudit } from '../discord.js';
+import { isFrozenForIntent } from '../fraud/account-freeze.js';
 import { logger } from '../logger.js';
 import { buildAuditEnvelope, type AdminAuditEnvelope } from './audit-envelope.js';
 import {
@@ -142,6 +143,28 @@ export async function adminEmissionHandler(c: Context): Promise<Response> {
   const targetUser = await getUserById(userId);
   if (targetUser === null) {
     return c.json({ code: 'NOT_FOUND', message: 'Target user not found' }, 404);
+  }
+
+  // NS-08 (design §5C #10 / §6 Q6 / ASH strict-AML tiebreak): an admin
+  // emission queues an on-chain LOOP payment to the target user's wallet —
+  // money IN to a possibly-attacker-controlled address. ANY live hold
+  // (`debits_only` OR `full`) blocks it — a flagged account receives
+  // NOTHING until cleared. Returned 409 ACCOUNT_FROZEN, not 403: this is
+  // an `/api/admin/*` route and the openapi-parity `admin-403` rule
+  // forbids a declared 403 on the admin middleware stack (the emission
+  // surface already declares 409 for its other conflict states). Admin
+  // credit-adjustments, by contrast, BYPASS the freeze (remediation — see
+  // adjustments.ts §5B #8).
+  if (await isFrozenForIntent(userId, 'system_payout')) {
+    log.warn({ userId, adminUserId: actor.id }, 'Emission refused — account frozen (NS-08)');
+    return c.json(
+      {
+        code: 'ACCOUNT_FROZEN',
+        message:
+          'Target account has a freeze / AML-hold — emissions to a frozen wallet are blocked until the hold is released.',
+      },
+      409,
+    );
   }
 
   // MNY-10: pin the emission destination to the TARGET user's

@@ -77,6 +77,7 @@ import { attachUserWalletSignature } from '../wallet/user-signer.js';
 import { isVaultEligibleCurrency } from '../credits/vaults/vault-emissions.js';
 import { vaultsEnabled } from '../credits/vaults/registry.js';
 import { redeemLoopOrderViaVault } from './redeem-vault.js';
+import { guardAccountNotFrozen } from '../fraud/account-freeze-http.js';
 
 const log = logger.child({ handler: 'redeem' });
 
@@ -225,6 +226,20 @@ export async function redeemLoopOrderHandler(c: Context): Promise<Response> {
       400,
     );
   }
+  // NS-08 (design §5A #2): per-account freeze / AML-hold gate. Redeeming
+  // submits an on-chain payment FROM the user's embedded wallet (classic
+  // path) or collects vault shares (vault fork below) — money OUT, so
+  // ANY live hold blocks it. Placed after the ALREADY_PAID replay + the
+  // ORDER_NOT_PAYABLE check above so reading a completed redemption's
+  // state (no new money movement) is unaffected, and BEFORE the vault
+  // fork / the classic build-sign-submit block. (`redeem-vault.ts` §5A #3
+  // re-gates the vault fork independently, defence-in-depth.)
+  const frozen = await guardAccountNotFrozen(c, auth.userId, 'user_withdrawal');
+  if (frozen !== null) {
+    log.warn({ orderId, userId: auth.userId }, 'Redemption refused — account frozen (NS-08)');
+    return frozen;
+  }
+
   // AUDIT-2 finding B (2026-07 hardening): fail closed on the same
   // LOOP_PHASE_1_ONLY gate as order-create (loop-handler.ts) — this
   // guard is NOT retroactive, so an order created before that gate

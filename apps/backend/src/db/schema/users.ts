@@ -64,6 +64,18 @@ export const users = pgTable(
     // tokens are rejected at once. Refresh tokens keep their own DB-row
     // revocation (`refresh_tokens`); this is the access-token equivalent.
     tokenVersion: integer('token_version').notNull().default(0),
+    // NS-08 — per-account freeze / AML-hold denormalized hot-path MIRROR
+    // (migration 0073). NULL ⇒ not frozen. `frozen_at` is the earliest
+    // live `account_holds` row's placed_at; `frozen_scope` is the
+    // effective (most restrictive) scope across that user's live holds
+    // ('full' > 'debits_only'). Read once per gated debit (column-scoped,
+    // exactly like `token_version` above / getUserTokenVersion) so the
+    // hot path never aggregates the append-only ledger per request. Kept
+    // in sync with the ledger inside the same transaction as every
+    // place/release write (fraud/account-freeze-service.ts). The
+    // `account_holds` table is the source of truth; this is the cache.
+    frozenAt: timestamp('frozen_at', { withTimezone: true }),
+    frozenScope: text('frozen_scope').$type<'full' | 'debits_only'>(),
     homeCurrency: char('home_currency', { length: 3 }).notNull().default('USD'),
     // ADR 015 — Stellar address the user wants their cashback paid
     // to (when on-chain payout is available for their home currency).
@@ -151,6 +163,17 @@ export const users = pgTable(
     index('users_stellar_address')
       .on(t.stellarAddress)
       .where(sql`${t.stellarAddress} IS NOT NULL`),
+    // NS-08 (migration 0073): the freeze-mirror enum twin of the TS
+    // `AccountHoldScope` union — CHECK pins it at the DB boundary, the
+    // `$type<'full' | 'debits_only'>()` narrowing pins it in TypeScript.
+    // NULL (not frozen) passes by SQL semantics.
+    check(
+      'users_frozen_scope_known',
+      sql`${t.frozenScope} IS NULL OR ${t.frozenScope} IN ('full', 'debits_only')`,
+    ),
+    // NS-08 invariant tripwire: the mirror timestamp is set iff a scope
+    // is set (both null = not frozen; both non-null = frozen).
+    check('users_frozen_mirror_shape', sql`(${t.frozenAt} IS NULL) = (${t.frozenScope} IS NULL)`),
   ],
 );
 

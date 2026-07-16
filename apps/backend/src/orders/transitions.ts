@@ -102,6 +102,18 @@ export async function markOrderPaid(
       .returning();
     if (paid === undefined) return null;
 
+    // NS-08 (design §5B #6): this loop_asset mirror debit runs in the
+    // ASYNC payment watcher, AFTER the user's on-chain LOOP already
+    // landed in the deposit account (the money already left the wallet).
+    // The freeze is enforced at the REDEMPTION ENTRY GATE (redeem.ts §5A
+    // #2), which refuses to submit that on-chain payment for a frozen
+    // account. By the time we reach here the value has moved on-chain, so
+    // this debit merely RECONCILES the off-chain mirror to match — and
+    // per design §6 Q7 (let in-flight settlement complete) we deliberately
+    // do NOT block it: blocking would leave the mirror un-debited while
+    // the on-chain LOOP is gone, an INV-1 desync that CREDITS the frozen
+    // user. Documented, not silently skipped.
+    //
     // A4-110: extinguish the off-chain liability when the user's
     // own on-chain LOOP-asset funded the order. Other methods
     // (xlm/usdc) bypass this step.
