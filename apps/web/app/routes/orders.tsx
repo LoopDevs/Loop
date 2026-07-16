@@ -196,22 +196,26 @@ export default function OrdersRoute(): React.JSX.Element {
   // reachable by direct `/orders/:id` URL (the purchase flow links
   // to the pending order mid-payment) — we just don't advertise them
   // on the overview.
+  //
+  // AUD-08: the backend now filters `pending` out server-side
+  // (`fetchOrders` sends `excludePending=true`), so pages are stable
+  // and complete and this client-side drop is normally a no-op. It's
+  // kept as defense-in-depth in case the request reaches an older
+  // backend build that hasn't shipped the server-side filter yet.
   const orders = allOrders.filter((o) => o.status !== 'pending');
   const errorText = errorMessage(t, error);
 
-  // The list is paginated server-side over ALL statuses, then `pending`
-  // orders are dropped client-side (above). A page can therefore filter
-  // down to zero *visible* rows while later pages — holding the user's
-  // completed orders — still exist. So the terminal "No orders yet" empty
-  // state must key off the RAW page being empty with no page either side
-  // (`noOrdersAtAll`), NOT off the post-filter `orders` list; otherwise an
-  // all-pending page renders a false empty state and, with pagination
-  // hidden, traps the user on it. When the visible list is empty but
-  // `hasOtherPages`, we show a neutral notice + keep Prev/Next alive so
-  // the user can always page through to their completed orders.
-  // NOTE: the proper fix is to server-paginate over the filtered set —
-  // that needs a backend list-handler + external CTX upstream change and
-  // is tracked as a separate follow-up.
+  // AUD-08: the backend now server-paginates over the non-pending set,
+  // so a page's raw rows are already the visible rows and the trap is
+  // fixed at the source. This empty-state logic is retained as a
+  // belt-and-suspenders guard: if a stale page ever filters down to
+  // zero *visible* rows while later pages still exist, the terminal
+  // "No orders yet" empty state keys off the RAW page being empty with
+  // no page either side (`noOrdersAtAll`), NOT the post-filter `orders`
+  // list — so a residual all-pending page can never render a false
+  // empty state with pagination hidden. When the visible list is empty
+  // but `hasOtherPages`, we show a neutral notice + keep Prev/Next alive
+  // so the user can always page through to their completed orders.
   const noOrdersAtAll = allOrders.length === 0 && !hasNext && !hasPrev;
   const hasOtherPages = hasNext || hasPrev;
 

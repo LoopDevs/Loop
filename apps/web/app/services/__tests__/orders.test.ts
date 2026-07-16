@@ -35,16 +35,16 @@ describe('orders service', () => {
   });
 
   describe('fetchOrders', () => {
-    it('calls with specified page param', async () => {
+    it('calls with specified page param and excludes pending server-side (AUD-08)', async () => {
       mockAuthRequest.mockResolvedValue({ orders: [], pagination: {} });
       await fetchOrders(3);
-      expect(mockAuthRequest).toHaveBeenCalledWith('/api/orders?page=3');
+      expect(mockAuthRequest).toHaveBeenCalledWith('/api/orders?page=3&excludePending=true');
     });
 
-    it('defaults to page 1', async () => {
+    it('defaults to page 1 and excludes pending server-side (AUD-08)', async () => {
       mockAuthRequest.mockResolvedValue({ orders: [], pagination: {} });
       await fetchOrders();
-      expect(mockAuthRequest).toHaveBeenCalledWith('/api/orders?page=1');
+      expect(mockAuthRequest).toHaveBeenCalledWith('/api/orders?page=1&excludePending=true');
     });
 
     it('returns the order list response', async () => {
