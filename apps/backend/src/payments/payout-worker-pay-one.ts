@@ -20,6 +20,7 @@ import {
   markPayoutFailed,
   reclaimSubmittedPayout,
   recordPayoutTxHash,
+  resetStrandedSubmittedToPending,
   type PendingPayout,
 } from '../credits/pending-payouts.js';
 import { getPayoutForAdmin } from '../credits/pending-payouts-admin.js';
@@ -27,7 +28,11 @@ import { findOutboundPaymentByMemo, getOutboundPaymentByTxHash } from './horizon
 import { getAccountTrustlines } from './horizon-trustlines.js';
 import { submitPayout, PayoutSubmitError } from './payout-submit.js';
 import { feeForAttempt } from './fee-strategy.js';
-import { notifyPayoutFailed, notifyPayoutAwaitingTrustline } from '../discord.js';
+import {
+  notifyPayoutFailed,
+  notifyPayoutAwaitingTrustline,
+  notifyPayoutTxHashOverwriteRefused,
+} from '../discord.js';
 import {
   applyAdminPayoutCompensation,
   AlreadyCompensatedError,
@@ -221,6 +226,22 @@ export async function payOne(row: PendingPayout, args: PayOneArgs): Promise<PayO
       );
       return 'retriedLater';
     }
+  }
+  // PAYOUT-TXHASHNULL-STRAND (liveness): recover a retry-EXHAUSTED
+  // `submitted` row that carries NO persisted tx hash. `txHash IS NULL` ⟺
+  // `onSigned` never committed ⟺ no tx ever reached the network
+  // (recordPayoutTxHash commits STRICTLY BEFORE the network POST — see
+  // payout-submit.ts), so nothing moved on-chain: this is recoverable
+  // stranded funds (crash between the attempts-bump commit and the hash
+  // persist), NOT a double-pay. Reset it to `pending` (attempts=0) so the
+  // normal pending path re-drains it. The reset is CAS-guarded on
+  // (submitted, txHash IS NULL), so it can never touch a row whose tx
+  // landed. Reached only via the STRAND clause in `listClaimablePayouts`;
+  // handled BEFORE the persisted-hash exhausted path below (that one needs
+  // `txHash !== null`, so the two are mutually exclusive) and before any
+  // submit-pipeline work — we are recovering, not paying.
+  if (row.state === 'submitted' && row.txHash === null && row.attempts >= args.maxAttempts) {
+    return recoverStrandedPayout(row);
   }
   // FT-compensate-guard (liveness): resolve a retry-EXHAUSTED submitted
   // row (`attempts >= maxAttempts`) that still carries a persisted tx hash
@@ -418,11 +439,37 @@ export async function payOne(row: PendingPayout, args: PayOneArgs): Promise<PayO
       // retry than to send a tx we can't later prove we sent.
       onSigned: async (signedHash) => {
         const stamped = await recordPayoutTxHash({ id: row.id, txHash: signedHash });
-        if (stamped === null) {
+        if (stamped.row === null) {
           // Row moved out from under us between claim and stamp (another
           // worker confirmed/failed it). Abort: do NOT submit a second
           // tx on a row we no longer own.
           throw new Error('row no longer in submitted state — aborting submit');
+        }
+        if (stamped.overwriteRefused) {
+          // PAYOUT-HASHHISTORY: this row already carried a DIFFERING durable
+          // tx-hash anchor (a prior submit). We preserved it and appended
+          // this re-submit hash to `payout_tx_hashes` history instead of
+          // overwriting — the anchor to the funds that first moved is never
+          // lost. The re-submit still proceeds (payOne's FT-05 pre-check
+          // already proved the prior tx provably expired); but if that prior
+          // tx actually LANDED under deep Horizon lag, this fresh submit is a
+          // potential double-pay, so page ops to reconcile via the history.
+          log.error(
+            {
+              payoutId: row.id,
+              anchorTxHash: stamped.existingTxHash,
+              newTxHash: signedHash,
+              attempts: claimed.attempts,
+            },
+            'PAYOUT-HASHHISTORY: refused to overwrite a payout’s durable tx-hash anchor on re-submit — anchor preserved, new hash appended to payout_tx_hashes; reconcile for a possible double-pay if the anchored tx also landed',
+          );
+          notifyPayoutTxHashOverwriteRefused({
+            payoutId: row.id,
+            userId: row.userId,
+            anchorTxHash: stamped.existingTxHash ?? '',
+            newTxHash: signedHash,
+            attempts: claimed.attempts,
+          });
         }
       },
     }));
@@ -460,6 +507,39 @@ export async function payOne(row: PendingPayout, args: PayOneArgs): Promise<PayO
     );
     return 'retriedLater';
   }
+}
+
+/**
+ * PAYOUT-TXHASHNULL-STRAND (liveness): recover a retry-EXHAUSTED
+ * `submitted` row that never persisted a tx hash by resetting it to
+ * `pending` with a fresh attempt budget.
+ *
+ * Reached only from the early return in `payOne` for a row the STRAND
+ * clause in `listClaimablePayouts` re-picked (`state='submitted' AND
+ * tx_hash IS NULL AND attempts >= maxAttempts`). Because `tx_hash IS NULL`
+ * proves NO tx ever reached the network (recordPayoutTxHash commits before
+ * the network POST), nothing moved on-chain and the reset can never
+ * double-pay. `resetStrandedSubmittedToPending` re-asserts the guard under
+ * the row lock (`state='submitted' AND tx_hash IS NULL`), so a null return
+ * means a concurrent worker recorded a hash / advanced the row first — a
+ * benign race, reported as `skippedRace`. On success the row is `pending`
+ * again and the normal claim path re-drains it next tick.
+ */
+async function recoverStrandedPayout(row: PendingPayout): Promise<PayOutcome> {
+  const reset = await resetStrandedSubmittedToPending(row.id);
+  if (reset === null) {
+    log.info(
+      { payoutId: row.id },
+      'PAYOUT-TXHASHNULL-STRAND: stranded row already advanced by a concurrent writer — no reset',
+    );
+    return 'skippedRace';
+  }
+  log.warn(
+    { payoutId: row.id, priorAttempts: row.attempts },
+    'PAYOUT-TXHASHNULL-STRAND: recovered a submitted+txHash-null stranded payout — reset to pending (attempts=0); no tx ever reached the network, so no double-pay. Will re-drain next tick',
+  );
+  // Left as `pending` for the normal claim path — semantically a retry.
+  return 'retriedLater';
 }
 
 /**

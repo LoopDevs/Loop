@@ -113,6 +113,11 @@ export const TABLES_TO_TRUNCATE = [
   // users.id), but listing it explicitly keeps the truncation order
   // self-documenting per this file's own stated intent.
   'interest_mint_snapshots',
+  // PAYOUT-HASHHISTORY (migration 0074): append-only per-payout tx-hash
+  // ledger. FK to pending_payouts(id) ON DELETE CASCADE, so a TRUNCATE of
+  // pending_payouts CASCADEs into it — listed explicitly (children-first,
+  // before its parent) per this file's self-documenting convention.
+  'payout_tx_hashes',
   'pending_payouts',
   'payment_watcher_skips',
   'credit_transactions',

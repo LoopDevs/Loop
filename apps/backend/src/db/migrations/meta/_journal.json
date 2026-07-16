@@ -519,6 +519,13 @@
       "when": 1780190400000,
       "tag": "0073_account_holds",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1780190500000,
+      "tag": "0074_payout_tx_hashes",
+      "breakpoints": true
     }
   ]
 }

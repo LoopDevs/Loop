@@ -200,6 +200,12 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
       'Fires when the payout-worker pre-flight detects the destination account is missing the required trustline (ADR-015 / ADR-016 Phase-2 trustline-probe). Throttled to once per (userId, assetCode) per process. Row stays in `pending` and submits on the next tick once the trustline is added — no admin retry needed.',
   },
   {
+    name: 'notifyPayoutTxHashOverwriteRefused',
+    channel: 'monitoring',
+    description:
+      'PAYOUT-HASHHISTORY: fires when a re-submit signs a DIFFERING tx hash while a durable anchor is already set — recordPayoutTxHash preserves the anchor and appends the new hash to payout_tx_hashes instead of overwriting. Benign in the normal case (prior tx provably expired), but under deep Horizon ingestion lag the anchored tx may have landed → potential double-pay; ops reconciles both hashes against Horizon.',
+  },
+  {
     name: 'notifyPegBreakOnFulfillment',
     channel: 'monitoring',
     description:

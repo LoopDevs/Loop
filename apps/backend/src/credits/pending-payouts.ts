@@ -241,6 +241,30 @@ export async function listClaimablePayouts(opts: {
           AND ${pendingPayouts.txHash} IS NOT NULL
           AND ${pendingPayouts.attempts} >= ${opts.maxAttempts}
           AND ${pendingPayouts.submittedAt} < NOW() - make_interval(secs => ${opts.staleSeconds})
+        )
+        OR (
+          -- PAYOUT-TXHASHNULL-STRAND (liveness): re-pick a retry-EXHAUSTED
+          -- (attempts >= maxAttempts) 'submitted' row that carries NO
+          -- persisted tx hash. Neither the watchdog clause (needs attempts <
+          -- max) nor the exhausted-reclaim clause above (needs txHash IS NOT
+          -- NULL) matches it, so without this it wedges in 'submitted'
+          -- forever — recoverable stranded funds. It arises only from a hard
+          -- crash BETWEEN the attempts-bump commit and the onSigned
+          -- hash-persist, repeated until the budget exhausts.
+          --
+          -- txHash IS NULL ⟺ onSigned never committed ⟺ NO tx ever reached
+          -- the network (recordPayoutTxHash commits strictly BEFORE the
+          -- network POST — see payout-submit.ts), so nothing moved on-chain
+          -- and the row is safe to reset to pending. payOne routes it to a
+          -- reset-ONLY path (recoverStrandedPayout) — never re-submitted from
+          -- here — and the reset itself is CAS-guarded on (submitted, txHash
+          -- IS NULL), so this can never re-pay a landed tx or double-pay. The
+          -- staleSeconds gate defers to a live worker that just bumped
+          -- attempts (its onSigned may still be in flight).
+          ${pendingPayouts.state} = 'submitted'
+          AND ${pendingPayouts.txHash} IS NULL
+          AND ${pendingPayouts.attempts} >= ${opts.maxAttempts}
+          AND ${pendingPayouts.submittedAt} < NOW() - make_interval(secs => ${opts.staleSeconds})
         )`,
       )
       .orderBy(
@@ -271,6 +295,8 @@ export {
   markPayoutConfirmed,
   markPayoutFailed,
   resetPayoutToPending,
+  resetStrandedSubmittedToPending,
+  type RecordTxHashResult,
 } from './pending-payouts-transitions.js';
 
 // Admin-side `pending_payouts` reads (`listPayoutsForAdmin`,

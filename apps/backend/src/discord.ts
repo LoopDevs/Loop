@@ -23,6 +23,7 @@ export {
   notifyGeoDbStale,
   notifyPayoutFailed,
   notifyPayoutAwaitingTrustline,
+  notifyPayoutTxHashOverwriteRefused,
   notifyOrderFailedAfterCtxPaid,
   notifyPriceFeedAnomaly,
   notifyUsdcBelowFloor,

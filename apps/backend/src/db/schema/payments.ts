@@ -342,6 +342,61 @@ export const pendingPayouts = pgTable(
   ],
 );
 
+/**
+ * PAYOUT-HASHHISTORY (migration 0074) — append-only ledger of every
+ * Stellar tx hash the worker has ever signed for a payout.
+ *
+ * `pending_payouts.tx_hash` holds a SINGLE hash — the DURABLE ANCHOR to
+ * the funds that first moved (CF-18: persisted in `onSigned`, BEFORE the
+ * network submit). Under deep Horizon ingestion lag the FT-05 expiry
+ * guard can clear (a landed tx still reads 404 past its timebound) and
+ * the re-submit path would OVERWRITE that anchor with a fresh hash,
+ * losing the durable link to the value that actually moved on-chain.
+ *
+ * `recordPayoutTxHash` now REFUSES to overwrite a differing non-null
+ * anchor and instead appends every signed hash here (one row per hash),
+ * so the anchor is preserved AND the full submit history is queryable
+ * for reconciliation / double-pay forensics. Mirrors how `account_holds`
+ * (freezes) and `credit_transactions` (balances) model an append-only
+ * audit trail beside a hot-path column.
+ *
+ * Rows are NEVER mutated or deleted (except a `pending_payouts` hard-
+ * delete cascading, which never happens in practice). `reason`:
+ *   - 'first-submit'      — the initial hash; it became the anchor
+ *                           (`pending_payouts.tx_hash`).
+ *   - 'resubmit-refused'  — a later DIFFERING hash on a re-submit; the
+ *                           anchor was preserved and this hash appended
+ *                           here only (an ops alert fires alongside).
+ */
+export const payoutTxHashes = pgTable(
+  'payout_tx_hashes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    payoutId: uuid('payout_id')
+      .notNull()
+      .references(() => pendingPayouts.id, { onDelete: 'cascade' }),
+    txHash: text('tx_hash').notNull(),
+    /** `pending_payouts.attempts` at record time — which attempt signed this hash. */
+    attempt: integer('attempt').notNull(),
+    reason: text('reason').notNull(),
+    recordedAt: timestamp('recorded_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // History reads: every hash for a payout, oldest-first.
+    index('payout_tx_hashes_payout_recorded').on(t.payoutId, t.recordedAt),
+    // A given hash is recorded at most ONCE per payout — a same-hash
+    // re-record within one attempt is an `ON CONFLICT DO NOTHING` no-op,
+    // not a duplicate row. Each attempt signs a distinct hash (fresh seq +
+    // fee), so this never collapses genuinely-different submits.
+    uniqueIndex('payout_tx_hashes_payout_tx_unique').on(t.payoutId, t.txHash),
+    check(
+      'payout_tx_hashes_reason_known',
+      sql`${t.reason} IN ('first-submit', 'resubmit-refused')`,
+    ),
+    check('payout_tx_hashes_attempt_non_negative', sql`${t.attempt} >= 0`),
+  ],
+);
+
 // Payout state enum lives in `@loop/shared` (ADR 019) — the CHECK
 // literal above and the filter chips on `/admin/payouts` + state pill
 // on `/settings/cashback` all read from the same tuple. Re-exported
