@@ -135,6 +135,17 @@ export const infraEnvFields = {
     .max(100_000)
     .default(12_500),
 
+  // NS-13 (settlement reconciliation): the CTX-settlement-system cutover
+  // timestamp. The missing-settlement reconciliation watchdog only flags a
+  // fulfilled, on-chain-funded order that has NO `ctx_settlements` row when
+  // the order was created AT OR AFTER this instant — orders created before
+  // the settlement system went live (migration 0045, "hardening A4")
+  // legitimately have no row and must never page. Optional: when unset the
+  // watchdog falls back to the earliest `ctx_settlements.created_at` as the
+  // empirical cutover. Set it to the exact A4 go-live instant (ISO-8601,
+  // e.g. `2026-05-14T00:00:00Z`) for a precise, backfill-proof baseline.
+  LOOP_SETTLEMENT_RECONCILE_SINCE: z.coerce.date().optional(),
+
   // Max auto-retry attempts before a row promotes from transient
   // failure to terminal `failed`. ADR 016 default 5.
   LOOP_PAYOUT_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
