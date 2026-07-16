@@ -30,6 +30,7 @@
  */
 import type { Context } from 'hono';
 import { refundDeposit } from '../payments/deposit-refund.js';
+import { RailHaltedError } from '../rail-kill-switches/index.js';
 import type { User } from '../db/users.js';
 import { notifyAdminAudit } from '../discord.js';
 import { logger } from '../logger.js';
@@ -165,6 +166,15 @@ export async function adminDepositRefundHandler(c: Context): Promise<Response> {
       },
     );
   } catch (err) {
+    // NS-04: refund rail halted — no NEW on-chain deposit refund starts.
+    // 503 transient-retry; the throw rolled the guard txn back so no
+    // snapshot persisted, and a retry after resume re-evaluates cleanly.
+    if (err instanceof RailHaltedError) {
+      return c.json(
+        { code: 'RAIL_HALTED', message: `${err.rail} rail is temporarily halted — retry shortly` },
+        503,
+      );
+    }
     if (err instanceof DepositRefundNotApplicableError) {
       switch (err.kind) {
         case 'not_found':

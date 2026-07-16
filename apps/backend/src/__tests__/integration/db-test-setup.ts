@@ -66,6 +66,11 @@ export const TABLES_TO_TRUNCATE = [
   // no FK to anything else in this list — same "CASCADE never reaches
   // it" reasoning as `vault_float_reconciliation_runs` above.
   'hot_float_backing_runs',
+  // NS-04 (migration 0072): durable per-rail runtime halt switches. FK
+  // to users(actor_user_id) ON DELETE RESTRICT, so it must be truncated
+  // alongside the rest (a CASCADE from users never reaches it — RESTRICT
+  // would instead block a user delete while a toggle row references them).
+  'rail_kill_switches',
   'interest_pool_alert_state',
   'watchdog_alert_state',
   'otp_attempt_counters',

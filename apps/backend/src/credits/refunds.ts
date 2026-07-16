@@ -27,6 +27,7 @@ import { creditTransactions, orders, paymentWatcherSkips, userCredits } from '..
 import { isUniqueViolation } from '../db/errors.js';
 import { env } from '../env.js';
 import { adjustmentCapLockKey, DailyAdjustmentLimitError } from './adjustments.js';
+import { assertRailNotHalted, killSwitchService } from '../rail-kill-switches/index.js';
 import {
   refundDeposit,
   type RefundResult as DepositRefundResult,
@@ -428,6 +429,14 @@ export async function applyAdminRefund(args: {
    */
   reason?: string;
 }): Promise<RefundResult> {
+  // NS-04: whole-rail halt for the CREDIT-rail refund primitive. Gated
+  // at the primitive (not just the HTTP handler) because the design's
+  // enforcement point is the primitive itself — the dispatcher alone is
+  // insufficient. Throws `RailHaltedError` before any money moves;
+  // HTTP handlers translate it to 503 `RAIL_HALTED`. Block-new-only: a
+  // refund already committed is untouched. Fails CLOSED (unreadable
+  // switch → halted).
+  await assertRailNotHalted(killSwitchService, 'refund');
   if (args.amountMinor <= 0n) {
     // Schema CHECK already enforces this but we fail fast with a
     // typed error rather than surfacing a pg CHECK violation.

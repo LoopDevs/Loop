@@ -1,4 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+// NS-04: stub the rail kill-switch barrel — this unit suite mocks the DB,
+// so the real refund-rail read would fail CLOSED and make applyAdminRefund
+// throw RailHaltedError before its own logic runs. Treat the rail as OPEN;
+// the DB-backed enforcement is proven in the rail-kill-switches integration suite.
+vi.mock('../../rail-kill-switches/index.js', () => ({
+  killSwitchService: { isHalted: async () => false },
+  assertRailNotHalted: async () => {},
+  RailHaltedError: class RailHaltedError extends Error {},
+  RAILS: ['deposit', 'payout', 'vault', 'refund'],
+}));
 
 /**
  * Mirrors the credit-adjustments repo test pattern (chainable-db

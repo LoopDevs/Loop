@@ -1,4 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+// NS-04: stub the rail kill-switch barrel. This unit suite mocks env/DB,
+// so importing the real barrel (which pulls in the DB-backed service +
+// logger under the minimal mocked env) would fail; and its fail-closed read
+// would make every mutating vault op throw RailHaltedError. Treat the vault
+// rail as OPEN; the DB-backed enforcement is proven in the integration suite.
+vi.mock('../../../rail-kill-switches/index.js', () => ({
+  killSwitchService: { isHalted: async () => false },
+  assertRailNotHalted: async () => {},
+  RailHaltedError: class RailHaltedError extends Error {},
+  RAILS: ['deposit', 'payout', 'vault', 'refund'],
+}));
 import {
   Account,
   Asset,

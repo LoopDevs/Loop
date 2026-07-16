@@ -26,6 +26,7 @@ import {
   RefundOrderInvalidError,
 } from '../credits/refunds.js';
 import { DailyAdjustmentLimitError } from '../credits/adjustments.js';
+import { RailHaltedError } from '../rail-kill-switches/index.js';
 import { notifyAdminAudit } from '../discord.js';
 import { logger } from '../logger.js';
 import { buildAuditEnvelope, type AdminAuditEnvelope } from './audit-envelope.js';
@@ -161,6 +162,16 @@ export async function adminRefundHandler(c: Context): Promise<Response> {
       },
     );
   } catch (err) {
+    // NS-04: refund rail halted — no NEW refund starts. 503 matches the
+    // SUBSYSTEM_DISABLED shape so web/mobile render it as a transient
+    // retry. No snapshot was stored (the throw rolled the guard txn
+    // back), so a retry after resume re-evaluates cleanly.
+    if (err instanceof RailHaltedError) {
+      return c.json(
+        { code: 'RAIL_HALTED', message: `${err.rail} rail is temporarily halted — retry shortly` },
+        503,
+      );
+    }
     if (err instanceof RefundAlreadyIssuedError) {
       return c.json(
         {

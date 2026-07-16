@@ -46,6 +46,7 @@ import { parseStroops } from './stroops.js';
 import { submitPayout, submitNativePayment, PayoutSubmitError } from './payout-submit.js';
 import { findOutboundPaymentByMemo, getOutboundPaymentByTxHash } from './horizon-find-outbound.js';
 import { resolvePayoutConfig } from './payout-worker.js';
+import { assertRailNotHalted, killSwitchService } from '../rail-kill-switches/index.js';
 
 const log = logger.child({ area: 'deposit-refund' });
 
@@ -270,6 +271,14 @@ async function persistRefundHash(paymentId: string, txHash: string): Promise<voi
  * result the handler maps to an HTTP status.
  */
 export async function refundDeposit(paymentId: string): Promise<RefundResult> {
+  // NS-04: whole-rail halt for the ON-CHAIN refund primitive. Gated at
+  // the primitive because it is reachable directly (the A6 auto-refund
+  // sweep in skipped-payments.ts calls it, bypassing the HTTP handler).
+  // Throws `RailHaltedError` before any Horizon read or submit; the admin
+  // handler maps it to 503 `RAIL_HALTED`, and the auto-refund sweep's
+  // try/catch leaves the deposit `abandoned` to re-drain on resume.
+  // Block-new-only + fails CLOSED (unreadable switch → halted).
+  await assertRailNotHalted(killSwitchService, 'refund');
   const skip = await loadSkip(paymentId);
   if (skip === null) return { kind: 'not_found' };
   if (skip.status === 'refunded') {

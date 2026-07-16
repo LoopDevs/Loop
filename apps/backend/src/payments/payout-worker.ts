@@ -52,6 +52,7 @@ import { Keypair } from '@stellar/stellar-sdk';
 import { env } from '../env.js';
 import { logger } from '../logger.js';
 import { isKilled } from '../kill-switches.js';
+import { killSwitchService } from '../rail-kill-switches/index.js';
 import { withAdvisoryLock } from '../db/client.js';
 import { listClaimablePayouts } from '../credits/pending-payouts.js';
 import { resolveIssuerSigners } from './issuer-signers.js';
@@ -180,6 +181,18 @@ const PAYOUT_TICK_LEASE_MS = 90_000;
 const TICK_LEASE_TIMED_OUT = Symbol('payout-tick-lease-timeout');
 
 export async function runPayoutTick(args: RunPayoutTickArgs): Promise<PayoutTickResult> {
+  // NS-04: whole-rail halt. When the payout rail is halted, early-return
+  // an empty tick BEFORE acquiring the leader lock or claiming any rows —
+  // no new payout is submitted. Block-new-only: claimed rows stay
+  // `pending`/`submitted` and re-drain on resume (same posture as the
+  // CF-15 emission-skip below, but for the WHOLE rail rather than just
+  // `kind='emission'`). Fails CLOSED: an unreadable switch reads as
+  // halted, so a DB blip pauses new outbound payments rather than risking
+  // them while state is unknown.
+  if (await killSwitchService.isHalted('payout')) {
+    log.warn('payout rail is halted — skipping payout tick (block-new-only)');
+    return { ...EMPTY_TICK };
+  }
   // Hardening A8: single-flight the whole claim→submit tick across
   // machines. `SKIP LOCKED` (listClaimablePayouts) already gives
   // disjoint row batches, but two machines submitting concurrently

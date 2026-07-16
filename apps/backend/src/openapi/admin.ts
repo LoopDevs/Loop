@@ -33,6 +33,7 @@ import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 import { registerAdminCashbackConfigOpenApi } from './admin-cashback-config.js';
 import { registerAdminCreditWritesOpenApi } from './admin-credit-writes.js';
 import { registerAdminUserWritesOpenApi } from './admin-user-writes.js';
+import { registerAdminRailsOpenApi } from './admin-rails.js';
 import { registerAdminCsvExportsOpenApi } from './admin-csv-exports.js';
 import { registerAdminDashboardClusterOpenApi } from './admin-dashboard-cluster.js';
 import { registerAdminFleetMonthlyOpenApi } from './admin-fleet-monthly.js';
@@ -164,6 +165,11 @@ export function registerAdminOpenApi(
   // flip (ADR 015 deferred). Same audit-envelope contract; lives
   // in its own slice because it isn't a credit/refund/emission.
   registerAdminUserWritesOpenApi(registry, errorResponse, AdminWriteAudit);
+
+  // NS-04 — runtime rail kill switches: list + halt + resume for the
+  // four money rails. Same ADR-017/028 audit-envelope contract on the
+  // two writes; the list is a plain read.
+  registerAdminRailsOpenApi(registry, errorResponse, AdminWriteAudit);
 
   // ADR 037 — staff role management (admin-tier; step-up writes)
   // and the support-ops cluster (watcher-skip browser + reopen,

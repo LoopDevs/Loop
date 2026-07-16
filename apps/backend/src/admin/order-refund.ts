@@ -99,6 +99,7 @@ import {
   RefundOrderInvalidError,
 } from '../credits/refunds.js';
 import { DailyAdjustmentLimitError } from '../credits/adjustments.js';
+import { RailHaltedError } from '../rail-kill-switches/index.js';
 import { notifyAdminAudit } from '../discord.js';
 import { logger } from '../logger.js';
 import { buildAuditEnvelope, type AdminAuditEnvelope } from './audit-envelope.js';
@@ -382,6 +383,15 @@ export async function adminRefundOrderHandler(c: Context): Promise<Response> {
       },
     );
   } catch (err) {
+    // NS-04: refund rail halted — no NEW order refund starts (whether it
+    // would dispatch to the credit or on-chain primitive). 503 transient-
+    // retry; the throw rolled the guard txn back so no snapshot persisted.
+    if (err instanceof RailHaltedError) {
+      return c.json(
+        { code: 'RAIL_HALTED', message: `${err.rail} rail is temporarily halted — retry shortly` },
+        503,
+      );
+    }
     if (err instanceof OrderRefundNotApplicableError) {
       if (err.kind === 'order_not_found') {
         return c.json({ code: 'NOT_FOUND', message: 'Order not found' }, 404);

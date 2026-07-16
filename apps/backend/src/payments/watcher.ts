@@ -37,6 +37,7 @@ import { parseStroops } from './stroops.js';
 import { isAmountSufficient, loopAssetOverpaymentStroops } from './amount-sufficient.js';
 import { notifyLoopAssetOverpayment } from '../discord.js';
 import { recordSkip, retrySkippedPayments, type RetryOutcome } from './skipped-payments.js';
+import { killSwitchService } from '../rail-kill-switches/index.js';
 import { REFUND_MIN_STROOPS } from './deposit-refund.js';
 import { checkDuplicateFundingSource } from '../fraud/duplicate-account-signals.js';
 
@@ -792,6 +793,19 @@ export async function runPaymentWatcherTick(args: {
   usdcIssuer?: string | undefined;
   limit?: number;
 }): Promise<TickResult> {
+  // NS-04: whole-rail halt. When the deposit rail is halted, early-return
+  // an empty tick BEFORE acquiring the fleet lock or hitting Horizon — no
+  // new deposit → order transition happens. Block-new-only: already-
+  // detected/in-flight work is unaffected, and unprocessed on-chain
+  // deposits simply aren't consumed this tick — the next tick after
+  // resume picks them up (Horizon is re-read from the persisted cursor).
+  // Fails CLOSED: an unreadable switch reads as halted, so a DB blip
+  // pauses new deposit processing rather than risking it while state is
+  // unknown.
+  if (await killSwitchService.isHalted('deposit')) {
+    log.warn('deposit rail is halted — skipping payment-watcher tick (block-new-only)');
+    return emptyTickResult(false);
+  }
   let leaseTimer: ReturnType<typeof setTimeout> | undefined;
   const locked = await withAdvisoryLock(paymentWatcherLockKey(), () =>
     Promise.race([
