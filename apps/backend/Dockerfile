@@ -4,7 +4,7 @@
 # doesn't auto-bump digests — update deliberately: verify the new
 # SHA against Docker Hub's signed manifest + Node's release notes
 # before flipping.
-FROM node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2 AS builder
+FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS builder
 WORKDIR /app
 
 # Copy workspace files
@@ -47,7 +47,7 @@ RUN --mount=type=secret,id=maxmind_account_id \
     fi
 
 # --- Production image ---
-FROM node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2
+FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32
 WORKDIR /app
 
 COPY package.json package-lock.json ./
