@@ -6,6 +6,9 @@ import { toLiteMerchant } from './lite.js';
 import { getUpstreamCircuit } from '../circuit-breaker.js';
 import { upstreamUrl } from '../upstream.js';
 import { logger } from '../logger.js';
+import type { LoopAuthContext } from '../auth/require-auth.js';
+import { getUserCtxUserId } from '../db/users.js';
+import { ctxActAsHeaders } from '../ctx/user-provisioning.js';
 
 const log = logger.child({ handler: 'merchants' });
 
@@ -159,36 +162,53 @@ export async function merchantDetailHandler(c: Context): Promise<Response> {
   const merchant = { ...cached };
 
   try {
-    const bearer = c.get('bearerToken') as string | undefined;
+    // Same auth split as the order handlers: act-as the user on the
+    // Loop-native path (the Loop JWT is not forwardable to CTX),
+    // forward the CTX bearer on the legacy path. When a native user
+    // has no CTX mapping yet, `headers` is null — we simply skip the
+    // enrichment and serve the cached merchant, which is this
+    // handler's fail-soft behaviour on any upstream miss anyway.
     const clientId = c.get('clientId') as string | undefined;
-    const headers: Record<string, string> = {};
-    if (bearer) headers['Authorization'] = `Bearer ${bearer}`;
-    if (clientId) headers['X-Client-Id'] = clientId;
-
-    const response = await getUpstreamCircuit('merchants').fetch(upstreamUrl(`/merchants/${id}`), {
-      headers,
-      signal: AbortSignal.timeout(10_000),
-    });
-
-    if (response.ok) {
-      const raw = (await response.json().catch(() => null)) as unknown;
-      const parsed = UpstreamMerchantDetailResponse.safeParse(raw);
-      if (parsed.success && parsed.data.info) {
-        const { intro, description, longDescription, terms, instructions } = parsed.data.info;
-        // longDescription wins when both are present — it's the
-        // full-length body copy, while `description` is often just a
-        // headline repeat. Fall back to `description` otherwise.
-        if (longDescription) merchant.description = longDescription;
-        else if (description) merchant.description = description;
-        if (intro) merchant.intro = intro;
-        if (terms) merchant.terms = terms;
-        if (instructions) merchant.instructions = instructions;
-      }
+    const auth = c.get('auth') as LoopAuthContext | undefined;
+    let headers: Record<string, string> | null;
+    if (auth?.kind === 'loop') {
+      headers = ctxActAsHeaders(await getUserCtxUserId(auth.userId), clientId);
     } else {
-      log.warn(
-        { id, status: response.status },
-        'Upstream /merchants/:id returned non-OK — serving cached',
+      const bearer = c.get('bearerToken') as string | undefined;
+      headers = {};
+      if (bearer) headers['Authorization'] = `Bearer ${bearer}`;
+      if (clientId) headers['X-Client-Id'] = clientId;
+    }
+
+    if (headers !== null) {
+      const response = await getUpstreamCircuit('merchants').fetch(
+        upstreamUrl(`/merchants/${id}`),
+        {
+          headers,
+          signal: AbortSignal.timeout(10_000),
+        },
       );
+
+      if (response.ok) {
+        const raw = (await response.json().catch(() => null)) as unknown;
+        const parsed = UpstreamMerchantDetailResponse.safeParse(raw);
+        if (parsed.success && parsed.data.info) {
+          const { intro, description, longDescription, terms, instructions } = parsed.data.info;
+          // longDescription wins when both are present — it's the
+          // full-length body copy, while `description` is often just a
+          // headline repeat. Fall back to `description` otherwise.
+          if (longDescription) merchant.description = longDescription;
+          else if (description) merchant.description = description;
+          if (intro) merchant.intro = intro;
+          if (terms) merchant.terms = terms;
+          if (instructions) merchant.instructions = instructions;
+        }
+      } else {
+        log.warn(
+          { id, status: response.status },
+          'Upstream /merchants/:id returned non-OK — serving cached',
+        );
+      }
     }
   } catch (err) {
     log.warn(

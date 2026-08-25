@@ -15,9 +15,11 @@ vi.mock('~/services/auth', () => ({
 
 vi.mock('~/native/secure-storage', () => ({
   storeRefreshToken: vi.fn(() => Promise.resolve()),
+  storeAccessToken: vi.fn(() => Promise.resolve()),
   storeEmail: vi.fn(() => Promise.resolve()),
   clearRefreshToken: vi.fn(() => Promise.resolve()),
   getRefreshToken: vi.fn(() => Promise.resolve(null)),
+  getAccessToken: vi.fn(() => Promise.resolve(null)),
   getEmail: vi.fn(() => Promise.resolve(null)),
 }));
 

@@ -19,17 +19,29 @@ interface Setup {
   clearRefreshToken: ReturnType<typeof vi.fn>;
 }
 
+/** Unsigned JWT expiring `expSecondsFromNow` from now — decode-only. */
+const fakeJwt = (expSecondsFromNow: number): string => {
+  const body = Buffer.from(
+    JSON.stringify({ exp: Math.floor(Date.now() / 1000) + expSecondsFromNow }),
+  ).toString('base64url');
+  return `eyJhbGciOiJIUzI1NiJ9.${body}.sig`;
+};
+
 async function setup(opts: {
   refreshToken: string | null;
   email: string | null;
   refreshedAccessToken: string | null;
+  /** Persisted access token read at boot (defaults to none stored). */
+  storedAccessToken?: string | null;
 }): Promise<Setup> {
   const tryRefresh = vi.fn(async () => opts.refreshedAccessToken);
   const clearRefreshToken = vi.fn(() => Promise.resolve());
   vi.doMock('~/native/secure-storage', () => ({
     getRefreshToken: vi.fn(async () => opts.refreshToken),
+    getAccessToken: vi.fn(async () => opts.storedAccessToken ?? null),
     getEmail: vi.fn(async () => opts.email),
     storeRefreshToken: vi.fn(() => Promise.resolve()),
+    storeAccessToken: vi.fn(() => Promise.resolve()),
     storeEmail: vi.fn(() => Promise.resolve()),
     clearRefreshToken,
   }));
@@ -116,6 +128,59 @@ describe('useSessionRestore', () => {
     expect(useAuthStore.getState().accessToken).toBeNull();
     // A2-1150: transient failures must not wipe the stored token.
     expect(clearRefreshToken).not.toHaveBeenCalled();
+  });
+
+  it('resumes from a still-fresh stored access token with no network call', async () => {
+    const freshToken = fakeJwt(3600);
+    const { useSessionRestore, useAuthStore, tryRefresh, clearRefreshToken } = await setup({
+      refreshToken: 'rt-stored-123',
+      email: 'test@example.com',
+      refreshedAccessToken: 'at-should-not-be-used',
+      storedAccessToken: freshToken,
+    });
+
+    const { result } = renderHook(() => useSessionRestore());
+    await waitFor(() => expect(result.current.isRestoring).toBe(false));
+
+    // The persisted token is inside its exp — restored as-is, zero
+    // refresh round trips.
+    expect(useAuthStore.getState().accessToken).toBe(freshToken);
+    expect(useAuthStore.getState().email).toBe('test@example.com');
+    expect(tryRefresh).not.toHaveBeenCalled();
+    expect(clearRefreshToken).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the refresh flow when the stored access token is expired', async () => {
+    const { useSessionRestore, useAuthStore, tryRefresh } = await setup({
+      refreshToken: 'rt-stored-123', // opaque → not known-expired → refresh attempted
+      email: 'test@example.com',
+      refreshedAccessToken: 'at-refreshed',
+      storedAccessToken: fakeJwt(-60),
+    });
+
+    const { result } = renderHook(() => useSessionRestore());
+    await waitFor(() => expect(result.current.isRestoring).toBe(false));
+
+    expect(tryRefresh).toHaveBeenCalledTimes(1);
+    expect(useAuthStore.getState().accessToken).toBe('at-refreshed');
+  });
+
+  it('skips the network and clears storage when BOTH tokens are expired', async () => {
+    const { useSessionRestore, useAuthStore, tryRefresh, clearRefreshToken } = await setup({
+      refreshToken: fakeJwt(-60),
+      email: 'test@example.com',
+      refreshedAccessToken: 'at-should-not-be-used',
+      storedAccessToken: fakeJwt(-120),
+    });
+
+    const { result } = renderHook(() => useSessionRestore());
+    await waitFor(() => expect(result.current.isRestoring).toBe(false));
+
+    // No credential worth sending — no refresh call, dead session
+    // swept from storage, boot lands on login.
+    expect(tryRefresh).not.toHaveBeenCalled();
+    expect(clearRefreshToken).toHaveBeenCalledTimes(1);
+    expect(useAuthStore.getState().accessToken).toBeNull();
   });
 
   it('skips restore and keeps the existing session when already authenticated', async () => {

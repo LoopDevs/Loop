@@ -9,8 +9,9 @@
  *
  *   - `summariseZodIssues(issues)` — one-line Discord-embed
  *     formatter for the A2-1915 schema-drift notifier.
- *   - `upstreamHeaders(c)` — builds the Authorization +
- *     X-Client-Id headers every CTX request needs.
+ *   - `upstreamHeaders(c)` — builds the auth headers a user-scoped
+ *     CTX request needs: act-as (operator key + X-User-Id) on the
+ *     Loop-native path, forwarded CTX bearer on the legacy path.
  *   - `CreateOrderUpstreamResponse` — Zod schema for the CTX
  *     `POST /gift-cards` response (A2-1706: exported so the
  *     contract-test suite can validate recorded fixtures).
@@ -28,6 +29,9 @@ import type { Context } from 'hono';
 import { z } from 'zod';
 import type { ZodIssue } from 'zod';
 import { logger } from '../logger.js';
+import type { LoopAuthContext } from '../auth/require-auth.js';
+import { getUserCtxUserId } from '../db/users.js';
+import { ctxActAsHeaders } from '../ctx/user-provisioning.js';
 
 const log = logger.child({ handler: 'orders' });
 
@@ -44,12 +48,36 @@ export function summariseZodIssues(issues: readonly ZodIssue[]): string {
     .join(' | ');
 }
 
-/** Builds auth headers for upstream requests, including optional X-Client-Id. */
-export function upstreamHeaders(c: Context): Record<string, string> {
+/**
+ * Auth headers for a user-scoped upstream (CTX) request.
+ *
+ * Two modes, keyed on how the caller authenticated:
+ *   - Loop-native (`kind: 'loop'`): the Loop JWT is NOT forwardable to
+ *     CTX (`require-auth.ts`). We act-as the user instead —
+ *     operator API key + `X-User-Id: <ctx_user_id>` + the request's
+ *     `X-Client-Id` (attributed-operator-traffic contract). Returns
+ *     `null` when the user has no CTX mapping yet (provisioning
+ *     pending) or the operator credentials are unset — the caller
+ *     MUST NOT then reach CTX, since an operator call without
+ *     `X-User-Id` would expose the operator's own data.
+ *   - Legacy CTX-proxy (`kind: 'ctx'`): the bearer IS a CTX token, so
+ *     forward it verbatim with the request's `X-Client-Id`.
+ *
+ * Async because the loop-native path resolves the CTX mapping from
+ * the DB.
+ */
+export async function upstreamHeaders(c: Context): Promise<Record<string, string> | null> {
+  const clientId = c.get('clientId') as string | undefined;
+  const auth = c.get('auth') as LoopAuthContext | undefined;
+
+  if (auth?.kind === 'loop') {
+    const ctxUserId = await getUserCtxUserId(auth.userId);
+    return ctxActAsHeaders(ctxUserId, clientId);
+  }
+
   const headers: Record<string, string> = {
     Authorization: `Bearer ${c.get('bearerToken') as string}`,
   };
-  const clientId = c.get('clientId') as string | undefined;
   if (clientId) {
     headers['X-Client-Id'] = clientId;
   }

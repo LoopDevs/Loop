@@ -49,7 +49,9 @@ class ConsoleEmailProvider implements EmailProvider {
         // Redact when Sentry is active so the raw code can't land in
         // a Sentry breadcrumb. Fall through to full code in the
         // default (no-Sentry) dev loop so the console stub still
-        // serves its "grab the OTP from the log" purpose.
+        // serves its "grab the OTP from the log" purpose. The key is
+        // deliberately NOT `code`/`otp` — logger.ts's REDACT_PATHS
+        // censors those even in dev, which used to defeat this branch.
         ...(sentryActive
           ? { code: '[REDACTED: SENTRY_DSN set]' }
           : { revealedDevOtpCode: input.code }),

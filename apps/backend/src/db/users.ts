@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { db } from './client.js';
 import { users } from './schema.js';
 import { env } from '../env.js';
@@ -111,6 +111,34 @@ export async function upsertUserFromCtx(args: {
 export async function getUserById(id: string): Promise<User | null> {
   const row = await db.query.users.findFirst({ where: eq(users.id, id) });
   return row ?? null;
+}
+
+/**
+ * Column-scoped read of a user's CTX customer mapping. Used by the
+ * procurement path to decide whether to act-as the customer on CTX
+ * calls — keep it narrow, it runs per order.
+ */
+export async function getUserCtxUserId(id: string): Promise<string | null> {
+  const row = await db.query.users.findFirst({
+    columns: { ctxUserId: true },
+    where: eq(users.id, id),
+  });
+  return row?.ctxUserId ?? null;
+}
+
+/**
+ * Records the CTX customer id minted by async provisioning
+ * (`ctx/user-provisioning.ts`). Guarded on `ctx_user_id IS NULL` so a
+ * concurrent provision (or a legacy CTX-proxy mapping) is never
+ * clobbered — first write wins, later writers see `false`.
+ */
+export async function setUserCtxUserId(id: string, ctxUserId: string): Promise<boolean> {
+  const rows = await db
+    .update(users)
+    .set({ ctxUserId, updatedAt: sql`NOW()` })
+    .where(and(eq(users.id, id), isNull(users.ctxUserId)))
+    .returning({ id: users.id });
+  return rows.length > 0;
 }
 
 /**

@@ -267,7 +267,11 @@ describe('ConsoleEmailProvider.sendOtpEmail', () => {
       code: '123456',
       expiresAt: new Date('2026-01-01T00:00:00Z'),
     });
-    expect(loggerCalls[0]![0]['code']).toBe('123456');
+    // Logged under `revealedDevOtpCode` — a key deliberately OUTSIDE
+    // logger.ts's REDACT_PATHS (`code` is redacted even in dev), so the
+    // console stub's grab-the-OTP-from-the-log purpose actually works.
+    expect(loggerCalls[0]![0]['revealedDevOtpCode']).toBe('123456');
+    expect(loggerCalls[0]![0]['code']).toBeUndefined();
     expect(loggerCalls[0]![1]).toMatch(/dev-only/);
     vi.doUnmock('../../env.js');
     vi.doUnmock('../../logger.js');

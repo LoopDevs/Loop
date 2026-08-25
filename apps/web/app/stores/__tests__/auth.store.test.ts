@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // Mock secure-storage before importing store
 vi.mock('~/native/secure-storage', () => ({
   storeRefreshToken: vi.fn(),
+  storeAccessToken: vi.fn(),
   clearRefreshToken: vi.fn(),
   storeEmail: vi.fn(),
 }));

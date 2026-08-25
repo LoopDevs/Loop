@@ -200,8 +200,19 @@ async function fetchUpstreamOrders(
     url.searchParams.set(key, value);
   }
 
+  const headers = await upstreamHeaders(c);
+  if (headers === null) {
+    // Loop-native user with no CTX mapping yet (provisioning pending):
+    // there is nothing to list for them upstream. Return an empty page
+    // rather than an operator-scoped call that would leak other data.
+    return {
+      ok: true,
+      data: { result: [], pagination: { page: 1, pages: 0, perPage: 0, total: 0 } },
+    };
+  }
+
   const response = await getUpstreamCircuit('gift-cards').fetch(url.toString(), {
-    headers: upstreamHeaders(c),
+    headers,
     signal: AbortSignal.timeout(15_000),
   });
 

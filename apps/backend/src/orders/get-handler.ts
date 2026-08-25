@@ -118,11 +118,18 @@ export async function getOrderHandler(c: Context): Promise<Response> {
     return c.json({ code: 'VALIDATION_ERROR', message: 'Invalid order ID' }, 400);
   }
 
+  const headers = await upstreamHeaders(c);
+  if (headers === null) {
+    // Loop-native user with no CTX mapping yet: the order can't belong
+    // to a CTX identity we can name, so it's not found for them.
+    return c.json({ code: 'NOT_FOUND', message: 'Order not found' }, 404);
+  }
+
   try {
     const response = await getUpstreamCircuit('gift-cards').fetch(
       upstreamUrl(`/gift-cards/${orderId}`),
       {
-        headers: upstreamHeaders(c),
+        headers,
         signal: AbortSignal.timeout(15_000),
       },
     );

@@ -13,9 +13,38 @@ function getBootRestore(): Promise<void> {
   if (bootRestore !== null) return bootRestore;
   bootRestore = (async () => {
     try {
-      const { getRefreshToken, getEmail } = await import('~/native/secure-storage');
-      const [refreshToken, email] = await Promise.all([getRefreshToken(), getEmail()]);
+      const { getAccessToken, getRefreshToken, getEmail } = await import('~/native/secure-storage');
+      const [storedAccessToken, refreshToken, email] = await Promise.all([
+        getAccessToken(),
+        getRefreshToken(),
+        getEmail(),
+      ]);
+
+      const { isJwtExpired } = await import('~/utils/jwt-expiry');
+
+      // Fast path: the persisted access token is still inside its
+      // `exp` (with skew) — resume the session with zero network.
+      // This is the common reload case; the refresh call below is
+      // reserved for genuinely stale sessions.
+      if (storedAccessToken !== null && !isJwtExpired(storedAccessToken)) {
+        useAuthStore.getState().setAccessToken(storedAccessToken);
+        if (email) useAuthStore.setState({ email });
+        return;
+      }
+
       if (refreshToken === null) return;
+
+      // Both tokens carry a decodable `exp` (Loop and CTX both mint
+      // JWTs). When the refresh token is ALSO past expiry there is no
+      // credential left worth sending — skip the doomed round trip,
+      // clear the dead session from storage, and let the boot path
+      // land on the login screen directly.
+      if (isJwtExpired(refreshToken)) {
+        const { clearRefreshToken } = await import('~/native/secure-storage');
+        await clearRefreshToken();
+        return;
+      }
+
       const { tryRefresh } = await import('~/services/api-client');
       const accessToken = await tryRefresh();
       if (accessToken !== null) {
@@ -46,7 +75,12 @@ if (typeof window !== 'undefined') {
   void getBootRestore();
 }
 
-/** Attempts to restore the auth session from stored refresh token on app mount. */
+/**
+ * Attempts to restore the auth session from stored tokens on app
+ * mount: a still-fresh persisted access token resumes the session
+ * with no network; otherwise the stored refresh token rolls a new
+ * pair; when both are expired the user lands on login directly.
+ */
 export function useSessionRestore(): { isRestoring: boolean } {
   const [isRestoring, setIsRestoring] = useState(true);
   const store = useAuthStore();

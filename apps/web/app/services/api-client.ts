@@ -311,7 +311,32 @@ export async function authenticatedRequest<T>(
   const { useAuthStore } = await import('~/stores/auth.store');
   const { getPlatform } = await import('~/native/platform');
   const store = useAuthStore.getState();
+  const { isJwtExpired } = await import('~/utils/jwt-expiry');
   let token = store.accessToken;
+
+  // A token whose decodable `exp` has already passed (or falls inside
+  // the skew window) is a guaranteed 401 — treat it as absent so the
+  // block below rolls it via one coalesced refresh BEFORE the request,
+  // saving the doomed round trip. Opaque / exp-less tokens are exempt
+  // (isJwtExpired fails open) and keep the 401 → refresh → retry
+  // backstop below as their path.
+  if (token !== null && isJwtExpired(token)) token = null;
+
+  // Boot-restore populates the in-memory token asynchronously on page
+  // load, so a request firing in that window sees `null` even though a
+  // still-fresh access token is already in storage. Adopt the persisted
+  // token before considering a refresh — without this, every request in
+  // the post-load window (several fire at once on the home screen) rolls
+  // the session independently, and because CTX deletes the prior pair on
+  // each rotation those roll into a refresh storm.
+  if (token === null) {
+    const { getAccessToken } = await import('~/native/secure-storage');
+    const stored = await getAccessToken();
+    if (stored !== null && !isJwtExpired(stored)) {
+      token = stored;
+      useAuthStore.getState().setAccessToken(stored);
+    }
+  }
 
   // Map platform to CTX client ID. `DEFAULT_CLIENT_IDS` in @loop/shared is
   // the single source of truth for these values — the backend's env

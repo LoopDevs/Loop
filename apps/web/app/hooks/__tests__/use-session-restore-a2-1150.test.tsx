@@ -17,8 +17,10 @@ describe('A2-1150: session restore on transient refresh failure', () => {
     const clearRefreshTokenSpy = vi.fn(() => Promise.resolve());
     vi.doMock('~/native/secure-storage', () => ({
       getRefreshToken: vi.fn(async () => 'rt-stored'),
+      getAccessToken: vi.fn(async () => null),
       getEmail: vi.fn(async () => 'u@example.com'),
       storeRefreshToken: vi.fn(() => Promise.resolve()),
+      storeAccessToken: vi.fn(() => Promise.resolve()),
       storeEmail: vi.fn(() => Promise.resolve()),
       clearRefreshToken: clearRefreshTokenSpy,
     }));

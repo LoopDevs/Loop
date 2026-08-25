@@ -62,7 +62,9 @@ afterAll(() => {
 
 function makeCtx(body: unknown): Context {
   return {
-    req: { json: async () => body },
+    // No Authorization header — the upstream CTX revoke (bearer-driven)
+    // is out of scope here; these tests exercise the local row revoke.
+    req: { json: async () => body, header: () => undefined },
     json: (b: unknown, status?: number) =>
       new Response(JSON.stringify(b), {
         status: status ?? 200,

@@ -364,21 +364,27 @@ describe('requireAuth middleware (via /api/orders)', () => {
 });
 
 describe('DELETE /api/auth/session', () => {
-  it('forwards refreshToken to upstream /logout', async () => {
+  it('forwards the bearer to upstream POST /logout with X-Client-Id, no body', async () => {
     mockFetch.mockResolvedValueOnce(new Response(null, { status: 204 }));
 
     const res = await app.request('/api/auth/session', {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/json', 'fly-client-ip': '10.0.0.1' },
-      body: JSON.stringify({ refreshToken: 'rt-to-revoke', platform: 'web' }),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ctx-access-token',
+        'fly-client-ip': '10.0.0.1',
+      },
+      body: JSON.stringify({ platform: 'web' }),
     });
 
     expect(res.status).toBe(200);
     const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
     expect(url).toContain('/logout');
-    const sent = JSON.parse(init.body as string) as { refreshToken: string; clientId: string };
-    expect(sent.refreshToken).toBe('rt-to-revoke');
-    expect(sent.clientId).toBe('loopweb');
+    expect(init.method).toBe('POST');
+    const headers = init.headers as Record<string, string>;
+    expect(headers['Authorization']).toBe('Bearer ctx-access-token');
+    expect(headers['X-Client-Id']).toBe('loopweb');
+    expect(init.body).toBeUndefined();
   });
 
   it('returns 200 even when upstream revoke fails (client always gets to log out)', async () => {
@@ -386,22 +392,54 @@ describe('DELETE /api/auth/session', () => {
 
     const res = await app.request('/api/auth/session', {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/json', 'fly-client-ip': '10.0.0.2' },
-      body: JSON.stringify({ refreshToken: 'rt-x', platform: 'web' }),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ctx-access-token',
+        'fly-client-ip': '10.0.0.2',
+      },
+      body: JSON.stringify({ platform: 'web' }),
     });
 
     expect(res.status).toBe(200);
   });
 
-  it('succeeds without calling upstream when no refreshToken provided', async () => {
+  it('succeeds without calling upstream when no bearer is presented', async () => {
+    // A body refreshToken alone no longer reaches CTX — the upstream
+    // contract revokes by access token in the Authorization header.
     const res = await app.request('/api/auth/session', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json', 'fly-client-ip': '10.0.0.3' },
+      body: JSON.stringify({ refreshToken: 'rt-to-revoke', platform: 'web' }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('never forwards a Loop-signed bearer upstream (native mode)', async () => {
+    const key = 'k'.repeat(32);
+    mockEnv['LOOP_JWT_SIGNING_KEY' as keyof typeof mockEnv] = key as never;
+    const { signLoopToken } = await import('../tokens.js');
+    const { token } = signLoopToken({
+      sub: 'u-9',
+      email: 'a@b.com',
+      typ: 'access',
+      ttlSeconds: 300,
+    });
+
+    const res = await app.request('/api/auth/session', {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+        'fly-client-ip': '10.0.0.5',
+      },
       body: JSON.stringify({ platform: 'web' }),
     });
 
     expect(res.status).toBe(200);
     expect(mockFetch).not.toHaveBeenCalled();
+    delete (mockEnv as Record<string, unknown>)['LOOP_JWT_SIGNING_KEY'];
   });
 
   it('A2-565: revokes the Loop-native refresh-token row when the token is Loop-signed', async () => {

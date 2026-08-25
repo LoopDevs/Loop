@@ -1,6 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 
 const REFRESH_TOKEN_KEY = 'loop_refresh_token';
+const ACCESS_TOKEN_KEY = 'loop_access_token';
 const EMAIL_KEY = 'loop_user_email';
 
 /**
@@ -114,14 +115,50 @@ export async function getRefreshToken(): Promise<string | null> {
   }
 }
 
-/** Removes the stored refresh token and email. */
+/**
+ * Stores the access token alongside the refresh token so a reload can
+ * resume the session without a network round trip. Same platform
+ * split as the refresh token: SecureStorage on native, sessionStorage
+ * on web. Access tokens are short-lived (15 min Loop / 8h CTX), so
+ * the reader (`use-session-restore`) pairs this with a client-side
+ * `exp` check and falls back to the refresh flow when stale.
+ */
+export async function storeAccessToken(token: string): Promise<void> {
+  if (Capacitor.isNativePlatform()) {
+    const secure = await loadSecureStorage();
+    await secure.set(ACCESS_TOKEN_KEY, token);
+    return;
+  }
+  try {
+    sessionStorage.setItem(ACCESS_TOKEN_KEY, token);
+  } catch {
+    // sessionStorage unavailable (e.g. cross-origin iframe) — skip
+  }
+}
+
+/** Reads the stored access token. Returns null if not found. */
+export async function getAccessToken(): Promise<string | null> {
+  if (Capacitor.isNativePlatform()) {
+    const secure = await loadSecureStorage();
+    return secure.get(ACCESS_TOKEN_KEY);
+  }
+  try {
+    return sessionStorage.getItem(ACCESS_TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/** Removes the stored refresh token, access token, and email. */
 export async function clearRefreshToken(): Promise<void> {
   if (Capacitor.isNativePlatform()) {
     const secure = await loadSecureStorage();
     await secure.remove(REFRESH_TOKEN_KEY);
+    await secure.remove(ACCESS_TOKEN_KEY);
     await secure.remove(EMAIL_KEY);
     // Also sweep any residue left in Preferences from the pre-migration
     // era, so a forgot-to-migrate reader never resurrects a stale token.
+    // (No ACCESS_TOKEN_KEY sweep — that key postdates the migration.)
     const prefs = await loadPreferences();
     await prefs.remove({ key: REFRESH_TOKEN_KEY });
     await prefs.remove({ key: EMAIL_KEY });
@@ -129,6 +166,7 @@ export async function clearRefreshToken(): Promise<void> {
   }
   try {
     sessionStorage.removeItem(REFRESH_TOKEN_KEY);
+    sessionStorage.removeItem(ACCESS_TOKEN_KEY);
     sessionStorage.removeItem(EMAIL_KEY);
   } catch {
     // ignore

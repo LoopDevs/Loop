@@ -1,5 +1,10 @@
 import { create } from 'zustand';
-import { storeRefreshToken, storeEmail, clearRefreshToken } from '~/native/secure-storage';
+import {
+  storeRefreshToken,
+  storeAccessToken,
+  storeEmail,
+  clearRefreshToken,
+} from '~/native/secure-storage';
 
 // Synchronous "was-authed" hint. Secure-storage reads are async, so on
 // cold boot we can't know instantly whether the user has a refresh
@@ -26,7 +31,15 @@ export const wasAuthedLastSession = (): boolean => {
 
 interface AuthState {
   email: string | null;
-  /** Access token — memory only. Never persisted. */
+  /**
+   * Access token. Held in memory for request stamping AND mirrored to
+   * platform storage (sessionStorage web / SecureStorage native) so a
+   * reload restores the session synchronously when the token's `exp`
+   * is still in the future — no refresh round trip. The refresh token
+   * remains the durable credential; this mirror is an optimisation
+   * with the same storage trust boundary as the refresh token that
+   * already lives there.
+   */
   accessToken: string | null;
   /**
    * FE-10: has the cold-boot session-restore attempt finished?
@@ -56,11 +69,13 @@ interface AuthActions {
 /**
  * Authentication state store.
  *
- * Access tokens are held in memory only.
- * Refresh tokens are stored via the platform-appropriate secure storage:
+ * Both tokens are stored via the platform-appropriate secure storage:
  * Keychain / EncryptedSharedPreferences on native via
  * `@aparajita/capacitor-secure-storage` (audit A-024, ADR-006),
- * sessionStorage on web.
+ * sessionStorage on web. The access token is additionally held in
+ * memory (this store) as the hot copy every request reads; the
+ * persisted mirror exists so `use-session-restore` can resume a
+ * still-fresh session on reload without a refresh call.
  */
 export const useAuthStore = create<AuthState & AuthActions>((set) => ({
   email: null,
@@ -71,12 +86,16 @@ export const useAuthStore = create<AuthState & AuthActions>((set) => ({
     if (refreshToken !== null) {
       void storeRefreshToken(refreshToken);
     }
+    void storeAccessToken(accessToken);
     void storeEmail(email);
     setWasAuthed(true);
     set({ email, accessToken });
   },
 
   setAccessToken: (token) => {
+    // Mirror every rotation to storage so the persisted copy never
+    // lags the one requests are stamped with.
+    void storeAccessToken(token);
     setWasAuthed(true);
     set({ accessToken: token });
   },

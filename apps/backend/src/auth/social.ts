@@ -25,6 +25,7 @@ import { resolveOrCreateUserForIdentity } from './identities.js';
 import { isLoopAuthConfigured } from './tokens.js';
 import { issueTokenPair } from './issue-token-pair.js';
 import { enqueueWalletProvisioning } from '../wallet/provisioning.js';
+import { enqueueCtxUserProvisioning } from '../ctx/user-provisioning.js';
 import type { SocialProvider } from '../db/schema.js';
 // D1: the request body is the schema-only `./social-schemas.ts`, the
 // same schema the OpenAPI spec registers — so the spec derives from
@@ -174,6 +175,9 @@ export function makeSocialLoginHandler(config: SocialProviderConfig) {
       // ADR 030 Phase C1 — fire-and-forget embedded-wallet
       // provisioning (see native.ts verify-otp for rationale).
       enqueueWalletProvisioning(user.id);
+      // Attributed-operator-traffic: fire-and-forget CTX customer
+      // provisioning (see native.ts verify-otp for rationale).
+      enqueueCtxUserProvisioning(user);
       // Include email so the client can persist the session without
       // having to decode the Loop access JWT — mirrors what OTP users
       // get back (they typed their email; social users never did).

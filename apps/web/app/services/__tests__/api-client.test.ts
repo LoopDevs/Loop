@@ -9,10 +9,13 @@ vi.mock('~/services/config', () => ({ API_BASE: 'http://test-api' }));
 const mockGetRefreshToken = vi.fn<() => Promise<string | null>>();
 const mockStoreRefreshToken = vi.fn<(token: string) => Promise<void>>();
 const mockClearRefreshToken = vi.fn<() => Promise<void>>();
+const mockGetAccessToken = vi.fn<() => Promise<string | null>>(async () => null);
 vi.mock('~/native/secure-storage', () => ({
   getRefreshToken: () => mockGetRefreshToken(),
   storeRefreshToken: (t: string) => mockStoreRefreshToken(t),
   clearRefreshToken: () => mockClearRefreshToken(),
+  storeAccessToken: vi.fn(async () => undefined),
+  getAccessToken: () => mockGetAccessToken(),
   storeEmail: vi.fn(async () => undefined),
   getEmail: vi.fn(async () => null),
 }));
@@ -767,5 +770,127 @@ describe('authenticatedRequest — step-up freshness gate (FE-07)', () => {
     const init = fetchSpy.mock.calls[0]![1] as RequestInit;
     const headers = init.headers as Record<string, string>;
     expect(headers['X-Admin-Step-Up']).toBe('fresh-jwt');
+  });
+});
+
+/**
+ * Proactive expiry roll: an in-memory access token whose decodable
+ * `exp` has passed is a guaranteed 401 — `authenticatedRequest` must
+ * refresh FIRST and stamp the request with the fresh token, instead of
+ * spending the doomed round trip. Opaque tokens keep the reactive
+ * 401 → refresh → retry path (`isJwtExpired` fails open for them).
+ */
+describe('authenticatedRequest — proactive expiry roll', () => {
+  const fakeJwt = (expSecondsFromNow: number): string => {
+    const body = Buffer.from(
+      JSON.stringify({ exp: Math.floor(Date.now() / 1000) + expSecondsFromNow }),
+    ).toString('base64url');
+    return `eyJhbGciOiJIUzI1NiJ9.${body}.sig`;
+  };
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    mockGetRefreshToken.mockReset();
+    mockStoreRefreshToken.mockReset();
+    mockClearRefreshToken.mockReset();
+    mockGetAccessToken.mockReset();
+    mockGetAccessToken.mockResolvedValue(null);
+    mockGetPlatform.mockReturnValue('web');
+    useAuthStore.getState().clearSession();
+  });
+
+  it('adopts a still-fresh persisted token when memory is empty, with no refresh (boot-restore race)', async () => {
+    // The post-login window: boot-restore has not yet populated the
+    // in-memory token, but a fresh access token is already in storage.
+    // The request must use it directly — a refresh here is the storm.
+    const stored = fakeJwt(3600);
+    mockGetAccessToken.mockResolvedValue(stored);
+    mockGetRefreshToken.mockResolvedValue('rt-stored');
+
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+
+    await authenticatedRequest('/api/users/me');
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy.mock.calls[0]![0]).toBe('http://test-api/api/users/me');
+    const init = fetchSpy.mock.calls[0]![1] as RequestInit;
+    expect((init.headers as Record<string, string>)['Authorization']).toBe(`Bearer ${stored}`);
+    expect(mockGetRefreshToken).not.toHaveBeenCalled();
+    expect(useAuthStore.getState().accessToken).toBe(stored);
+  });
+
+  it('refreshes when memory is empty and the persisted token is also expired', async () => {
+    mockGetAccessToken.mockResolvedValue(fakeJwt(-60));
+    mockGetRefreshToken.mockResolvedValue('rt-stored');
+
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ accessToken: 'at-fresh' }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+
+    await authenticatedRequest('/api/users/me');
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(fetchSpy.mock.calls[0]![0]).toBe('http://test-api/api/auth/refresh');
+  });
+
+  it('refreshes BEFORE the request when the in-memory token is expired', async () => {
+    useAuthStore.getState().setAccessToken(fakeJwt(-60));
+    mockGetRefreshToken.mockResolvedValue('rt-stored');
+
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      // First wire call must be the refresh, not the doomed request.
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ accessToken: 'at-fresh' }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+
+    const result = await authenticatedRequest<{ ok: boolean }>('/api/users/me');
+    expect(result).toEqual({ ok: true });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(fetchSpy.mock.calls[0]![0]).toBe('http://test-api/api/auth/refresh');
+    const init = fetchSpy.mock.calls[1]![1] as RequestInit;
+    const headers = init.headers as Record<string, string>;
+    expect(headers['Authorization']).toBe('Bearer at-fresh');
+    expect(useAuthStore.getState().accessToken).toBe('at-fresh');
+  });
+
+  it('sends a still-fresh JWT as-is with no refresh call', async () => {
+    const fresh = fakeJwt(3600);
+    useAuthStore.getState().setAccessToken(fresh);
+    mockGetRefreshToken.mockResolvedValue('rt-stored');
+
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+
+    await authenticatedRequest('/api/users/me');
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const init = fetchSpy.mock.calls[0]![1] as RequestInit;
+    const headers = init.headers as Record<string, string>;
+    expect(headers['Authorization']).toBe(`Bearer ${fresh}`);
+    expect(mockGetRefreshToken).not.toHaveBeenCalled();
+  });
+
+  it('still sends an opaque (exp-less) token and lets the 401 path handle it', async () => {
+    useAuthStore.getState().setAccessToken('opaque-at');
+
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+
+    await authenticatedRequest('/api/users/me');
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const init = fetchSpy.mock.calls[0]![1] as RequestInit;
+    const headers = init.headers as Record<string, string>;
+    expect(headers['Authorization']).toBe('Bearer opaque-at');
   });
 });

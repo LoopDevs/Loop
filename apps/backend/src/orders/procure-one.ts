@@ -274,10 +274,29 @@ export async function procureOne(order: Order): Promise<'fulfilled' | 'failed' |
   // CTX debt. `ctxOrderId` is captured alongside for the alert.
   let ctxPaid = false;
   let ctxOrderId: string | null = null;
+
+  // Attributed-operator-traffic: when the order's user has a
+  // provisioned CTX customer, act-as them on the purchase so CTX
+  // attributes the order to a real user (per-user limits, merchant
+  // toggles, admin tooling). The API-key headers take precedence
+  // over the operator bearer on the CTX side, so this composes with
+  // `operatorFetch` unchanged. Fail-soft by design: any lookup /
+  // config gap degrades to today's anonymous operator purchase —
+  // attribution must never block the money path.
+  let actAsHeaders: Record<string, string> = {};
+  try {
+    const { getUserCtxUserId } = await import('../db/users.js');
+    const { ctxActAsHeaders } = await import('../ctx/user-provisioning.js');
+    actAsHeaders = ctxActAsHeaders(await getUserCtxUserId(order.userId)) ?? {};
+  } catch (err) {
+    log.warn({ orderId: order.id, err }, 'CTX act-as lookup failed — proceeding unattributed');
+  }
+
   try {
     const res = await operatorFetch(upstreamUrl('/gift-cards'), {
       method: 'POST',
       headers: {
+        ...actAsHeaders,
         'Content-Type': 'application/json',
         // A2-1508: pin the CTX charge to this Loop order. A 30s
         // fetch timeout + retry-on-next-tick (after

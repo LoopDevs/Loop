@@ -101,6 +101,10 @@ vi.mock('../../credits/refunds.js', async (importActual) => {
 vi.mock('../../merchants/sync.js', () => ({
   getMerchants: () => ({ merchantsById: new Map() }),
 }));
+
+vi.mock('../../db/users.js', () => ({
+  getUserCtxUserId: vi.fn(async () => null),
+}));
 const { waitForRedemptionMock } = vi.hoisted(() => ({
   waitForRedemptionMock: vi.fn(async () => ({ code: null, pin: null, url: null })),
 }));

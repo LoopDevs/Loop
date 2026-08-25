@@ -87,7 +87,7 @@ function makeCtx(headers: Record<string, string | undefined>): FakeCtx {
 /** Minimal Hono-context stub carrying a JSON body — for `logoutHandler`. */
 function makeBodyCtx(body: unknown): Context {
   return {
-    req: { json: async () => body },
+    req: { json: async () => body, header: () => undefined },
     json: (b: unknown, status?: number) =>
       new Response(JSON.stringify(b), {
         status: status ?? 200,

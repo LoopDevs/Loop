@@ -94,6 +94,18 @@ export const authEnvFields = {
   // false → the legacy CTX-proxy auth path stays in place.
   LOOP_AUTH_NATIVE_ENABLED: envBoolean.default(false),
 
+  // Attributed-operator-traffic contract: async CTX customer
+  // provisioning at signup/login (`ctx/user-provisioning.ts`). When
+  // true (and the `GIFT_CARD_API_KEY`/`_SECRET` operator credentials
+  // are set), each Loop-native user gets a CTX customer created
+  // under Loop's operator company — silent, fire-and-forget, never
+  // blocking auth — and the returned id lands in `users.ctx_user_id`
+  // so procurement can act-as the customer (`X-User-Id`). Default
+  // true — attribution is the intended posture wherever the operator
+  // credentials exist; set false to fall back to anonymous operator
+  // traffic (e.g. an environment with no CTX-side Loop company).
+  CTX_USER_PROVISIONING_ENABLED: envBoolean.default(true),
+
   // Phase 1 launch gate. When true, the public + onboarding surfaces
   // hide every Phase 2 cashback / wallet / LOOP-asset element so the
   // app reads as a pure XLM-via-CTX gift-card store. The Phase 2

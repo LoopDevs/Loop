@@ -3,10 +3,11 @@
  *
  * Lifted out of `./handler.ts` so the four CTX-proxy auth handlers
  * don't all share a single fat module. Logout is the odd one out:
- * unlike `request-otp` / `verify-otp` / `refresh`, it does not have
- * a Loop-native counterpart on the `LOOP_AUTH_NATIVE_ENABLED` flag —
- * it always tries the upstream revoke (best-effort) and additionally
- * revokes any Loop-signed refresh-token row it can recognise.
+ * unlike `request-otp` / `verify-otp` / `refresh`, it does not branch
+ * on the `LOOP_AUTH_NATIVE_ENABLED` flag — it branches on what the
+ * credentials themselves turn out to be: a Loop-signed refresh token
+ * in the body drives the local row revoke, and a non-Loop bearer in
+ * the Authorization header drives the upstream CTX revoke.
  *
  * Re-exported from `./handler.ts` so existing import sites (the
  * routes module + the test suite) keep resolving.
@@ -37,18 +38,34 @@ const LogoutBody = z.object({
 });
 
 /**
- * DELETE /api/auth/session — best-effort upstream revoke + success.
+ * DELETE /api/auth/session — best-effort revoke + success.
  *
- * If the client supplies a refresh token we try to revoke it upstream so a
- * leaked token can't outlive the user's intent to log out. Upstream errors
- * are logged and swallowed: the client has already decided to log out, so
- * failing the request would just trap the token in-store. The client
- * always clears local state on receiving 200.
+ * Two independent revocation jobs, each driven by its own credential:
+ *
+ *   - Loop-native refresh-row revoke + token_version bump, driven by
+ *     the body's `refreshToken` when it verifies as Loop-signed. The
+ *     body token stays necessary here — this route is not behind
+ *     `requireAuth`, and an access token carries no `jti`, so the
+ *     refresh token is the only handle on the specific device row.
+ *
+ *   - Upstream CTX revoke, driven by the request's `Authorization`
+ *     bearer. CTX's `POST /logout` authenticates like every other CTX
+ *     endpoint — `Authorization: Bearer <accessToken>` plus an
+ *     `X-Client-Id` header, no body — and deletes the access/refresh
+ *     pair server-side. Forwarded ONLY when the bearer is not
+ *     Loop-shaped: a Loop-signed token (valid, expired, or
+ *     wrong-typed — anything past the signature check) never reaches
+ *     CTX, closing the old always-fire path that posted Loop tokens
+ *     at CTX in native mode.
+ *
+ * Errors in either job are logged and swallowed: the client has
+ * already decided to log out, so failing the request would just trap
+ * tokens in-store. The client always clears local state on 200.
  */
 export async function logoutHandler(c: Context): Promise<Response> {
   const parsed = LogoutBody.safeParse(await c.req.json().catch(() => ({})));
-  if (!parsed.success || parsed.data.refreshToken === undefined) {
-    // No token in body — nothing to revoke upstream. Still succeed so the
+  if (!parsed.success) {
+    // Unparseable body — nothing to act on. Still succeed so the
     // client proceeds with local clear.
     return c.json({ message: 'Logged out' });
   }
@@ -59,7 +76,7 @@ export async function logoutHandler(c: Context): Promise<Response> {
   // revoke to have happened. verifyLoopToken ignores tokens from
   // other issuers / audiences (A2-1600), so a CTX-signed bearer
   // falls through harmlessly.
-  if (isLoopAuthConfigured()) {
+  if (parsed.data.refreshToken !== undefined && isLoopAuthConfigured()) {
     const verified = verifyLoopToken(parsed.data.refreshToken, 'refresh');
     if (verified.ok) {
       // NS-09: bump the user's token_version so every already-issued
@@ -106,14 +123,37 @@ export async function logoutHandler(c: Context): Promise<Response> {
     }
   }
 
+  const authHeader = c.req.header('Authorization');
+  const bearer = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (bearer === null) {
+    // The new CTX contract revokes by access token — without a bearer
+    // there is nothing to send upstream. Local revoke (above) already
+    // ran; the client clears its own state on 200.
+    return c.json({ message: 'Logged out' });
+  }
+
+  if (isLoopAuthConfigured()) {
+    // Forward only bearers that are definitively NOT ours. The reason
+    // taxonomy makes this exact: a foreign (CTX) token always fails
+    // the signature check (`bad_signature`, or `malformed` for
+    // non-JWT garbage — forwarding that is a harmless CTX 401), while
+    // our own tokens fail AFTER it (`expired` / `wrong_type` /
+    // `wrong_issuer` / `wrong_audience`) and must never cross.
+    const verified = verifyLoopToken(bearer, 'access');
+    const isForeign =
+      !verified.ok && (verified.reason === 'bad_signature' || verified.reason === 'malformed');
+    if (!isForeign) {
+      return c.json({ message: 'Logged out' });
+    }
+  }
+
   try {
     const response = await getUpstreamCircuit('logout').fetch(upstreamUrl('/logout'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        refreshToken: parsed.data.refreshToken,
-        clientId: clientIdForPlatform(parsed.data.platform),
-      }),
+      headers: {
+        Authorization: `Bearer ${bearer}`,
+        'X-Client-Id': clientIdForPlatform(parsed.data.platform),
+      },
       signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) {

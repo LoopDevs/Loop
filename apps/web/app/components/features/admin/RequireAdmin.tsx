@@ -30,9 +30,10 @@ import { Button } from '~/components/ui/Button';
  *   - `minimum="support"` → admin or support (read views + the three
  *     delivery-unsticking actions).
  *
- * Session-restore in flight → spinner (FE-10): the access token is
- * memory-only, so on a hard reload it's briefly null for an already-
- * authenticated staff user while the boot refresh runs. We wait on the
+ * Session-restore in flight → spinner (FE-10): on a hard reload the
+ * access token is briefly null for an already-authenticated staff user
+ * while the boot restore runs (reading the persisted token, or rolling
+ * via the refresh token when it's stale). We wait on the
  * auth store's `restoreComplete` flag before deciding, so the sign-in
  * CTA never flashes mid-restore. Unauthenticated (restore done) →
  * sign-in CTA. Authenticated but under-privileged → denial banner, no
@@ -68,9 +69,9 @@ export function RequireStaff({
     staleTime: 5 * 60 * 1000,
   });
 
-  // FE-10: on a hard reload the access token (memory-only, never
-  // persisted) is briefly null for an already-authenticated staff user
-  // while the refresh-token restore is in flight. Rendering the sign-in
+  // FE-10: on a hard reload the access token is briefly null for an
+  // already-authenticated staff user while the boot restore is in
+  // flight (stored-token read, or refresh-token roll when stale). Rendering the sign-in
   // CTA in that window flashes it before the session resolves. Hold the
   // neutral loading spinner until the boot-restore attempt completes;
   // only *then* does a genuinely-unauthenticated user fall through to

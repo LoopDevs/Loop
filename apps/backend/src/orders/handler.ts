@@ -72,11 +72,20 @@ export async function createOrderHandler(c: Context): Promise<Response> {
   }
   const fiatCurrency = merchant.denominations?.currency ?? 'USD';
 
+  const authHeaders = await upstreamHeaders(c);
+  if (authHeaders === null) {
+    // Loop-native user with no CTX mapping yet: can't attribute a
+    // purchase to a CTX identity. 503 so the client retries once
+    // async provisioning has landed, rather than a silent operator
+    // charge.
+    return c.json({ code: 'UPSTREAM_ERROR', message: 'Account not ready — please retry' }, 503);
+  }
+
   try {
     const response = await getUpstreamCircuit('gift-cards').fetch(upstreamUrl('/gift-cards'), {
       method: 'POST',
       headers: {
-        ...upstreamHeaders(c),
+        ...authHeaders,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({

@@ -114,6 +114,9 @@ const { dbMock, state } = vi.hoisted(() => {
 });
 
 vi.mock('../../db/client.js', () => ({ db: dbMock }));
+vi.mock('../../db/users.js', () => ({
+  getUserCtxUserId: vi.fn(async () => null),
+}));
 vi.mock('../../db/schema.js', async () => {
   const actual = await vi.importActual<typeof SchemaModule>('../../db/schema.js');
   return {
