@@ -89,10 +89,14 @@ export default function OrderDetailRoute(): React.JSX.Element {
 
       {/* Native only needs to clear the PageHeader row height
           (`h-14` = 3.5rem); NativeShell already adds `var(--safe-top)`
-          padding. Web: `pt-20` clears the fixed Navbar. The tight
-          native top-pad (`pt-14`) keeps the order summary flush up
-          to the header rather than floating in its own white band. */}
-      <main className={`max-w-2xl mx-auto px-4 ${isNative ? 'pt-14 pb-4' : 'pt-20 pb-8'}`}>
+          padding. Web: `pt-28` clears the fixed Navbar and matches the
+          /orders list so content doesn't jump vertically when drilling
+          into an order. The tight native top-pad (`pt-14`) keeps the
+          order summary flush up to the header rather than floating in
+          its own white band. */}
+      {/* `px-6` matches /orders and the /settings/* pages (same max-w-2xl
+          container) so the content edge doesn't shift when navigating. */}
+      <main className={`max-w-2xl mx-auto px-6 ${isNative ? 'pt-14 pb-4' : 'pt-28 pb-8'}`}>
         {/* Web keeps the inline "All orders" breadcrumb since the
             native back chevron lives in PageHeader instead. */}
         {!isNative && (

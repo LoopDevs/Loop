@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, act, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
 import { ApiException } from '@loop/shared';
 
@@ -49,10 +50,18 @@ vi.mock('react-router', async (importActual) => {
 import SettingsPrivacyRoute from '../settings.privacy';
 
 function renderPage(): ReturnType<typeof render> {
+  // The route now renders the shared Navbar chrome on web (same idiom as
+  // orders.tsx), and Navbar's hooks need a QueryClient — same wrapper as
+  // settings.wallet.test.tsx.
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   return render(
-    <MemoryRouter>
-      <SettingsPrivacyRoute />
-    </MemoryRouter>,
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <SettingsPrivacyRoute />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 

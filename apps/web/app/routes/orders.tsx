@@ -252,8 +252,24 @@ export default function OrdersRoute(): React.JSX.Element {
           `var(--safe-top)`, so we only need to clear the PageHeader
           row height (`h-14` = 3.5rem) — adding another safe-top here
           would double-count and push content ~50px too far down.
-          Web: `pt-20` clears the fixed Navbar. */}
-      <main className={`max-w-2xl mx-auto px-4 ${isNative ? 'pt-16 pb-4' : 'pt-20 pb-8'}`}>
+          Web: `pt-28` clears the fixed Navbar and matches the home
+          hero / rates / settings top offset so page titles land at a
+          consistent height. */}
+      {/* `px-6` matches the /settings/* pages (same max-w-2xl container) so
+          the content edge doesn't shift when navigating between them. */}
+      <main className={`max-w-2xl mx-auto px-6 ${isNative ? 'pt-16 pb-4' : 'pt-28 pb-8'}`}>
+        {/* Page title in the same style as /settings/cashback's
+            "Cashback history" header. Web only — on native the
+            PageHeader bar above already titles this screen, and a
+            second in-page h1 would double it. */}
+        {!isNative && (
+          <header className="mb-6">
+            <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">
+              {t('list.heading')}
+            </h1>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{t('list.subtitle')}</p>
+          </header>
+        )}
         {/* Lifetime cashback headline — silent no-op for zero-earnings
             users and for anyone who isn't signed in. Sits above the
             orders list so "earned with Loop" frames the content. */}

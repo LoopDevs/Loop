@@ -70,9 +70,15 @@ function CashbackIndexBody(): React.JSX.Element {
   });
 
   return (
-    <>
+    // `min-h-screen` + `flex-1` on <main> pins the Footer to the bottom of
+    // the viewport when the list is short (e.g. the empty state); `pt-28`
+    // clears the fixed Navbar and matches the home hero's effective top
+    // offset (home.tsx uses `sm:pt-28`) so the two pages share a vertical
+    // rhythm. The offset lives on <main>, not the h1, so every first child —
+    // spinner, error, future breadcrumb — inherits the nav clearance.
+    <div className="flex min-h-screen flex-col">
       <Navbar />
-      <main className="container mx-auto max-w-4xl px-4 py-12">
+      <main className="container mx-auto max-w-4xl flex-1 px-4 pb-12 pt-28">
         <header className="text-center mb-10">
           <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-3">
             {t('index.heading')}
@@ -110,7 +116,7 @@ function CashbackIndexBody(): React.JSX.Element {
         </section>
       </main>
       <Footer />
-    </>
+    </div>
   );
 }
 

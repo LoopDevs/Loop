@@ -23,6 +23,9 @@ import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
 import { Button } from '~/components/ui/Button';
 import { Phase2Gate } from '~/components/Phase2Gate';
+import { Navbar } from '~/components/features/Navbar';
+import { PageHeader } from '~/components/ui/PageHeader';
+import { useNativePlatform } from '~/hooks/use-native-platform';
 import {
   getCashbackHistory,
   type CashbackHistoryEntry,
@@ -134,8 +137,16 @@ function formatDate(iso: string, locale: string): string {
 }
 
 export default function SettingsCashbackRoute(): React.JSX.Element {
+  const { t } = useTranslation('settings');
+  const { isNative } = useNativePlatform();
   return (
     <Phase2Gate>
+      {/* Same interior-page chrome idiom as routes/orders.tsx: web gets
+          the shared fixed Navbar, native gets the back-chevron PageHeader
+          (the Navbar's account menu links here, so a chrome-less page
+          left web users with no way back — FE regression fixed 2026-08). */}
+      {!isNative && <Navbar />}
+      <PageHeader title={t('cashback.heading')} fallbackHref="/auth" />
       <SettingsCashbackBody />
     </Phase2Gate>
   );
@@ -145,6 +156,13 @@ function SettingsCashbackBody(): React.JSX.Element {
   const { t } = useTranslation('settings');
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
+  const { isNative } = useNativePlatform();
+  // Native: NativeShell's `native-safe-page` already pads by
+  // `var(--safe-top)`, so only the PageHeader row (h-14) needs
+  // clearing. Web: `pt-28` clears the fixed Navbar and matches the
+  // home hero / rates page top offset so headings land at a
+  // consistent height across pages.
+  const mainPad = isNative ? 'pt-16 pb-4' : 'pt-28 pb-8';
 
   // Cursor accumulator: every Load-more pushes the last-row's
   // `createdAt` into this list, and each cursor is its own query key.
@@ -153,7 +171,7 @@ function SettingsCashbackBody(): React.JSX.Element {
 
   if (!isAuthenticated) {
     return (
-      <main className="max-w-2xl mx-auto px-6 py-12">
+      <main className={`max-w-2xl mx-auto px-6 ${mainPad}`}>
         <h1 className="text-2xl font-semibold text-gray-900 dark:text-white mb-4">
           {t('cashback.signedOut.heading')}
         </h1>
@@ -172,7 +190,7 @@ function SettingsCashbackBody(): React.JSX.Element {
   }
 
   return (
-    <main className="max-w-2xl mx-auto px-6 py-12 space-y-8">
+    <main className={`max-w-2xl mx-auto px-6 ${mainPad} space-y-8`}>
       <header>
         <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">
           {t('cashback.heading')}

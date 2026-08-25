@@ -17,6 +17,8 @@
       "title": "Orders — Loop"
     },
     "pageTitle": "Orders",
+    "heading": "Order history",
+    "subtitle": "Every gift card order on your account — newest first.",
     "error": {
       "tryAgain": "Try again"
     },

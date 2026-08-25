@@ -28,6 +28,8 @@ import i18n from '~/i18n/i18next';
 import { useAuth } from '~/hooks/use-auth';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 import { Button } from '~/components/ui/Button';
+import { Navbar } from '~/components/features/Navbar';
+import { PageHeader } from '~/components/ui/PageHeader';
 import { downloadMyData, getMyDataExport, requestAccountDeletion } from '~/services/user';
 import { signOutAllDevices } from '~/services/auth';
 import { shareJsonFile } from '~/native/share';
@@ -95,23 +97,39 @@ export default function SettingsPrivacyRoute(): React.JSX.Element {
     })();
   };
 
+  // Same interior-page chrome idiom as routes/orders.tsx: web gets the
+  // shared fixed Navbar, native gets the back-chevron PageHeader. Native:
+  // NativeShell's `native-safe-page` already pads by `var(--safe-top)`, so
+  // only the PageHeader row (h-14) needs clearing; web `pt-28` clears the
+  // fixed Navbar and matches the home hero / rates page top offset.
+  const chrome = (
+    <>
+      {!isNative && <Navbar />}
+      <PageHeader title={t('privacy.heading')} fallbackHref="/auth" />
+    </>
+  );
+  const mainPad = isNative ? 'pt-16 pb-4' : 'pt-28 pb-8';
+
   if (!isAuthenticated) {
     return (
-      <main className="max-w-2xl mx-auto px-6 py-12">
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white mb-4">
-          {t('privacy.signedOut.heading')}
-        </h1>
-        <p className="text-gray-700 dark:text-gray-300 mb-6">{t('privacy.signedOut.body')}</p>
-        <button
-          type="button"
-          className="text-blue-600 underline"
-          onClick={() => {
-            void navigate('/auth');
-          }}
-        >
-          {t('privacy.signedOut.cta')}
-        </button>
-      </main>
+      <>
+        {chrome}
+        <main className={`max-w-2xl mx-auto px-6 ${mainPad}`}>
+          <h1 className="text-2xl font-semibold text-gray-900 dark:text-white mb-4">
+            {t('privacy.signedOut.heading')}
+          </h1>
+          <p className="text-gray-700 dark:text-gray-300 mb-6">{t('privacy.signedOut.body')}</p>
+          <button
+            type="button"
+            className="text-blue-600 underline"
+            onClick={() => {
+              void navigate('/auth');
+            }}
+          >
+            {t('privacy.signedOut.cta')}
+          </button>
+        </main>
+      </>
     );
   }
 
@@ -172,111 +190,120 @@ export default function SettingsPrivacyRoute(): React.JSX.Element {
   };
 
   return (
-    <main className="max-w-2xl mx-auto px-6 py-12 space-y-8">
-      <header>
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">
-          {t('privacy.heading')}
-        </h1>
-        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-          {t('privacy.introPrefix')}{' '}
-          <a href="/privacy" className="text-blue-600 underline">
-            {t('privacy.introLink')}
-          </a>{' '}
-          {t('privacy.introSuffix')}
-        </p>
-      </header>
+    <>
+      {chrome}
+      <main className={`max-w-2xl mx-auto px-6 ${mainPad} space-y-8`}>
+        <header>
+          <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">
+            {t('privacy.heading')}
+          </h1>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+            {t('privacy.introPrefix')}{' '}
+            <a href="/privacy" className="text-blue-600 underline">
+              {t('privacy.introLink')}
+            </a>{' '}
+            {t('privacy.introSuffix')}
+          </p>
+        </header>
 
-      {/* Data export (GDPR Art. 15 / 20) */}
-      <section
-        aria-labelledby="export-heading"
-        className="rounded-xl border border-gray-200 dark:border-gray-800 p-5 bg-white dark:bg-gray-900 space-y-4"
-      >
-        <h2 id="export-heading" className="text-base font-semibold text-gray-900 dark:text-white">
-          {t('privacy.export.heading')}
-        </h2>
-        <p className="text-sm text-gray-600 dark:text-gray-400">{t('privacy.export.body')}</p>
-        <Button variant="secondary" onClick={handleExport} disabled={exportState === 'working'}>
-          {exportState === 'working' ? t('privacy.export.working') : t('privacy.export.cta')}
-        </Button>
-        {exportState === 'done' ? (
-          <p
-            role="status"
-            aria-live="polite"
-            className="text-sm text-green-700 dark:text-green-400"
+        {/* Data export (GDPR Art. 15 / 20) */}
+        <section
+          aria-labelledby="export-heading"
+          className="rounded-xl border border-gray-200 dark:border-gray-800 p-5 bg-white dark:bg-gray-900 space-y-4"
+        >
+          <h2 id="export-heading" className="text-base font-semibold text-gray-900 dark:text-white">
+            {t('privacy.export.heading')}
+          </h2>
+          <p className="text-sm text-gray-600 dark:text-gray-400">{t('privacy.export.body')}</p>
+          <Button variant="secondary" onClick={handleExport} disabled={exportState === 'working'}>
+            {exportState === 'working' ? t('privacy.export.working') : t('privacy.export.cta')}
+          </Button>
+          {exportState === 'done' ? (
+            <p
+              role="status"
+              aria-live="polite"
+              className="text-sm text-green-700 dark:text-green-400"
+            >
+              {isNative ? t('privacy.export.doneNative') : t('privacy.export.doneWeb')}
+            </p>
+          ) : null}
+          {exportError !== null ? (
+            <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+              {exportError}
+            </p>
+          ) : null}
+        </section>
+
+        {/* Session security (B4) */}
+        <section
+          aria-labelledby="sessions-heading"
+          className="rounded-xl border border-gray-200 dark:border-gray-800 p-5 bg-white dark:bg-gray-900 space-y-4"
+        >
+          <h2
+            id="sessions-heading"
+            className="text-base font-semibold text-gray-900 dark:text-white"
           >
-            {isNative ? t('privacy.export.doneNative') : t('privacy.export.doneWeb')}
-          </p>
-        ) : null}
-        {exportError !== null ? (
-          <p role="alert" className="text-sm text-red-600 dark:text-red-400">
-            {exportError}
-          </p>
-        ) : null}
-      </section>
+            {t('privacy.sessions.heading')}
+          </h2>
+          <p className="text-sm text-gray-600 dark:text-gray-400">{t('privacy.sessions.body')}</p>
+          <Button
+            variant="secondary"
+            onClick={handleSignOutAll}
+            disabled={signOutAllState === 'working'}
+          >
+            {signOutAllState === 'working'
+              ? t('privacy.sessions.working')
+              : t('privacy.sessions.cta')}
+          </Button>
+          {signOutAllError !== null ? (
+            <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+              {signOutAllError}
+            </p>
+          ) : null}
+        </section>
 
-      {/* Session security (B4) */}
-      <section
-        aria-labelledby="sessions-heading"
-        className="rounded-xl border border-gray-200 dark:border-gray-800 p-5 bg-white dark:bg-gray-900 space-y-4"
-      >
-        <h2 id="sessions-heading" className="text-base font-semibold text-gray-900 dark:text-white">
-          {t('privacy.sessions.heading')}
-        </h2>
-        <p className="text-sm text-gray-600 dark:text-gray-400">{t('privacy.sessions.body')}</p>
-        <Button
-          variant="secondary"
-          onClick={handleSignOutAll}
-          disabled={signOutAllState === 'working'}
+        {/* Account deletion (GDPR Art. 17 — right of erasure) */}
+        <section
+          aria-labelledby="delete-heading"
+          className="rounded-xl border border-red-200 dark:border-red-900 p-5 bg-white dark:bg-gray-900 space-y-4"
         >
-          {signOutAllState === 'working'
-            ? t('privacy.sessions.working')
-            : t('privacy.sessions.cta')}
-        </Button>
-        {signOutAllError !== null ? (
-          <p role="alert" className="text-sm text-red-600 dark:text-red-400">
-            {signOutAllError}
-          </p>
-        ) : null}
-      </section>
-
-      {/* Account deletion (GDPR Art. 17 — right of erasure) */}
-      <section
-        aria-labelledby="delete-heading"
-        className="rounded-xl border border-red-200 dark:border-red-900 p-5 bg-white dark:bg-gray-900 space-y-4"
-      >
-        <h2 id="delete-heading" className="text-base font-semibold text-red-700 dark:text-red-400">
-          {t('privacy.delete.heading')}
-        </h2>
-        <p className="text-sm text-gray-600 dark:text-gray-400">{t('privacy.delete.body')}</p>
-        <label htmlFor="delete-confirm" className="block">
-          <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            {t('privacy.delete.confirmLabelPrefix')} <strong>{CONFIRM_PHRASE}</strong>{' '}
-            {t('privacy.delete.confirmLabelSuffix')}
-          </span>
-          <input
-            id="delete-confirm"
-            type="text"
-            autoComplete="off"
-            spellCheck={false}
-            value={confirmText}
-            onChange={(e) => setConfirmText(e.target.value)}
-            placeholder={CONFIRM_PHRASE}
-            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-700 dark:bg-gray-950 dark:text-white dark:placeholder-gray-600"
-          />
-        </label>
-        {deleteError !== null ? (
-          <p role="alert" className="text-sm text-amber-700 dark:text-amber-400">
-            {deleteError}
-          </p>
-        ) : null}
-        <Button
-          variant="destructive"
-          onClick={handleDelete}
-          disabled={!confirmed || deleteState === 'working'}
-        >
-          {deleteState === 'working' ? t('privacy.delete.working') : t('privacy.delete.cta')}
-        </Button>
-      </section>
-    </main>
+          <h2
+            id="delete-heading"
+            className="text-base font-semibold text-red-700 dark:text-red-400"
+          >
+            {t('privacy.delete.heading')}
+          </h2>
+          <p className="text-sm text-gray-600 dark:text-gray-400">{t('privacy.delete.body')}</p>
+          <label htmlFor="delete-confirm" className="block">
+            <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              {t('privacy.delete.confirmLabelPrefix')} <strong>{CONFIRM_PHRASE}</strong>{' '}
+              {t('privacy.delete.confirmLabelSuffix')}
+            </span>
+            <input
+              id="delete-confirm"
+              type="text"
+              autoComplete="off"
+              spellCheck={false}
+              value={confirmText}
+              onChange={(e) => setConfirmText(e.target.value)}
+              placeholder={CONFIRM_PHRASE}
+              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-700 dark:bg-gray-950 dark:text-white dark:placeholder-gray-600"
+            />
+          </label>
+          {deleteError !== null ? (
+            <p role="alert" className="text-sm text-amber-700 dark:text-amber-400">
+              {deleteError}
+            </p>
+          ) : null}
+          <Button
+            variant="destructive"
+            onClick={handleDelete}
+            disabled={!confirmed || deleteState === 'working'}
+          >
+            {deleteState === 'working' ? t('privacy.delete.working') : t('privacy.delete.cta')}
+          </Button>
+        </section>
+      </main>
+    </>
   );
 }

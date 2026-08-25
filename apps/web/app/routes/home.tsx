@@ -174,7 +174,10 @@ function HomeContent(): React.JSX.Element {
                 className="absolute inset-x-0 -top-40 h-96 bg-[radial-gradient(closest-side,rgba(26,86,219,0.10),transparent)]"
                 aria-hidden="true"
               />
-              <div className="relative mx-auto max-w-4xl text-center px-6 pt-20 pb-16 sm:pt-28 sm:pb-20">
+              {/* The hero wrapper is `hidden md:block`, so this div only ever
+                renders ≥768px — the old `pt-20 pb-16 sm:` base values were
+                unreachable; `pt-28 pb-20` are the values that always applied. */}
+              <div className="relative mx-auto max-w-4xl text-center px-6 pt-28 pb-20">
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 ring-1 ring-blue-100">
                   <span className="h-1.5 w-1.5 rounded-full bg-blue-600" />
                   {phase1Only ? t('hero.badgePhase1') : t('hero.badgePhase2')}
