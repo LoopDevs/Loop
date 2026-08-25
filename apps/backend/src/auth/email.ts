@@ -50,7 +50,9 @@ class ConsoleEmailProvider implements EmailProvider {
         // a Sentry breadcrumb. Fall through to full code in the
         // default (no-Sentry) dev loop so the console stub still
         // serves its "grab the OTP from the log" purpose.
-        ...(sentryActive ? { code: '[REDACTED: SENTRY_DSN set]' } : { code: input.code }),
+        ...(sentryActive
+          ? { code: '[REDACTED: SENTRY_DSN set]' }
+          : { revealedDevOtpCode: input.code }),
         expiresAt: input.expiresAt.toISOString(),
       },
       sentryActive
