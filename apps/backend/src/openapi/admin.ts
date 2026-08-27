@@ -48,6 +48,7 @@ import { registerAdminPayoutsClusterOpenApi } from './admin-payouts-cluster.js';
 import { registerAdminPerMerchantDrillOpenApi } from './admin-per-merchant-drill.js';
 import { registerAdminPerUserDrillOpenApi } from './admin-per-user-drill.js';
 import { registerAdminSupplierSpendOpenApi } from './admin-supplier-spend.js';
+import { registerAdminCtxCommissionOpenApi } from './admin-ctx-commission.js';
 import { registerAdminTreasuryAssetsOpenApi } from './admin-treasury-assets.js';
 import { registerAdminUserClusterOpenApi } from './admin-user-cluster.js';
 import { registerAdminStaffOpenApi } from './admin-staff.js';
@@ -326,6 +327,10 @@ export function registerAdminOpenApi(
   // ./admin-operator-fleet.ts and is threaded into both slices as a
   // parameter.
   registerAdminSupplierSpendOpenApi(registry, errorResponse, AdminSupplierSpendRow);
+
+  // CTX operator-commission proxy (ctx-interop) — registered right
+  // after supplier-spend, its reconciliation counterpart.
+  registerAdminCtxCommissionOpenApi(registry, errorResponse);
 
   //
   // The three X × operator endpoints (merchants/{id}/operator-mix,

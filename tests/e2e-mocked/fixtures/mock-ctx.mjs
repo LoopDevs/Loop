@@ -14,6 +14,13 @@
  *     when a test calls POST /_test/mark-paid/:id. Real CTX flips on chain
  *     confirmation.
  *   - Merchant/location data is seeded with a small fixed catalog.
+ *   - ctx-interop: every merchant carries a flat 2% operator-commission
+ *     spread (MOCK_OPERATOR_COMMISSION_BPS) on top of its user discount;
+ *     fulfilment accrues a commission entry, GET /companies/:id/commission
+ *     (+ /settlements, /entries) reads the ledger, and
+ *     POST /_test/settle-commission stands in for the real CTX
+ *     `commission-settlement` system trigger. POST /users echoes an id so
+ *     the act-as provisioning path works offline.
  *
  * Usage:
  *   node tests/e2e-mocked/fixtures/mock-ctx.mjs            # runs on :9091
@@ -84,6 +91,17 @@ const merchants = [
  */
 const orders = new Map();
 const validRefreshTokens = new Set();
+
+// ctx-interop: operator-commission ledger. Every fulfilled order
+// accrues `fiat × MOCK_OPERATOR_COMMISSION_BPS / 10000` for the mock
+// operator company; POST /_test/settle-commission groups unsettled
+// entries into a settlement, mirroring the real CTX
+// `commission-settlement` system trigger.
+const MOCK_OPERATOR_COMMISSION_BPS = 200;
+const MOCK_OPERATOR_COMPANY_ID = 'mock-loop-co';
+const commissionEntries = [];
+const commissionSettlements = [];
+const provisionedUsers = new Map();
 
 // ───────── Helpers ───────────────────────────────────────────────────
 
@@ -177,6 +195,16 @@ const server = http.createServer(async (req, res) => {
     const id = randomUUID();
     const xlmAmount = (Number(body.fiatAmount) * 5).toFixed(4); // fake rate
     const memo = `ctx:${id.slice(0, 10)}`;
+    // ctx-interop: operator discount = user discount + the mock
+    // commission spread, mirroring the spend-api model at an implied
+    // 100% profit share (real CTX: commission = spread × company
+    // profit share; the spread is capped by the provider discount,
+    // which the mock has no tier for). Surfaces the same fields the
+    // real API added.
+    const userDiscountBps = merchant.savingsPercentage ?? 0;
+    const operatorDiscountBps = userDiscountBps + MOCK_OPERATOR_COMMISSION_BPS;
+    const fiat = Number(body.fiatAmount);
+    const operatorFiat = fiat * (1 - operatorDiscountBps / 10000);
     const order = {
       id,
       merchantId: merchant.id,
@@ -190,6 +218,13 @@ const server = http.createServer(async (req, res) => {
       status: 'unpaid',
       fulfilmentStatus: 'pending',
       percentDiscount: ((merchant.savingsPercentage ?? 0) / 100).toFixed(2),
+      operatorDiscount: operatorDiscountBps,
+      operatorPercentDiscount: (operatorDiscountBps / 100).toFixed(2),
+      operatorFiatAmount: operatorFiat.toFixed(2),
+      operatorFiatCurrency: body.fiatCurrency ?? merchant.currency,
+      operatorCryptoAmount: (Number(xlmAmount) * (operatorFiat / fiat || 0)).toFixed(4),
+      operatorCryptoCurrency: 'XLM',
+      ...(body.operatorReference ? { operatorReference: body.operatorReference } : {}),
       created: new Date().toISOString(),
     };
     orders.set(id, order);
@@ -218,6 +253,22 @@ const server = http.createServer(async (req, res) => {
     const body = await readBody(req);
     order.status = 'fulfilled';
     order.fulfilmentStatus = 'completed';
+    // ctx-interop: accrue the operator commission on fulfilment,
+    // idempotent per gift card like the real flow's unique index.
+    if (!commissionEntries.some((entry) => entry.giftCardId === order.id)) {
+      commissionEntries.push({
+        id: randomUUID(),
+        companyId: MOCK_OPERATOR_COMPANY_ID,
+        type: 'commission',
+        direction: 'credit',
+        amount: ((Number(order.cardFiatAmount) * MOCK_OPERATOR_COMMISSION_BPS) / 10000).toFixed(2),
+        currency: order.cardFiatCurrency,
+        giftCardId: order.id,
+        ...(order.operatorReference ? { operatorReference: order.operatorReference } : {}),
+        settlementId: '',
+        created: new Date().toISOString(),
+      });
+    }
     // Default: URL-based redemption (PurchaseContainer will transition to
     // the 'redeem' step). Tests can override via `?type=barcode` to hit
     // the giftCardCode path if the backend ever passes those through.
@@ -231,9 +282,112 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, order);
   }
 
+  // ── ctx-interop: operator identity (company id is evaluated from
+  // /me under API-key auth, never configured) ──
+  if (method === 'GET' && path === '/me') {
+    return json(res, 200, {
+      user: { id: 'mock-api-user', email: 'api@loop.test' },
+      company: { id: MOCK_OPERATOR_COMPANY_ID, name: 'Loop', type: 'operator' },
+    });
+  }
+
+  // ── ctx-interop: user provisioning (act-as) ──
+  if (method === 'POST' && path === '/users') {
+    const body = await readBody(req);
+    if (!body.email) return json(res, 400, { error: 'email required' });
+    const existing = provisionedUsers.get(body.email);
+    if (existing) return json(res, 400, { error: 'user already exists' });
+    const user = { id: randomUUID(), email: body.email, operatorUserId: body.operatorUserId ?? '' };
+    provisionedUsers.set(body.email, user);
+    return json(res, 201, { id: user.id });
+  }
+
+  // ── ctx-interop: operator commission ──
+  const commissionMatch = path.match(/^\/companies\/([^/]+)\/commission$/);
+  if (method === 'GET' && commissionMatch) {
+    const unsettled = commissionEntries.filter((entry) => entry.settlementId === '');
+    const byCurrency = new Map();
+    for (const entry of unsettled) {
+      const sum = byCurrency.get(entry.currency) ?? { amount: 0, entryCount: 0 };
+      sum.amount += Number(entry.amount) * (entry.direction === 'debit' ? -1 : 1);
+      sum.entryCount += 1;
+      byCurrency.set(entry.currency, sum);
+    }
+    const rsp = {
+      companyId: commissionMatch[1],
+      balances: [...byCurrency.entries()].map(([currency, sum]) => ({
+        currency,
+        amount: sum.amount.toFixed(2),
+        entryCount: sum.entryCount,
+      })),
+    };
+    const latest = commissionSettlements[commissionSettlements.length - 1];
+    if (latest) {
+      rsp.lastSettlementAt = latest.created;
+      rsp.lastSettlementId = latest.id;
+    }
+    return json(res, 200, rsp);
+  }
+
+  const settlementsMatch = path.match(/^\/companies\/([^/]+)\/commission\/settlements$/);
+  if (method === 'GET' && settlementsMatch) {
+    const result = [...commissionSettlements].reverse();
+    return json(res, 200, {
+      pagination: { page: 1, pages: 1, perPage: 25, total: result.length },
+      result,
+    });
+  }
+
+  const entriesMatch = path.match(/^\/companies\/([^/]+)\/commission\/entries$/);
+  if (method === 'GET' && entriesMatch) {
+    const result = [...commissionEntries].reverse();
+    return json(res, 200, {
+      pagination: { page: 1, pages: 1, perPage: 25, total: result.length },
+      result,
+    });
+  }
+
+  // ── ctx-interop test-only: run a commission settlement ──
+  if (method === 'POST' && path === '/_test/settle-commission') {
+    const unsettled = commissionEntries.filter((entry) => entry.settlementId === '');
+    const settlements = [];
+    const byCurrency = new Map();
+    for (const entry of unsettled) {
+      const bucket = byCurrency.get(entry.currency) ?? [];
+      bucket.push(entry);
+      byCurrency.set(entry.currency, bucket);
+    }
+    for (const [currency, bucket] of byCurrency) {
+      const settlement = {
+        id: randomUUID(),
+        companyId: MOCK_OPERATOR_COMPANY_ID,
+        amount: bucket
+          .reduce(
+            (sum, entry) => sum + Number(entry.amount) * (entry.direction === 'debit' ? -1 : 1),
+            0,
+          )
+          .toFixed(2),
+        currency,
+        periodStart: bucket[0].created,
+        periodEnd: new Date().toISOString(),
+        giftCardIds: bucket.map((entry) => entry.giftCardId).filter(Boolean),
+        entryIds: bucket.map((entry) => entry.id),
+        entryCount: bucket.length,
+        created: new Date().toISOString(),
+      };
+      for (const entry of bucket) entry.settlementId = settlement.id;
+      commissionSettlements.push(settlement);
+      settlements.push(settlement);
+    }
+    return json(res, 200, { result: settlements, count: settlements.length });
+  }
+
   if (method === 'POST' && path === '/_test/reset') {
     orders.clear();
     validRefreshTokens.clear();
+    commissionEntries.length = 0;
+    commissionSettlements.length = 0;
+    provisionedUsers.clear();
     return json(res, 200, { message: 'reset' });
   }
 

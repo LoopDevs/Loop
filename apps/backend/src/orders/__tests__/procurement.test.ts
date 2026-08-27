@@ -430,6 +430,9 @@ describe('runProcurementTick', () => {
       fiatCurrency: 'USD',
       fiatAmount: '25.00',
       merchantId: 'target',
+      // ctx-interop: the Loop order id is stamped onto the CTX gift
+      // card as operatorReference for commission traceability.
+      operatorReference: 'o-1',
     });
   });
 

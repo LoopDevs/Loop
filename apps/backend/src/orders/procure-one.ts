@@ -319,6 +319,12 @@ export async function procureOne(order: Order): Promise<'fulfilled' | 'failed' |
         // exact regardless of magnitude.
         fiatAmount: formatMinorToMajor(order.faceValueMinor),
         merchantId: order.merchantId,
+        // ctx-interop: stamp the Loop order id onto the CTX gift card
+        // (`operatorReference`, optional CTX-side) so CTX commission
+        // entries and settlements link straight back to Loop's order
+        // row — same pivot as the Idempotency-Key header above, but
+        // persisted on the CTX entity and echoed in its responses.
+        operatorReference: order.id,
       }),
       signal: AbortSignal.timeout(30_000),
     });

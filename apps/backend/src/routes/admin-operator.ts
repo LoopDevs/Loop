@@ -31,6 +31,7 @@
 import type { Hono } from 'hono';
 import { rateLimit } from '../middleware/rate-limit.js';
 import { adminSupplierSpendHandler } from '../admin/supplier-spend.js';
+import { adminCtxCommissionHandler } from '../admin/ctx-commission.js';
 import { adminSupplierSpendActivityHandler } from '../admin/supplier-spend-activity.js';
 import { adminOperatorSupplierSpendHandler } from '../admin/operator-supplier-spend.js';
 import { adminOperatorActivityHandler } from '../admin/operator-activity.js';
@@ -52,6 +53,17 @@ export function mountAdminOperatorRoutes(app: Hono): void {
     '/api/admin/supplier-spend',
     rateLimit('GET /api/admin/supplier-spend', 60, 60_000),
     adminSupplierSpendHandler,
+  );
+  // CTX operator-commission proxy (ctx-interop): CTX's record of the
+  // commission it owes Loop for attributed orders + recent
+  // settlements. The reconciliation counterpart to supplier-spend
+  // above (Loop's own record of the same traffic). Read-only, and
+  // upstream-fetching — 30/min keeps a misbehaving dashboard from
+  // hammering CTX through us.
+  app.get(
+    '/api/admin/ctx-commission',
+    rateLimit('GET /api/admin/ctx-commission', 30, 60_000),
+    adminCtxCommissionHandler,
   );
   // Supplier-spend activity time-series (ADR 013 / 015) — per-day
   // per-currency wholesale/face/cashback/margin paid to CTX. The

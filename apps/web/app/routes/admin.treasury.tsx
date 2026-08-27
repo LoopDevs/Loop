@@ -16,6 +16,7 @@ import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton
 import { AssetDriftBadge } from '~/components/features/admin/AssetDriftBadge';
 import { PayoutsByAssetTable } from '~/components/features/admin/PayoutsByAssetTable';
 import { SupplierSpendCard } from '~/components/features/admin/SupplierSpendCard';
+import { CtxCommissionCard } from '~/components/features/admin/CtxCommissionCard';
 import { SupplierSpendActivityChart } from '~/components/features/admin/SupplierSpendActivityChart';
 import { CreditFlowChart } from '~/components/features/admin/CreditFlowChart';
 import { OperatorStatsCard } from '~/components/features/admin/OperatorStatsCard';
@@ -592,6 +593,18 @@ function AdminTreasuryRouteInner(): React.JSX.Element {
           </p>
           <SupplierSpendActivityChart />
         </div>
+      </section>
+
+      <section>
+        <div className="flex items-baseline justify-between mb-3">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">CTX commission</h2>
+        </div>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          CTX&apos;s record of the operator commission it owes Loop for attributed orders
+          (ctx-interop) — the mirror of the supplier-spend card above. The two drifting apart is the
+          cross-company reconciliation alarm.
+        </p>
+        <CtxCommissionCard />
       </section>
 
       <section>
