@@ -508,7 +508,6 @@ describe('BK-healthrecon: probe-gated /health body', () => {
       env: {
         NODE_ENV: 'production',
         METRICS_BEARER_TOKEN: TOKEN,
-        REFRESH_INTERVAL_HOURS: 6,
         LOCATION_REFRESH_INTERVAL_HOURS: 24,
       },
     }));

@@ -21,7 +21,6 @@ vi.mock('../env.js', () => ({
     NODE_ENV: 'test',
     LOG_LEVEL: 'silent',
     GIFT_CARD_API_BASE_URL: 'http://test-upstream.local',
-    REFRESH_INTERVAL_HOURS: 6,
     LOCATION_REFRESH_INTERVAL_HOURS: 24,
     CTX_CLIENT_ID_WEB: 'loopweb',
     CTX_CLIENT_ID_IOS: 'loopios',

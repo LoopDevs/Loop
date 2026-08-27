@@ -81,8 +81,9 @@ export const coreEnvFields = {
   GIFT_CARD_API_KEY: z.string().optional(),
   GIFT_CARD_API_SECRET: z.string().optional(),
 
-  // Refresh intervals (hours)
-  REFRESH_INTERVAL_HOURS: z.coerce.number().int().positive().default(6),
+  // Refresh interval (hours). The merchant sweep has no equivalent var:
+  // it's hardcoded hourly (merchants/sync-interval.ts) — it's only the
+  // fallback reconciler behind the ws maintainer, not worth a knob.
   LOCATION_REFRESH_INTERVAL_HOURS: z.coerce.number().int().positive().default(24),
 
   // Dev mode: include disabled merchants so UI can be tested before CTX enables them

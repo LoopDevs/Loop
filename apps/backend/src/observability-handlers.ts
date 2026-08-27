@@ -222,7 +222,7 @@ export async function metricsHandler(c: Context): Promise<Response> {
   lines.push('');
 
   // B-5: docs/slo.md §Freshness pins "merchant catalog age ≤ 2x
-  // REFRESH_INTERVAL_HOURS" / "location clusters age ≤ 2x
+  // the hourly sweep" / "location clusters age ≤ 2x
   // LOCATION_REFRESH_INTERVAL_HOURS" as SLOs, but until now that data
   // only reached operators via /health's JSON body (not scrapeable /
   // dashboard-able / alertable via Prometheus). Both reads are in-memory

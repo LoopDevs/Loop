@@ -32,10 +32,9 @@ function summariseZodIssues(issues: readonly z.ZodIssue[]): string {
 // misconfiguration), we cap iteration instead of looping for hours.
 const MAX_PAGES = 100;
 
-// CTX's `httprpc.MaxPerPage` — one request returns the whole catalog
-// (~1.1k merchants today). The pagination loop below stays as the
-// safety net for a future catalog that outgrows a single page or an
-// upstream that clamps `perPage` lower than requested.
+// CTX's `httprpc.MaxPerPage` — request the largest page the upstream
+// allows; the pagination loop below keeps working off `pagination.pages`
+// if the response spans more than one.
 const PER_PAGE = 100_000;
 
 /**
@@ -44,7 +43,7 @@ const PER_PAGE = 100_000;
  * empty entries are dropped. Returns an empty Set when the env var
  * is absent or empty. Read every refresh so an ops flip via
  * `fly secrets set LOOP_MERCHANT_DENYLIST=...` takes effect on the
- * next 6h tick (or sooner via the admin force-refresh button)
+ * next hourly tick (or sooner via a ws merchant event or the admin force-refresh button)
  * without a restart.
  */
 function readMerchantDenylist(): ReadonlySet<string> {

@@ -52,7 +52,7 @@
 | CTX confirmed-down, upstream-side incident | Hold. Breaker auto-probes after 30s cooldown; closes when probe succeeds. Post in `#ops-alerts` with the CTX status link.            |
 | Our request shape broken (last deploy)     | Roll back the last deploy: `fly releases list -a loopfinance-api`, find the prior version, `fly deploy --image registry.fly.io/...`. |
 | Auth credential rotation broke us          | Verify `GIFT_CARD_API_KEY` / `GIFT_CARD_API_SECRET` haven't been rotated upstream without us picking up the new value.               |
-| Rate-limit on upstream                     | Back off — circuit's already throttling us. Consider lowering our refresh cadence (`REFRESH_INTERVAL_HOURS`).                        |
+| Rate-limit on upstream                     | Back off — circuit's already throttling us. The hourly sweep is fixed; the ws maintainer adds no polling load.                       |
 
 **The circuit is per-endpoint by design (audit A2-407).** A failing
 `/locations` doesn't trip auth. Don't manually reset all breakers

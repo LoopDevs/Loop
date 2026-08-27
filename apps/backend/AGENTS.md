@@ -163,8 +163,8 @@ src/
 │                         + 60s backoff sweeper (pages ops after 10 attempts →
 │                         runbooks/wallet-provisioning-stuck.md)
 ├── merchants/
-│   ├── sync.ts         ← Full-catalog boot load (one perPage=100000 sweep) + store
-│   │                     upsert/removal primitives; interval sweep = fallback reconciler
+│   ├── sync.ts         ← Full-catalog boot load (max-perPage sweep) + store
+│   │                     upsert/removal primitives; hourly sweep = fallback reconciler
 │   ├── ws-maintainer.ts ← CTX /ws merchant-topic client — event-driven store
 │   │                     maintenance (needs GIFT_CARD_API_KEY/SECRET; backoff +
 │   │                     resync-on-reconnect; /health `merchantWs`)

@@ -7,7 +7,6 @@ vi.mock('../../env.js', () => ({
     NODE_ENV: 'test',
     LOG_LEVEL: 'silent',
     GIFT_CARD_API_BASE_URL: 'http://test-upstream.local',
-    REFRESH_INTERVAL_HOURS: 6,
     LOCATION_REFRESH_INTERVAL_HOURS: 24,
     // Match the zod defaults so the A-036 X-Client-Id allowlist
     // in `requireAuth` includes `loopweb`/`loopios`/`loopandroid`.

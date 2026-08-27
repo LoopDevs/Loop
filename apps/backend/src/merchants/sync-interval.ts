@@ -11,11 +11,18 @@
  * Re-exported from `./sync.ts` so existing import sites (`index.ts`,
  * graceful shutdown) keep resolving against the historical path.
  */
-import { env } from '../env.js';
 import { logger } from '../logger.js';
 import { getMerchants, refreshMerchants, warmStartMerchantsFromSnapshot } from './sync.js';
 
 const log = logger.child({ module: 'merchants-sync' });
+
+/**
+ * Fixed hourly sweep — deliberately NOT configurable. The sweep is only
+ * the fallback reconciler behind the ws maintainer (./ws-maintainer.ts),
+ * so a cadence knob would be dead config; one full catalog request per
+ * hour is negligible load either way.
+ */
+export const MERCHANT_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
 
 let refreshInterval: NodeJS.Timeout | null = null;
 
@@ -24,7 +31,7 @@ export async function startMerchantRefresh(): Promise<void> {
   await warmStartMerchantsFromSnapshot();
   void refreshMerchants();
 
-  const intervalMs = env.REFRESH_INTERVAL_HOURS * 60 * 60 * 1000;
+  const intervalMs = MERCHANT_REFRESH_INTERVAL_MS;
   const staleMs = intervalMs * 2;
   refreshInterval = setInterval(() => {
     const store = getMerchants();

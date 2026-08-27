@@ -44,6 +44,7 @@ import { logger } from './logger.js';
 import { db } from './db/client.js';
 import { getLocations, isLocationLoading } from './clustering/data-store.js';
 import { getMerchants } from './merchants/sync.js';
+import { MERCHANT_REFRESH_INTERVAL_MS } from './merchants/sync-interval.js';
 import { getMerchantWsStatus } from './merchants/ws-maintainer.js';
 import { getRuntimeHealthSnapshot } from './runtime-health.js';
 import { upstreamUrl } from './upstream.js';
@@ -287,7 +288,7 @@ async function probeUpstream(): Promise<boolean> {
  * `docs/slo.md` §Freshness.
  */
 export function merchantCatalogStaleAfterMs(): number {
-  return env.REFRESH_INTERVAL_HOURS * 2 * 60 * 60 * 1000;
+  return MERCHANT_REFRESH_INTERVAL_MS * 2;
 }
 
 export function locationCatalogStaleAfterMs(): number {

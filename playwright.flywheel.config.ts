@@ -57,7 +57,6 @@ export default defineConfig({
         // No real CTX upstream — the loop-native flow under test
         // doesn't talk to it. Still required by env.ts validation.
         GIFT_CARD_API_BASE_URL: 'http://unused.test.local',
-        REFRESH_INTERVAL_HOURS: '6',
         LOCATION_REFRESH_INTERVAL_HOURS: '24',
         DATABASE_URL: 'postgres://loop:loop@localhost:5433/loop_test',
         // Enable loop-native auth — this is the whole point of the

@@ -105,12 +105,12 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # at sync time — Loop's operator deny-list. Denied IDs never reach the
 # in-memory store, the public API, or the admin catalog.
 # LOOP_MERCHANT_DENYLIST=merchant-id-1,merchant-id-2
-# Fallback full-sweep cadence. The catalog is fully loaded at boot and
-# maintained live from CTX's /ws merchant topic when the operator API
-# creds are set (merchants/ws-maintainer.ts) — this sweep is the
-# missed-event reconciler (and the only freshness mechanism when the
-# creds are absent or the ws is down).
-REFRESH_INTERVAL_HOURS=6                # merchant cache refresh
+# Merchant catalog freshness has NO env knob: the catalog is fully
+# loaded at boot, maintained live from CTX's /ws merchant topic when the
+# operator API creds are set (merchants/ws-maintainer.ts), and swept
+# hourly (hardcoded in merchants/sync-interval.ts) as the missed-event
+# reconciler — the sweep is also the only freshness mechanism when the
+# creds are absent or the ws is down.
 LOCATION_REFRESH_INTERVAL_HOURS=24      # location data refresh
 # INCLUDE_DISABLED_MERCHANTS=true       # dev mode — show disabled merchants
 

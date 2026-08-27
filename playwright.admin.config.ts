@@ -70,7 +70,6 @@ export default defineConfig({
         // (the step-up gate rejects the redrive/refund attempts
         // first). Still required by env.ts validation.
         GIFT_CARD_API_BASE_URL: 'http://unused.test.local',
-        REFRESH_INTERVAL_HOURS: '6',
         LOCATION_REFRESH_INTERVAL_HOURS: '24',
         DATABASE_URL: 'postgres://loop:loop@localhost:5433/loop_test',
         LOOP_AUTH_NATIVE_ENABLED: 'true',

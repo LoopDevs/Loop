@@ -469,8 +469,7 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # Dev mode: show disabled merchants
 # INCLUDE_DISABLED_MERCHANTS=true
 
-# Refresh cadences
-# REFRESH_INTERVAL_HOURS=6
+# Refresh cadences (merchant sweep is hardcoded hourly — no env knob)
 # LOCATION_REFRESH_INTERVAL_HOURS=24
 
 # Runtime

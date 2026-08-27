@@ -110,7 +110,6 @@ export default defineConfig({
         NODE_ENV: 'test',
         LOG_LEVEL: 'warn',
         GIFT_CARD_API_BASE_URL: 'http://localhost:9093',
-        REFRESH_INTERVAL_HOURS: '6',
         LOCATION_REFRESH_INTERVAL_HOURS: '24',
         DATABASE_URL: 'postgres://loop:loop@localhost:5433/loop_test',
         DISABLE_RATE_LIMITING: '1',

@@ -37,8 +37,7 @@ to promote (see the go/no-go checklist below).
 ## The measurement
 
 **There is no `merchants` table in Postgres** — the catalog lives only in the
-backend's in-memory store (`apps/backend/src/merchants/sync.ts`, refreshed
-every `REFRESH_INTERVAL_HOURS`), so there's no SQL query to run. The lowest-
+backend's in-memory store (`apps/backend/src/merchants/sync.ts`, hourly ws-maintained sweep), so there's no SQL query to run. The lowest-
 effort reuse is the **public catalog endpoint that already serves this exact
 data** to the web app: `GET /api/merchants/all?fields=lite` — unauthenticated,
 `Cache-Control: public, max-age=300`, 60/min rate limit

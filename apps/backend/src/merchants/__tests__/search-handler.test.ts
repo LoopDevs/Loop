@@ -6,7 +6,6 @@ const mockEnv = vi.hoisted(() => ({
   NODE_ENV: 'test',
   LOG_LEVEL: 'silent',
   GIFT_CARD_API_BASE_URL: 'http://test-upstream.local',
-  REFRESH_INTERVAL_HOURS: 6,
   LOCATION_REFRESH_INTERVAL_HOURS: 24,
   // Rate-limit test below drives requests via the spoof-proof `Fly-Client-IP`
   // header (FT-08) — matches the auth handler test's pattern

@@ -72,7 +72,6 @@ export default defineConfig({
         // ignores their values, so any non-empty pair lights it up.
         GIFT_CARD_API_KEY: 'mock-api-key',
         GIFT_CARD_API_SECRET: 'mock-api-secret',
-        REFRESH_INTERVAL_HOURS: '6',
         LOCATION_REFRESH_INTERVAL_HOURS: '24',
         // A2-1705 phase A.2: real postgres connection. The migrations
         // are applied by `tests/e2e-mocked/global-setup.ts` before

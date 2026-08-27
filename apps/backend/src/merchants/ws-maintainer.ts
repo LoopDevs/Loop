@@ -2,9 +2,8 @@
  * CTX `/ws` merchant-topic client — event-driven merchant-store
  * maintenance.
  *
- * The merchant catalog is fully loaded once at boot (see `./sync.ts`,
- * one `GET /merchants?perPage=100000` sweep) and then kept current by
- * subscribing to CTX's websocket merchant topic:
+ * The merchant catalog is fully loaded at boot (see `./sync.ts`) and
+ * then kept current by subscribing to CTX's websocket merchant topic:
  *
  *   GET {GIFT_CARD_API_BASE_URL}/ws        (http → ws upgrade)
  *   headers: X-Api-Key / X-Api-Secret      (operator API creds)

@@ -55,7 +55,7 @@ describe('parseEnv', () => {
     expect(env.NODE_ENV).toBe('development');
     expect(env.PORT).toBe(8080);
     expect(env.LOG_LEVEL).toBe('info');
-    expect(env.REFRESH_INTERVAL_HOURS).toBe(6);
+    expect(env.LOCATION_REFRESH_INTERVAL_HOURS).toBe(24);
     expect(env.CTX_CLIENT_ID_WEB).toBe('loopweb');
   });
 

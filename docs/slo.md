@@ -78,7 +78,7 @@ sum by (method, route) (rate(loop_requests_total[7d]))
 
 | Data                          | SLI                                         | Target                                       | Window      | Surface                         |
 | ----------------------------- | ------------------------------------------- | -------------------------------------------- | ----------- | ------------------------------- |
-| Merchant catalog              | `getMerchants().loadedAt` age               | ≤ 2× `REFRESH_INTERVAL_HOURS` (12h)          | per-machine | `/health` `merchantsStale` flag |
+| Merchant catalog              | `getMerchants().loadedAt` age               | ≤ 2× the hourly sweep (2h)                   | per-machine | `/health` `merchantsStale` flag |
 | Location clusters             | `getLocations().loadedAt` age               | ≤ 2× `LOCATION_REFRESH_INTERVAL_HOURS` (48h) | per-machine | `/health` `locationsStale` flag |
 | Cashback realization snapshot | `/api/admin/cashback-realization` query age | point-in-time (reads live)                   | n/a         | admin UI timestamp              |
 

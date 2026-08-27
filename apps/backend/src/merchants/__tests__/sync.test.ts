@@ -9,7 +9,6 @@ const { envState } = vi.hoisted(() => ({
     JWT_REFRESH_SECRET: 'test-refresh-secret-long-enough-32',
     PORT: 8080,
     LOG_LEVEL: 'silent',
-    REFRESH_INTERVAL_HOURS: 6,
     LOCATION_REFRESH_INTERVAL_HOURS: 24,
     EMAIL_FROM: 'test@test.com',
     LOOP_MERCHANT_DENYLIST: undefined as string | undefined,

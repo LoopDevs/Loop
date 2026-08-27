@@ -9,7 +9,6 @@ const mockEnv = vi.hoisted(() => ({
   CTX_CLIENT_ID_WEB: 'loopweb',
   CTX_CLIENT_ID_IOS: 'loopios',
   CTX_CLIENT_ID_ANDROID: 'loopandroid',
-  REFRESH_INTERVAL_HOURS: 6,
   LOCATION_REFRESH_INTERVAL_HOURS: 24,
   // Audit A-023 / FT-08 — the rate limiter keys on the client IP only when
   // this is true; behind a trusted proxy it reads the spoof-proof
