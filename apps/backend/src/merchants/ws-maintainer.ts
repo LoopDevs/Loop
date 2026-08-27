@@ -261,8 +261,8 @@ function handleMerchantEvent(eventName: string, data: unknown): void {
 
   const merchant = mapUpstreamMerchant(upstream);
   if (merchant === null) {
-    // Disabled upstream (and INCLUDE_DISABLED_MERCHANTS unset) — the
-    // sweep would drop it, so the event drops it too.
+    // Disabled upstream — the sweep would drop it, so the event drops
+    // it too.
     applyMerchantRemoval(upstream.id);
     log.info({ merchantId: upstream.id, event: eventName }, 'Merchant dropped via ws event');
     return;

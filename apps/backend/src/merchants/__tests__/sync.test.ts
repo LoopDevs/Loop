@@ -12,6 +12,8 @@ const { envState } = vi.hoisted(() => ({
     LOCATION_REFRESH_INTERVAL_HOURS: 24,
     EMAIL_FROM: 'test@test.com',
     LOOP_MERCHANT_DENYLIST: undefined as string | undefined,
+    GIFT_CARD_API_KEY: undefined as string | undefined,
+    GIFT_CARD_API_SECRET: undefined as string | undefined,
   },
 }));
 
@@ -450,10 +452,54 @@ describe('refreshMerchants', () => {
       ),
     );
 
-    // With INCLUDE_DISABLED_MERCHANTS falsy (default), disabled merchants
-    // are filtered out entirely.
+    // Disabled merchants are filtered out entirely.
     await refreshMerchants();
     expect(getMerchants().merchants.find((m) => m.id === 'm-disabled')).toBeUndefined();
+  });
+
+  it('maps operator-scoped rows: effective status + per-link discount override', async () => {
+    envState.GIFT_CARD_API_KEY = 'op-key';
+    envState.GIFT_CARD_API_SECRET = 'op-secret';
+    try {
+      mockFetch.mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            pagination: { page: 1, pages: 1, perPage: 100000, total: 2 },
+            result: [
+              {
+                id: 'm-linked',
+                name: 'Linked',
+                enabled: true,
+                status: 'enabled',
+                savingsPercentage: 400,
+                link: { userDiscountBasisPoints: 750, userDiscountOverride: true },
+              },
+              // Globally enabled but link-disabled for this operator.
+              { id: 'm-link-off', name: 'Link Off', enabled: true, status: 'disabled' },
+            ],
+          }),
+          { status: 200 },
+        ),
+      );
+
+      await refreshMerchants();
+
+      // The operator creds ride the catalog request.
+      const [, init] = mockFetch.mock.calls[0]!;
+      expect((init as RequestInit).headers).toMatchObject({
+        'X-Api-Key': 'op-key',
+        'X-Api-Secret': 'op-secret',
+      });
+
+      const store = getMerchants();
+      // Per-link user-discount override beats the merchant default.
+      expect(store.merchantsById.get('m-linked')?.savingsPercentage).toBe(7.5);
+      // Effective status is authoritative over the global flag.
+      expect(store.merchantsById.has('m-link-off')).toBe(false);
+    } finally {
+      envState.GIFT_CARD_API_KEY = undefined;
+      envState.GIFT_CARD_API_SECRET = undefined;
+    }
   });
 
   // A2-1922: denylist filter

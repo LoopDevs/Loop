@@ -41,13 +41,10 @@ backend's in-memory store (`apps/backend/src/merchants/sync.ts`, hourly ws-maint
 effort reuse is the **public catalog endpoint that already serves this exact
 data** to the web app: `GET /api/merchants/all?fields=lite` — unauthenticated,
 `Cache-Control: public, max-age=300`, 60/min rate limit
-(`apps/backend/src/routes/merchants.ts`). In production, `sync-upstream.ts`
-already drops disabled merchants before they reach the store
-(`INCLUDE_DISABLED_MERCHANTS` is a dev-only override), so counting rows from
-this endpoint against production **is** counting enabled merchants — no
-extra filtering needed. Run it against production
-(`https://api.loopfinance.io`); running it against a local/staging backend
-with `INCLUDE_DISABLED_MERCHANTS=true` set would overcount.
+(`apps/backend/src/routes/merchants.ts`). `sync-upstream.ts` drops disabled merchants before they reach the store,
+so counting rows from this endpoint against production **is** counting
+enabled merchants — no extra filtering needed. Run it against production
+(`https://api.loopfinance.io`).
 
 Two equally-fine ways to run it — pick whichever tool you have on hand, don't
 add a new script for this:

@@ -77,7 +77,9 @@ export const coreEnvFields = {
   CTX_CLIENT_ID_WEB: z.string().default(DEFAULT_CLIENT_IDS.web),
   CTX_CLIENT_ID_IOS: z.string().default(DEFAULT_CLIENT_IDS.ios),
   CTX_CLIENT_ID_ANDROID: z.string().default(DEFAULT_CLIENT_IDS.android),
-  // Optional API credentials — needed for endpoints that require auth (e.g. /locations)
+  // Operator API credentials — scope the merchant catalog + /locations
+  // to what CTX serves Loop (per-operator status + link discounts) and
+  // authenticate the /ws merchant-topic subscription.
   GIFT_CARD_API_KEY: z.string().optional(),
   GIFT_CARD_API_SECRET: z.string().optional(),
 
@@ -85,9 +87,6 @@ export const coreEnvFields = {
   // it's hardcoded hourly (merchants/sync-interval.ts) — it's only the
   // fallback reconciler behind the ws maintainer, not worth a knob.
   LOCATION_REFRESH_INTERVAL_HOURS: z.coerce.number().int().positive().default(24),
-
-  // Dev mode: include disabled merchants so UI can be tested before CTX enables them
-  INCLUDE_DISABLED_MERCHANTS: envBoolean.default(false),
 
   // A2-1922: comma-separated list of CTX merchant IDs to filter out
   // of the catalog at sync time. Operator-controlled deny-list for

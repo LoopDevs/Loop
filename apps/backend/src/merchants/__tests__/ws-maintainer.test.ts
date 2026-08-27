@@ -1,13 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Env mock mirrors sync.test.ts's pattern: mutable so scenarios can flip
-// INCLUDE_DISABLED_MERCHANTS without resetting modules.
+// Env mock mirrors sync.test.ts's pattern.
 const { envState } = vi.hoisted(() => ({
   envState: {
     GIFT_CARD_API_BASE_URL: 'http://test',
     GIFT_CARD_API_KEY: 'test-key',
     GIFT_CARD_API_SECRET: 'test-secret',
-    INCLUDE_DISABLED_MERCHANTS: false,
   },
 }));
 vi.mock('../../env.js', () => ({ env: envState }));
@@ -55,7 +53,6 @@ describe('merchant ws maintainer message handling', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     syncMock.isMerchantDenylisted.mockReturnValue(false);
-    envState.INCLUDE_DISABLED_MERCHANTS = false;
     __resetMerchantWsForTests();
   });
 
@@ -90,6 +87,20 @@ describe('merchant ws maintainer message handling', () => {
     );
     expect(syncMock.applyMerchantRemoval).toHaveBeenCalledWith('m-1');
     expect(syncMock.applyMerchantUpsert).not.toHaveBeenCalled();
+  });
+
+  it('treats the per-operator effective status as authoritative over the global flag', () => {
+    // Link-disabled for Loop while globally enabled → removed.
+    __handleWsMessageForTests(
+      eventFrame('system.merchant.updated', { ...MERCHANT, enabled: true, status: 'disabled' }),
+    );
+    expect(syncMock.applyMerchantRemoval).toHaveBeenCalledWith('m-1');
+
+    // Effective status enabled wins over a false global flag.
+    __handleWsMessageForTests(
+      eventFrame('system.merchant.updated', { ...MERCHANT, enabled: false, status: 'enabled' }),
+    );
+    expect(syncMock.applyMerchantUpsert).toHaveBeenCalledTimes(1);
   });
 
   it('respects LOOP_MERCHANT_DENYLIST on event-driven upserts', () => {

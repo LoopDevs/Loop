@@ -360,7 +360,8 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # env.ts refuses to boot in production if this is set at all.
 # LOOP_TEST_ENDPOINTS_SECRET=<at-least-16-char-test-only-secret>
 
-# Optional: API credentials for endpoints that require auth (/locations)
+# Operator API credentials — scope the catalog + locations to what CTX
+# serves Loop; also authenticate the /ws merchant subscription
 # GIFT_CARD_API_KEY=<key>
 # GIFT_CARD_API_SECRET=<secret>
 
@@ -461,9 +462,6 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # EMAIL_FROM_ADDRESS=noreply@loopfinance.io     # default
 # EMAIL_FROM_NAME=Loop                          # default
 # EMAIL_REPLY_TO_ADDRESS=hello@loopfinance.io   # unset → reply_to omitted
-
-# Dev mode: show disabled merchants
-# INCLUDE_DISABLED_MERCHANTS=true
 
 # Refresh cadences (merchant sweep is hardcoded hourly — no env knob)
 # LOCATION_REFRESH_INTERVAL_HOURS=24

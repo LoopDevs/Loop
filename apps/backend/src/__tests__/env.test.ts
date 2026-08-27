@@ -196,15 +196,6 @@ describe('parseEnv', () => {
     }
   });
 
-  it('coerces INCLUDE_DISABLED_MERCHANTS boolean-ish strings', () => {
-    expect(
-      parseEnv({ ...base, INCLUDE_DISABLED_MERCHANTS: 'true' }).INCLUDE_DISABLED_MERCHANTS,
-    ).toBe(true);
-    expect(parseEnv({ ...base, INCLUDE_DISABLED_MERCHANTS: '' }).INCLUDE_DISABLED_MERCHANTS).toBe(
-      false,
-    );
-  });
-
   // Regression: `z.coerce.boolean()` treats any non-empty string as true,
   // so `TRUST_PROXY=false` would silently enable X-Forwarded-For trust —
   // the opposite of what the operator wrote. The custom envBoolean parser
@@ -243,20 +234,6 @@ describe('parseEnv', () => {
     expect(() => parseEnv({ ...base, DISCORD_WEBHOOK_ORDERS: 'not-a-url' })).toThrow(
       /DISCORD_WEBHOOK_ORDERS/,
     );
-  });
-
-  it('warns (does not throw) on INCLUDE_DISABLED_MERCHANTS=true in production', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    parseEnv({
-      ...base,
-      NODE_ENV: 'production',
-      INCLUDE_DISABLED_MERCHANTS: 'true',
-      LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
-      DISABLE_NATIVE_AUTH_ENFORCEMENT: '1',
-      LOOP_STELLAR_USDC_ISSUER: USDC_ISSUER,
-    });
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('INCLUDE_DISABLED_MERCHANTS'));
-    warn.mockRestore();
   });
 
   // ADR 050: the A-025 image-proxy host-allowlist boot guard is retired —

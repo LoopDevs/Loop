@@ -14,7 +14,6 @@
  */
 import type { Merchant, MerchantDenominations } from '@loop/shared';
 import { z } from 'zod';
-import { env } from '../env.js';
 
 // Size caps stop a compromised or buggy upstream from bloating every merchant
 // list response (which we cache and serve to every client). Generous relative
@@ -43,6 +42,20 @@ export const UpstreamMerchantSchema = z
     cardImageUrl: z.string().max(MAX_URL_LENGTH).optional(),
     mapPinUrl: z.string().max(MAX_URL_LENGTH).optional(),
     enabled: z.boolean(),
+    // Operator-scoped rows only (creds-authenticated sweep + ws events):
+    // the merchant's EFFECTIVE status for this operator, resolved through
+    // the merchant link. Authoritative over the global `enabled` flag
+    // when present.
+    status: z.string().max(32).optional(),
+    // Operator-scoped rows only: this operator's merchant link. CTX
+    // includes `userDiscountBasisPoints` only when the link overrides
+    // the merchant default.
+    link: z
+      .object({
+        userDiscountBasisPoints: z.number().optional(),
+      })
+      .passthrough()
+      .optional(),
     // RFC 3339 timestamp CTX bumps on every merchant edit. Carried onto
     // `Merchant.updatedAt` as the image cache-busting version.
     updated: z.string().max(64).optional(),
@@ -90,9 +103,11 @@ export const UpstreamListResponseSchema = z
  */
 export function mapUpstreamMerchant(item: UpstreamMerchant): Merchant | null {
   if (!item.name) return null;
-  // NOTE: CTX currently returns all 117 merchants with enabled: true.
-  // This filter only matters if CTX starts returning disabled merchants.
-  if (!item.enabled && !env.INCLUDE_DISABLED_MERCHANTS) return null;
+  // `status` is the per-operator effective status (resolved through
+  // Loop's merchant link) — authoritative over the global `enabled`
+  // flag when present.
+  const effectivelyEnabled = item.status !== undefined ? item.status === 'enabled' : item.enabled;
+  if (!effectivelyEnabled) return null;
 
   // Parse denominations from the flat upstream fields
   let denominations: MerchantDenominations | undefined;
@@ -120,9 +135,11 @@ export function mapUpstreamMerchant(item: UpstreamMerchant): Merchant | null {
   }
 
   // savingsPercentage from upstream is in hundredths (e.g. 400 = 4.00%).
-  // Convert to percentage for display (4.0).
-  const savingsPercentage =
-    item.savingsPercentage !== undefined ? item.savingsPercentage / 100 : undefined;
+  // Convert to percentage for display (4.0). A per-link user-discount
+  // override (operator-scoped rows, ctx-interop) beats the merchant
+  // default — it's the discount Loop's users actually get.
+  const savingsBasisPoints = item.link?.userDiscountBasisPoints ?? item.savingsPercentage;
+  const savingsPercentage = savingsBasisPoints !== undefined ? savingsBasisPoints / 100 : undefined;
 
   const intro = item.info?.intro;
   const description = item.info?.description;
@@ -147,11 +164,7 @@ export function mapUpstreamMerchant(item: UpstreamMerchant): Merchant | null {
     ...(description ? { description } : {}),
     ...(instructions ? { instructions } : {}),
     ...(terms ? { terms } : {}),
-    // Reflect the actual upstream flag — hardcoding true was a bug that
-    // only didn't bite because CTX currently returns all merchants enabled.
-    // With INCLUDE_DISABLED_MERCHANTS=true (dev), this lets the UI see the
-    // real state instead of a falsified `enabled: true` on every record.
-    enabled: item.enabled,
+    enabled: effectivelyEnabled,
     ...(locationCount !== undefined ? { locationCount } : {}),
     ...(item.country ? { country: item.country } : {}),
     ...(item.updated ? { updatedAt: item.updated } : {}),

@@ -52,24 +52,13 @@ export function parseEnv(source: NodeJS.ProcessEnv): Env {
     throw new Error(`Invalid environment variables — ${details}`);
   }
 
-  // Warn on footguns that pass schema validation but are almost certainly
-  // misconfigurations in production. A warn (not a throw) keeps emergency
-  // admin overrides possible.
-  if (parsed.data.NODE_ENV === 'production' && parsed.data.INCLUDE_DISABLED_MERCHANTS) {
-    // eslint-disable-next-line no-console
-    console.warn(
-      '[env] INCLUDE_DISABLED_MERCHANTS=true in production — disabled merchants will be visible to end users',
-    );
-  }
-
   // CFG-02: the admin daily money caps (per-admin, per-currency, per
   // UTC day) bound how much a stolen admin session can drain via many
   // sub-per-request-cap writes. `0` DISABLES the cap entirely — a
   // documented dev/test escape hatch — so a fat-finger `0` in
   // production silently removes the treasury safeguard while everything
-  // still looks healthy. Warn loudly in production (matching the
-  // INCLUDE_DISABLED_MERCHANTS prod-warn) so the disabled cap is
-  // visible; dev/test keep the 0=disable hatch quietly. A warn (not a
+  // still looks healthy. Warn loudly in production so the disabled cap
+  // is visible; dev/test keep the 0=disable hatch quietly. A warn (not a
   // throw) preserves the documented "0 disables" contract for a
   // deliberate operator while removing the SILENCE the footgun relied on.
   if (parsed.data.NODE_ENV === 'production') {

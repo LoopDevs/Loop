@@ -32,9 +32,8 @@ function bySavings(a: Merchant, b: Merchant): number {
  *  - `foldForSearch(m.name).includes(q)` — same accent/case-insensitive
  *    substring match on name as `/api/merchants?q=` and the Navbar/
  *    MobileHome client filters.
- *  - `enabled !== false` — same as the client filters (the base catalog
- *    already excludes disabled merchants in production; this only bites
- *    under the dev-only `INCLUDE_DISABLED_MERCHANTS` override).
+ *  - `enabled !== false` — same as the client filters (defense in
+ *    depth; the sync layer already drops disabled merchants).
  *
  * Query params:
  *  - `q`: search text. Empty/missing returns an empty result rather than

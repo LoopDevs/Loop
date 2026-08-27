@@ -82,7 +82,10 @@ NODE_ENV=development
 # ── Upstream CTX (ADR 013) ───────────────────────────────────────────
 GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 
-# Optional upstream API credentials — needed only for /locations endpoint
+# Operator API credentials. Scope the merchant catalog + /locations to
+# the merchants CTX serves Loop (per-operator status + link discounts)
+# and authenticate the /ws merchant-topic subscription that keeps the
+# catalog live between hourly sweeps.
 # GIFT_CARD_API_KEY=...
 # GIFT_CARD_API_SECRET=...
 
@@ -112,7 +115,6 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # reconciler — the sweep is also the only freshness mechanism when the
 # creds are absent or the ws is down.
 LOCATION_REFRESH_INTERVAL_HOURS=24      # location data refresh
-# INCLUDE_DISABLED_MERCHANTS=true       # dev mode — show disabled merchants
 
 # ── Database (ADR 012) ───────────────────────────────────────────────
 # Required in production. The dev default points at the docker-compose

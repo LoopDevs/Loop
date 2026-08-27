@@ -123,7 +123,7 @@ describe('GET /api/merchants/search', () => {
     expect(body.merchants.map((m) => m.id)).toEqual(['m-1']);
   });
 
-  it('excludes disabled merchants (dev-mode INCLUDE_DISABLED_MERCHANTS parity with the client filters)', async () => {
+  it('excludes disabled merchants (parity with the client filters)', async () => {
     seed([merchant('m-1', 'Home Depot', { enabled: false }), merchant('m-2', 'Home Goods')]);
     const res = await app.request('/api/merchants/search?q=home');
     const body = (await res.json()) as { merchants: Merchant[] };

@@ -281,6 +281,15 @@ async function refreshMerchantsInternal(opts: { rethrow?: boolean } = {}): Promi
   // refresh env flip can't half-apply across pages.
   const denylist = readMerchantDenylist();
 
+  // Operator-scoped catalog: the API creds scope the response to the
+  // merchants CTX serves Loop (linked, with effective per-operator
+  // `status` and any per-link discount override) — the same scope the
+  // ws merchant topic and /locations use.
+  const authHeaders: Record<string, string> =
+    env.GIFT_CARD_API_KEY !== undefined && env.GIFT_CARD_API_SECRET !== undefined
+      ? { 'X-Api-Key': env.GIFT_CARD_API_KEY, 'X-Api-Secret': env.GIFT_CARD_API_SECRET }
+      : {};
+
   try {
     while (page <= totalPages && page <= MAX_PAGES) {
       const url = new URL(upstreamUrl('/merchants'));
@@ -288,6 +297,7 @@ async function refreshMerchantsInternal(opts: { rethrow?: boolean } = {}): Promi
       url.searchParams.set('perPage', String(PER_PAGE));
 
       const response = await getUpstreamCircuit('merchants').fetch(url.toString(), {
+        headers: authHeaders,
         signal: AbortSignal.timeout(30_000),
       });
 
@@ -319,8 +329,7 @@ async function refreshMerchantsInternal(opts: { rethrow?: boolean } = {}): Promi
         }
         // A2-1922: drop denylisted merchants before they enter the
         // in-memory store. Logged at info-level so an operator can
-        // verify the filter is firing (and that `INCLUDE_DISABLED_MERCHANTS`
-        // dev-mode override hasn't accidentally re-enabled them).
+        // verify the filter is firing.
         if (denylist.has(merchantParsed.data.id)) {
           log.info(
             { merchantId: merchantParsed.data.id, merchantName: merchantParsed.data.name },
