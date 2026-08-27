@@ -327,10 +327,6 @@ VITE_API_URL=http://localhost:8080
 # a new var.)
 GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 
-# Production-required (audit A-025) — boot fails without it in
-# NODE_ENV=production unless DISABLE_IMAGE_PROXY_ALLOWLIST_ENFORCEMENT=1
-# IMAGE_PROXY_ALLOWED_HOSTS=spend.ctx.com,ctx-spend.s3.us-west-2.amazonaws.com
-
 # Rate-limiter trust boundary (audit A-023). Set `true` only when
 # behind a trusted edge proxy (Fly.io, Cloudflare) — otherwise clients
 # can spoof X-Forwarded-For and bypass per-IP limits.

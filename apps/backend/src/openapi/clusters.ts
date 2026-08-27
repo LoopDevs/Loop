@@ -88,15 +88,17 @@ export function registerClustersOpenApi(
   registry.registerPath({
     method: 'get',
     path: '/api/image',
-    summary: 'Fetch, resize, and re-encode a remote image (SSRF-validated).',
+    summary: 'Reference-keyed merchant-image proxy (ADR 050): resize + re-encode by merchant id.',
     tags: ['Images'],
     request: {
       query: z.object({
-        url: z.string().url(),
+        merchantId: z.string().min(1).max(128),
+        // `pin` resolves from the locations feed, falling back to the
+        // merchant's logo.
+        kind: z.enum(['logo', 'card', 'pin']),
         width: z.coerce.number().int().min(1).max(2000).optional(),
         height: z.coerce.number().int().min(1).max(2000).optional(),
         quality: z.coerce.number().int().min(1).max(100).optional(),
-        mode: z.enum(['public', 'private']).optional(),
         // Cache-busting version token (typically the merchant's
         // `updatedAt`). Part of the proxy's cache key; never forwarded
         // upstream. Truncated to 64 chars server-side.
@@ -112,7 +114,11 @@ export function registerClustersOpenApi(
         },
       },
       400: {
-        description: 'Validation / SSRF rejection',
+        description: 'Missing/invalid merchantId or kind',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      404: {
+        description: 'Unknown merchant, or the merchant has no image of that kind',
         content: { 'application/json': { schema: errorResponse } },
       },
       413: {
@@ -133,7 +139,7 @@ export function registerClustersOpenApi(
         content: { 'application/json': { schema: errorResponse } },
       },
       502: {
-        description: 'Upstream image error',
+        description: 'Upstream image error, or the resolved catalog URL is unusable',
         content: { 'application/json': { schema: errorResponse } },
       },
     },

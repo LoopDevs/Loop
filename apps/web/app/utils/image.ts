@@ -2,31 +2,32 @@ import type { ImageProxyParams } from '@loop/shared';
 import { API_BASE } from '~/services/config';
 
 /**
- * Returns a Loop image-proxy URL for the given upstream image URL.
- * If width is 0 or undefined, no resize is applied. Shape of the
- * emitted query params matches `ImageProxyParams` in @loop/shared,
- * which mirrors the backend's `GET /api/image` zod validator.
+ * Builds a Loop image-proxy URL for a merchant image (ADR 050 —
+ * reference-keyed: the client names the image by merchant id + kind and
+ * the backend resolves the actual upstream URL from its own catalog,
+ * so no URL ever travels from the client). Shape of the emitted query
+ * params matches `ImageProxyParams` in @loop/shared, which mirrors the
+ * backend's `GET /api/image` validator.
+ *
+ * `merchant.updatedAt` rides along as the `v` cache-busting version:
+ * it changes on every CTX merchant edit, so an image swap busts both
+ * the proxy's LRU key and the browser's 7-day immutable cache. If
+ * width is 0 or undefined, no resize is applied.
  */
-export function getImageProxyUrl(
-  url: string,
+export function getMerchantImageUrl(
+  merchant: { id: string; updatedAt?: string | undefined },
+  kind: ImageProxyParams['kind'],
   width = 0,
   quality = 80,
-  options: { mode?: ImageProxyParams['mode']; version?: string | undefined } = {},
 ): string {
-  const query: ImageProxyParams = { url, quality };
-  if (width > 0) query.width = width;
-  if (options.mode !== undefined) query.mode = options.mode;
-  // Cache-busting version (typically `merchant.updatedAt`): folded into
-  // the backend proxy's LRU key and, by changing the URL, busts the
-  // browser's 7-day immutable cache — so a same-URL image edit on CTX
-  // shows up as soon as the catalog carries the new timestamp.
-  if (options.version !== undefined && options.version !== '') query.v = options.version;
   const params = new URLSearchParams({
-    url: query.url,
-    quality: String(query.quality),
-    ...(query.width !== undefined ? { width: String(query.width) } : {}),
-    ...(query.mode !== undefined ? { mode: query.mode } : {}),
-    ...(query.v !== undefined ? { v: query.v } : {}),
+    merchantId: merchant.id,
+    kind,
+    quality: String(quality),
+    ...(width > 0 ? { width: String(width) } : {}),
+    ...(merchant.updatedAt !== undefined && merchant.updatedAt !== ''
+      ? { v: merchant.updatedAt }
+      : {}),
   });
   return `${API_BASE}/api/image?${params.toString()}`;
 }

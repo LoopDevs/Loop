@@ -2,8 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { LookupAddress, LookupOptions } from 'node:dns';
 
 // Mirror proxy.test.ts's env/dns mocking so the guard can be exercised in
-// isolation. Default: allowlist OFF (undefined) and production mode — the
-// point of these tests is that the IP-range defence holds with no allowlist.
+// isolation. Default: production mode — the IP-range defence only runs
+// there (ADR 050: outside production the resolved-URL check is
+// deliberately permissive so local CTX file hosts work).
 const mockEnv = vi.hoisted(() => {
   const obj: Record<string, unknown> = { NODE_ENV: 'production' };
   return obj;
@@ -13,12 +14,11 @@ vi.mock('../../env.js', () => ({ env: mockEnv }));
 const mockDnsLookup = vi.hoisted(() => vi.fn());
 vi.mock('node:dns/promises', () => ({ lookup: mockDnsLookup }));
 
-import { validateImageUrl, isPrivateOrReservedIp, ssrfSafeLookup } from '../ssrf-guard.js';
+import { validateResolvedImageUrl, isPrivateOrReservedIp, ssrfSafeLookup } from '../ssrf-guard.js';
 
 beforeEach(() => {
   mockDnsLookup.mockReset();
   mockEnv.NODE_ENV = 'production';
-  delete mockEnv.IMAGE_PROXY_ALLOWED_HOSTS;
 });
 
 // Promise wrapper around the node `LookupFunction` callback so tests can
@@ -137,30 +137,50 @@ describe('ssrfSafeLookup — connect-time rebind defence (SEC-SSRF-allowlist)', 
   });
 });
 
-describe('validateImageUrl — pre-flight defence with the allowlist OFF', () => {
+describe('validateResolvedImageUrl — production pre-flight defence (ADR 050)', () => {
   it('rejects a hostname that resolves to the metadata IP even with no allowlist', async () => {
     // Allowlist unset (deleted in beforeEach). A public-looking host that
     // resolves to 169.254.169.254 must still be rejected.
     mockDnsLookup.mockResolvedValueOnce([{ address: '169.254.169.254', family: 4 }]);
-    const err = await validateImageUrl('https://metadata.evil.com/latest/meta-data/');
+    const err = await validateResolvedImageUrl('https://metadata.evil.com/latest/meta-data/');
     expect(err).toContain('Private and loopback');
   });
 
   it('rejects a NAT64-embedded metadata IPv6 literal with no allowlist (SEC-SSRF-nat64)', async () => {
-    const err = await validateImageUrl('https://[64:ff9b::a9fe:a9fe]/x.png');
+    const err = await validateResolvedImageUrl('https://[64:ff9b::a9fe:a9fe]/x.png');
     expect(err).toContain('Private and loopback');
     // IP literal → no DNS roundtrip needed.
     expect(mockDnsLookup).not.toHaveBeenCalled();
   });
 
   it('rejects a 6to4 RFC1918 literal with no allowlist', async () => {
-    const err = await validateImageUrl('https://[2002:c0a8:101::]/x.png');
+    const err = await validateResolvedImageUrl('https://[2002:c0a8:101::]/x.png');
     expect(err).toContain('Private and loopback');
   });
 
   it('allows a public host (control) with no allowlist', async () => {
     mockDnsLookup.mockResolvedValueOnce([{ address: '93.184.216.34', family: 4 }]);
-    const err = await validateImageUrl('https://cdn.example.com/logo.png');
+    const err = await validateResolvedImageUrl('https://cdn.example.com/logo.png');
     expect(err).toBeNull();
+  });
+});
+
+describe('validateResolvedImageUrl — permissive outside production (ADR 050)', () => {
+  it('allows loopback/http URLs in development (local CTX file hosts)', async () => {
+    mockEnv.NODE_ENV = 'development';
+    expect(await validateResolvedImageUrl('http://localhost:7777/files/abc/download')).toBeNull();
+    expect(await validateResolvedImageUrl('http://127.0.0.1:9091/img.png')).toBeNull();
+    expect(mockDnsLookup).not.toHaveBeenCalled();
+  });
+
+  it('still rejects non-http(s) schemes in every environment', async () => {
+    mockEnv.NODE_ENV = 'development';
+    expect(await validateResolvedImageUrl('file:///etc/passwd')).toContain('HTTP(S)');
+    expect(await validateResolvedImageUrl('not a url')).toBe('Invalid URL');
+  });
+
+  it('rejects plain http in production', async () => {
+    mockEnv.NODE_ENV = 'production';
+    expect(await validateResolvedImageUrl('http://cdn.example.com/logo.png')).toContain('HTTPS');
   });
 });

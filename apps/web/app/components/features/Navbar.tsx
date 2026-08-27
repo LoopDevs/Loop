@@ -10,7 +10,7 @@ import { useLocale, useLocalizedNavigate } from '~/i18n/locale';
 import { useAuth } from '~/hooks/use-auth';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 import { useAppConfig } from '~/hooks/use-app-config';
-import { getImageProxyUrl } from '~/utils/image';
+import { getMerchantImageUrl } from '~/utils/image';
 import { Avatar } from '~/components/ui/Avatar';
 import { LoopLogo } from '~/components/ui/LoopLogo';
 import { CountrySelector } from '~/components/features/CountrySelector';
@@ -22,9 +22,12 @@ interface NavbarProps {
 interface SearchResult {
   id: string;
   name: string;
-  logoUrl?: string | undefined;
-  /** Image-proxy cache-busting version for `logoUrl` (merchant `updatedAt`). */
-  updatedAt?: string | undefined;
+  /**
+   * The merchant whose logo represents this row (for a brand group,
+   * the first member with a logo). Undefined → no logo to render.
+   * Feeds the reference-keyed image proxy (ADR 050).
+   */
+  logo?: { id: string; updatedAt?: string | undefined } | undefined;
   savingsPercentage?: number | undefined;
   /** Precomputed navigation target — `/gift-card/:slug` or, for a brand group, `/brand/:slug`. */
   to: string;
@@ -64,9 +67,9 @@ function SearchDropdown({
             i === selectedIndex ? 'bg-gray-50' : ''
           }`}
         >
-          {r.logoUrl !== undefined ? (
+          {r.logo !== undefined ? (
             <img
-              src={getImageProxyUrl(r.logoUrl, 64, 80, { version: r.updatedAt })}
+              src={getMerchantImageUrl(r.logo, 'logo', 64)}
               alt={r.name}
               className="w-8 h-8 object-contain rounded-md border border-line bg-white"
             />
@@ -152,8 +155,7 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
               return {
                 id: `g:${g.key}`,
                 name: g.name,
-                logoUrl: withLogo?.logoUrl,
-                updatedAt: withLogo?.updatedAt,
+                logo: withLogo !== undefined ? withLogo : undefined,
                 to: `/brand/${brandSlug(g.name)}`,
                 optionCount: g.members.length,
               };
@@ -162,8 +164,7 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
             return {
               id: m.id,
               name: m.name,
-              logoUrl: m.logoUrl,
-              updatedAt: m.updatedAt,
+              logo: m.logoUrl !== undefined ? m : undefined,
               savingsPercentage: m.savingsPercentage,
               to: `/gift-card/${merchantSlug(m)}`,
             };

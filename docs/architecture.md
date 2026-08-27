@@ -201,16 +201,16 @@ the per-handler validators.
 
 The full enumeration of known outbound origins:
 
-| Surface              | Origin(s)                                                           | SSRF defence                                                                               |
-| -------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| **CTX upstream**     | `spend.ctx.com` (configurable via `GIFT_CARD_API_BASE_URL`)         | Origin pinned in env at boot; circuit breaker per-endpoint.                                |
-| **Image proxy**      | Per-request user URL                                                | Per-host allowlist (`IMAGE_PROXY_ALLOWED_HOSTS`, audit A-025) + scheme + private-IP guard. |
-| **Stellar Horizon**  | `horizon.stellar.org` (configurable via `LOOP_STELLAR_HORIZON_URL`) | Origin pinned in env at boot; per-account / per-asset endpoints only.                      |
-| **Price feed**       | `api.coingecko.com`                                                 | Single hardcoded URL; no user-controlled segment.                                          |
-| **Google OAuth**     | `googleapis.com`, `accounts.google.com`                             | Hardcoded JWKS + issuer URLs; per-token signature verify.                                  |
-| **Apple OAuth**      | `appleid.apple.com`                                                 | Hardcoded JWKS + issuer URLs; per-token signature verify.                                  |
-| **Sentry**           | `*.ingest.sentry.io` / `*.ingest.de.sentry.io`                      | DSN baked at deploy time; no user-controlled segment.                                      |
-| **Discord webhooks** | `discord.com/api/webhooks/<id>/<token>`                             | Webhook URL baked into Fly secret per channel; allowed_mentions disabled.                  |
+| Surface              | Origin(s)                                                           | SSRF defence                                                              |
+| -------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| **CTX upstream**     | `spend.ctx.com` (configurable via `GIFT_CARD_API_BASE_URL`)         | Origin pinned in env at boot; circuit breaker per-endpoint.               |
+| **Image proxy**      | Server-resolved catalog/order URLs (ADR 050 — never client URLs)    | Reference-keyed API + production https/public-IP guard on resolved URLs.  |
+| **Stellar Horizon**  | `horizon.stellar.org` (configurable via `LOOP_STELLAR_HORIZON_URL`) | Origin pinned in env at boot; per-account / per-asset endpoints only.     |
+| **Price feed**       | `api.coingecko.com`                                                 | Single hardcoded URL; no user-controlled segment.                         |
+| **Google OAuth**     | `googleapis.com`, `accounts.google.com`                             | Hardcoded JWKS + issuer URLs; per-token signature verify.                 |
+| **Apple OAuth**      | `appleid.apple.com`                                                 | Hardcoded JWKS + issuer URLs; per-token signature verify.                 |
+| **Sentry**           | `*.ingest.sentry.io` / `*.ingest.de.sentry.io`                      | DSN baked at deploy time; no user-controlled segment.                     |
+| **Discord webhooks** | `discord.com/api/webhooks/<id>/<token>`                             | Webhook URL baked into Fly secret per channel; allowed_mentions disabled. |
 
 **Phase-1 posture:** runtime egress allowlist (e.g. via `iptables` /
 Fly Machines policy / a forward proxy) is intentionally **not**
@@ -224,20 +224,31 @@ outbound origin lands here in the same PR that adds it, gated by the
 
 ## Image proxy
 
-`GET /api/image?url=<encoded>&width=<n>&height=<n>&quality=<n>&mode=<public|private>`
+`GET /api/image?merchantId=<id>&kind=<logo|card|pin>&width=<n>&height=<n>&quality=<n>&v=<version>`
 
-- Fetches upstream image, resizes with `sharp`, serves with cache headers
-- LRU in-memory cache: 100 MB max, 7-day TTL
-- `mode=private` bypasses the shared LRU cache and returns `Cache-Control: private, no-store`; used for authenticated redemption barcode imagery so order-bound assets do not become public cache objects
+- **Reference-keyed (ADR 050)**: the client names an image by merchant
+  id + kind; the backend resolves the actual upstream URL from its own
+  stores (`kind=pin` from the locations feed, falling back to the
+  logo). Clients never supply URLs, which removes the client-driven
+  SSRF surface the old `?url=` API had — no host allowlist or boot
+  guard needed.
+- Fetches the resolved image, resizes with `sharp`, serves with cache headers
+- LRU in-memory cache: 100 MB max, 7-day TTL; `v` (the merchant's
+  `updatedAt`) is part of the cache key so in-place upstream image
+  edits bust both the LRU and the browser's immutable cache
 - Prevents CORS issues and normalises image dimensions
-- SSRF-hardened (audit A-025): the target URL is validated before
-  fetch — rejects non-http/https schemes, localhost / private / IPv6
-  link-local addresses, and hosts outside the
-  `IMAGE_PROXY_ALLOWED_HOSTS` allowlist. The backend refuses to boot
-  in `NODE_ENV=production` without the allowlist set, unless
-  `DISABLE_IMAGE_PROXY_ALLOWLIST_ENFORCEMENT=1` is an explicit
-  emergency opt-out. Requests capped at 10 MB and 2000px per
-  dimension.
+- Residual defense-in-depth against bad CTX catalog data: in
+  production, resolved URLs must be HTTPS and resolve to public IPs
+  (pre-flight + connect-time DNS check); outside production any
+  http(s) URL is fetched so local CTX file hosts work. Requests capped
+  at 10 MB and 2000px per dimension.
+
+`GET /api/orders/:id/barcode-image?width=<n>&quality=<n>` is the authed
+sibling for redemption barcodes: it fetches the order from CTX with the
+caller's own upstream bearer, resolves the barcode URL CTX put on the
+record, and serves the re-encoded image (always JPEG, `private,
+no-store`) — order-bound assets never become public cache objects and
+the CTX URL never reaches the client.
 
 ---
 
@@ -384,6 +395,7 @@ GET  /api/orders/loop/:id    [authenticated — Loop-native flow, ADR 010]
 POST /api/orders/loop/:id/redeem [authenticated — one-tap LOOP-asset redemption from the embedded wallet: user-signed inner payment + operator fee-bump; watcher settles downstream, ADR 030 C3 / ADR 036; 400 LOOP_ASSET_UNAVAILABLE_PHASE_1 while LOOP_PHASE_1_ONLY=true, fail-closed even for pre-existing orders (AUDIT-2 finding B). ADR 031 §D6 (V4): when the order's chargeCurrency is vault-eligible (USD/EUR) and LOOP_VAULTS_ENABLED is on, forks internally to a Soroban vault-share redemption (orders/redeem-vault.ts + credits/vaults/vault-redemptions.ts) instead of the classic on-chain payment — same request/response shape, same status codes; gated off is byte-identical to the classic path above]
 GET  /api/orders             [authenticated]
 GET  /api/orders/:id         [authenticated]
+GET  /api/orders/:id/barcode-image [authenticated — reference-keyed barcode proxy, ADR 050: resolves the CTX barcode URL server-side, serves JPEG bytes private/no-store]
 GET  /api/users/me           [authenticated — profile + home_currency, ADR 015]
 POST /api/users/me/home-currency   [authenticated — first-time-set (order-less), ADR 015]
 PUT  /api/users/me/stellar-address [authenticated — link/unlink Stellar wallet for payouts, ADR 015]

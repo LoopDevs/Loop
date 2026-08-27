@@ -2,58 +2,55 @@ import { describe, it, expect, vi } from 'vitest';
 
 vi.mock('~/services/config', () => ({ API_BASE: 'http://test-api' }));
 
-import { getImageProxyUrl } from '../image';
+import { getMerchantImageUrl } from '../image';
 
-describe('getImageProxyUrl', () => {
+const MERCHANT = { id: 'm-1', updatedAt: '2026-08-26T10:00:00Z' };
+
+describe('getMerchantImageUrl', () => {
   it('starts with API_BASE/api/image', () => {
-    const url = getImageProxyUrl('https://example.com/img.png', 200);
+    const url = getMerchantImageUrl(MERCHANT, 'logo', 200);
     expect(url.startsWith('http://test-api/api/image?')).toBe(true);
   });
 
-  it('includes encoded source URL', () => {
-    const url = getImageProxyUrl('https://example.com/path?foo=bar', 100);
-    expect(url).toContain(`url=${encodeURIComponent('https://example.com/path?foo=bar')}`);
+  it('emits merchantId + kind, never a URL', () => {
+    const url = new URL(getMerchantImageUrl(MERCHANT, 'card', 640));
+    expect(url.searchParams.get('merchantId')).toBe('m-1');
+    expect(url.searchParams.get('kind')).toBe('card');
+    expect(url.searchParams.has('url')).toBe(false);
   });
 
-  it('includes width when > 0', () => {
-    const url = getImageProxyUrl('https://example.com/img.png', 200);
-    expect(url).toContain('width=200');
+  it('includes width only when positive', () => {
+    const withWidth = new URL(getMerchantImageUrl(MERCHANT, 'logo', 100));
+    expect(withWidth.searchParams.get('width')).toBe('100');
+    const noWidth = new URL(getMerchantImageUrl(MERCHANT, 'logo', 0));
+    expect(noWidth.searchParams.has('width')).toBe(false);
+    const defaulted = new URL(getMerchantImageUrl(MERCHANT, 'logo'));
+    expect(defaulted.searchParams.has('width')).toBe(false);
   });
 
-  it('omits width when 0', () => {
-    const url = getImageProxyUrl('https://example.com/img.png', 0);
-    expect(url).not.toContain('width=');
+  it('defaults quality to 80 and accepts an override', () => {
+    expect(new URL(getMerchantImageUrl(MERCHANT, 'logo', 100)).searchParams.get('quality')).toBe(
+      '80',
+    );
+    expect(
+      new URL(getMerchantImageUrl(MERCHANT, 'logo', 100, 50)).searchParams.get('quality'),
+    ).toBe('50');
   });
 
-  it('omits width when not provided', () => {
-    const url = getImageProxyUrl('https://example.com/img.png');
-    expect(url).not.toContain('width=');
+  it('passes updatedAt as the v cache-busting version', () => {
+    const url = new URL(getMerchantImageUrl(MERCHANT, 'logo', 100));
+    expect(url.searchParams.get('v')).toBe('2026-08-26T10:00:00Z');
   });
 
-  it('uses default quality of 80', () => {
-    const url = getImageProxyUrl('https://example.com/img.png', 100);
-    expect(url).toContain('quality=80');
+  it('omits v when the merchant has no updatedAt', () => {
+    const url = new URL(getMerchantImageUrl({ id: 'm-2' }, 'logo', 100));
+    expect(url.searchParams.has('v')).toBe(false);
+    const empty = new URL(getMerchantImageUrl({ id: 'm-2', updatedAt: '' }, 'logo', 100));
+    expect(empty.searchParams.has('v')).toBe(false);
   });
 
-  it('uses custom quality when provided', () => {
-    const url = getImageProxyUrl('https://example.com/img.png', 100, 50);
-    expect(url).toContain('quality=50');
-  });
-
-  it('produces a valid URL with all params', () => {
-    const url = getImageProxyUrl('https://cdn.example.com/photo.jpg', 300, 90);
-    const parsed = new URL(url);
-    expect(parsed.pathname).toBe('/api/image');
-    expect(parsed.searchParams.get('url')).toBe('https://cdn.example.com/photo.jpg');
-    expect(parsed.searchParams.get('width')).toBe('300');
-    expect(parsed.searchParams.get('quality')).toBe('90');
-  });
-
-  it('includes private mode when requested', () => {
-    const url = getImageProxyUrl('https://cdn.example.com/barcode.png', 640, 80, {
-      mode: 'private',
-    });
-    const parsed = new URL(url);
-    expect(parsed.searchParams.get('mode')).toBe('private');
+  it('supports the pin kind for map markers', () => {
+    const url = new URL(getMerchantImageUrl(MERCHANT, 'pin', 64));
+    expect(url.searchParams.get('kind')).toBe('pin');
   });
 });

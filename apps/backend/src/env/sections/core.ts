@@ -104,11 +104,6 @@ export const coreEnvFields = {
   // follow-up (admin DB column rather than an env var).
   LOOP_MERCHANT_DENYLIST: z.string().optional(),
 
-  // Image proxy: comma-separated list of allowed hostnames.
-  // If set, only URLs from these hosts are fetched. Recommended in production.
-  // Example: "cdn.giftcards.com,images.merchant.com"
-  IMAGE_PROXY_ALLOWED_HOSTS: z.string().optional(),
-
   // Path to an operator-provided MaxMind GeoLite2-Country .mmdb (ADR 033). Powers the
   // GET /api/public/geo first-guess for the region selector. Unset → that endpoint
   // returns the US default and the web client falls back to navigator.language.
@@ -143,15 +138,6 @@ export const coreEnvFields = {
   // — it is always served fresh, so it has no minimum.
   MIN_SUPPORTED_APP_VERSION_IOS: z.string().optional(),
   MIN_SUPPORTED_APP_VERSION_ANDROID: z.string().optional(),
-
-  // A2-654: emergency opt-out for the production-allowlist boot guard
-  // below. Typed here rather than read from bare `process.env` so a
-  // typo on deploy (`DISABLE_IMAGE_PROXY_ALLOWLIST_ENFORCMENT=1`) fails
-  // at parse time with a clear message instead of silently leaving the
-  // override inactive. Only `"1"` counts as the off-switch; any other
-  // non-empty value is rejected so operators can't set it to `"true"`
-  // or `"yes"` and wonder why production still refuses to boot.
-  DISABLE_IMAGE_PROXY_ALLOWLIST_ENFORCEMENT: z.enum(['1']).optional(),
 
   // Hardening B3: emergency opt-out for the production step-up-key
   // boot guard below. Same `"1"`-only shape as the image-proxy

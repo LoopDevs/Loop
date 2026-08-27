@@ -32,6 +32,11 @@ vi.mock('~/native/haptics', () => ({
 // jsbarcode is dynamically imported inside the component; the test env has
 // no canvas, so mock the module to a harmless no-op.
 vi.mock('jsbarcode', () => ({ default: () => undefined }));
+// ADR 050: the barcode image arrives as an authed blob fetch by order id.
+const mockFetchBarcode = vi.fn<(id: string) => Promise<Blob>>();
+vi.mock('~/services/orders', () => ({
+  fetchOrderBarcodeImage: (id: string) => mockFetchBarcode(id),
+}));
 
 import { PurchaseComplete } from '../PurchaseComplete';
 
@@ -138,16 +143,32 @@ describe('PurchaseComplete', () => {
     expect(canvas!.getAttribute('aria-label')).toBe('Barcode for gift card code CODE-ABC');
   });
 
-  it('uses private proxy mode for upstream barcode images', () => {
-    render(
-      <PurchaseComplete
-        merchantName="Target"
-        code="CODE-ABC"
-        barcodeImageUrl="https://cdn.example.com/barcode.png"
-      />,
-    );
-    const image = screen.getByRole('img', { name: 'Barcode for gift card code CODE-ABC' });
-    expect(image.getAttribute('src')).toContain('mode=private');
+  it('fetches the upstream barcode through the authed proxy and renders the blob', async () => {
+    mockFetchBarcode.mockResolvedValue(new Blob(['jpeg-bytes'], { type: 'image/jpeg' }));
+    const createObjectURL = vi.fn(() => 'blob:mock-barcode');
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL, revokeObjectURL }));
+    try {
+      render(<PurchaseComplete merchantName="Target" code="CODE-ABC" barcodeOrderId="order-1" />);
+      const image = await screen.findByRole('img', {
+        name: 'Barcode for gift card code CODE-ABC',
+      });
+      expect(mockFetchBarcode).toHaveBeenCalledWith('order-1');
+      expect(image.getAttribute('src')).toBe('blob:mock-barcode');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('falls back to the canvas barcode when the authed fetch fails', async () => {
+    mockFetchBarcode.mockRejectedValue(new Error('401'));
+    render(<PurchaseComplete merchantName="Target" code="CODE-ABC" barcodeOrderId="order-1" />);
+    // The canvas fallback carries the same aria-label.
+    await vi.waitFor(() => {
+      expect(
+        document.querySelector('canvas[aria-label="Barcode for gift card code CODE-ABC"]'),
+      ).not.toBeNull();
+    });
   });
 });
 

@@ -16,7 +16,7 @@
  *
  * `LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS` is the ONLY input — a
  * comma-separated list of Stellar secret keys, mirroring the
- * `IMAGE_PROXY_ALLOWED_HOSTS` comma-list convention elsewhere in this
+ * `ANDROID_CERT_SHA256` comma-list convention elsewhere in this
  * backend's env surface. List length IS "N"; there is no separate
  * count var to drift out of sync with the secrets. Empty/unset →
  * zero channels → the payout worker's legacy single-sequence, fully

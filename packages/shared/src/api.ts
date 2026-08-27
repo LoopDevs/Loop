@@ -396,17 +396,24 @@ export interface RefreshRequest {
 // ─── Image proxy ─────────────────────────────────────────────────────────────
 
 /** Query params for GET /api/image */
+/**
+ * `GET /api/image` query params (ADR 050 — reference-keyed: clients
+ * name an image by merchant id + kind; the backend resolves the actual
+ * upstream URL from its own stores and never accepts URLs from
+ * clients).
+ */
 export interface ImageProxyParams {
-  url: string;
+  merchantId: string;
+  /** `pin` resolves from the locations feed, falling back to the logo. */
+  kind: 'logo' | 'card' | 'pin';
   width?: number;
   height?: number;
   quality?: number;
-  mode?: 'public' | 'private';
   /**
    * Cache-busting version token (typically the merchant's `updatedAt`).
    * Never forwarded upstream — it only differentiates the proxy's LRU
-   * cache key and the browser-cache URL, so a same-URL image edit on CTX
-   * propagates without waiting out the 7-day immutable TTLs.
+   * cache key and the browser-cache URL, so an in-place image edit on
+   * CTX propagates without waiting out the 7-day immutable TTLs.
    */
   v?: string;
 }

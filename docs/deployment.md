@@ -40,7 +40,7 @@ No shared state between regions — each instance fetches merchants/locations in
 fly launch --name loopfinance-api --region iad --no-deploy --config apps/backend/fly.toml --dockerfile apps/backend/Dockerfile
 
 # Set secrets (API credentials for /locations endpoint only — the
-# non-secret config like GIFT_CARD_API_BASE_URL, IMAGE_PROXY_ALLOWED_HOSTS,
+# non-secret config like GIFT_CARD_API_BASE_URL,
 # TRUST_PROXY, PORT, NODE_ENV, and LOG_LEVEL are baked into the
 # apps/backend/fly.toml [env] block)
 fly secrets set --config apps/backend/fly.toml \
@@ -70,7 +70,6 @@ See `apps/backend/fly.toml`:
 | Variable                          | Required           | Default       | Description                                                                                                                                                                                                                                                                                                                                 |
 | --------------------------------- | ------------------ | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `GIFT_CARD_API_BASE_URL`          | Yes                | —             | CTX API base URL                                                                                                                                                                                                                                                                                                                            |
-| `IMAGE_PROXY_ALLOWED_HOSTS`       | Yes (prod)         | —             | Comma-separated hostnames for the image proxy SSRF allowlist (audit A-025). Boot fails in `NODE_ENV=production` without it unless `DISABLE_IMAGE_PROXY_ALLOWLIST_ENFORCEMENT=1` is set.                                                                                                                                                     |
 | `TRUST_PROXY`                     | Recommended (prod) | `false`       | Rate-limit IP trust boundary (audit A-023). Set to `true` on Fly.io so the limiter keys on X-Forwarded-For; otherwise clients can spoof their own bucket.                                                                                                                                                                                   |
 | `GIFT_CARD_API_KEY`               | No                 | —             | API key for /locations                                                                                                                                                                                                                                                                                                                      |
 | `GIFT_CARD_API_SECRET`            | No                 | —             | API secret for /locations                                                                                                                                                                                                                                                                                                                   |
@@ -701,13 +700,9 @@ previously-uploaded artifact**, regardless of build path. Loop's policy:
 docker build -t loopfinance-api -f apps/backend/Dockerfile .
 docker build -t loopfinance-web -f apps/web/Dockerfile .
 
-# Run backend — the Dockerfile hardcodes NODE_ENV=production, so the
-# audit A-025 allowlist is required; either set IMAGE_PROXY_ALLOWED_HOSTS
-# (preferred) or set DISABLE_IMAGE_PROXY_ALLOWLIST_ENFORCEMENT=1 to skip
-# the production boot check for quick local tests.
+# Run backend (the Dockerfile hardcodes NODE_ENV=production)
 docker run -p 8080:8080 \
   -e GIFT_CARD_API_BASE_URL=https://spend.ctx.com \
-  -e IMAGE_PROXY_ALLOWED_HOSTS=spend.ctx.com,ctx-spend.s3.us-west-2.amazonaws.com \
   -e TRUST_PROXY=false \
   loopfinance-api
 

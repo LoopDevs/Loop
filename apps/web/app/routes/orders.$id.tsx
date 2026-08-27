@@ -221,7 +221,10 @@ function OrderDetailBody({ order, now }: { order: Order; now: number }): React.J
             merchantName={order.merchantName}
             code={order.giftCardCode}
             pin={order.giftCardPin}
-            barcodeImageUrl={order.barcodeImageUrl}
+            // ADR 050: `barcodeImageUrl` on the order is only the
+            // "has an upstream barcode" signal — the bytes come
+            // through the authed reference-keyed proxy by order id.
+            barcodeOrderId={order.barcodeImageUrl !== undefined ? order.id : undefined}
           />
         </div>
       )}

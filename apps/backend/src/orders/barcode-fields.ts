@@ -35,6 +35,16 @@ function pickString(record: Record<string, unknown>, ...keys: string[]): string 
 }
 
 /**
+ * Pulls the barcode image URL out of a CTX gift-card record. CTX has
+ * shipped it under several names over time. Shared with the authed
+ * barcode-image proxy (`./barcode-image-handler.ts`, ADR 050), which
+ * resolves the URL server-side instead of forwarding it to the client.
+ */
+export function extractBarcodeImageUrl(upstream: Record<string, unknown>): string | undefined {
+  return pickString(upstream, 'barcodeUrl', 'imageUrl', 'barcodeImageUrl', 'giftCardImageUrl');
+}
+
+/**
  * Extracts barcode card material from the validated CTX response and
  * adds the `giftCardCode`, `giftCardPin`, `barcodeImageUrl` fields to
  * the in-flight `order` shape. Logs the extraction outcome on
@@ -49,13 +59,7 @@ export function applyBarcodeFields(args: {
   const { upstream, orderId, order, log } = args;
   const code = pickString(upstream, 'number', 'code', 'cardNumber', 'giftCardCode');
   const pin = pickString(upstream, 'pin', 'cardPin', 'giftCardPin');
-  const imageUrl = pickString(
-    upstream,
-    'barcodeUrl',
-    'imageUrl',
-    'barcodeImageUrl',
-    'giftCardImageUrl',
-  );
+  const imageUrl = extractBarcodeImageUrl(upstream);
 
   if (code !== undefined) order.giftCardCode = code;
   if (pin !== undefined) order.giftCardPin = pin;

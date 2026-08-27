@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { triggerHapticNotification } from '~/native/haptics';
 import { copySensitive } from '~/native/clipboard';
 import { nativeShare } from '~/native/share';
-import { getImageProxyUrl } from '~/utils/image';
+import { fetchOrderBarcodeImage } from '~/services/orders';
 import { composeGiftCardShareImage } from '~/utils/share-image';
 
 interface PurchaseCompleteProps {
@@ -10,12 +10,15 @@ interface PurchaseCompleteProps {
   code: string;
   pin?: string | undefined;
   /**
-   * Upstream-rendered barcode image URL. When present, we display it
-   * instead of rendering our own CODE128 canvas — the merchant's POS
-   * expects a specific format (CODE39, DataMatrix, QR, etc.) that we
-   * can't reliably guess client-side.
+   * Order id to fetch the upstream-rendered barcode image for — set
+   * only when the order carries one (ADR 050: the image comes through
+   * the authed reference-keyed proxy as a blob; the client never sees
+   * the CTX URL). When present, we display that image instead of
+   * rendering our own CODE128 canvas — the merchant's POS expects a
+   * specific format (CODE39, DataMatrix, QR, etc.) that we can't
+   * reliably guess client-side.
    */
-  barcodeImageUrl?: string | undefined;
+  barcodeOrderId?: string | undefined;
 }
 
 /**
@@ -31,14 +34,40 @@ export function PurchaseComplete({
   merchantName,
   code,
   pin,
-  barcodeImageUrl,
+  barcodeOrderId,
 }: PurchaseCompleteProps): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [copied, setCopied] = useState<'code' | 'pin' | null>(null);
   const [imageFailed, setImageFailed] = useState(false);
+  // Object URL for the barcode blob fetched through the authed proxy.
+  const [barcodeSrc, setBarcodeSrc] = useState<string | null>(null);
   // Fall back to the client-rendered canvas if CTX didn't provide
-  // a barcode image URL or the image 404s / is blocked.
-  const useCanvas = barcodeImageUrl === undefined || imageFailed;
+  // a barcode image or the fetch fails.
+  const useCanvas = barcodeOrderId === undefined || imageFailed;
+
+  useEffect(() => {
+    if (barcodeOrderId === undefined) return undefined;
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    void (async () => {
+      try {
+        const blob = await fetchOrderBarcodeImage(barcodeOrderId);
+        objectUrl = URL.createObjectURL(blob);
+        if (cancelled) {
+          URL.revokeObjectURL(objectUrl);
+          return;
+        }
+        setBarcodeSrc(objectUrl);
+      } catch {
+        if (!cancelled) setImageFailed(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      setBarcodeSrc(null);
+      if (objectUrl !== null) URL.revokeObjectURL(objectUrl);
+    };
+  }, [barcodeOrderId]);
 
   const handleCopy = async (text: string, which: 'code' | 'pin'): Promise<void> => {
     // Gift-card code/PIN are redemption secrets: copy via `copySensitive`
@@ -61,10 +90,10 @@ export function PurchaseComplete({
       code,
       pin,
       barcodeCanvas: useCanvas ? (canvasRef.current ?? undefined) : undefined,
-      barcodeImageUrl:
-        !useCanvas && barcodeImageUrl !== undefined
-          ? getImageProxyUrl(barcodeImageUrl, 640, 80, { mode: 'private' })
-          : undefined,
+      // The already-fetched blob's object URL — same-origin, so the
+      // share canvas can load it without CORS ceremony. Null while the
+      // blob is still loading → compose falls through cleanly.
+      barcodeImageUrl: !useCanvas && barcodeSrc !== null ? barcodeSrc : undefined,
     });
     const safeName = merchantName.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
     await nativeShare({
@@ -161,14 +190,14 @@ export function PurchaseComplete({
                 className="max-w-full"
                 aria-label={`Barcode for gift card code ${code}`}
               />
-            ) : (
+            ) : barcodeSrc !== null ? (
               <img
-                src={getImageProxyUrl(barcodeImageUrl ?? '', 640, 80, { mode: 'private' })}
+                src={barcodeSrc}
                 alt={`Barcode for gift card code ${code}`}
                 onError={() => setImageFailed(true)}
                 className="max-h-full max-w-full"
               />
-            )}
+            ) : null}
           </div>
         </div>
       </div>

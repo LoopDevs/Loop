@@ -168,10 +168,10 @@ export function loadImage(url: string): Promise<HTMLImageElement | null> {
       settle(null);
     }, LOAD_IMAGE_TIMEOUT_MS);
     // `crossOrigin` is required so the resulting canvas isn't
-    // tainted and `toDataURL` can serialise it. Our image proxy
-    // (`/api/image?url=...`) returns the right CORS headers; the
-    // URL comes from `getImageProxyUrl` so it always hits the
-    // proxy, never the raw CTX origin.
+    // tainted and `toDataURL` can serialise it. The barcode source is
+    // a same-origin blob object URL (fetched through the authed
+    // reference-keyed proxy, ADR 050), for which this is a no-op —
+    // kept so any future remote source stays untainted too.
     image.crossOrigin = 'anonymous';
     image.onload = () => settle(image);
     image.onerror = () => settle(null);

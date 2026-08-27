@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAllMerchants } from '~/hooks/use-merchants';
-import { getImageProxyUrl } from '~/utils/image';
+import { getMerchantImageUrl } from '~/utils/image';
 import { LoopLogo } from '~/components/ui/LoopLogo';
 import { MerchantTile, useCountUp, useReducedMotion } from './atoms';
 
@@ -258,10 +258,7 @@ export function TrustMerchants({ active, copy }: ScreenProps): React.JSX.Element
       .map((m) => ({
         name: m.name,
         pct: `${(m.savingsPercentage ?? 0).toFixed(0)}%`,
-        logoUrl:
-          m.logoUrl !== undefined
-            ? getImageProxyUrl(m.logoUrl, 128, 80, { version: m.updatedAt })
-            : undefined,
+        logoUrl: m.logoUrl !== undefined ? getMerchantImageUrl(m, 'logo', 128) : undefined,
       }));
   }, [merchants]);
 

@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import type { Merchant } from '@loop/shared';
 import { LazyImage } from '~/components/ui/LazyImage';
-import { getImageProxyUrl } from '~/utils/image';
+import { getMerchantImageUrl } from '~/utils/image';
 import { brandTileStyle } from '~/utils/brand-color';
 import { PurchaseContainer } from '~/components/features/purchase/PurchaseContainer';
 import { useFocusTrap } from '~/hooks/use-focus-trap';
@@ -25,12 +25,8 @@ interface MapBottomSheetProps {
  * normally.
  */
 export function MapBottomSheet({ merchant, onClose }: MapBottomSheetProps): React.JSX.Element {
-  const coverUrl = merchant.cardImageUrl
-    ? getImageProxyUrl(merchant.cardImageUrl, 640, 80, { version: merchant.updatedAt })
-    : undefined;
-  const logoUrl = merchant.logoUrl
-    ? getImageProxyUrl(merchant.logoUrl, 96, 80, { version: merchant.updatedAt })
-    : undefined;
+  const coverUrl = merchant.cardImageUrl ? getMerchantImageUrl(merchant, 'card', 640) : undefined;
+  const logoUrl = merchant.logoUrl ? getMerchantImageUrl(merchant, 'logo', 96) : undefined;
 
   // Drag-to-close state. `dragY` is how far the sheet has been pulled
   // down from its resting position (in px). `isClosing` flips true

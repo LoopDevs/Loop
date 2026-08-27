@@ -1,7 +1,7 @@
 import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import type { Merchant } from '@loop/shared';
 import { merchantSlug } from '@loop/shared';
-import { getImageProxyUrl } from '~/utils/image';
+import { getMerchantImageUrl } from '~/utils/image';
 import { brandTileStyle } from '~/utils/brand-color';
 import { formatCashbackPct } from '~/utils/format-cashback';
 import { triggerHaptic } from '~/native/haptics';
@@ -111,13 +111,9 @@ export function MerchantCard({
 }: MerchantCardProps): React.JSX.Element {
   const slug = merchantSlug(merchant);
   const cardImgUrl =
-    merchant.cardImageUrl !== undefined
-      ? getImageProxyUrl(merchant.cardImageUrl, 640, 80, { version: merchant.updatedAt })
-      : undefined;
+    merchant.cardImageUrl !== undefined ? getMerchantImageUrl(merchant, 'card', 640) : undefined;
   const logoImgUrl =
-    merchant.logoUrl !== undefined
-      ? getImageProxyUrl(merchant.logoUrl, 160, 80, { version: merchant.updatedAt })
-      : undefined;
+    merchant.logoUrl !== undefined ? getMerchantImageUrl(merchant, 'logo', 160) : undefined;
   const cashbackLabel = formatCashbackPct(userCashbackPct);
   // Route locale drives the denomination-range grouping separators (ADR 034).
   const locale = useLocaleTag();

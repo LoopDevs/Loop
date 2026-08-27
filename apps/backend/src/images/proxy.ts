@@ -3,7 +3,10 @@ import https from 'node:https';
 import { Readable } from 'node:stream';
 import sharp from 'sharp';
 import type { Context } from 'hono';
+import { env } from '../env.js';
 import { logger } from '../logger.js';
+import { getMerchants } from '../merchants/sync.js';
+import { getMapPinUrl } from '../clustering/data-store.js';
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10 MB
 const MAX_DIMENSION = 2000;
@@ -44,101 +47,203 @@ function evictLruUntilFits(requiredBytes: number): void {
   }
 }
 
+/** Merchant image kinds the reference-keyed proxy can resolve. */
+const IMAGE_KINDS = ['logo', 'card', 'pin'] as const;
+type ImageKind = (typeof IMAGE_KINDS)[number];
+
+function isImageKind(v: string): v is ImageKind {
+  return (IMAGE_KINDS as readonly string[]).includes(v);
+}
+
+// Mirrors the sync layer's MAX_ID_LENGTH bound on upstream merchant ids.
+const MERCHANT_ID_RE = /^[\w.-]{1,128}$/;
+
 /**
- * GET /api/image
+ * GET /api/image — reference-keyed merchant-image proxy (ADR 050).
  *
- * Fetches a remote image, resizes it with sharp, caches the result, and
- * returns it with appropriate Content-Type and Cache-Control headers.
+ * The client names an image by reference; the backend resolves the
+ * actual upstream URL from its own stores, fetches, resizes with
+ * sharp, caches, and serves it. Clients never supply URLs — the
+ * URL-shaped API this replaced was an SSRF surface that needed a host
+ * allowlist and unconditional private-IP rejection to stay safe.
  *
  * Query params:
- *   url      — remote image URL (required)
- *   width    — target width in px (optional, max 2000)
- *   height   — target height in px (optional, max 2000)
- *   quality  — JPEG quality 1–100 (optional, default 80)
- *   v        — cache-busting version token (optional; typically the
- *              merchant's `updatedAt`). Part of the LRU cache key but
- *              NEVER forwarded upstream — a same-URL image edit on CTX
- *              gets fresh bytes on the first request carrying the new
- *              version, instead of waiting out the 7-day TTL.
+ *   merchantId — catalog merchant id (required)
+ *   kind       — logo | card | pin (required). `pin` resolves from the
+ *                locations feed, falling back to the merchant's logo —
+ *                the same precedence the cluster store applies.
+ *   width      — target width in px (optional, max 2000)
+ *   height     — target height in px (optional, max 2000)
+ *   quality    — JPEG/WebP quality 1–100 (optional, default 80)
+ *   v          — cache-busting version token (optional; typically the
+ *                merchant's `updatedAt`). Part of the LRU cache key and
+ *                of the browser-cached URL, never sent upstream.
  */
 export async function imageProxyHandler(c: Context): Promise<Response> {
   const log = logger.child({ handler: 'image-proxy' });
 
-  const imageUrl = c.req.query('url');
-  if (!imageUrl) {
-    return c.json({ code: 'VALIDATION_ERROR', message: 'url is required' }, 400);
+  const merchantId = c.req.query('merchantId') ?? '';
+  const kind = c.req.query('kind') ?? '';
+  if (!MERCHANT_ID_RE.test(merchantId)) {
+    return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId is required' }, 400);
+  }
+  if (!isImageKind(kind)) {
+    return c.json({ code: 'VALIDATION_ERROR', message: 'kind must be logo, card, or pin' }, 400);
   }
 
-  const urlError = await validateImageUrl(imageUrl);
+  const merchant = getMerchants().merchantsById.get(merchantId);
+  if (merchant === undefined) {
+    return c.json({ code: 'NOT_FOUND', message: 'Merchant not found' }, 404);
+  }
+
+  const imageUrl =
+    kind === 'logo'
+      ? merchant.logoUrl
+      : kind === 'card'
+        ? merchant.cardImageUrl
+        : (getMapPinUrl(merchantId) ?? merchant.logoUrl);
+  if (imageUrl === undefined || imageUrl === null) {
+    return c.json({ code: 'NOT_FOUND', message: `Merchant has no ${kind} image` }, 404);
+  }
+
+  const urlError = await validateResolvedImageUrl(imageUrl);
   if (urlError !== null) {
-    log.warn({ url: imageUrl, reason: urlError }, 'Image proxy URL rejected');
-    return c.json({ code: 'VALIDATION_ERROR', message: urlError }, 400);
+    // The URL is CTX catalog data, not client input — a rejection means
+    // the upstream record is unusable, which is an upstream problem.
+    log.warn({ merchantId, kind, reason: urlError }, 'Resolved merchant image URL rejected');
+    return c.json({ code: 'UPSTREAM_ERROR', message: 'Upstream image URL is not usable' }, 502);
   }
 
   const width = clampDimension(parseInt(c.req.query('width') ?? '0', 10));
   const height = clampDimension(parseInt(c.req.query('height') ?? '0', 10));
   const quality = clampQuality(parseInt(c.req.query('quality') ?? '80', 10));
-  const mode = c.req.query('mode') === 'private' ? 'private' : 'public';
-  // Bounded so an attacker can't mint unbounded distinct cache keys for
-  // one image by rotating an arbitrarily long `v` — beyond the length
-  // cap the LRU itself bounds total memory, same as rotating `quality`.
+  // Bounded so unbounded distinct cache keys can't be minted for one
+  // image by rotating an arbitrarily long `v` — beyond the length cap
+  // the LRU itself bounds total memory, same as rotating `quality`.
   const version = (c.req.query('v') ?? '').slice(0, 64);
 
   const key = cacheKey(imageUrl, width, height, quality, version);
 
-  const cached = mode === 'public' ? cache.get(key) : undefined;
+  const cached = cache.get(key);
   if (cached !== undefined && Date.now() - cached.cachedAt < CACHE_TTL_MS) {
     cached.lastUsed = Date.now();
-    return imageResponse(cached.data, cached.mimeType, mode);
+    return imageResponse(cached.data, cached.mimeType, 'public');
   }
 
+  const result = await fetchAndTransformImage(imageUrl, { width, height, quality });
+  if (!result.ok) {
+    return c.json({ code: result.code, message: result.message }, result.status);
+  }
+  const { data, mimeType } = result;
+
+  if (data.byteLength <= MAX_CACHE_BYTES) {
+    // Overwrite accounting: a TTL-expired entry for the same key is
+    // replaced (not added), so its bytes must come off the counter
+    // first — otherwise `totalCacheBytes` drifts upward on every
+    // refresh and the LRU evicts earlier and earlier until the
+    // cache is effectively disabled (comprehensive-audit
+    // 2026-06-11, P10).
+    const previous = cache.get(key);
+    if (previous !== undefined) {
+      cache.delete(key);
+      totalCacheBytes -= previous.sizeBytes;
+    }
+    evictLruUntilFits(data.byteLength);
+    cache.set(key, {
+      data,
+      mimeType,
+      cachedAt: Date.now(),
+      lastUsed: Date.now(),
+      sizeBytes: data.byteLength,
+    });
+    totalCacheBytes += data.byteLength;
+  }
+
+  return imageResponse(data, mimeType, 'public');
+}
+
+export type ImageFetchResult =
+  | { ok: true; data: Uint8Array; mimeType: string }
+  | { ok: false; status: 413 | 500 | 502; code: string; message: string };
+
+/**
+ * Fetches a server-resolved image URL and re-encodes it with sharp.
+ * Shared by the catalog handler above and the authed order-barcode
+ * handler (`orders/barcode-image-handler.ts`). The caller has already
+ * run `validateResolvedImageUrl`; this adds the transport-level
+ * hardening (redirect rejection, content-type check, size caps).
+ *
+ * `forceJpeg` flattens any alpha onto white and always emits JPEG —
+ * used for barcodes, where the caller needs a statically known MIME
+ * type and a white quiet zone is what scanners want anyway.
+ */
+export async function fetchAndTransformImage(
+  imageUrl: string,
+  opts: { width: number; height: number; quality: number; forceJpeg?: boolean },
+): Promise<ImageFetchResult> {
+  const log = logger.child({ handler: 'image-proxy' });
+  const { width, height, quality } = opts;
   try {
     // Deliberately not `getUpstreamCircuit('...').fetch`. Our breakers
     // are keyed per fixed endpoint category (`login`, `gift-cards`,
-    // etc.). Image URLs here are arbitrary allowlisted hosts — one bad
-    // host would trip a shared breaker and fail every other host's logo
-    // fetches. This handler already has a `FETCH_TIMEOUT_MS` bound + a
-    // 100 MB / 7-day LRU cache in front, which is the right level of
-    // protection for this shape. Documented exception in
-    // `apps/backend/AGENTS.md` under "Upstream calls always use".
-    //
-    // `__imageUpstream.fetch` is the SSRF-safe transport (see above): it
-    // range-checks the connect-time resolved IP via `ssrfSafeLookup`,
-    // closing the DNS-rebinding gap ADR-005 §5 previously only documented.
+    // etc.); image hosts vary per record, and one bad host would trip
+    // a shared breaker for every other host's fetches. The
+    // FETCH_TIMEOUT_MS bound is the right protection here. Documented
+    // exception in `apps/backend/AGENTS.md` under "Upstream calls
+    // always use".
     const upstream = await __imageUpstream.fetch(imageUrl, {
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       redirect: 'manual',
     });
 
-    // Reject redirects — following them would re-introduce SSRF risk by
-    // letting an allowed upstream point at a private IP.
+    // Reject redirects — following them would hand URL control to the
+    // image host's owner, sidestepping the resolved-URL validation.
     if (upstream.status >= 300 && upstream.status < 400) {
-      return c.json(
-        { code: 'UPSTREAM_REDIRECT', message: 'Redirects from upstream are not allowed' },
-        502,
-      );
+      return {
+        ok: false,
+        status: 502,
+        code: 'UPSTREAM_REDIRECT',
+        message: 'Redirects from upstream are not allowed',
+      };
     }
 
     if (!upstream.ok) {
-      return c.json(
-        { code: 'UPSTREAM_ERROR', message: `Upstream returned ${upstream.status}` },
-        502,
-      );
+      return {
+        ok: false,
+        status: 502,
+        code: 'UPSTREAM_ERROR',
+        message: `Upstream returned ${upstream.status}`,
+      };
     }
 
     const contentType = (upstream.headers.get('Content-Type') ?? '').toLowerCase();
     if (!contentType.startsWith('image/')) {
-      return c.json({ code: 'NOT_AN_IMAGE', message: 'Upstream response is not an image' }, 502);
+      return {
+        ok: false,
+        status: 502,
+        code: 'NOT_AN_IMAGE',
+        message: 'Upstream response is not an image',
+      };
     }
 
     const declaredLength = parseInt(upstream.headers.get('Content-Length') ?? '0', 10);
     if (Number.isFinite(declaredLength) && declaredLength > MAX_IMAGE_BYTES) {
-      return c.json({ code: 'IMAGE_TOO_LARGE', message: 'Image exceeds 10 MB limit' }, 413);
+      return {
+        ok: false,
+        status: 413,
+        code: 'IMAGE_TOO_LARGE',
+        message: 'Image exceeds 10 MB limit',
+      };
     }
 
     const buffer = await readBodyWithLimit(upstream, MAX_IMAGE_BYTES);
     if (buffer === null) {
-      return c.json({ code: 'IMAGE_TOO_LARGE', message: 'Image exceeds 10 MB limit' }, 413);
+      return {
+        ok: false,
+        status: 413,
+        code: 'IMAGE_TOO_LARGE',
+        message: 'Image exceeds 10 MB limit',
+      };
     }
 
     // Inspect the input to decide output format: inputs with an alpha
@@ -148,9 +253,12 @@ export async function imageProxyHandler(c: Context): Promise<Response> {
     // is supported by every browser we target (Safari 14+, Chrome/Firefox
     // current, WebKit on Capacitor).
     const metadata = await sharp(buffer).metadata();
-    const hasAlpha = metadata.hasAlpha === true;
+    const hasAlpha = metadata.hasAlpha === true && opts.forceJpeg !== true;
 
     let pipeline = sharp(buffer);
+    if (opts.forceJpeg === true) {
+      pipeline = pipeline.flatten({ background: '#ffffff' });
+    }
 
     if (width > 0 || height > 0) {
       pipeline = pipeline.resize(width || null, height || null, {
@@ -166,37 +274,14 @@ export async function imageProxyHandler(c: Context): Promise<Response> {
     const mimeType = hasAlpha ? 'image/webp' : 'image/jpeg';
     const output = new Uint8Array(data);
 
-    if (mode === 'public' && output.byteLength <= MAX_CACHE_BYTES) {
-      // Overwrite accounting: a TTL-expired entry for the same key is
-      // replaced (not added), so its bytes must come off the counter
-      // first — otherwise `totalCacheBytes` drifts upward on every
-      // refresh and the LRU evicts earlier and earlier until the
-      // cache is effectively disabled (comprehensive-audit
-      // 2026-06-11, P10).
-      const previous = cache.get(key);
-      if (previous !== undefined) {
-        cache.delete(key);
-        totalCacheBytes -= previous.sizeBytes;
-      }
-      evictLruUntilFits(output.byteLength);
-      cache.set(key, {
-        data: output,
-        mimeType,
-        cachedAt: Date.now(),
-        lastUsed: Date.now(),
-        sizeBytes: output.byteLength,
-      });
-      totalCacheBytes += output.byteLength;
-    }
-
     log.debug(
       { url: imageUrl, width: info.width, height: info.height, bytes: output.byteLength },
       'Image processed',
     );
-    return imageResponse(output, mimeType, mode);
+    return { ok: true, data: output, mimeType };
   } catch (err) {
     log.error({ err, url: imageUrl }, 'Image proxy error');
-    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to process image' }, 500);
+    return { ok: false, status: 500, code: 'INTERNAL_ERROR', message: 'Failed to process image' };
   }
 }
 
@@ -226,7 +311,11 @@ export function evictExpiredImageCache(): void {
   }
 }
 
-function imageResponse(data: Uint8Array, mimeType: string, mode: 'public' | 'private'): Response {
+export function imageResponse(
+  data: Uint8Array,
+  mimeType: string,
+  mode: 'public' | 'private',
+): Response {
   return new Response(data, {
     headers: {
       'Content-Type': mimeType,
@@ -267,11 +356,11 @@ async function readBodyWithLimit(res: Response, limit: number): Promise<Buffer |
   return Buffer.concat(chunks.map((c) => Buffer.from(c)));
 }
 
-// SSRF guard (URL-validate + IP-range checks) lives in
-// `./ssrf-guard.ts`. `validateImageUrl` is the pre-flight check;
-// `ssrfSafeLookup` is the connect-time resolver that closes the
+// Resolved-URL validation (production https + public-IP requirement;
+// permissive outside production) lives in `./ssrf-guard.ts`, together
+// with `ssrfSafeLookup`, the connect-time resolver that closes the
 // DNS-rebinding gap on the actual fetch below.
-import { validateImageUrl, ssrfSafeLookup } from './ssrf-guard.js';
+import { validateResolvedImageUrl, ssrfSafeLookup } from './ssrf-guard.js';
 
 interface UpstreamFetchInit {
   signal?: AbortSignal;
@@ -285,22 +374,27 @@ interface UpstreamFetchInit {
 const NULL_BODY_STATUSES = new Set([101, 103, 204, 205, 304]);
 
 /**
- * SSRF-safe upstream fetch. Unlike a bare `fetch()`, the connecting
- * socket resolves DNS through `ssrfSafeLookup`, which range-checks the
- * address the request will actually connect to — closing the
- * DNS-rebinding TOCTOU where an attacker-run resolver answers public to
- * `validateImageUrl` and private to the fetch, even with the host
- * allowlist off. `agent: false` forces a fresh validated lookup per
- * request (no keep-alive socket reuse). Node core never auto-follows
- * redirects, so a 3xx surfaces as a status the handler rejects (no
- * redirect-chain SSRF).
+ * Upstream fetch on node core. In production the connecting socket
+ * resolves DNS through `ssrfSafeLookup`, which range-checks the address
+ * the request will actually connect to — closing the DNS-rebinding
+ * TOCTOU where a resolver answers public to `validateResolvedImageUrl`
+ * and private to the fetch. Outside production the default resolver is
+ * used so local CTX file hosts work. `agent: false` forces a fresh
+ * lookup per request (no keep-alive socket reuse). Node core never
+ * auto-follows redirects, so a 3xx surfaces as a status the handler
+ * rejects.
  */
-function ssrfSafeUpstreamFetch(rawUrl: string, init: UpstreamFetchInit): Promise<Response> {
+function upstreamImageFetch(rawUrl: string, init: UpstreamFetchInit): Promise<Response> {
   const transport = new URL(rawUrl).protocol === 'http:' ? http : https;
   return new Promise<Response>((resolve, reject) => {
     const req = transport.request(
       rawUrl,
-      { method: 'GET', lookup: ssrfSafeLookup, agent: false, signal: init.signal },
+      {
+        method: 'GET',
+        ...(env.NODE_ENV === 'production' ? { lookup: ssrfSafeLookup } : {}),
+        agent: false,
+        signal: init.signal,
+      },
       (res) => {
         const status = res.statusCode ?? 502;
         const headers = new Headers();
@@ -323,22 +417,21 @@ function ssrfSafeUpstreamFetch(rawUrl: string, init: UpstreamFetchInit): Promise
 }
 
 /**
- * Test seam: the upstream fetch is SSRF-safe (node core + a connect-time
- * IP-validating `lookup`) in production; the proxy tests replace `fetch`
- * here with a stub returning a synthetic `Response` so they exercise the
- * resize/cache/redirect handling without real sockets. The connect-time
- * rebind defence itself is proven directly in `ssrf-guard.test.ts`.
+ * Test seam: the proxy tests replace `fetch` here with a stub returning
+ * a synthetic `Response` so they exercise the resize/cache/redirect
+ * handling without real sockets. The connect-time rebind defence itself
+ * is proven directly in `ssrf-guard.test.ts`.
  */
 export const __imageUpstream: {
   fetch: (url: string, init: UpstreamFetchInit) => Promise<Response>;
-} = { fetch: ssrfSafeUpstreamFetch };
+} = { fetch: upstreamImageFetch };
 
-function clampDimension(v: number): number {
+export function clampDimension(v: number): number {
   if (isNaN(v) || v <= 0) return 0;
   return Math.min(v, MAX_DIMENSION);
 }
 
-function clampQuality(v: number): number {
+export function clampQuality(v: number): number {
   if (isNaN(v)) return 80;
   return Math.max(1, Math.min(v, 100));
 }

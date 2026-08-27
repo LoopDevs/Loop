@@ -33,3 +33,17 @@ export async function fetchOrders(page = 1): Promise<OrderListResponse> {
 export async function fetchOrder(id: string): Promise<{ order: Order }> {
   return authenticatedRequest<{ order: Order }>(`/api/orders/${encodeURIComponent(id)}`);
 }
+
+/**
+ * ADR 050: fetches the order's barcode image through the authed,
+ * reference-keyed proxy (`GET /api/orders/:id/barcode-image`) — the
+ * client never sees the upstream CTX URL. The endpoint always emits
+ * JPEG, so the Blob's MIME type is static.
+ */
+export async function fetchOrderBarcodeImage(id: string): Promise<Blob> {
+  const buffer = await authenticatedRequest<ArrayBuffer>(
+    `/api/orders/${encodeURIComponent(id)}/barcode-image`,
+    { binary: true },
+  );
+  return new Blob([buffer], { type: 'image/jpeg' });
+}

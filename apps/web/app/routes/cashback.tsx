@@ -11,7 +11,7 @@ import { Footer } from '~/components/features/Footer';
 import { Phase2Gate } from '~/components/Phase2Gate';
 import { Spinner } from '~/components/ui/Spinner';
 import { LazyImage } from '~/components/ui/LazyImage';
-import { getImageProxyUrl } from '~/utils/image';
+import { getMerchantImageUrl } from '~/utils/image';
 
 /**
  * `/cashback` — SEO index page listing every merchant with an
@@ -133,7 +133,7 @@ function MerchantRow({ merchant }: { merchant: TopCashbackMerchant }): React.JSX
         <div className="h-12 w-12 shrink-0">
           {merchant.logoUrl !== null ? (
             <LazyImage
-              src={getImageProxyUrl(merchant.logoUrl, 96, 96)}
+              src={getMerchantImageUrl(merchant, 'logo', 96, 96)}
               alt=""
               className="h-12 w-12 rounded-lg object-cover"
             />

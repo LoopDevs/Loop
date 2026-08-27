@@ -27,20 +27,29 @@ vi.mock('../../logger.js', () => ({
   },
 }));
 
-// Mock background refresh to prevent timers and network calls
-vi.mock('../../clustering/data-store.js', () => ({
-  startLocationRefresh: vi.fn(),
-  getLocations: () => ({ locations: [], loadedAt: Date.now() }),
+// ADR 050: the proxy resolves URLs from the merchant + location stores.
+// Both are mocked mutable so each test controls what resolves.
+const { storeState } = vi.hoisted(() => ({
+  storeState: {
+    merchants: new Map<string, Record<string, unknown>>(),
+    pinByMerchant: new Map<string, string>(),
+  },
 }));
 
 vi.mock('../../merchants/sync.js', () => ({
   startMerchantRefresh: vi.fn(),
   getMerchants: () => ({
-    merchants: [],
-    merchantsById: new Map(),
+    merchants: [...storeState.merchants.values()],
+    merchantsById: storeState.merchants,
     merchantsBySlug: new Map(),
     loadedAt: Date.now(),
   }),
+}));
+
+vi.mock('../../clustering/data-store.js', () => ({
+  startLocationRefresh: vi.fn(),
+  getLocations: () => ({ locations: [], loadedAt: Date.now() }),
+  getMapPinUrl: (merchantId: string) => storeState.pinByMerchant.get(merchantId) ?? null,
 }));
 
 // Mock clustering handler to avoid proto import
@@ -50,30 +59,34 @@ vi.mock('../../clustering/handler.js', () => ({
   ),
 }));
 
-// Mock sharp — native module, not needed for URL validation tests. The
-// handler now calls `sharp(buffer).metadata()` first to decide whether
-// to output JPEG (opaque) or WebP (alpha-preserving), so the mock must
-// respond to both `.metadata()` and the encoder chain. Default:
-// hasAlpha=false → JPEG path.
+// Mock sharp — native module. The handler calls `sharp(buffer).metadata()`
+// first to decide whether to output JPEG (opaque) or WebP
+// (alpha-preserving), so the mock must respond to both `.metadata()` and
+// the encoder chain. Default: hasAlpha=false → JPEG path.
 const mockSharpMetadata = vi.hoisted(() =>
   vi.fn().mockResolvedValue({ hasAlpha: false, format: 'jpeg' }),
 );
+const mockSharpFlatten = vi.hoisted(() => vi.fn());
 vi.mock('sharp', () => ({
-  default: vi.fn(() => ({
-    metadata: mockSharpMetadata,
-    resize: vi.fn().mockReturnThis(),
-    jpeg: vi.fn().mockReturnThis(),
-    webp: vi.fn().mockReturnThis(),
-    toBuffer: vi.fn().mockResolvedValue({
-      data: Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
-      info: { width: 100, height: 100 },
-    }),
-  })),
+  default: vi.fn(() => {
+    const pipeline = {
+      metadata: mockSharpMetadata,
+      flatten: mockSharpFlatten,
+      resize: vi.fn().mockReturnThis(),
+      jpeg: vi.fn().mockReturnThis(),
+      webp: vi.fn().mockReturnThis(),
+      toBuffer: vi.fn().mockResolvedValue({
+        data: Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
+        info: { width: 100, height: 100 },
+      }),
+    };
+    mockSharpFlatten.mockReturnValue(pipeline);
+    return pipeline;
+  }),
 }));
 
-// Mock DNS — default to returning a public IP for any hostname. Individual
-// tests override via mockDnsLookup.mockResolvedValueOnce(...) to simulate
-// DNS rebinding or private-IP resolution.
+// Mock DNS — default to a public IP. Production-mode tests override to
+// simulate private-IP resolution.
 const mockDnsLookup = vi.hoisted(() => vi.fn());
 vi.mock('node:dns/promises', () => ({
   lookup: mockDnsLookup,
@@ -86,12 +99,20 @@ import {
   __imageUpstream,
 } from '../proxy.js';
 
-// Stub the SSRF-safe upstream transport (production: node core + a
-// connect-time IP-validating `lookup`) with a mock returning synthetic
-// `Response`s. The handler still passes it `{ signal, redirect: 'manual' }`,
-// so the call-shape assertions below are unchanged; the connect-time rebind
-// defence is proven separately in `../ssrf-guard.test.ts`.
+// Stub the upstream transport with a mock returning synthetic
+// `Response`s so tests exercise resolution/resize/cache handling
+// without real sockets. The connect-time rebind defence is proven in
+// `../ssrf-guard.test.ts`.
 const mockFetch = vi.fn();
+
+const MERCHANT = {
+  id: 'm-1',
+  name: 'Airbnb Canada',
+  enabled: true,
+  logoUrl: 'https://cdn.example.com/logo.png',
+  cardImageUrl: 'https://cdn.example.com/card.jpg',
+  updatedAt: '2026-08-26T10:00:00Z',
+};
 
 beforeEach(() => {
   mockFetch.mockReset();
@@ -99,12 +120,11 @@ beforeEach(() => {
   mockDnsLookup.mockReset();
   mockSharpMetadata.mockReset();
   mockSharpMetadata.mockResolvedValue({ hasAlpha: false, format: 'jpeg' });
-  // Default DNS: everything resolves to a harmless public IP. Tests that
-  // care about resolution (rebinding, private-IP lookup) override per-call.
   mockDnsLookup.mockResolvedValue([{ address: '93.184.216.34', family: 4 }]);
-  // Reset env to defaults before each test
   mockEnv.NODE_ENV = 'development';
-  delete mockEnv.IMAGE_PROXY_ALLOWED_HOSTS;
+  storeState.merchants = new Map([[MERCHANT.id, MERCHANT]]);
+  storeState.pinByMerchant = new Map();
+  __resetImageCacheForTests();
 });
 
 // Tiny valid JPEG-like response for tests that need a successful upstream
@@ -116,259 +136,116 @@ function fakeImageResponse(): Response {
   });
 }
 
-describe('GET /api/image — SSRF validation', () => {
-  it('rejects missing url param with 400', async () => {
-    const res = await app.request('/api/image');
+describe('GET /api/image — reference resolution (ADR 050)', () => {
+  it('rejects a missing merchantId with 400', async () => {
+    const res = await app.request('/api/image?kind=logo');
     expect(res.status).toBe(400);
-
     const body = (await res.json()) as Record<string, string>;
     expect(body.code).toBe('VALIDATION_ERROR');
-    expect(body.message).toBe('url is required');
   });
 
-  it('rejects http://localhost/image.jpg (private address)', async () => {
+  it('rejects a missing or unknown kind with 400', async () => {
+    expect((await app.request('/api/image?merchantId=m-1')).status).toBe(400);
+    expect((await app.request('/api/image?merchantId=m-1&kind=banner')).status).toBe(400);
+  });
+
+  it('rejects a url param shape entirely — no URL-driven fetching', async () => {
     const res = await app.request(
-      `/api/image?url=${encodeURIComponent('http://localhost/image.jpg')}`,
+      `/api/image?url=${encodeURIComponent('http://169.254.169.254/latest/meta-data/')}`,
     );
     expect(res.status).toBe(400);
-
-    const body = (await res.json()) as Record<string, string>;
-    expect(body.code).toBe('VALIDATION_ERROR');
-    expect(body.message).toContain('Private and loopback');
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('rejects https://127.0.0.1/image.jpg (loopback)', async () => {
-    const res = await app.request(
-      `/api/image?url=${encodeURIComponent('https://127.0.0.1/image.jpg')}`,
-    );
-    expect(res.status).toBe(400);
-
+  it('404s for an unknown merchant', async () => {
+    const res = await app.request('/api/image?merchantId=nope&kind=logo');
+    expect(res.status).toBe(404);
     const body = (await res.json()) as Record<string, string>;
-    expect(body.code).toBe('VALIDATION_ERROR');
-    expect(body.message).toContain('Private and loopback');
+    expect(body.code).toBe('NOT_FOUND');
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('rejects https://10.0.0.1/image.jpg (private range)', async () => {
-    const res = await app.request(
-      `/api/image?url=${encodeURIComponent('https://10.0.0.1/image.jpg')}`,
-    );
-    expect(res.status).toBe(400);
-
-    const body = (await res.json()) as Record<string, string>;
-    expect(body.code).toBe('VALIDATION_ERROR');
-    expect(body.message).toContain('Private and loopback');
+  it('404s when the merchant has no image of the requested kind', async () => {
+    storeState.merchants.set('m-2', { id: 'm-2', name: 'No Images', enabled: true });
+    const res = await app.request('/api/image?merchantId=m-2&kind=card');
+    expect(res.status).toBe(404);
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('rejects https://192.168.1.1/image.jpg (private range)', async () => {
-    const res = await app.request(
-      `/api/image?url=${encodeURIComponent('https://192.168.1.1/image.jpg')}`,
-    );
-    expect(res.status).toBe(400);
-
-    const body = (await res.json()) as Record<string, string>;
-    expect(body.code).toBe('VALIDATION_ERROR');
-    expect(body.message).toContain('Private and loopback');
-  });
-
-  it('rejects https://[::1]/image.jpg (IPv6 loopback)', async () => {
-    const res = await app.request(
-      `/api/image?url=${encodeURIComponent('https://[::1]/image.jpg')}`,
-    );
-    expect(res.status).toBe(400);
-
-    const body = (await res.json()) as Record<string, string>;
-    expect(body.code).toBe('VALIDATION_ERROR');
-    expect(body.message).toContain('Private and loopback');
-  });
-
-  it('allows valid HTTPS URL when upstream succeeds', async () => {
+  it('resolves kind=logo from the catalog and fetches that URL', async () => {
     mockFetch.mockResolvedValueOnce(fakeImageResponse());
-
-    const url = 'https://cdn.example.com/photos/card.jpg';
-    const res = await app.request(`/api/image?url=${encodeURIComponent(url)}`);
-
+    const res = await app.request('/api/image?merchantId=m-1&kind=logo&width=160');
     expect(res.status).toBe(200);
     expect(res.headers.get('Content-Type')).toBe('image/jpeg');
     expect(res.headers.get('Cache-Control')).toContain('max-age=604800');
-
-    // Verify fetch was called with the original URL
     expect(mockFetch).toHaveBeenCalledWith(
-      url,
+      'https://cdn.example.com/logo.png',
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
 
-  it('rejects hostname not in IMAGE_PROXY_ALLOWED_HOSTS', async () => {
-    mockEnv.IMAGE_PROXY_ALLOWED_HOSTS = 'cdn.example.com';
+  it('resolves kind=pin from the locations feed, falling back to the logo', async () => {
+    storeState.pinByMerchant.set('m-1', 'https://cdn.example.com/pin.png');
+    mockFetch.mockResolvedValue(fakeImageResponse());
 
-    const url = 'https://evil.attacker.com/image.jpg';
-    const res = await app.request(`/api/image?url=${encodeURIComponent(url)}`);
+    expect((await app.request('/api/image?merchantId=m-1&kind=pin')).status).toBe(200);
+    expect(String(mockFetch.mock.calls[0]![0])).toBe('https://cdn.example.com/pin.png');
 
-    expect(res.status).toBe(400);
-
-    const body = (await res.json()) as Record<string, string>;
-    expect(body.code).toBe('VALIDATION_ERROR');
-    expect(body.message).toContain('not in the allowed list');
+    storeState.pinByMerchant.clear();
+    expect((await app.request('/api/image?merchantId=m-1&kind=pin&width=64')).status).toBe(200);
+    expect(String(mockFetch.mock.calls[1]![0])).toBe('https://cdn.example.com/logo.png');
   });
 
-  it('in production mode, rejects HTTP URLs (only HTTPS allowed)', async () => {
+  it('fetches loopback catalog URLs outside production (local CTX file hosts)', async () => {
+    storeState.merchants.set('m-1', {
+      ...MERCHANT,
+      logoUrl: 'http://localhost:7777/files/abc/download',
+    });
+    mockFetch.mockResolvedValueOnce(fakeImageResponse());
+    const res = await app.request('/api/image?merchantId=m-1&kind=logo');
+    expect(res.status).toBe(200);
+    expect(String(mockFetch.mock.calls[0]![0])).toBe('http://localhost:7777/files/abc/download');
+  });
+
+  it('rejects a non-HTTPS resolved URL in production with 502', async () => {
     mockEnv.NODE_ENV = 'production';
-
-    const url = 'http://cdn.example.com/image.jpg';
-    const res = await app.request(`/api/image?url=${encodeURIComponent(url)}`);
-
-    expect(res.status).toBe(400);
-
-    const body = (await res.json()) as Record<string, string>;
-    expect(body.code).toBe('VALIDATION_ERROR');
-    expect(body.message).toContain('Only HTTPS');
+    storeState.merchants.set('m-1', { ...MERCHANT, logoUrl: 'http://cdn.example.com/logo.png' });
+    const res = await app.request('/api/image?merchantId=m-1&kind=logo');
+    expect(res.status).toBe(502);
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('rejects https://0.0.0.0/image.jpg (unspecified)', async () => {
-    const res = await app.request(
-      `/api/image?url=${encodeURIComponent('https://0.0.0.0/image.jpg')}`,
-    );
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as Record<string, string>;
-    expect(body.message).toContain('Private and loopback');
-  });
-
-  it('rejects https://169.254.169.254/ (cloud metadata, link-local)', async () => {
-    const res = await app.request(
-      `/api/image?url=${encodeURIComponent('https://169.254.169.254/latest/meta-data/')}`,
-    );
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as Record<string, string>;
-    expect(body.message).toContain('Private and loopback');
-  });
-
-  it('rejects https://[::ffff:127.0.0.1]/ (IPv4-mapped IPv6 loopback)', async () => {
-    const res = await app.request(
-      `/api/image?url=${encodeURIComponent('https://[::ffff:127.0.0.1]/image.jpg')}`,
-    );
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as Record<string, string>;
-    expect(body.message).toContain('Private and loopback');
-  });
-
-  it('rejects hostname that resolves to a private IP (DNS rebinding defense)', async () => {
-    // Hostname looks public, but DNS resolves to AWS metadata address.
+  it('rejects a resolved URL that resolves to a private IP in production with 502', async () => {
+    mockEnv.NODE_ENV = 'production';
     mockDnsLookup.mockResolvedValueOnce([{ address: '169.254.169.254', family: 4 }]);
-
-    const url = 'https://metadata-proxy.evil.com/latest/meta-data/';
-    const res = await app.request(`/api/image?url=${encodeURIComponent(url)}`);
-
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as Record<string, string>;
-    expect(body.message).toContain('Private and loopback');
-    // Fetch must not have been called — validation blocks before any network I/O.
+    const res = await app.request('/api/image?merchantId=m-1&kind=logo');
+    expect(res.status).toBe(502);
     expect(mockFetch).not.toHaveBeenCalled();
-  });
-
-  it('rejects when DNS resolution returns mixed public + private addresses', async () => {
-    // Attacker advertises one public and one private A record.
-    mockDnsLookup.mockResolvedValueOnce([
-      { address: '93.184.216.34', family: 4 },
-      { address: '10.0.0.5', family: 4 },
-    ]);
-
-    const res = await app.request(
-      `/api/image?url=${encodeURIComponent('https://mixed.evil.com/x.jpg')}`,
-    );
-    expect(res.status).toBe(400);
-    expect(mockFetch).not.toHaveBeenCalled();
-  });
-
-  it('rejects when DNS lookup fails', async () => {
-    mockDnsLookup.mockRejectedValueOnce(new Error('ENOTFOUND'));
-
-    const res = await app.request(
-      `/api/image?url=${encodeURIComponent('https://nonexistent.invalid/x.jpg')}`,
-    );
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as Record<string, string>;
-    expect(body.message).toContain('resolve');
   });
 });
 
 describe('GET /api/image — upstream hardening', () => {
-  it('rejects upstream 302 redirect (prevents SSRF via redirect chain)', async () => {
+  it('rejects upstream 302 redirect', async () => {
     mockFetch.mockResolvedValueOnce(
-      new Response(null, {
-        status: 302,
-        headers: { Location: 'http://169.254.169.254/latest/meta-data/' },
-      }),
+      new Response(null, { status: 302, headers: { Location: 'https://elsewhere.example.com' } }),
     );
-
-    const res = await app.request(
-      `/api/image?url=${encodeURIComponent('https://cdn.example.com/image.jpg')}`,
-    );
+    const res = await app.request('/api/image?merchantId=m-1&kind=logo');
     expect(res.status).toBe(502);
     const body = (await res.json()) as Record<string, string>;
     expect(body.code).toBe('UPSTREAM_REDIRECT');
-    // Verify redirect:'manual' was requested so fetch did not follow.
-    expect(mockFetch).toHaveBeenCalledWith(
-      'https://cdn.example.com/image.jpg',
-      expect.objectContaining({ redirect: 'manual' }),
-    );
   });
 
   it('rejects non-image Content-Type (e.g. HTML from a misconfigured origin)', async () => {
     mockFetch.mockResolvedValueOnce(
-      new Response('<html>not an image</html>', {
+      new Response('<html></html>', {
         status: 200,
         headers: { 'Content-Type': 'text/html' },
       }),
     );
-
-    const res = await app.request(
-      `/api/image?url=${encodeURIComponent('https://cdn.example.com/page.html')}`,
-    );
+    const res = await app.request('/api/image?merchantId=m-1&kind=logo');
     expect(res.status).toBe(502);
     const body = (await res.json()) as Record<string, string>;
     expect(body.code).toBe('NOT_AN_IMAGE');
-  });
-
-  it('outputs WebP when input has an alpha channel (preserves logo transparency)', async () => {
-    mockSharpMetadata.mockResolvedValueOnce({ hasAlpha: true, format: 'png' });
-    mockFetch.mockResolvedValueOnce(
-      new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), {
-        status: 200,
-        headers: { 'Content-Type': 'image/png', 'Content-Length': '4' },
-      }),
-    );
-
-    const res = await app.request(
-      `/api/image?url=${encodeURIComponent('https://cdn.example.com/logo.png')}`,
-    );
-    expect(res.status).toBe(200);
-    expect(res.headers.get('Content-Type')).toBe('image/webp');
-  });
-
-  it('outputs JPEG when input has no alpha channel (default path)', async () => {
-    // mockSharpMetadata defaults to hasAlpha:false in beforeEach
-    mockFetch.mockResolvedValueOnce(
-      new Response(new Uint8Array([0xff, 0xd8, 0xff, 0xe0]), {
-        status: 200,
-        headers: { 'Content-Type': 'image/jpeg', 'Content-Length': '4' },
-      }),
-    );
-
-    const res = await app.request(
-      `/api/image?url=${encodeURIComponent('https://cdn.example.com/card.jpg')}`,
-    );
-    expect(res.status).toBe(200);
-    expect(res.headers.get('Content-Type')).toBe('image/jpeg');
-  });
-
-  it('private mode disables public caching for sensitive images', async () => {
-    mockFetch.mockResolvedValueOnce(fakeImageResponse());
-
-    const res = await app.request(
-      `/api/image?url=${encodeURIComponent('https://cdn.example.com/card.jpg')}&mode=private`,
-    );
-    expect(res.status).toBe(200);
-    expect(res.headers.get('Cache-Control')).toBe('private, no-store');
   });
 
   it('rejects upstream Content-Length exceeding 10MB', async () => {
@@ -381,21 +258,57 @@ describe('GET /api/image — upstream hardening', () => {
         },
       }),
     );
-
-    const res = await app.request(
-      `/api/image?url=${encodeURIComponent('https://cdn.example.com/huge.jpg')}`,
-    );
+    const res = await app.request('/api/image?merchantId=m-1&kind=logo');
     expect(res.status).toBe(413);
     const body = (await res.json()) as Record<string, string>;
     expect(body.code).toBe('IMAGE_TOO_LARGE');
   });
+
+  it('outputs WebP when input has an alpha channel (transparent logos)', async () => {
+    mockSharpMetadata.mockResolvedValueOnce({ hasAlpha: true, format: 'png' });
+    mockFetch.mockResolvedValueOnce(
+      new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), {
+        status: 200,
+        headers: { 'Content-Type': 'image/png', 'Content-Length': '4' },
+      }),
+    );
+    const res = await app.request('/api/image?merchantId=m-1&kind=logo');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toBe('image/webp');
+  });
+
+  it('outputs JPEG when input has no alpha channel (default path)', async () => {
+    mockFetch.mockResolvedValueOnce(fakeImageResponse());
+    const res = await app.request('/api/image?merchantId=m-1&kind=card');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toBe('image/jpeg');
+  });
 });
 
-describe('GET /api/image — LRU byte accounting', () => {
-  it('does not drift the byte counter when an expired entry is overwritten', async () => {
-    __resetImageCacheForTests();
+describe('GET /api/image — LRU cache', () => {
+  it('serves repeats from cache and treats a new `v` as a miss', async () => {
     mockFetch.mockResolvedValue(fakeImageResponse());
-    const url = `/api/image?url=${encodeURIComponent('https://cdn.example.com/recached.jpg')}`;
+    const base = '/api/image?merchantId=m-1&kind=logo';
+
+    expect((await app.request(`${base}&v=2026-08-01`)).status).toBe(200);
+    expect((await app.request(`${base}&v=2026-08-01`)).status).toBe(200);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+
+    // Bumped v (CTX merchant `updatedAt` changed) → fresh upstream
+    // fetch, second cache entry.
+    expect((await app.request(`${base}&v=2026-08-26`)).status).toBe(200);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(__getImageCacheStatsForTests().entries).toBe(2);
+
+    // `v` must never reach the upstream fetch URL.
+    for (const call of mockFetch.mock.calls) {
+      expect(String(call[0])).toBe('https://cdn.example.com/logo.png');
+    }
+  });
+
+  it('does not drift the byte counter when an expired entry is overwritten', async () => {
+    mockFetch.mockResolvedValue(fakeImageResponse());
+    const url = '/api/image?merchantId=m-1&kind=logo';
 
     const first = await app.request(url);
     expect(first.status).toBe(200);
@@ -421,29 +334,5 @@ describe('GET /api/image — LRU byte accounting', () => {
     const afterSecond = __getImageCacheStatsForTests();
     expect(afterSecond.entries).toBe(1);
     expect(afterSecond.totalBytes).toBe(afterFirst.totalBytes);
-    __resetImageCacheForTests();
-  });
-
-  it('treats a new `v` version token as a cache miss (same-URL image edits propagate)', async () => {
-    __resetImageCacheForTests();
-    mockFetch.mockResolvedValue(fakeImageResponse());
-    const base = `/api/image?url=${encodeURIComponent('https://cdn.example.com/logo.png')}`;
-
-    // Same URL + same v → served from cache (one upstream fetch).
-    expect((await app.request(`${base}&v=2026-08-01`)).status).toBe(200);
-    expect((await app.request(`${base}&v=2026-08-01`)).status).toBe(200);
-    expect(mockFetch).toHaveBeenCalledTimes(1);
-
-    // Bumped v (CTX merchant `updatedAt` changed) → fresh upstream fetch,
-    // second cache entry.
-    expect((await app.request(`${base}&v=2026-08-26`)).status).toBe(200);
-    expect(mockFetch).toHaveBeenCalledTimes(2);
-    expect(__getImageCacheStatsForTests().entries).toBe(2);
-
-    // `v` must never reach the upstream fetch URL.
-    for (const call of mockFetch.mock.calls) {
-      expect(String(call[0])).toBe('https://cdn.example.com/logo.png');
-    }
-    __resetImageCacheForTests();
   });
 });

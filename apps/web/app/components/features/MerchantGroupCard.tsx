@@ -1,7 +1,7 @@
 import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import type { MerchantGroup } from '@loop/shared';
 import { brandSlug } from '@loop/shared';
-import { getImageProxyUrl } from '~/utils/image';
+import { getMerchantImageUrl } from '~/utils/image';
 import { brandTileStyle } from '~/utils/brand-color';
 import { triggerHaptic } from '~/native/haptics';
 import { LazyImage } from '~/components/ui/LazyImage';
@@ -44,13 +44,9 @@ export function MerchantGroupCard({
   const withCard = group.members.find((m) => m.cardImageUrl !== undefined);
   const withLogo = group.members.find((m) => m.logoUrl !== undefined);
   const cardImgUrl =
-    withCard?.cardImageUrl !== undefined
-      ? getImageProxyUrl(withCard.cardImageUrl, 640, 80, { version: withCard.updatedAt })
-      : undefined;
+    withCard?.cardImageUrl !== undefined ? getMerchantImageUrl(withCard, 'card', 640) : undefined;
   const logoImgUrl =
-    withLogo?.logoUrl !== undefined
-      ? getImageProxyUrl(withLogo.logoUrl, 160, 80, { version: withLogo.updatedAt })
-      : undefined;
+    withLogo?.logoUrl !== undefined ? getMerchantImageUrl(withLogo, 'logo', 160) : undefined;
 
   // Best-of across the group: the brand tile advertises the strongest
   // offer any variant carries, so the headline doesn't undersell.

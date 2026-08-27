@@ -4,9 +4,9 @@
  * Lifted out of `apps/backend/src/images/proxy.ts`. The helpers
  * share one concern — validating that a remote URL is safe to proxy:
  *
- *   - `validateImageUrl(rawUrl)` — protocol check, allowlist
- *     check, hostname resolution, IP-range check across every
- *     resolved address (the pre-flight check).
+ *   - `validateResolvedImageUrl(rawUrl)` — protocol check, hostname
+ *     resolution, IP-range check across every resolved address (the
+ *     pre-flight check; production-only — see its doc comment).
  *   - `ssrfSafeLookup(hostname, …)` — the connecting socket's DNS
  *     resolver for the *actual* fetch: it re-range-checks the address
  *     the connection will use, so a DNS-rebind between the pre-flight
@@ -23,10 +23,12 @@
  * Pulled out to give the SSRF-defense logic its own focused
  * home — separate from the proxy\'s caching / fetch-with-limit
  * / sharp-resize plumbing in the parent file. The DNS-rebinding
- * TOCTOU gap that used to be a documented limitation is now closed
- * by `ssrfSafeLookup` (wired into the proxy's fetch as the socket's
- * `lookup`); `IMAGE_PROXY_ALLOWED_HOSTS` remains a defence-in-depth
- * layer on top, not the only mitigation.
+ * TOCTOU gap that used to be a documented limitation is closed by
+ * `ssrfSafeLookup` (wired into the proxy's fetch as the socket's
+ * `lookup` in production). Since ADR 050 the proxy is reference-keyed
+ * (clients send ids, never URLs), so this module is defense-in-depth
+ * against bad CTX catalog data rather than the primary control
+ * against client-driven SSRF.
  */
 import { lookup } from 'node:dns/promises';
 import net from 'node:net';
@@ -34,24 +36,33 @@ import type { LookupFunction } from 'node:net';
 import { env } from '../env.js';
 
 /**
- * Validates that the given URL is safe to proxy:
- * - Must be https: (or http: only in development)
- * - If IMAGE_PROXY_ALLOWED_HOSTS is configured, hostname must be in the allowlist
- * - Resolves hostname via DNS and rejects if any resolved address is private,
- *   loopback, link-local, CGNAT, or multicast (SSRF / DNS-rebinding defense)
+ * Validates a SERVER-RESOLVED image URL before the proxy fetches it.
+ *
+ * ADR 050: the image proxy is reference-keyed — clients send a merchant
+ * id / order id and the backend looks the URL up in its own stores
+ * (merchant catalog, locations, CTX order). The URL under validation is
+ * therefore CTX-supplied data, never client input, and this check is
+ * defense-in-depth against a compromised or misbehaving upstream
+ * pointing catalog URLs at internal targets — not the primary SSRF
+ * control it was when the client chose the URL.
+ *
+ * Rules:
+ * - Outside production: any http(s) URL passes — local CTX instances
+ *   mint file URLs against their own dev base (e.g. a loopback host),
+ *   and there is no internal network to protect.
+ * - In production: must be https:, and every resolved address must be
+ *   public (no loopback/private/link-local/CGNAT/multicast, including
+ *   IPv4-mapped / NAT64 / 6to4 forms).
  *
  * Returns an error string if invalid, or null if valid.
  *
- * This is the pre-flight check: it rejects obviously-bad URLs before any
- * socket is opened. It does NOT, on its own, close the DNS-rebinding
- * TOCTOU window — an attacker-run resolver can answer with a public IP
- * here and a private IP to the fetch's own later lookup. That window is
- * closed at the connection layer by `ssrfSafeLookup`, which the proxy
- * wires in as the connecting socket's `lookup`, so the address the
- * request actually connects to is range-checked too. Both layers run
- * regardless of whether `IMAGE_PROXY_ALLOWED_HOSTS` is configured.
+ * This is the pre-flight check: it rejects bad URLs before any socket
+ * is opened. The DNS-rebinding TOCTOU window is closed at the
+ * connection layer by `ssrfSafeLookup`, which the proxy wires in as the
+ * connecting socket's `lookup` (in production), so the address the
+ * request actually connects to is range-checked too.
  */
-export async function validateImageUrl(rawUrl: string): Promise<string | null> {
+export async function validateResolvedImageUrl(rawUrl: string): Promise<string | null> {
   let parsed: URL;
   try {
     parsed = new URL(rawUrl);
@@ -61,15 +72,14 @@ export async function validateImageUrl(rawUrl: string): Promise<string | null> {
 
   const { protocol, hostname } = parsed;
 
-  if (protocol !== 'https:' && !(env.NODE_ENV === 'development' && protocol === 'http:')) {
-    return 'Only HTTPS URLs are allowed';
+  if (protocol !== 'https:' && protocol !== 'http:') {
+    return 'Only HTTP(S) URLs are supported';
   }
 
-  if (env.IMAGE_PROXY_ALLOWED_HOSTS !== undefined) {
-    const allowed = env.IMAGE_PROXY_ALLOWED_HOSTS.split(',').map((h) => h.trim().toLowerCase());
-    if (!allowed.includes(hostname.toLowerCase())) {
-      return `Host "${hostname}" is not in the allowed list`;
-    }
+  if (env.NODE_ENV !== 'production') return null;
+
+  if (protocol !== 'https:') {
+    return 'Only HTTPS URLs are allowed';
   }
 
   // URL hostnames for IPv6 literals are returned bracketed; strip them.

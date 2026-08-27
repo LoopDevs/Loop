@@ -76,6 +76,30 @@ export function getLocations(): StoreData {
   return store;
 }
 
+// ADR 050: per-merchant map-pin lookup for the reference-keyed image
+// proxy (`GET /api/image?kind=pin`). Built lazily and invalidated by
+// store identity, so every store-replacement path (refresh, warm
+// start, test reset) refreshes it without extra wiring. First
+// location with a pin wins — pins are brand logos in practice, so
+// per-location variation isn't a supported case.
+let pinIndexSource: StoreData | null = null;
+let pinIndex = new Map<string, string>();
+
+/** Returns the merchant's map-pin URL from the locations feed, or null. */
+export function getMapPinUrl(merchantId: string): string | null {
+  if (pinIndexSource !== store) {
+    const index = new Map<string, string>();
+    for (const location of store.locations) {
+      if (location.mapPinUrl !== null && !index.has(location.merchantId)) {
+        index.set(location.merchantId, location.mapPinUrl);
+      }
+    }
+    pinIndex = index;
+    pinIndexSource = store;
+  }
+  return pinIndex.get(merchantId) ?? null;
+}
+
 let isLocationRefreshing = false;
 
 /** Returns true while a location refresh is in progress. */

@@ -41,6 +41,7 @@ import { killSwitch } from '../middleware/kill-switch.js';
 import { privateNoStoreResponse } from '../middleware/cache-control.js';
 import { requireAuth } from '../auth/handler.js';
 import { createOrderHandler, listOrdersHandler, getOrderHandler } from '../orders/handler.js';
+import { orderBarcodeImageHandler } from '../orders/barcode-image-handler.js';
 import {
   loopCreateOrderHandler,
   loopGetOrderHandler,
@@ -109,4 +110,12 @@ export function mountOrderRoutes(app: Hono): void {
     loopGetOrderHandler,
   );
   app.get('/api/orders/:id', rateLimit('GET /api/orders/:id', 120, 60_000), getOrderHandler);
+  // ADR 050: authed, reference-keyed barcode-image proxy. Same access
+  // model as GET /api/orders/:id (requireAuth above + CTX bearer
+  // scoping); serves the actual image bytes, private/no-store.
+  app.get(
+    '/api/orders/:id/barcode-image',
+    rateLimit('GET /api/orders/:id/barcode-image', 60, 60_000),
+    orderBarcodeImageHandler,
+  );
 }

@@ -15,7 +15,7 @@ import type { ClusterParams, ClusterResponse } from '@loop/shared';
 import { ApiException, merchantSlug } from '@loop/shared';
 import * as Sentry from '@sentry/react';
 import { fetchClusters } from '~/services/clusters';
-import { getImageProxyUrl } from '~/utils/image';
+import { getMerchantImageUrl } from '~/utils/image';
 import { useAllMerchants } from '~/hooks/use-merchants';
 
 const DEBOUNCE_MS = 300;
@@ -179,7 +179,9 @@ export default function ClusterMap({
   // the full catalog row here (popup handlers run outside React and only have
   // the merchant id), so the popup's "Buy" link uses merchantSlug, not a
   // name-only slug that would drop the country.
-  const merchantsById = useRef(new Map<string, { name: string; slug: string }>());
+  const merchantsById = useRef(
+    new Map<string, { name: string; slug: string; updatedAt?: string | undefined }>(),
+  );
   const onMerchantSelectRef = useRef(onMerchantSelect);
   // Popup "open" click handlers run outside React — capture navigate in a
   // ref so the anchor click listener can invoke client-side nav without
@@ -202,7 +204,7 @@ export default function ClusterMap({
 
   useEffect(() => {
     merchantsById.current = new Map(
-      merchants.map((m) => [m.id, { name: m.name, slug: merchantSlug(m) }]),
+      merchants.map((m) => [m.id, { name: m.name, slug: merchantSlug(m), updatedAt: m.updatedAt }]),
     );
   }, [merchants]);
 
@@ -302,15 +304,18 @@ export default function ClusterMap({
       for (const point of data.locationPoints) {
         const { longitude: lng, latitude: lat } = point.geometry.coordinates;
         const { merchantId, mapPinUrl } = point.properties;
+        const resolved = merchantsById.current.get(merchantId);
+        // `mapPinUrl` presence still decides pin-vs-plain-marker; the
+        // actual bytes come reference-keyed via merchantId (ADR 050).
+        const pinRef = { id: merchantId, updatedAt: resolved?.updatedAt };
 
         const iconHtml = mapPinUrl
-          ? `<div style="width:32px;height:32px;border-radius:6px;border:2px solid #fff;box-shadow:0 2px 5px rgba(0,0,0,0.3);background-image:url('${escapeHtml(getImageProxyUrl(mapPinUrl, 64))}');background-size:cover;background-position:center;background-repeat:no-repeat;"></div>`
+          ? `<div style="width:32px;height:32px;border-radius:6px;border:2px solid #fff;box-shadow:0 2px 5px rgba(0,0,0,0.3);background-image:url('${escapeHtml(getMerchantImageUrl(pinRef, 'pin', 64))}');background-size:cover;background-position:center;background-repeat:no-repeat;"></div>`
           : `<div style="width:32px;height:32px;border-radius:6px;background:#2563eb;border:2px solid white;box-shadow:0 2px 5px rgba(0,0,0,0.3)"></div>`;
 
         const el = document.createElement('div');
         el.innerHTML = iconHtml;
 
-        const resolved = merchantsById.current.get(merchantId);
         const merchantName = resolved?.name ?? merchantId;
         const slug = resolved?.slug ?? merchantSlug(merchantId);
         // A11Y-006: focusable + named pin so keyboard/SR users can reach
@@ -319,8 +324,10 @@ export default function ClusterMap({
 
         // Escape before interpolation: Popup#setHTML sets innerHTML.
         const safeName = escapeHtml(merchantName);
-        const safePinLargeUrl = mapPinUrl ? escapeHtml(getImageProxyUrl(mapPinUrl, 400)) : '';
-        const safePinSmallUrl = mapPinUrl ? escapeHtml(getImageProxyUrl(mapPinUrl, 80)) : '';
+        const safePinLargeUrl = mapPinUrl
+          ? escapeHtml(getMerchantImageUrl(pinRef, 'pin', 400))
+          : '';
+        const safePinSmallUrl = mapPinUrl ? escapeHtml(getMerchantImageUrl(pinRef, 'pin', 80)) : '';
         const safeHref = `/gift-card/${encodeURIComponent(slug)}`;
 
         // Build rich popup content

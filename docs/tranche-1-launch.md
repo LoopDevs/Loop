@@ -64,7 +64,6 @@ PORT=8080
 GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 DATABASE_URL=postgres://…@…/loop
 TRUST_PROXY=true                              # Fly.io / CDN edge
-IMAGE_PROXY_ALLOWED_HOSTS=spend.ctx.com,ctx-spend.s3.us-west-2.amazonaws.com
 
 # Tranche 1 UI gate
 LOOP_PHASE_1_ONLY=true

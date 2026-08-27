@@ -198,11 +198,10 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # poison the release pivot in Sentry.
 # SENTRY_RELEASE=<git-sha or v1.2.3+sha>
 
-# ── Security posture (audit A-023 / A-025 / test-only) ───────────────
-# Image proxy SSRF allowlist — REQUIRED in production (audit A-025).
-# Comma-separated upstream hostnames. Boot fails in production if unset
-# unless DISABLE_IMAGE_PROXY_ALLOWLIST_ENFORCEMENT=1.
-# IMAGE_PROXY_ALLOWED_HOSTS=spend.ctx.com,ctx-spend.s3.us-west-2.amazonaws.com
+# ── Security posture (audit A-023 / test-only) ───────────────────────
+# The image proxy needs no configuration: it is reference-keyed
+# (ADR 050 — clients send merchant/order ids, never URLs), with a
+# production-only https/public-IP guard on the server-resolved URLs.
 
 # Path to an operator-provided MaxMind GeoLite2-Country .mmdb (ADR 033),
 # powering the GET /api/public/geo first-guess for the region selector.

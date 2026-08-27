@@ -251,7 +251,6 @@ describe('parseEnv', () => {
       ...base,
       NODE_ENV: 'production',
       INCLUDE_DISABLED_MERCHANTS: 'true',
-      IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
       LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
       DISABLE_NATIVE_AUTH_ENFORCEMENT: '1',
       LOOP_STELLAR_USDC_ISSUER: USDC_ISSUER,
@@ -260,48 +259,19 @@ describe('parseEnv', () => {
     warn.mockRestore();
   });
 
-  // Audit A-025 — image proxy allowlist is mandatory in production.
-  it('refuses to start in production when IMAGE_PROXY_ALLOWED_HOSTS is unset', () => {
-    expect(() => parseEnv({ ...base, NODE_ENV: 'production' })).toThrow(
-      /IMAGE_PROXY_ALLOWED_HOSTS/,
-    );
-  });
-
-  it('refuses to start in production when IMAGE_PROXY_ALLOWED_HOSTS is empty', () => {
-    expect(() =>
-      parseEnv({ ...base, NODE_ENV: 'production', IMAGE_PROXY_ALLOWED_HOSTS: '   ' }),
-    ).toThrow(/IMAGE_PROXY_ALLOWED_HOSTS/);
-  });
-
-  it('accepts production config once IMAGE_PROXY_ALLOWED_HOSTS is set', () => {
+  // ADR 050: the A-025 image-proxy host-allowlist boot guard is retired —
+  // the proxy is reference-keyed (clients send merchant/order ids, never
+  // URLs), so production boots with no image-proxy config at all.
+  it('boots in production without any image-proxy configuration', () => {
     const env = parseEnv({
       ...base,
       NODE_ENV: 'production',
-      IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com,images.example.com',
       LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
       LOOP_AUTH_NATIVE_ENABLED: 'true',
       LOOP_JWT_SIGNING_KEY: JWT_KEY,
       LOOP_STELLAR_USDC_ISSUER: USDC_ISSUER,
     });
     expect(env.NODE_ENV).toBe('production');
-    expect(env.IMAGE_PROXY_ALLOWED_HOSTS).toBe('cdn.example.com,images.example.com');
-  });
-
-  it('allows DISABLE_IMAGE_PROXY_ALLOWLIST_ENFORCEMENT=1 as an explicit emergency override', () => {
-    const env = parseEnv({
-      ...base,
-      NODE_ENV: 'production',
-      DISABLE_IMAGE_PROXY_ALLOWLIST_ENFORCEMENT: '1',
-      LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
-      DISABLE_NATIVE_AUTH_ENFORCEMENT: '1',
-      LOOP_STELLAR_USDC_ISSUER: USDC_ISSUER,
-    });
-    expect(env.NODE_ENV).toBe('production');
-  });
-
-  it('does not enforce the allowlist in development or test', () => {
-    expect(() => parseEnv({ ...base, NODE_ENV: 'development' })).not.toThrow();
-    expect(() => parseEnv({ ...base, NODE_ENV: 'test' })).not.toThrow();
   });
 
   // CF2-17 (2026-06-30 cold audit): length alone doesn't rule out a

@@ -14,7 +14,7 @@ import { Footer } from '~/components/features/Footer';
 import { Phase2Gate } from '~/components/Phase2Gate';
 import { Spinner } from '~/components/ui/Spinner';
 import { LazyImage } from '~/components/ui/LazyImage';
-import { getImageProxyUrl } from '~/utils/image';
+import { getMerchantImageUrl } from '~/utils/image';
 import i18n from '~/i18n/i18next';
 
 /**
@@ -125,7 +125,9 @@ function CashbackMerchantLandingBody(): React.JSX.Element {
         ) : (
           <HeroCopy
             name={query.data?.name ?? fallbackName}
-            logoUrl={query.data?.logoUrl ?? null}
+            merchantId={
+              query.data !== undefined && query.data.logoUrl !== null ? query.data.id : null
+            }
             userCashbackPct={query.data?.userCashbackPct ?? null}
             merchantSlug={query.data?.slug ?? slug}
             isPending={query.isPending}
@@ -170,13 +172,14 @@ function CashbackMerchantLandingBody(): React.JSX.Element {
 
 function HeroCopy({
   name,
-  logoUrl,
+  merchantId,
   userCashbackPct,
   merchantSlug,
   isPending,
 }: {
   name: string;
-  logoUrl: string | null;
+  /** Set only when the merchant has a logo — null hides the logo pane. */
+  merchantId: string | null;
   userCashbackPct: string | null;
   merchantSlug: string;
   isPending: boolean;
@@ -184,10 +187,10 @@ function HeroCopy({
   const { t } = useTranslation('cashback');
   return (
     <section className="text-center">
-      {logoUrl !== null ? (
+      {merchantId !== null ? (
         <div className="mx-auto mb-6 h-24 w-24">
           <LazyImage
-            src={getImageProxyUrl(logoUrl, 192, 192)}
+            src={getMerchantImageUrl({ id: merchantId }, 'logo', 192, 192)}
             alt={`${name} logo`}
             className="h-24 w-24 rounded-2xl object-cover"
             eager

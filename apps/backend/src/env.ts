@@ -188,29 +188,12 @@ export function parseEnv(source: NodeJS.ProcessEnv): Env {
     );
   }
 
-  // Audit A-025: the image proxy's strongest SSRF mitigation is the
-  // hostname allowlist. Without it we only have best-effort IP validation,
-  // which the proxy's own source documents as TOCTOU-vulnerable to DNS
-  // rebinding. Refuse to start in production unless the allowlist is set.
-  // Emergency opt-out is DISABLE_IMAGE_PROXY_ALLOWLIST_ENFORCEMENT=1.
-  //
-  // A2-654: the override used to be read directly from `source[...]`
-  // (i.e. process.env), bypassing the zod schema. A typo on deploy
-  // left the override silently inactive. It's now a schema field
-  // whose only accepted value is `"1"`; any other non-empty value
-  // fails at parse time with a clear message.
-  if (
-    parsed.data.NODE_ENV === 'production' &&
-    (parsed.data.IMAGE_PROXY_ALLOWED_HOSTS === undefined ||
-      parsed.data.IMAGE_PROXY_ALLOWED_HOSTS.trim() === '') &&
-    parsed.data.DISABLE_IMAGE_PROXY_ALLOWLIST_ENFORCEMENT !== '1'
-  ) {
-    throw new Error(
-      'Invalid environment variables — IMAGE_PROXY_ALLOWED_HOSTS must be set in production (audit A-025). ' +
-        'Set it to a comma-separated list of upstream image hostnames (e.g. "cdn.ctx.com,ctx-spend.s3.us-west-2.amazonaws.com"), ' +
-        'or set DISABLE_IMAGE_PROXY_ALLOWLIST_ENFORCEMENT=1 to override for an emergency push.',
-    );
-  }
+  // The A-025 image-proxy host-allowlist boot guard used to live here.
+  // ADR 050 reference-keyed the proxy (clients send merchant/order ids,
+  // never URLs), which removes the client-driven SSRF surface the
+  // allowlist bounded — the residual defense is the production-only
+  // resolved-URL validation in images/ssrf-guard.ts, which needs no
+  // config.
 
   // A2-1605: DISABLE_RATE_LIMITING bypasses every per-IP rate
   // limiter in the middleware stack. That's a test-harness flag —

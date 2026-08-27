@@ -241,7 +241,12 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
           merchantName={merchant.name}
           code={store.giftCardCode}
           pin={store.giftCardPin ?? undefined}
-          barcodeImageUrl={store.barcodeImageUrl ?? undefined}
+          // ADR 050: the raw CTX URL in the store is only the "this
+          // order has an upstream barcode" signal — the bytes come
+          // through the authed reference-keyed proxy by order id.
+          barcodeOrderId={
+            store.barcodeImageUrl !== null && store.orderId !== null ? store.orderId : undefined
+          }
         />
       </div>
     );

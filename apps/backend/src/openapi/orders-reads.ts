@@ -169,4 +169,60 @@ export function registerOrdersReadsOpenApi(
       },
     },
   });
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/orders/{id}/barcode-image',
+    summary:
+      'Authed, reference-keyed barcode-image proxy (ADR 050): resolves the CTX barcode URL server-side and serves the re-encoded image.',
+    tags: ['Orders'],
+    security: [{ bearerAuth: [] }],
+    request: {
+      params: z.object({ id: z.string() }),
+      query: z.object({
+        width: z.coerce.number().int().min(1).max(2000).optional(),
+        quality: z.coerce.number().int().min(1).max(100).optional(),
+      }),
+    },
+    responses: {
+      200: {
+        description: 'Barcode image bytes (always JPEG; private, no-store)',
+        content: {
+          'image/jpeg': { schema: z.string().openapi({ format: 'binary' }) },
+        },
+      },
+      400: {
+        description: 'Invalid order id',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      401: {
+        description: 'Missing or invalid access token',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      404: {
+        description: 'Order not found, or the order has no barcode image',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      413: {
+        description: 'Image exceeds 10MB limit',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      429: {
+        description: 'Rate limit exceeded (60/min per IP)',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      500: {
+        description: 'Internal image-processing failure',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      502: {
+        description: 'Upstream error from CTX, or the resolved barcode URL is unusable',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      503: {
+        description: 'Circuit breaker open',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+    },
+  });
 }
