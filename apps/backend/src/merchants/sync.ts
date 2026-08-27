@@ -32,6 +32,12 @@ function summariseZodIssues(issues: readonly z.ZodIssue[]): string {
 // misconfiguration), we cap iteration instead of looping for hours.
 const MAX_PAGES = 100;
 
+// CTX's `httprpc.MaxPerPage` — one request returns the whole catalog
+// (~1.1k merchants today). The pagination loop below stays as the
+// safety net for a future catalog that outgrows a single page or an
+// upstream that clamps `perPage` lower than requested.
+const PER_PAGE = 100_000;
+
 /**
  * A2-1922: parse `LOOP_MERCHANT_DENYLIST` once per refresh tick. The
  * list is comma-separated CTX merchant IDs. Whitespace is trimmed;
@@ -69,7 +75,12 @@ let store: MerchantStore = {
   loadedAt: 0,
 };
 
-function buildMerchantStore(merchants: Merchant[], loadedAt: number): MerchantStore {
+function buildMerchantStore(
+  merchants: Merchant[],
+  loadedAt: number,
+  opts: { warnOnSlugCollision?: boolean } = {},
+): MerchantStore {
+  const warnOnSlugCollision = opts.warnOnSlugCollision !== false;
   const log = logger.child({ module: 'merchants-sync' });
   const merchantsById = new Map(merchants.map((m) => [m.id, m]));
   // Build merchantsBySlug explicitly so a slug collision is visible in logs
@@ -87,7 +98,7 @@ function buildMerchantStore(merchants: Merchant[], loadedAt: number): MerchantSt
   for (const m of merchants) {
     const slug = merchantSlug(m);
     const existing = merchantsBySlug.get(slug);
-    if (existing !== undefined) {
+    if (existing !== undefined && warnOnSlugCollision) {
       log.warn(
         {
           slug,
@@ -176,6 +187,88 @@ export async function forceRefreshMerchants(): Promise<RefreshOutcome> {
   return refreshMerchantsInternal({ rethrow: true });
 }
 
+// ── Websocket-event store maintenance (./ws-maintainer.ts) ──────────────
+//
+// Between full sweeps, the CTX `/ws` merchant topic delivers per-merchant
+// upserts/removals. Each application rebuilds the store atomically via
+// `buildMerchantStore` — O(catalog) per event is trivial at ~1.1k
+// merchants, and reusing the builder keeps the slug-collision logging and
+// index construction on a single code path. `loadedAt` is deliberately
+// NOT bumped: it means "last successful full sweep", which is what the
+// /health staleness signal and the interval-loop warn key off. Persisting
+// the post-event catalog to the Postgres snapshot is debounced so an
+// admin bulk edit upstream (one event per merchant) coalesces into one
+// snapshot write.
+
+const SNAPSHOT_DEBOUNCE_MS = 30_000;
+let snapshotTimer: NodeJS.Timeout | null = null;
+
+function scheduleSnapshotPersist(): void {
+  if (snapshotTimer !== null) return;
+  snapshotTimer = setTimeout(() => {
+    snapshotTimer = null;
+    const { merchants } = store;
+    saveCatalogSnapshot({
+      name: 'merchants',
+      items: merchants,
+      loadedAt: new Date(),
+    }).catch((err: unknown) => {
+      logger
+        .child({ module: 'merchants-sync' })
+        .error({ err }, 'Failed to persist merchant catalog snapshot after ws event');
+    });
+  }, SNAPSHOT_DEBOUNCE_MS);
+  // Never hold the process open just to flush a snapshot — the next full
+  // sweep persists the same data anyway.
+  snapshotTimer.unref();
+}
+
+/** Cancels a pending debounced snapshot write. For graceful shutdown/tests. */
+export function cancelPendingSnapshotPersist(): void {
+  if (snapshotTimer !== null) {
+    clearTimeout(snapshotTimer);
+    snapshotTimer = null;
+  }
+}
+
+/** Inserts or replaces one merchant in the in-memory store. */
+export function applyMerchantUpsert(merchant: Merchant): void {
+  // Replace in place / append if new — filter+push would move an updated
+  // merchant to the end of the catalog, destabilising `/api/merchants`
+  // pagination and any order-sensitive browse surface on every event.
+  const index = store.merchants.findIndex((m) => m.id === merchant.id);
+  const merchants = [...store.merchants];
+  if (index === -1) {
+    merchants.push(merchant);
+  } else {
+    merchants[index] = merchant;
+  }
+  // Slug-collision warns are suppressed here: the ~8 pre-existing dupe
+  // clusters would otherwise re-log on every single event (bulk upstream
+  // edits fire one event per merchant). The full sweep still warns.
+  store = buildMerchantStore(merchants, store.loadedAt, { warnOnSlugCollision: false });
+  scheduleSnapshotPersist();
+}
+
+/** Removes one merchant from the in-memory store. No-op if absent. */
+export function applyMerchantRemoval(merchantId: string): void {
+  if (!store.merchantsById.has(merchantId)) return;
+  store = buildMerchantStore(
+    store.merchants.filter((m) => m.id !== merchantId),
+    store.loadedAt,
+    { warnOnSlugCollision: false },
+  );
+  scheduleSnapshotPersist();
+}
+
+/**
+ * A2-1922 denylist, exposed for the ws maintainer so an event-driven
+ * upsert respects the same filter as the sweep.
+ */
+export function isMerchantDenylisted(merchantId: string): boolean {
+  return readMerchantDenylist().has(merchantId);
+}
+
 async function refreshMerchantsInternal(opts: { rethrow?: boolean } = {}): Promise<RefreshOutcome> {
   if (isMerchantRefreshing) return { triggered: false };
   isMerchantRefreshing = true;
@@ -193,7 +286,7 @@ async function refreshMerchantsInternal(opts: { rethrow?: boolean } = {}): Promi
     while (page <= totalPages && page <= MAX_PAGES) {
       const url = new URL(upstreamUrl('/merchants'));
       url.searchParams.set('page', String(page));
-      url.searchParams.set('perPage', '100');
+      url.searchParams.set('perPage', String(PER_PAGE));
 
       const response = await getUpstreamCircuit('merchants').fetch(url.toString(), {
         signal: AbortSignal.timeout(30_000),

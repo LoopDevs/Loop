@@ -97,6 +97,10 @@ export function registerClustersOpenApi(
         height: z.coerce.number().int().min(1).max(2000).optional(),
         quality: z.coerce.number().int().min(1).max(100).optional(),
         mode: z.enum(['public', 'private']).optional(),
+        // Cache-busting version token (typically the merchant's
+        // `updatedAt`). Part of the proxy's cache key; never forwarded
+        // upstream. Truncated to 64 chars server-side.
+        v: z.string().max(64).optional(),
       }),
     },
     responses: {

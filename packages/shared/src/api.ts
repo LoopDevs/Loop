@@ -402,4 +402,11 @@ export interface ImageProxyParams {
   height?: number;
   quality?: number;
   mode?: 'public' | 'private';
+  /**
+   * Cache-busting version token (typically the merchant's `updatedAt`).
+   * Never forwarded upstream — it only differentiates the proxy's LRU
+   * cache key and the browser-cache URL, so a same-URL image edit on CTX
+   * propagates without waiting out the 7-day immutable TTLs.
+   */
+  v?: string;
 }

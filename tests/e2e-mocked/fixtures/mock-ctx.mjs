@@ -27,7 +27,7 @@
  *   PORT=9099 node tests/e2e-mocked/fixtures/mock-ctx.mjs  # custom port
  */
 import http from 'node:http';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 const PORT = Number(process.env.PORT ?? 9091);
 const OTP = '123456';
@@ -46,11 +46,16 @@ const CTX_MOCK_DESTINATION = 'GAY6JKQ5XYKHLEM5QJU7P336Y675XAJKYH56HX3UHHCZO7KVWW
 
 // ───────── Seed data ─────────────────────────────────────────────────
 
+// `updated` mirrors the real CTX field (bumped on every merchant edit) —
+// Loop maps it to `Merchant.updatedAt` and uses it as the image-proxy
+// cache-busting version.
+const SEED_UPDATED = new Date().toISOString();
 const merchants = [
   {
     id: 'mock-amazon',
     name: 'Amazon',
     enabled: true,
+    updated: SEED_UPDATED,
     savingsPercentage: 300,
     denominationsType: 'min-max',
     denominations: ['5', '500'],
@@ -61,6 +66,7 @@ const merchants = [
     id: 'mock-target',
     name: 'Target',
     enabled: true,
+    updated: SEED_UPDATED,
     savingsPercentage: 200,
     denominationsType: 'fixed',
     denominations: ['10', '25', '50', '100'],
@@ -71,6 +77,7 @@ const merchants = [
     id: 'mock-starbucks',
     name: 'Starbucks',
     enabled: true,
+    updated: SEED_UPDATED,
     savingsPercentage: 100,
     denominationsType: 'fixed',
     denominations: ['5', '10', '25'],
@@ -173,8 +180,9 @@ const server = http.createServer(async (req, res) => {
 
   // ── Merchants ──
   if (method === 'GET' && path === '/merchants') {
+    const perPage = Number(parsed.searchParams.get('perPage') ?? 100) || 100;
     return json(res, 200, {
-      pagination: { page: 1, pages: 1, perPage: 100, total: merchants.length },
+      pagination: { page: 1, pages: 1, perPage, total: merchants.length },
       result: merchants,
     });
   }
@@ -382,6 +390,40 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, { result: settlements, count: settlements.length });
   }
 
+  // ── ws-interop test-only: mutate a merchant + emit the ws event the
+  // real CTX fires on merchant edits. Body: { id, ...fields } upserts
+  // (created event when the id is new, updated otherwise, with `updated`
+  // bumped like the real API); { id, _delete: true } removes and emits
+  // the deleted event. Loop's backend maintains its merchant store from
+  // these events (apps/backend/src/merchants/ws-maintainer.ts).
+  if (method === 'POST' && path === '/_test/update-merchant') {
+    const body = await readBody(req);
+    if (!body.id) return json(res, 400, { error: 'id required' });
+    const index = merchants.findIndex((m) => m.id === body.id);
+    if (body._delete === true) {
+      if (index === -1) return json(res, 404, { error: 'merchant not found' });
+      const [removed] = merchants.splice(index, 1);
+      broadcastMerchantEvent('system.merchant.deleted', removed);
+      return json(res, 200, removed);
+    }
+    const { _delete, ...fields } = body;
+    void _delete;
+    const merchant = {
+      ...(index === -1 ? { enabled: true, currency: 'USD' } : merchants[index]),
+      ...fields,
+      updated: new Date().toISOString(),
+    };
+    if (!merchant.name) return json(res, 400, { error: 'name required for a new merchant' });
+    if (index === -1) {
+      merchants.push(merchant);
+      broadcastMerchantEvent('system.merchant.created', merchant);
+    } else {
+      merchants[index] = merchant;
+      broadcastMerchantEvent('system.merchant.updated', merchant);
+    }
+    return json(res, 200, merchant);
+  }
+
   if (method === 'POST' && path === '/_test/reset') {
     orders.clear();
     validRefreshTokens.clear();
@@ -394,13 +436,184 @@ const server = http.createServer(async (req, res) => {
   return json(res, 404, { error: `unknown route ${method} ${path}` });
 });
 
+// ───────── Websocket endpoint (GET /ws upgrade) ──────────────────────
+//
+// Minimal hand-rolled RFC 6455 server — enough for Loop's merchant-store
+// maintainer: subscribe/unsubscribe commands in, `{type:'event'}` frames
+// out. Mirrors the real spend-api /ws contract (http_ws.go):
+//   client → {"action":"subscribe","topic":"merchant"}
+//   server → {"type":"ok","action":"subscribe","subscriptions":[...]}
+//   server → {"type":"event","topic":"merchant",
+//             "event":"system.merchant.updated","data":{...merchant}}
+// No auth check (consistent with the rest of the mock), no ping cadence
+// (test runs are seconds long), no fragmented/binary frame support.
+
+const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
+/** Set<{ socket, subscriptions: Set<string> }> */
+const wsClients = new Set();
+
+/** Builds an unmasked server→client text frame. */
+function wsTextFrame(payload) {
+  const data = Buffer.from(payload, 'utf8');
+  let header;
+  if (data.length < 126) {
+    header = Buffer.from([0x81, data.length]);
+  } else if (data.length < 65536) {
+    header = Buffer.alloc(4);
+    header[0] = 0x81;
+    header[1] = 126;
+    header.writeUInt16BE(data.length, 2);
+  } else {
+    header = Buffer.alloc(10);
+    header[0] = 0x81;
+    header[1] = 127;
+    header.writeBigUInt64BE(BigInt(data.length), 2);
+  }
+  return Buffer.concat([header, data]);
+}
+
+function wsSend(client, message) {
+  try {
+    client.socket.write(wsTextFrame(JSON.stringify(message)));
+  } catch {
+    wsClients.delete(client);
+  }
+}
+
+function broadcastMerchantEvent(eventName, merchant) {
+  for (const client of wsClients) {
+    if (!client.subscriptions.has('merchant')) continue;
+    wsSend(client, { type: 'event', topic: 'merchant', event: eventName, data: merchant });
+  }
+}
+
+/**
+ * Parses complete client→server frames out of `client.buffer`, handling
+ * text commands, pings, and close. Client frames are always masked per
+ * RFC 6455 §5.3.
+ */
+function wsConsumeFrames(client) {
+  const { socket } = client;
+  while (true) {
+    const buf = client.buffer;
+    if (buf.length < 2) return;
+    const opcode = buf[0] & 0x0f;
+    const masked = (buf[1] & 0x80) !== 0;
+    let len = buf[1] & 0x7f;
+    let offset = 2;
+    if (len === 126) {
+      if (buf.length < 4) return;
+      len = buf.readUInt16BE(2);
+      offset = 4;
+    } else if (len === 127) {
+      if (buf.length < 10) return;
+      len = Number(buf.readBigUInt64BE(2));
+      offset = 10;
+    }
+    const maskLen = masked ? 4 : 0;
+    if (buf.length < offset + maskLen + len) return;
+    const mask = masked ? buf.subarray(offset, offset + 4) : null;
+    const payload = buf.subarray(offset + maskLen, offset + maskLen + len);
+    if (mask) {
+      for (let i = 0; i < payload.length; i++) payload[i] ^= mask[i % 4];
+    }
+    client.buffer = buf.subarray(offset + maskLen + len);
+
+    if (opcode === 0x8) {
+      // close → echo close, drop
+      try {
+        socket.write(Buffer.from([0x88, 0x00]));
+      } catch {
+        /* already gone */
+      }
+      socket.destroy();
+      wsClients.delete(client);
+      return;
+    }
+    if (opcode === 0x9) {
+      // ping → pong with same payload
+      const pong = Buffer.concat([Buffer.from([0x8a, payload.length]), payload]);
+      socket.write(pong);
+      continue;
+    }
+    if (opcode !== 0x1) continue; // ignore pong/binary/continuation
+
+    let command = {};
+    try {
+      command = JSON.parse(payload.toString('utf8'));
+    } catch {
+      command = {};
+    }
+    if (command.action === 'subscribe' && command.topic) {
+      client.subscriptions.add(command.topic);
+      wsSend(client, {
+        type: 'ok',
+        action: 'subscribe',
+        subscriptions: [...client.subscriptions].sort(),
+      });
+    } else if (command.action === 'unsubscribe' && command.topic) {
+      client.subscriptions.delete(command.topic);
+      wsSend(client, {
+        type: 'ok',
+        action: 'unsubscribe',
+        subscriptions: [...client.subscriptions].sort(),
+      });
+    } else if (command.action === 'list') {
+      wsSend(client, {
+        type: 'ok',
+        action: 'list',
+        subscriptions: [...client.subscriptions].sort(),
+      });
+    } else {
+      wsSend(client, {
+        type: 'error',
+        action: command.action ?? '',
+        error: 'unknown action, expected: subscribe, unsubscribe, or list',
+      });
+    }
+  }
+}
+
+server.on('upgrade', (req, socket) => {
+  const { pathname } = new URL(req.url, `http://localhost:${PORT}`);
+  const wsKey = req.headers['sec-websocket-key'];
+  if (pathname !== '/ws' || !wsKey) {
+    socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
+    return;
+  }
+  const accept = createHash('sha1')
+    .update(wsKey + WS_GUID)
+    .digest('base64');
+  socket.write(
+    'HTTP/1.1 101 Switching Protocols\r\n' +
+      'Upgrade: websocket\r\n' +
+      'Connection: Upgrade\r\n' +
+      `Sec-WebSocket-Accept: ${accept}\r\n\r\n`,
+  );
+  const client = { socket, subscriptions: new Set(), buffer: Buffer.alloc(0) };
+  wsClients.add(client);
+  socket.on('data', (chunk) => {
+    client.buffer = Buffer.concat([client.buffer, chunk]);
+    wsConsumeFrames(client);
+  });
+  const drop = () => {
+    wsClients.delete(client);
+  };
+  socket.on('close', drop);
+  socket.on('error', drop);
+});
+
 server.listen(PORT, () => {
   console.log(`[mock-ctx] listening on :${PORT}`);
 });
 
-// Graceful shutdown so Playwright's webServer can stop cleanly.
+// Graceful shutdown so Playwright's webServer can stop cleanly. Open ws
+// sockets are hijacked from the http server, so `server.close()` alone
+// would wait on them forever — destroy them first.
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => {
+    for (const client of wsClients) client.socket.destroy();
+    wsClients.clear();
     server.close(() => process.exit(0));
   });
 }

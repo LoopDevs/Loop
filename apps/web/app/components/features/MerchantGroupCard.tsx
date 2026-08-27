@@ -44,9 +44,13 @@ export function MerchantGroupCard({
   const withCard = group.members.find((m) => m.cardImageUrl !== undefined);
   const withLogo = group.members.find((m) => m.logoUrl !== undefined);
   const cardImgUrl =
-    withCard?.cardImageUrl !== undefined ? getImageProxyUrl(withCard.cardImageUrl, 640) : undefined;
+    withCard?.cardImageUrl !== undefined
+      ? getImageProxyUrl(withCard.cardImageUrl, 640, 80, { version: withCard.updatedAt })
+      : undefined;
   const logoImgUrl =
-    withLogo?.logoUrl !== undefined ? getImageProxyUrl(withLogo.logoUrl, 160) : undefined;
+    withLogo?.logoUrl !== undefined
+      ? getImageProxyUrl(withLogo.logoUrl, 160, 80, { version: withLogo.updatedAt })
+      : undefined;
 
   // Best-of across the group: the brand tile advertises the strongest
   // offer any variant carries, so the headline doesn't undersell.

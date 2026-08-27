@@ -11,16 +11,22 @@ export function getImageProxyUrl(
   url: string,
   width = 0,
   quality = 80,
-  options: { mode?: ImageProxyParams['mode'] } = {},
+  options: { mode?: ImageProxyParams['mode']; version?: string | undefined } = {},
 ): string {
   const query: ImageProxyParams = { url, quality };
   if (width > 0) query.width = width;
   if (options.mode !== undefined) query.mode = options.mode;
+  // Cache-busting version (typically `merchant.updatedAt`): folded into
+  // the backend proxy's LRU key and, by changing the URL, busts the
+  // browser's 7-day immutable cache — so a same-URL image edit on CTX
+  // shows up as soon as the catalog carries the new timestamp.
+  if (options.version !== undefined && options.version !== '') query.v = options.version;
   const params = new URLSearchParams({
     url: query.url,
     quality: String(query.quality),
     ...(query.width !== undefined ? { width: String(query.width) } : {}),
     ...(query.mode !== undefined ? { mode: query.mode } : {}),
+    ...(query.v !== undefined ? { v: query.v } : {}),
   });
   return `${API_BASE}/api/image?${params.toString()}`;
 }

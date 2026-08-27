@@ -258,7 +258,10 @@ export function TrustMerchants({ active, copy }: ScreenProps): React.JSX.Element
       .map((m) => ({
         name: m.name,
         pct: `${(m.savingsPercentage ?? 0).toFixed(0)}%`,
-        logoUrl: m.logoUrl !== undefined ? getImageProxyUrl(m.logoUrl, 128) : undefined,
+        logoUrl:
+          m.logoUrl !== undefined
+            ? getImageProxyUrl(m.logoUrl, 128, 80, { version: m.updatedAt })
+            : undefined,
       }));
   }, [merchants]);
 

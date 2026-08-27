@@ -4,7 +4,12 @@ import { env } from './env.js';
 import { logger } from './logger.js';
 import { app, stopCleanupInterval, stopFleetSizeEstimator } from './app.js';
 import { startLocationRefresh, stopLocationRefresh } from './clustering/data-store.js';
-import { startMerchantRefresh, stopMerchantRefresh } from './merchants/sync.js';
+import {
+  startMerchantRefresh,
+  stopMerchantRefresh,
+  cancelPendingSnapshotPersist,
+} from './merchants/sync.js';
+import { startMerchantWs, stopMerchantWs } from './merchants/ws-maintainer.js';
 import { runMigrations, closeDb } from './db/client.js';
 import { startPaymentWatcher, stopPaymentWatcher } from './payments/watcher.js';
 import { startProcurementWorker, stopProcurementWorker } from './orders/procurement.js';
@@ -136,6 +141,9 @@ if (env.NODE_ENV !== 'test') {
 // Locations start after a short delay to ensure merchant data is available
 // for cross-referencing pin logos.
 await startMerchantRefresh();
+// Event-driven store maintenance between sweeps (CTX /ws merchant topic).
+// No-op without the operator API creds.
+startMerchantWs();
 const locationStartTimer = setTimeout(() => {
   void startLocationRefresh();
 }, 3000);
@@ -394,6 +402,8 @@ function shutdown(signal: string): void {
   stopCleanupInterval();
   stopFleetSizeEstimator();
   stopMerchantRefresh();
+  stopMerchantWs();
+  cancelPendingSnapshotPersist();
   stopLocationRefresh();
   stopPaymentWatcher();
   stopOperatorFloatReconciliationWatcher();

@@ -111,8 +111,12 @@ export default function GiftCardRoute(): React.JSX.Element {
   // the hero an instant browser-cache hit (the directory card already loaded
   // this exact URL with `Cache-Control: immutable`) instead of a second,
   // larger 1280 fetch + first-time resize.
-  const cardUrl = merchant.cardImageUrl ? getImageProxyUrl(merchant.cardImageUrl, 640) : undefined;
-  const logoUrl = merchant.logoUrl ? getImageProxyUrl(merchant.logoUrl, 160) : undefined;
+  const cardUrl = merchant.cardImageUrl
+    ? getImageProxyUrl(merchant.cardImageUrl, 640, 80, { version: merchant.updatedAt })
+    : undefined;
+  const logoUrl = merchant.logoUrl
+    ? getImageProxyUrl(merchant.logoUrl, 160, 80, { version: merchant.updatedAt })
+    : undefined;
   const savings = merchant.savingsPercentage;
   // Numeric(5,2) string from /cashback-rate (e.g. "2.50"). Parse for
   // the display formatter only — never coerce back to Number for

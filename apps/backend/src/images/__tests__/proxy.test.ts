@@ -424,4 +424,27 @@ describe('GET /api/image — LRU byte accounting', () => {
     expect(afterSecond.totalBytes).toBe(afterFirst.totalBytes);
     __resetImageCacheForTests();
   });
+
+  it('treats a new `v` version token as a cache miss (same-URL image edits propagate)', async () => {
+    __resetImageCacheForTests();
+    mockFetch.mockResolvedValue(fakeImageResponse());
+    const base = `/api/image?url=${encodeURIComponent('https://cdn.example.com/logo.png')}`;
+
+    // Same URL + same v → served from cache (one upstream fetch).
+    expect((await app.request(`${base}&v=2026-08-01`)).status).toBe(200);
+    expect((await app.request(`${base}&v=2026-08-01`)).status).toBe(200);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+
+    // Bumped v (CTX merchant `updatedAt` changed) → fresh upstream fetch,
+    // second cache entry.
+    expect((await app.request(`${base}&v=2026-08-26`)).status).toBe(200);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(__getImageCacheStatsForTests().entries).toBe(2);
+
+    // `v` must never reach the upstream fetch URL.
+    for (const call of mockFetch.mock.calls) {
+      expect(String(call[0])).toBe('https://cdn.example.com/logo.png');
+    }
+    __resetImageCacheForTests();
+  });
 });

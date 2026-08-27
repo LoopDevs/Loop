@@ -25,8 +25,12 @@ interface MapBottomSheetProps {
  * normally.
  */
 export function MapBottomSheet({ merchant, onClose }: MapBottomSheetProps): React.JSX.Element {
-  const coverUrl = merchant.cardImageUrl ? getImageProxyUrl(merchant.cardImageUrl, 640) : undefined;
-  const logoUrl = merchant.logoUrl ? getImageProxyUrl(merchant.logoUrl, 96) : undefined;
+  const coverUrl = merchant.cardImageUrl
+    ? getImageProxyUrl(merchant.cardImageUrl, 640, 80, { version: merchant.updatedAt })
+    : undefined;
+  const logoUrl = merchant.logoUrl
+    ? getImageProxyUrl(merchant.logoUrl, 96, 80, { version: merchant.updatedAt })
+    : undefined;
 
   // Drag-to-close state. `dragY` is how far the sheet has been pulled
   // down from its resting position (in px). `isClosing` flips true

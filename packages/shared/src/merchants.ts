@@ -35,6 +35,13 @@ export interface Merchant {
   locationCount?: number | undefined;
   /** ISO 3166-1 alpha-2 country code, used by the region filter (e.g. 'US', 'GB', 'CA', 'DE'). */
   country?: string | undefined;
+  /**
+   * CTX's `updated` timestamp (RFC 3339), carried through verbatim. Used as
+   * the image-proxy cache-busting version (`v` param): CTX bumps it on every
+   * merchant edit, so an in-place image swap at the same URL still produces
+   * a fresh proxy URL instead of waiting out the 7-day immutable caches.
+   */
+  updatedAt?: string | undefined;
 }
 
 /** Paginated response for the merchant list endpoint. */

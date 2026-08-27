@@ -111,6 +111,10 @@ export function registerHealthOpenApi(
       locationsLoadedAt: z.string().openapi({ format: 'date-time' }),
       merchantsStale: z.boolean(),
       locationsStale: z.boolean(),
+      merchantWs: z.enum(['disabled', 'connecting', 'connected']).openapi({
+        description:
+          'CTX ws merchant-topic maintainer state (merchants/ws-maintainer.ts). disabled = operator API creds absent (interval sweep only); connecting = between sessions/backoff; connected = live event-driven catalog maintenance. Informational only.',
+      }),
       geoDbStale: z.boolean().openapi({
         description:
           'GeoLite2-Country .mmdb staleness/absence signal (go-live-plan §T1-F). False both when fresh AND when MAXMIND_GEOLITE2_PATH was never configured (deliberate — see docs/deployment.md §GeoLite2); true when stale (>45 days old) or configured-but-unopenable.',

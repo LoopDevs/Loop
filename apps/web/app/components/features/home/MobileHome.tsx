@@ -698,7 +698,10 @@ function BrandTile({
   merchant: Merchant;
   size?: number;
 }): React.JSX.Element {
-  const logo = merchant.logoUrl !== undefined ? getImageProxyUrl(merchant.logoUrl, 192) : undefined;
+  const logo =
+    merchant.logoUrl !== undefined
+      ? getImageProxyUrl(merchant.logoUrl, 192, 80, { version: merchant.updatedAt })
+      : undefined;
   return (
     <div
       className="flex items-center justify-center rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 shadow-[0_1px_3px_rgba(0,0,0,0.08),0_4px_12px_rgba(0,0,0,0.06)] dark:shadow-none overflow-hidden"

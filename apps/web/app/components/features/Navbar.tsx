@@ -23,6 +23,8 @@ interface SearchResult {
   id: string;
   name: string;
   logoUrl?: string | undefined;
+  /** Image-proxy cache-busting version for `logoUrl` (merchant `updatedAt`). */
+  updatedAt?: string | undefined;
   savingsPercentage?: number | undefined;
   /** Precomputed navigation target — `/gift-card/:slug` or, for a brand group, `/brand/:slug`. */
   to: string;
@@ -64,7 +66,7 @@ function SearchDropdown({
         >
           {r.logoUrl !== undefined ? (
             <img
-              src={getImageProxyUrl(r.logoUrl, 64)}
+              src={getImageProxyUrl(r.logoUrl, 64, 80, { version: r.updatedAt })}
               alt={r.name}
               className="w-8 h-8 object-contain rounded-md border border-line bg-white"
             />
@@ -146,10 +148,12 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
           .slice(0, 6)
           .map((g): SearchResult => {
             if (g.isGroup) {
+              const withLogo = g.members.find((m) => m.logoUrl !== undefined);
               return {
                 id: `g:${g.key}`,
                 name: g.name,
-                logoUrl: g.members.find((m) => m.logoUrl !== undefined)?.logoUrl,
+                logoUrl: withLogo?.logoUrl,
+                updatedAt: withLogo?.updatedAt,
                 to: `/brand/${brandSlug(g.name)}`,
                 optionCount: g.members.length,
               };
@@ -159,6 +163,7 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
               id: m.id,
               name: m.name,
               logoUrl: m.logoUrl,
+              updatedAt: m.updatedAt,
               savingsPercentage: m.savingsPercentage,
               to: `/gift-card/${merchantSlug(m)}`,
             };

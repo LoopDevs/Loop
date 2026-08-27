@@ -44,6 +44,7 @@ import { logger } from './logger.js';
 import { db } from './db/client.js';
 import { getLocations, isLocationLoading } from './clustering/data-store.js';
 import { getMerchants } from './merchants/sync.js';
+import { getMerchantWsStatus } from './merchants/ws-maintainer.js';
 import { getRuntimeHealthSnapshot } from './runtime-health.js';
 import { upstreamUrl } from './upstream.js';
 import { notifyGeoDbStale } from './discord.js';
@@ -484,6 +485,13 @@ export async function healthHandler(c: Context): Promise<Response> {
       locationsLoadedAt: new Date(locLoadedAt).toISOString(),
       merchantsStale,
       locationsStale,
+      // Event-driven merchant maintenance (merchants/ws-maintainer.ts).
+      // 'disabled' = operator API creds absent (interval sweep only);
+      // 'connecting' = between sessions / backoff; 'connected' = the
+      // CTX merchant-topic subscription is live. Informational — a
+      // down ws degrades freshness to the sweep cadence, which
+      // `merchantsStale` already covers.
+      merchantWs: getMerchantWsStatus(),
       // go-live-plan §T1-F: staleness/absence signal for the operator-
       // provided GeoLite2-Country .mmdb (docs/deployment.md §GeoLite2).
       // `geoDbStale` is false both when fresh AND when

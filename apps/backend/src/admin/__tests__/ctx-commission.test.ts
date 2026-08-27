@@ -14,7 +14,7 @@
  *   - upstream non-2xx (including /me) → 502 UPSTREAM_ERROR;
  *   - upstream schema drift → 502 UPSTREAM_ERROR (logged, not thrown).
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, type MockInstance } from 'vitest';
 import { Hono } from 'hono';
 
 vi.mock('../../logger.js', () => ({
@@ -63,7 +63,9 @@ const settlementsBody = {
   ],
 };
 
-function mockCtxFetch(): ReturnType<typeof vi.spyOn> {
+// NOT `ReturnType<typeof vi.spyOn>` — that erases the fetch-specific
+// generics and turns `.mock.calls` into any[].
+function mockCtxFetch(): MockInstance<typeof globalThis.fetch> {
   return vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
     const url = String(input);
     if (url.endsWith('/me')) {

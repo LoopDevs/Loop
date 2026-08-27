@@ -111,9 +111,13 @@ export function MerchantCard({
 }: MerchantCardProps): React.JSX.Element {
   const slug = merchantSlug(merchant);
   const cardImgUrl =
-    merchant.cardImageUrl !== undefined ? getImageProxyUrl(merchant.cardImageUrl, 640) : undefined;
+    merchant.cardImageUrl !== undefined
+      ? getImageProxyUrl(merchant.cardImageUrl, 640, 80, { version: merchant.updatedAt })
+      : undefined;
   const logoImgUrl =
-    merchant.logoUrl !== undefined ? getImageProxyUrl(merchant.logoUrl, 160) : undefined;
+    merchant.logoUrl !== undefined
+      ? getImageProxyUrl(merchant.logoUrl, 160, 80, { version: merchant.updatedAt })
+      : undefined;
   const cashbackLabel = formatCashbackPct(userCashbackPct);
   // Route locale drives the denomination-range grouping separators (ADR 034).
   const locale = useLocaleTag();

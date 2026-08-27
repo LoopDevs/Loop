@@ -67,6 +67,11 @@ export default defineConfig({
         NODE_ENV: 'test',
         LOG_LEVEL: 'warn',
         GIFT_CARD_API_BASE_URL: 'http://localhost:9091',
+        // The ws merchant maintainer (merchants/ws-maintainer.ts) only
+        // starts when the operator API creds are present — mock-ctx
+        // ignores their values, so any non-empty pair lights it up.
+        GIFT_CARD_API_KEY: 'mock-api-key',
+        GIFT_CARD_API_SECRET: 'mock-api-secret',
         REFRESH_INTERVAL_HOURS: '6',
         LOCATION_REFRESH_INTERVAL_HOURS: '24',
         // A2-1705 phase A.2: real postgres connection. The migrations

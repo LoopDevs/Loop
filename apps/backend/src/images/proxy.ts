@@ -22,8 +22,14 @@ interface CacheEntry {
 const cache = new Map<string, CacheEntry>();
 let totalCacheBytes = 0;
 
-function cacheKey(url: string, width: number, height: number, quality: number): string {
-  return `${url}|${width}|${height}|${quality}`;
+function cacheKey(
+  url: string,
+  width: number,
+  height: number,
+  quality: number,
+  version: string,
+): string {
+  return `${url}|${width}|${height}|${quality}|${version}`;
 }
 
 function evictLruUntilFits(requiredBytes: number): void {
@@ -49,6 +55,11 @@ function evictLruUntilFits(requiredBytes: number): void {
  *   width    — target width in px (optional, max 2000)
  *   height   — target height in px (optional, max 2000)
  *   quality  — JPEG quality 1–100 (optional, default 80)
+ *   v        — cache-busting version token (optional; typically the
+ *              merchant's `updatedAt`). Part of the LRU cache key but
+ *              NEVER forwarded upstream — a same-URL image edit on CTX
+ *              gets fresh bytes on the first request carrying the new
+ *              version, instead of waiting out the 7-day TTL.
  */
 export async function imageProxyHandler(c: Context): Promise<Response> {
   const log = logger.child({ handler: 'image-proxy' });
@@ -68,8 +79,12 @@ export async function imageProxyHandler(c: Context): Promise<Response> {
   const height = clampDimension(parseInt(c.req.query('height') ?? '0', 10));
   const quality = clampQuality(parseInt(c.req.query('quality') ?? '80', 10));
   const mode = c.req.query('mode') === 'private' ? 'private' : 'public';
+  // Bounded so an attacker can't mint unbounded distinct cache keys for
+  // one image by rotating an arbitrarily long `v` — beyond the length
+  // cap the LRU itself bounds total memory, same as rotating `quality`.
+  const version = (c.req.query('v') ?? '').slice(0, 64);
 
-  const key = cacheKey(imageUrl, width, height, quality);
+  const key = cacheKey(imageUrl, width, height, quality, version);
 
   const cached = mode === 'public' ? cache.get(key) : undefined;
   if (cached !== undefined && Date.now() - cached.cachedAt < CACHE_TTL_MS) {

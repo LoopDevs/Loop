@@ -43,6 +43,9 @@ export const UpstreamMerchantSchema = z
     cardImageUrl: z.string().max(MAX_URL_LENGTH).optional(),
     mapPinUrl: z.string().max(MAX_URL_LENGTH).optional(),
     enabled: z.boolean(),
+    // RFC 3339 timestamp CTX bumps on every merchant edit. Carried onto
+    // `Merchant.updatedAt` as the image cache-busting version.
+    updated: z.string().max(64).optional(),
     country: z.string().max(MAX_CURRENCY_LENGTH).optional(),
     currency: z.string().max(MAX_CURRENCY_LENGTH).optional(),
     savingsPercentage: z.number().optional(),
@@ -151,5 +154,6 @@ export function mapUpstreamMerchant(item: UpstreamMerchant): Merchant | null {
     enabled: item.enabled,
     ...(locationCount !== undefined ? { locationCount } : {}),
     ...(item.country ? { country: item.country } : {}),
+    ...(item.updated ? { updatedAt: item.updated } : {}),
   };
 }

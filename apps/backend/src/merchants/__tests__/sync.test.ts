@@ -53,6 +53,9 @@ vi.mock('../../circuit-breaker.js', () => ({
 
 import {
   __resetMerchantStoreForTests,
+  applyMerchantRemoval,
+  applyMerchantUpsert,
+  cancelPendingSnapshotPersist,
   refreshMerchants,
   getMerchants,
   warmStartMerchantsFromSnapshot,
@@ -618,5 +621,82 @@ describe('refreshMerchants', () => {
         droppedId: 'lastminute-1',
       });
     });
+  });
+});
+
+describe('ws-event store maintenance (applyMerchantUpsert / applyMerchantRemoval)', () => {
+  beforeEach(async () => {
+    mockFetch.mockReset();
+    warnSpy.mockClear();
+    snapshotState.saved = [];
+    snapshotState.next = null;
+    __resetMerchantStoreForTests();
+    cancelPendingSnapshotPersist();
+    // Seed a three-merchant store through the normal sweep path.
+    mockFetch.mockResolvedValueOnce(
+      upstreamResponse(
+        [
+          { id: 'm-1', name: 'Alpha', enabled: true },
+          { id: 'm-2', name: 'Beta', enabled: true },
+          { id: 'm-3', name: 'Gamma', enabled: true },
+        ],
+        1,
+        1,
+      ),
+    );
+    await refreshMerchants();
+  });
+
+  it('replaces an existing merchant IN PLACE — catalog order is stable', () => {
+    applyMerchantUpsert({ id: 'm-2', name: 'Beta Updated', enabled: true });
+
+    const store = getMerchants();
+    expect(store.merchants.map((m) => m.id)).toEqual(['m-1', 'm-2', 'm-3']);
+    expect(store.merchantsById.get('m-2')?.name).toBe('Beta Updated');
+    expect(store.merchantsBySlug.get('beta-updated')?.id).toBe('m-2');
+    // The old slug no longer resolves.
+    expect(store.merchantsBySlug.has('beta')).toBe(false);
+  });
+
+  it('appends a brand-new merchant', () => {
+    applyMerchantUpsert({ id: 'm-4', name: 'Delta', enabled: true });
+    const store = getMerchants();
+    expect(store.merchants.map((m) => m.id)).toEqual(['m-1', 'm-2', 'm-3', 'm-4']);
+  });
+
+  it('removes a merchant and its index entries; unknown ids are a no-op', () => {
+    applyMerchantRemoval('m-3');
+    const store = getMerchants();
+    expect(store.merchants.map((m) => m.id)).toEqual(['m-1', 'm-2']);
+    expect(store.merchantsById.has('m-3')).toBe(false);
+    expect(store.merchantsBySlug.has('gamma')).toBe(false);
+
+    applyMerchantRemoval('nope');
+    expect(getMerchants().merchants).toHaveLength(2);
+  });
+
+  it('does not bump loadedAt (freshness signal stays "last full sweep")', () => {
+    const before = getMerchants().loadedAt;
+    applyMerchantUpsert({ id: 'm-2', name: 'Beta Updated', enabled: true });
+    expect(getMerchants().loadedAt).toBe(before);
+  });
+
+  it('debounces the snapshot persist across a burst of events', async () => {
+    vi.useFakeTimers();
+    try {
+      applyMerchantUpsert({ id: 'm-1', name: 'Alpha 2', enabled: true });
+      applyMerchantUpsert({ id: 'm-2', name: 'Beta 2', enabled: true });
+      applyMerchantRemoval('m-3');
+      expect(snapshotState.saved).toHaveLength(1); // only the seed sweep's save
+
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(snapshotState.saved).toHaveLength(2); // one coalesced event save
+      expect(
+        (snapshotState.saved[1]!.items as Array<{ id: string }>).map((m) => m.id).sort(),
+      ).toEqual(['m-1', 'm-2']);
+    } finally {
+      vi.useRealTimers();
+      cancelPendingSnapshotPersist();
+    }
   });
 });

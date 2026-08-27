@@ -67,6 +67,10 @@ export function registerMerchantsOpenApi(
       country: z.string().optional().openapi({
         description: "ISO 3166-1 alpha-2 country code (e.g. 'US', 'GB', 'CA', 'DE').",
       }),
+      updatedAt: z.string().optional().openapi({
+        description:
+          "CTX's `updated` timestamp (RFC 3339), bumped upstream on every merchant edit. Clients pass it as the image proxy's `v` cache-busting param.",
+      }),
     }),
   );
 
