@@ -249,7 +249,7 @@ describe('GET /api/merchants/search', () => {
   it('sets a public 5-minute cache header, matching sibling merchant endpoints', async () => {
     seed([merchant('m-1', 'Store A')]);
     const res = await app.request('/api/merchants/search?q=store');
-    expect(res.headers.get('Cache-Control')).toBe('public, max-age=300');
+    expect(res.headers.get('Cache-Control')).toBe('no-store');
   });
 
   it('does not collide with /api/merchants/:id route ordering', async () => {

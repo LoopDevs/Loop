@@ -64,7 +64,7 @@ export function merchantListHandler(c: Context): Response {
   const start = (page - 1) * limit;
   const paginated = filtered.slice(start, start + limit);
 
-  c.header('Cache-Control', 'public, max-age=300'); // 5 minute cache
+  c.header('Cache-Control', 'no-store');
   return c.json({
     merchants: paginated,
     pagination: {
@@ -89,12 +89,12 @@ export function merchantListHandler(c: Context): Response {
  * — no pagination envelope, since the whole point is to skip paging.
  *
  * The catalog is already in memory (`getMerchants()`) so this is O(N) over
- * the cached slice and costs no upstream call. 5-minute public cache
- * matches the per-page endpoint.
+ * the live slice and costs no upstream call. No HTTP caching — the
+ * store is ws-maintained, so responses are always current.
  */
 export function merchantAllHandler(c: Context): Response {
   const { merchants } = getMerchants();
-  c.header('Cache-Control', 'public, max-age=300');
+  c.header('Cache-Control', 'no-store');
   // S4-7: browse surfaces (home, map, navbar/mobile search) need the whole
   // catalog but never RENDER the long-form description/instructions/terms —
   // only the detail page does, and it pulls those from /by-slug + /:id, not
@@ -128,7 +128,7 @@ export function merchantBySlugHandler(c: Context): Response {
     return c.json({ code: 'NOT_FOUND', message: 'Merchant not found' }, 404);
   }
 
-  c.header('Cache-Control', 'public, max-age=300'); // 5 minute cache
+  c.header('Cache-Control', 'no-store');
   return c.json({ merchant });
 }
 
@@ -217,7 +217,7 @@ export async function merchantDetailHandler(c: Context): Promise<Response> {
     );
   }
 
-  c.header('Cache-Control', 'private, max-age=300');
+  c.header('Cache-Control', 'no-store');
   return c.json({ merchant });
 }
 

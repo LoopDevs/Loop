@@ -40,7 +40,7 @@ to promote (see the go/no-go checklist below).
 backend's in-memory store (`apps/backend/src/merchants/sync.ts`, hourly ws-maintained sweep), so there's no SQL query to run. The lowest-
 effort reuse is the **public catalog endpoint that already serves this exact
 data** to the web app: `GET /api/merchants/all?fields=lite` — unauthenticated,
-`Cache-Control: public, max-age=300`, 60/min rate limit
+`Cache-Control: no-store`, 60/min rate limit
 (`apps/backend/src/routes/merchants.ts`). `sync-upstream.ts` drops disabled merchants before they reach the store,
 so counting rows from this endpoint against production **is** counting
 enabled merchants — no extra filtering needed. Run it against production

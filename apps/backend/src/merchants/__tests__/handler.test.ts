@@ -140,10 +140,10 @@ describe('GET /api/merchants', () => {
     expect(body.pagination.hasPrev).toBe(false);
   });
 
-  it('sets Cache-Control public max-age=300 so CDN/browser can cache', async () => {
+  it('sets Cache-Control no-store — catalog reads serve the live store', async () => {
     seed([merchant('m-1', 'Store')]);
     const res = await app.request('/api/merchants');
-    expect(res.headers.get('Cache-Control')).toBe('public, max-age=300');
+    expect(res.headers.get('Cache-Control')).toBe('no-store');
   });
 
   it('paginates: page 1 of 2 with limit 2 returns first two', async () => {
@@ -249,7 +249,7 @@ describe('GET /api/merchants/all', () => {
   it('sets the same 5-minute public cache header as the paginated endpoint', async () => {
     seed([merchant('m-1', 'A')]);
     const res = await app.request('/api/merchants/all');
-    expect(res.headers.get('Cache-Control')).toBe('public, max-age=300');
+    expect(res.headers.get('Cache-Control')).toBe('no-store');
   });
 
   it('returns an empty array when the catalog is empty (no 404)', async () => {
@@ -312,7 +312,7 @@ describe('GET /api/merchants/by-slug/:slug', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { merchant: Merchant };
     expect(body.merchant.id).toBe('m-1');
-    expect(res.headers.get('Cache-Control')).toBe('public, max-age=300');
+    expect(res.headers.get('Cache-Control')).toBe('no-store');
   });
 
   it('returns 404 with NOT_FOUND code when slug is unknown', async () => {
@@ -376,7 +376,7 @@ describe('GET /api/merchants/:id', () => {
     const body = (await res.json()) as { merchant: Merchant };
     expect(body.merchant.id).toBe('m-1');
     // Authenticated endpoint — never publicly cacheable.
-    expect(res.headers.get('Cache-Control')).toBe('private, max-age=300');
+    expect(res.headers.get('Cache-Control')).toBe('no-store');
   });
 
   it('returns 404 when id unknown', async () => {

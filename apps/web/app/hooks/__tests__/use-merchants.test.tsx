@@ -108,7 +108,7 @@ describe('useAllMerchants', () => {
   // 30 min so routine navigation doesn't re-pay the multi-hundred-KB
   // fetch. Assert the resolved query options rather than simulating
   // focus (deterministic + no FocusManager flakiness in jsdom).
-  it('disables focus-refetch and uses a 30-min staleTime for the catalog (PERF-003)', async () => {
+  it('disables focus-refetch and uses staleTime 0 for the catalog (live ws-maintained backend)', async () => {
     merchantsMock.fetchAllMerchants.mockResolvedValue({ merchants: [], total: 0 });
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false, gcTime: 0, throwOnError: false } },
@@ -129,7 +129,7 @@ describe('useAllMerchants', () => {
       | { refetchOnWindowFocus?: boolean; staleTime?: number }
       | undefined;
     expect(opts?.refetchOnWindowFocus).toBe(false);
-    expect(opts?.staleTime).toBe(30 * 60 * 1000);
+    expect(opts?.staleTime).toBe(0);
   });
 });
 

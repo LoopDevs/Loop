@@ -40,12 +40,11 @@ export function useMerchants(options: UseMerchantsOptions = {}): UseMerchantsRes
   const query = useQuery<MerchantListResponse, Error>({
     queryKey: ['merchants', { page, limit, q }],
     queryFn: () => fetchMerchants({ page, limit, ...(q !== undefined ? { q } : {}) }),
-    staleTime: 5 * 60 * 1000,
-    // PERF-003 (audit 2026-06-15-cold / CF-29): the merchant catalog
-    // churns slowly (synced on a multi-hour cadence). Re-fetching the
-    // list on every tab focus once staleTime lapses is wasted bandwidth
-    // + main-thread JSON parse for no fresher data. staleTime governs
-    // freshness; a focus-refetch buys nothing here.
+    // staleTime 0 (TanStack default): render cached instantly, refetch
+    // on mount — the backend catalog is ws-maintained, so what it
+    // returns is current. No focus-refetch: mounting governs freshness
+    // without re-downloading the list on every tab switch.
+    staleTime: 0,
     refetchOnWindowFocus: false,
     refetchOnReconnect: true,
     retry: shouldRetry,
@@ -77,19 +76,12 @@ export function useAllMerchants(): {
 } {
   const query = useQuery<MerchantAllResponse, Error>({
     queryKey: ['merchants-all'],
-    // PERF-003 (audit 2026-06-15-cold / CF-29): this is the full
-    // ~1,134-record catalog (multi-hundred-KB JSON). Two cadence fixes:
-    //  - longer `staleTime` (30 min) — the catalog syncs on a multi-hour
-    //    cadence, and the `loop_merchants_all_v1` localStorage cache in
-    //    root.tsx already covers cold-start render, so a 5-min stale
-    //    window forced a redundant background refetch on routine
-    //    navigation. 30 min still revalidates well within a session.
-    //  - `refetchOnWindowFocus: false` — previously the whole payload
-    //    re-downloaded on every tab focus once staleTime lapsed,
-    //    including on routes that never render the catalog. staleTime +
-    //    the localStorage cache cover freshness without the focus tax.
+    // staleTime 0 (TanStack default): render cached instantly, refetch
+    // on mount — the backend catalog is ws-maintained, so what it
+    // returns is current. No focus-refetch: mounting governs freshness
+    // without re-downloading the full catalog on every tab switch.
     queryFn: () => fetchAllMerchants(),
-    staleTime: 30 * 60 * 1000,
+    staleTime: 0,
     refetchOnWindowFocus: false,
     refetchOnReconnect: true,
     retry: shouldRetry,
@@ -156,7 +148,7 @@ export function useMerchantSearch(
         ...(options.limit !== undefined ? { limit: options.limit } : {}),
       }),
     enabled,
-    staleTime: 60_000,
+    staleTime: 0,
     placeholderData: keepPreviousData,
     retry: shouldRetry,
   });
@@ -182,7 +174,7 @@ export function useMerchantBySlug(slug: string): {
   const query = useQuery<{ merchant: Merchant }, Error>({
     queryKey: ['merchant-by-slug', normalized],
     queryFn: () => fetchMerchantBySlug(normalized),
-    staleTime: 5 * 60 * 1000,
+    staleTime: 0,
     enabled: normalized.length > 0,
     refetchOnReconnect: true,
     retry: shouldRetry,
@@ -218,7 +210,7 @@ export function useMerchant(
   const query = useQuery<{ merchant: Merchant }, Error>({
     queryKey: ['merchant', normalized],
     queryFn: () => fetchMerchant(normalized),
-    staleTime: 5 * 60 * 1000,
+    staleTime: 0,
     enabled,
     refetchOnReconnect: true,
     retry: shouldRetry,

@@ -63,13 +63,9 @@ export function merchantSearchHandler(c: Context): Response {
     Math.max(1, parseInt(c.req.query('limit') ?? String(DEFAULT_LIMIT), 10) || DEFAULT_LIMIT),
   );
 
-  // Cache-Control mirrors the sibling merchant reads (`/api/merchants`,
-  // `/api/merchants/all`): 5-minute public cache. The catalog syncs on a
-  // multi-hour cadence, so brief staleness is fine, and since the cache key
-  // is the full URL (including `q`), this doesn't collide across distinct
-  // searches — it just lets a repeated identical search within the window
-  // skip origin.
-  c.header('Cache-Control', 'public, max-age=300');
+  // No HTTP caching — catalog reads serve the live ws-maintained
+  // in-memory store; a cache in front of it only delays edits.
+  c.header('Cache-Control', 'no-store');
 
   if (q.length === 0) {
     return c.json({ merchants: [], total: 0 });

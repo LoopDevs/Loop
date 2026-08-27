@@ -35,10 +35,11 @@ import { useUiStore } from '~/stores/ui.store';
 import { buildSecurityHeaders } from '~/utils/security-headers';
 import { useNonce } from '~/utils/nonce-context';
 import { shouldRetry } from '~/hooks/query-retry';
+import { fetchAllMerchants } from '~/services/merchants';
+import { merchantInCountry } from '@loop/shared';
 import { NativeTabBar } from '~/components/features/NativeTabBar';
 import { ForceUpdateGate } from '~/components/ForceUpdateGate';
 import { LoopLogo } from '~/components/ui/LoopLogo';
-import { fetchAllMerchants } from '~/services/merchants';
 import { getLangDir, useLocale } from '~/i18n/locale';
 import './app.css';
 
@@ -119,26 +120,33 @@ const queryClient = new QueryClient({
   },
 });
 
-// Merchant catalog cold-start cache. The app shell is on disk (no
-// network), but the catalog itself is fetched from api.loopfinance.io.
-// Persist the last-known response to localStorage so the home route
-// renders instantly on cold start with whatever we saw last, while a
-// background refetch updates the cache. Worst case on a brand-new
-// install is one network round-trip before home has data — same as
-// before this cache existed.
+// Merchant catalog quick-start cache — scoped to the LAST COUNTRY the
+// user was on. The country's merchant slice is persisted to
+// localStorage so the home route renders instantly on cold start; a
+// fetch fires immediately on every page load to refresh from the
+// backend (whose store is ws-maintained, so the response is current).
+// Only the active country's slice is stored — it's what the user will
+// see again, and region-specific deployments will make the fetched
+// catalog per-country anyway. A country change or brand-new install
+// costs one network round-trip before home has data.
 const MERCHANTS_CACHE_KEY = 'loop_merchants_all_v1';
-const MERCHANTS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 interface MerchantsCacheEntry {
   ts: number;
+  country: string;
   data: Awaited<ReturnType<typeof fetchAllMerchants>>;
 }
 if (typeof window !== 'undefined') {
-  // Seed queryClient from disk cache synchronously so the very first
-  // render of home has data. Mark the entry with an old
-  // `dataUpdatedAt` so it's treated as stale — the background
-  // prefetch below still fires to revalidate, and mounting
-  // useAllMerchants returns the cached data instantly. Quietly skip
-  // malformed entries.
+  // The locale country from the URL path (`/gb/en/...`, ADR 034).
+  // Null on unprefixed legacy paths — no seeding or storing there.
+  const pathCountry = (): string | null => {
+    const match = /^\/([a-z]{2})(?:\/|$)/.exec(window.location.pathname);
+    return match?.[1] !== undefined ? match[1].toUpperCase() : null;
+  };
+
+  // Seed queryClient from disk synchronously so the very first render
+  // of home has data, marked stale (past `updatedAt`) so the refresh
+  // below always fires. Only when the stored slice is for the country
+  // being viewed; quietly skip malformed entries.
   try {
     const raw = localStorage.getItem(MERCHANTS_CACHE_KEY);
     if (raw !== null) {
@@ -147,48 +155,41 @@ if (typeof window !== 'undefined') {
         entry !== null &&
         typeof entry === 'object' &&
         typeof entry.ts === 'number' &&
-        Date.now() - entry.ts < MERCHANTS_CACHE_TTL_MS
+        typeof entry.country === 'string' &&
+        entry.country === pathCountry()
       ) {
-        queryClient.setQueryData(['merchants-all'], entry.data, {
-          // dataUpdatedAt in the past so TanStack considers the entry
-          // stale — triggers a background refetch while still
-          // returning cached data to subscribers.
-          updatedAt: entry.ts,
-        });
+        queryClient.setQueryData(['merchants-all'], entry.data, { updatedAt: entry.ts });
       }
     }
   } catch {
     /* corrupt or unavailable — ignore */
   }
 
-  // Revalidate in the background. On a cache hit, home still shows
-  // instantly with the stale data; the cache update on success is
-  // picked up by subscribed useAllMerchants consumers.
-  //
-  // PERF-003 (audit 2026-06-15-cold / CF-29): this prefetch already runs
-  // exactly once per page load (module scope), not per route — but its
-  // 5-min staleTime meant any cold load with a >5-min-old localStorage
-  // seed re-downloaded the full ~1,134-record catalog even on routes
-  // that never render it. Align with `useAllMerchants`' 30-min staleTime
-  // so `prefetchQuery` treats a recently-seeded entry as fresh and skips
-  // the network round-trip entirely — the catalog syncs on a multi-hour
-  // cadence, so 30 min still revalidates well within a session, and the
-  // localStorage cache covers freshness across loads. The fetch still
-  // fires (and refreshes the disk cache) when the seed is stale or
-  // absent, so cold-start data is never missing.
+  // Refresh from the backend immediately, once per page load. A seeded
+  // home still renders instantly, then updates in place when this
+  // lands; the disk cache is rewritten with the current country's
+  // slice for the next cold start.
   void queryClient.prefetchQuery({
     queryKey: ['merchants-all'],
     queryFn: async () => {
       const data = await fetchAllMerchants();
-      try {
-        const entry: MerchantsCacheEntry = { ts: Date.now(), data };
-        localStorage.setItem(MERCHANTS_CACHE_KEY, JSON.stringify(entry));
-      } catch {
-        /* quota or disabled — ignore */
+      const country = pathCountry();
+      if (country !== null) {
+        try {
+          const merchants = data.merchants.filter((m) => merchantInCountry(m, country));
+          const entry: MerchantsCacheEntry = {
+            ts: Date.now(),
+            country,
+            data: { merchants, total: merchants.length },
+          };
+          localStorage.setItem(MERCHANTS_CACHE_KEY, JSON.stringify(entry));
+        } catch {
+          /* quota or disabled — ignore */
+        }
       }
       return data;
     },
-    staleTime: 30 * 60 * 1000,
+    staleTime: 0,
   });
 }
 
