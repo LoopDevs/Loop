@@ -75,6 +75,27 @@ describe('merchant ws maintainer message handling', () => {
     expect(syncMock.applyMerchantUpsert).toHaveBeenCalledTimes(2);
   });
 
+  it('handles merchant-link events (same merchant-shaped payload)', () => {
+    // Linking Loop delivers the merchant; a per-link discount override
+    // rides in `link` and beats the merchant default.
+    __handleWsMessageForTests(
+      eventFrame('system.merchantlink.created', {
+        ...MERCHANT,
+        status: 'enabled',
+        link: { userDiscountBasisPoints: 750, userDiscountOverride: true },
+      }),
+    );
+    expect(syncMock.applyMerchantUpsert).toHaveBeenCalledTimes(1);
+    const merchant = syncMock.applyMerchantUpsert.mock.calls[0]![0] as Record<string, unknown>;
+    expect(merchant['savingsPercentage']).toBe(7.5);
+
+    // Link disabled for Loop → effective status disables the merchant.
+    __handleWsMessageForTests(
+      eventFrame('system.merchantlink.status_changed', { ...MERCHANT, status: 'disabled' }),
+    );
+    expect(syncMock.applyMerchantRemoval).toHaveBeenCalledWith('m-1');
+  });
+
   it('removes the merchant on system.merchant.deleted', () => {
     __handleWsMessageForTests(eventFrame('system.merchant.deleted', MERCHANT));
     expect(syncMock.applyMerchantRemoval).toHaveBeenCalledWith('m-1');

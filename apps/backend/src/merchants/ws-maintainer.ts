@@ -59,6 +59,13 @@ const MERCHANT_EVENTS = new Set([
   'system.merchant.updated',
   'system.merchant.status_changed',
   EVENT_DELETED,
+  // Merchant-LINK mutations (linking/unlinking Loop, per-link status +
+  // discount changes) arrive on the same topic with the same
+  // merchant-shaped payload — CTX resolves the link to its merchant
+  // before delivery, so the handling below is identical.
+  'system.merchantlink.created',
+  'system.merchantlink.updated',
+  'system.merchantlink.status_changed',
 ]);
 
 /**
