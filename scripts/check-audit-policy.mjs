@@ -63,6 +63,14 @@ const ACCEPTED_HIGH_VULNS = new Map([
     'Multiple 2026-06 advisories (TLS/SOCKS5 proxy bypass, Set-Cookie header injection/downgrade, WebSocket DoS, cache poisoning). Two independent dev/test-only chains pull it in: jsdom@29.1.1 (apps/web devDependency, test-environment only, never in the built web bundle or the SSR runtime) and @sentry/cli@3.4.1 (root devDependency, release-tooling CLI invoked at build time, not imported by any runtime code). Not reachable from any deployed surface; accepted pending a jsdom/@sentry/cli major bump.',
   ],
   [
+    'toml',
+    'GHSA-82x6-q7mm-w9cf (uncontrolled recursion) + GHSA-v5mp-jgw5-2x6j (prototype pollution), toml <4.2.0; installed 3.0.0, transitive via @stellar/stellar-sdk@15.1.0. The SDK only uses toml in its StellarTomlResolver / Federation (SEP-1) module, and Loop calls no stellar.toml or federation surface anywhere (no StellarTomlResolver/Federation import in backend or shared), so no attacker-controlled TOML ever reaches the parser. npm’s only fix is a semver-major SDK bump (17.0.1) on the payout-signing path — that upgrade needs its own human-reviewed PR (Stellar-code review rule) and is the tracked follow-up; accepted until then.',
+  ],
+  [
+    '@stellar/stellar-sdk',
+    'No advisory against the SDK itself — npm flags it high only as the parent of the vulnerable transitive `toml` chain above (same GHSA pair, same unreachable SEP-1 module). Cleared by the same tracked semver-major bump to 17.0.1.',
+  ],
+  [
     '@cyclonedx/cyclonedx-npm',
     'GHSA-v75r-vx73-82pj (shell injection via unsanitized --workspace argument, range 2.1.0-4.2.1). Root devDependency invoked once, in CI only, by .github/workflows/ci.yml to generate the SBOM — never runs with untrusted/user-controlled arguments (the workflow invokes it with a fixed, repo-authored argument list, not external input), so the injection vector is not reachable. Fix is semver-major (5.0.0); deferred as a tracked follow-up rather than risking breaking the SBOM step mid-audit-remediation.',
   ],
