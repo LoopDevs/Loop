@@ -40,61 +40,6 @@ export function registerAdminMiscReadsOpenApi(
   registry: OpenAPIRegistry,
   errorResponse: ReturnType<OpenAPIRegistry['register']>,
 ): void {
-  // ─── Admin — per-merchant fulfilled-order flows (ADR 011 / 015) ─────────────
-
-  const MerchantFlow = registry.register(
-    'MerchantFlow',
-    z.object({
-      merchantId: z.string(),
-      currency: z.string().openapi({ description: 'ISO charge currency for this bucket.' }),
-      count: z.string().openapi({
-        description: 'Number of fulfilled orders in this bucket. BigInt-string count.',
-      }),
-      faceValueMinor: z.string(),
-      wholesaleMinor: z.string().openapi({ description: 'Total paid to CTX (supplier).' }),
-      userCashbackMinor: z.string().openapi({ description: 'Total credited to users.' }),
-      loopMarginMinor: z.string().openapi({ description: 'Total kept by Loop.' }),
-    }),
-  );
-
-  const MerchantFlowsResponse = registry.register(
-    'MerchantFlowsResponse',
-    z.object({ flows: z.array(MerchantFlow) }),
-  );
-
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/merchant-flows',
-    summary: 'Aggregated fulfilled-order flow per (merchant, charge currency) (ADR 011 / 015).',
-    description:
-      "Groups `orders` WHERE `state='fulfilled'` by `merchant_id` + `charge_currency`, summing face/wholesale/cashback/margin. Feeds the per-row 'actual vs configured' display on /admin/cashback so ops can spot merchants whose real split doesn't match their configured cashback.",
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    responses: {
-      200: {
-        description: 'Per-merchant flow buckets',
-        content: { 'application/json': { schema: MerchantFlowsResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      404: {
-        description:
-          'Not found — also returned to authenticated non-admin callers: requireAdmin masks the admin surface as 404 by design (see src/auth/require-admin.ts).',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (60/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: {
-        description: 'Internal error',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
-
   // ─── Admin — ledger reconciliation (ADR 009) ────────────────────────────────
 
   const ReconciliationEntry = registry.register(

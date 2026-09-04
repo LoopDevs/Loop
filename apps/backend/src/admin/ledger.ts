@@ -123,7 +123,7 @@ export async function adminLedgerHandler(c: Context): Promise<Response> {
 
   // referenceId is a free-form id (order/payout uuid, or an
   // admin_adjustment-generated id) — shape-check length only, same
-  // posture as `admin/orders.ts`'s ctxOperatorId filter.
+  // posture as `admin/orders.ts`'s free-form id filters.
   const referenceIdRaw = c.req.query('referenceId');
   if (
     referenceIdRaw !== undefined &&

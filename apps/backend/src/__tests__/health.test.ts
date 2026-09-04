@@ -3,7 +3,7 @@ import type { Context } from 'hono';
 
 /**
  * `/health` had zero test coverage before this file. Added alongside
- * CF2-01 (2026-06-30 cold audit) to protect the new operator-pool
+ * CF2-01 (2026-06-30 cold audit) to protect the CTX-upstream
  * exposure, and to close the pre-existing gap while touching this file.
  */
 
@@ -12,7 +12,7 @@ const {
   merchantsState,
   runtimeState,
   dbState,
-  operatorHealthMock,
+  ctxApiHealthMock,
   geoDbState,
   notifyGeoDbStaleMock,
   fleetSizeState,
@@ -31,7 +31,7 @@ const {
     workers: [] as unknown[],
   },
   dbState: { shouldFail: false },
-  operatorHealthMock: vi.fn(() => [] as Array<{ id: string; state: string }>),
+  ctxApiHealthMock: vi.fn(() => ({ configured: true, state: 'closed' })),
   // Defaults mirror the "unconfigured" GeoDbStatus (public/geo.ts) —
   // most tests don't care about geo staleness, so the baseline must not
   // spuriously soft-degrade / page.
@@ -119,8 +119,8 @@ vi.mock('../db/client.js', () => ({
   },
 }));
 
-vi.mock('../ctx/operator-pool.js', () => ({
-  getOperatorHealth: operatorHealthMock,
+vi.mock('../ctx/api-fetch.js', () => ({
+  getCtxApiHealth: ctxApiHealthMock,
 }));
 
 const fetchMock = vi.fn();
@@ -155,7 +155,7 @@ beforeEach(() => {
   runtimeState.otpDelivery.degraded = false;
   runtimeState.workers = [];
   dbState.shouldFail = false;
-  operatorHealthMock.mockReset().mockReturnValue([]);
+  ctxApiHealthMock.mockReset().mockReturnValue({ configured: true, state: 'closed' });
   fetchMock.mockReset().mockResolvedValue(new Response('ok', { status: 200 }));
   geoDbState.available = false;
   geoDbState.buildEpoch = null;
@@ -192,27 +192,21 @@ async function driveHealthTransitionToDegraded(): Promise<void> {
 }
 
 describe('healthHandler', () => {
-  it('200 healthy when everything is up and the operator pool has no exhausted breakers', async () => {
-    operatorHealthMock.mockReturnValue([
-      { id: 'op-1', state: 'closed' },
-      { id: 'op-2', state: 'closed' },
-    ]);
+  it('200 healthy when everything is up and the CTX breaker is closed', async () => {
+    ctxApiHealthMock.mockReturnValue({ configured: true, state: 'closed' });
     const { ctx } = makeCtx();
     const res = await healthHandler(ctx);
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       status: string;
-      operatorPool: unknown;
-      operatorPoolExhausted: boolean;
+      ctxApi: unknown;
+      ctxApiDown: boolean;
       softDegradedReasons: string[];
     };
     expect(body.status).toBe('healthy');
-    expect(body.operatorPool).toEqual([
-      { id: 'op-1', state: 'closed' },
-      { id: 'op-2', state: 'closed' },
-    ]);
-    expect(body.operatorPoolExhausted).toBe(false);
-    expect(body.softDegradedReasons).not.toContain('operator_pool_exhausted');
+    expect(body.ctxApi).toEqual({ configured: true, state: 'closed' });
+    expect(body.ctxApiDown).toBe(false);
+    expect(body.softDegradedReasons).not.toContain('ctx_api_down');
   });
 
   it('503 critical when the database is unreachable', async () => {
@@ -264,67 +258,55 @@ describe('healthHandler', () => {
     });
   });
 
-  // CF2-01 (2026-06-30 cold audit): the operator-pool circuit-breaker
+  // CF2-01 (2026-06-30 cold audit): the CTX-upstream circuit-breaker
   // state was previously invisible to /health entirely. These pin the
-  // new exposure and its SOFT (not critical) classification — a pool-
-  // wide CTX outage shouldn't cycle this backend instance, since the
-  // isAvailable() fix means the pool recovers on its own schedule and
-  // cycling the machine wouldn't fix an upstream CTX outage.
-  describe('operator pool exposure', () => {
-    it('surfaces every operator breaker state in the response body', async () => {
-      operatorHealthMock.mockReturnValue([
-        { id: 'op-1', state: 'open' },
-        { id: 'op-2', state: 'closed' },
-      ]);
+  // exposure and its SOFT (not critical) classification — a CTX
+  // outage shouldn't cycle this backend instance, since the breaker
+  // recovers on its own schedule and cycling the machine wouldn't fix
+  // an upstream CTX outage.
+  describe('CTX upstream exposure', () => {
+    it('surfaces the credential + breaker state in the response body', async () => {
+      ctxApiHealthMock.mockReturnValue({ configured: true, state: 'half_open' });
       const { ctx } = makeCtx();
       const res = await healthHandler(ctx);
-      const body = (await res.json()) as { operatorPool: Array<{ id: string; state: string }> };
-      expect(body.operatorPool).toEqual([
-        { id: 'op-1', state: 'open' },
-        { id: 'op-2', state: 'closed' },
-      ]);
+      const body = (await res.json()) as { ctxApi: { configured: boolean; state: string } };
+      expect(body.ctxApi).toEqual({ configured: true, state: 'half_open' });
     });
 
-    it('flags operatorPoolExhausted as a SOFT degraded reason (200, not 503) when every operator is OPEN', async () => {
-      operatorHealthMock.mockReturnValue([
-        { id: 'op-1', state: 'open' },
-        { id: 'op-2', state: 'open' },
-      ]);
+    it('flags ctxApiDown as a SOFT degraded reason (200, not 503) when the breaker is OPEN', async () => {
+      ctxApiHealthMock.mockReturnValue({ configured: true, state: 'open' });
       const { ctx } = makeCtx();
       const res = await healthHandler(ctx);
       // Soft-degraded, not critical — does NOT return 503 / cycle the machine.
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
         status: string;
-        operatorPoolExhausted: boolean;
+        ctxApiDown: boolean;
         softDegraded: boolean;
         criticalDegraded: boolean;
         softDegradedReasons: string[];
       };
       expect(body.status).toBe('degraded');
-      expect(body.operatorPoolExhausted).toBe(true);
+      expect(body.ctxApiDown).toBe(true);
       expect(body.softDegraded).toBe(true);
       expect(body.criticalDegraded).toBe(false);
-      expect(body.softDegradedReasons).toContain('operator_pool_exhausted');
+      expect(body.softDegradedReasons).toContain('ctx_api_down');
     });
 
-    it('does not flag exhausted when at least one operator is available', async () => {
-      operatorHealthMock.mockReturnValue([
-        { id: 'op-1', state: 'open' },
-        { id: 'op-2', state: 'half_open' },
-      ]);
+    it('does not flag down while the breaker is half-open (probe in flight)', async () => {
+      ctxApiHealthMock.mockReturnValue({ configured: true, state: 'half_open' });
       const { ctx } = makeCtx();
       const res = await healthHandler(ctx);
-      const body = (await res.json()) as { operatorPoolExhausted: boolean };
-      expect(body.operatorPoolExhausted).toBe(false);
+      const body = (await res.json()) as { ctxApiDown: boolean };
+      expect(body.ctxApiDown).toBe(false);
     });
 
-    it('an empty operator pool (none configured) does not falsely report exhausted', async () => {
-      operatorHealthMock.mockReturnValue([]);
+    it('unconfigured credentials do not falsely report down', async () => {
+      ctxApiHealthMock.mockReturnValue({ configured: false, state: 'closed' });
       const { ctx } = makeCtx();
       const res = await healthHandler(ctx);
-      const body = (await res.json()) as { operatorPoolExhausted: boolean };
-      expect(body.operatorPoolExhausted).toBe(false);
+      const body = (await res.json()) as { ctxApiDown: boolean };
+      expect(body.ctxApiDown).toBe(false);
     });
   });
 
@@ -538,8 +520,8 @@ describe('BK-healthrecon: probe-gated /health body', () => {
   }
 
   const RECON_FIELDS = [
-    'operatorPool',
-    'operatorPoolExhausted',
+    'ctxApi',
+    'ctxApiDown',
     'workers',
     'otpDelivery',
     'rateLimitFleetEstimate',

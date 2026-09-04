@@ -6,17 +6,17 @@ vi.hoisted(() => {
 });
 
 // Mock the operator pool — we control which credentials it returns
-// (or null, to skip SSE) and the operatorFetch responses the
+// (or null, to skip SSE) and the ctxFetch responses the
 // polling fallback consumes.
-const { operatorFetchMock, credsState } = vi.hoisted(() => ({
-  operatorFetchMock: vi.fn(),
+const { ctxFetchMock, credsState } = vi.hoisted(() => ({
+  ctxFetchMock: vi.fn(),
   credsState: {
-    current: null as null | { id: string; bearer: string; clientId: string },
+    current: null as null | { apiKey: string; apiSecret: string; clientId: string },
   },
 }));
-vi.mock('../../ctx/operator-pool.js', () => ({
-  operatorFetch: (url: string, init?: RequestInit) => operatorFetchMock(url, init),
-  pickOperatorCredentials: () => credsState.current,
+vi.mock('../../ctx/api-fetch.js', () => ({
+  ctxFetch: (url: string, init?: RequestInit) => ctxFetchMock(url, init),
+  ctxApiCredentials: () => credsState.current,
 }));
 
 // Mock the SSE stream client — tests choose whether it resolves,
@@ -52,26 +52,26 @@ function detailResponse(body: Record<string, unknown>): Response {
 }
 
 beforeEach(() => {
-  operatorFetchMock.mockReset();
+  ctxFetchMock.mockReset();
   streamMock.mockReset();
   notifyCtxSchemaDriftMock.mockReset();
   logMock.info.mockReset();
   logMock.warn.mockReset();
   logMock.error.mockReset();
   logMock.debug.mockReset();
-  credsState.current = { id: 'op-1', bearer: 'tok', clientId: 'loopweb' };
+  credsState.current = { apiKey: 'key', apiSecret: 'secret', clientId: 'loopweb' };
 });
 
 describe('waitForRedemption', () => {
   it('stream-first: terminal fulfilled → one authoritative GET → returns codes', async () => {
     streamMock.mockResolvedValueOnce({ fulfilmentStatus: 'fulfilled' });
-    operatorFetchMock.mockResolvedValueOnce(
+    ctxFetchMock.mockResolvedValueOnce(
       detailResponse({ redeemCode: 'C', redeemPin: 'P', redeemUrl: 'https://x.example' }),
     );
     const result = await waitForRedemption('o-1');
     expect(result).toEqual({ code: 'C', pin: 'P', url: 'https://x.example' });
     // Exactly one CTX call after the stream — the authoritative GET.
-    expect(operatorFetchMock).toHaveBeenCalledTimes(1);
+    expect(ctxFetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('rejected/failed/error from the stream propagates so procureOne can fail the order', async () => {
@@ -80,19 +80,19 @@ describe('waitForRedemption', () => {
       waitForRedemption('o-1', { pollIntervalMs: 1, totalTimeoutMs: 20 }),
     ).rejects.toThrow(/rejected/);
     // No polling after a terminal CTX rejection.
-    expect(operatorFetchMock).not.toHaveBeenCalled();
+    expect(ctxFetchMock).not.toHaveBeenCalled();
   });
 
   it('transient stream error → falls back to polling', async () => {
     streamMock.mockRejectedValueOnce(new Error('socket hang up'));
-    operatorFetchMock.mockResolvedValueOnce(detailResponse({ redeemUrl: 'https://x.example' }));
+    ctxFetchMock.mockResolvedValueOnce(detailResponse({ redeemUrl: 'https://x.example' }));
     const result = await waitForRedemption('o-1', { pollIntervalMs: 1, totalTimeoutMs: 200 });
     expect(result.url).toBe('https://x.example');
   });
 
-  it('no healthy operator → skips SSE, polls directly', async () => {
+  it('no API credentials → skips SSE, polls directly', async () => {
     credsState.current = null;
-    operatorFetchMock.mockResolvedValueOnce(
+    ctxFetchMock.mockResolvedValueOnce(
       detailResponse({ code: 'X', pin: 'Y', url: 'https://x.example' }),
     );
     const result = await waitForRedemption('o-1', { pollIntervalMs: 1, totalTimeoutMs: 200 });
@@ -101,7 +101,7 @@ describe('waitForRedemption', () => {
   });
 
   it('schema drift on detail fetch pages the drift channel and returns null payload', async () => {
-    operatorFetchMock.mockResolvedValueOnce(detailResponse({ redeemUrl: 123 }));
+    ctxFetchMock.mockResolvedValueOnce(detailResponse({ redeemUrl: 123 }));
     const result = await fetchRedemption('o-1');
     expect(result).toEqual({ code: null, pin: null, url: null });
     expect(notifyCtxSchemaDriftMock).toHaveBeenCalledWith({
@@ -111,7 +111,7 @@ describe('waitForRedemption', () => {
   });
 
   it('keeps usable code/PIN when CTX returns a non-absolute redeemUrl, nulling the unusable url', async () => {
-    operatorFetchMock.mockResolvedValueOnce(
+    ctxFetchMock.mockResolvedValueOnce(
       detailResponse({ redeemCode: 'C', redeemPin: 'P', redeemUrl: '/relative/redeem' }),
     );
     const result = await fetchRedemption('o-1');
@@ -120,7 +120,7 @@ describe('waitForRedemption', () => {
   });
 
   it('F10: never persists a non-http(s) redeem URL — javascript: is nulled, code/PIN survive', async () => {
-    operatorFetchMock.mockResolvedValueOnce(
+    ctxFetchMock.mockResolvedValueOnce(
       detailResponse({ redeemCode: 'C', redeemUrl: 'javascript:alert(document.cookie)' }),
     );
     const result = await fetchRedemption('o-1');
@@ -128,7 +128,7 @@ describe('waitForRedemption', () => {
   });
 
   it('F10: a genuine https redeem URL passes through untouched', async () => {
-    operatorFetchMock.mockResolvedValueOnce(
+    ctxFetchMock.mockResolvedValueOnce(
       detailResponse({ redeemUrl: 'https://redeem.example.com/card/123' }),
     );
     const result = await fetchRedemption('o-1');
@@ -142,7 +142,7 @@ describe('waitForRedemption', () => {
     // populated the codes are PII and must not land in logs"). Pin
     // that contract directly: a response carrying a real code/PIN must
     // never surface in any log call, at any level.
-    operatorFetchMock.mockResolvedValueOnce(
+    ctxFetchMock.mockResolvedValueOnce(
       detailResponse({ redeemCode: 'SECRET-CODE-1234', redeemPin: '9999' }),
     );
     const result = await fetchRedemption('o-1');
@@ -159,7 +159,7 @@ describe('waitForRedemption', () => {
   });
 
   it('logs a diagnostic (keys only) only when every redemption field comes back null', async () => {
-    operatorFetchMock.mockResolvedValueOnce(detailResponse({ someUnrelatedField: 'x' }));
+    ctxFetchMock.mockResolvedValueOnce(detailResponse({ someUnrelatedField: 'x' }));
     const result = await fetchRedemption('o-1');
     expect(result).toEqual({ code: null, pin: null, url: null });
     expect(logMock.info).toHaveBeenCalledTimes(1);
@@ -178,7 +178,7 @@ describe('waitForRedemption', () => {
     // the VALUES must never appear in any log call. Note the shapes below
     // (a hyphenated code, a 4-digit PIN) deliberately slip past the token /
     // card-shape scrubber, proving keys-only is required, not just scrubbing.
-    operatorFetchMock.mockResolvedValueOnce(
+    ctxFetchMock.mockResolvedValueOnce(
       detailResponse({ redemptionCode: 'LIVE-CODE-4242', redemptionPin: '7788' }),
     );
     const result = await fetchRedemption('o-1');
@@ -203,7 +203,7 @@ describe('waitForRedemption', () => {
 
   it('polling tolerates intermittent failures and returns once codes appear', async () => {
     credsState.current = null;
-    operatorFetchMock
+    ctxFetchMock
       .mockResolvedValueOnce(new Response('boom', { status: 500 }))
       .mockResolvedValueOnce(detailResponse({})) // empty fields — polling continues
       .mockResolvedValueOnce(detailResponse({ redeemCode: 'C', redeemUrl: 'https://x.example' }));
@@ -221,7 +221,7 @@ describe('waitForRedemption', () => {
     // fetchRedemption — the catch-and-continue in the polling loop
     // swallowed it and the suite passed while the retry path was never
     // actually exercised.
-    operatorFetchMock.mockImplementation(async () => detailResponse({})); // always empty
+    ctxFetchMock.mockImplementation(async () => detailResponse({})); // always empty
     const result = await waitForRedemption('o-1', { pollIntervalMs: 1, totalTimeoutMs: 10 });
     expect(result).toEqual({ code: null, pin: null, url: null });
   });
@@ -234,7 +234,7 @@ describe('waitForRedemption', () => {
     // (the audited "Body is unusable" bug) the code would never be
     // observed and the budget would exhaust to nulls.
     let calls = 0;
-    operatorFetchMock.mockImplementation(async () => {
+    ctxFetchMock.mockImplementation(async () => {
       calls++;
       return calls < 4
         ? detailResponse({})
@@ -243,7 +243,7 @@ describe('waitForRedemption', () => {
     const result = await waitForRedemption('o-1', { pollIntervalMs: 1, totalTimeoutMs: 5_000 });
     expect(result).toEqual({ code: 'LATE-CODE', pin: '9876', url: null });
     // Exactly one fetch per poll tick — the recovery tick is the 4th.
-    expect(operatorFetchMock).toHaveBeenCalledTimes(4);
+    expect(ctxFetchMock).toHaveBeenCalledTimes(4);
   });
 
   it('a consumed-body failure on one tick does not poison subsequent ticks', async () => {
@@ -255,11 +255,11 @@ describe('waitForRedemption', () => {
     // next genuinely fresh fetch.
     const consumed = detailResponse({});
     await consumed.json(); // consume the body up-front
-    operatorFetchMock
+    ctxFetchMock
       .mockResolvedValueOnce(consumed)
       .mockResolvedValueOnce(detailResponse({ redeemUrl: 'https://x.example' }));
     const result = await waitForRedemption('o-1', { pollIntervalMs: 1, totalTimeoutMs: 5_000 });
     expect(result.url).toBe('https://x.example');
-    expect(operatorFetchMock).toHaveBeenCalledTimes(2);
+    expect(ctxFetchMock).toHaveBeenCalledTimes(2);
   });
 });

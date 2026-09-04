@@ -35,6 +35,12 @@ export interface AppConfig {
   loopAuthNativeEnabled: boolean;
   loopOrdersEnabled: boolean;
   /**
+   * ADR 052 — chain-qualified CTX payment currencies the customer can
+   * choose at checkout (e.g. `XLM`, `DASH`, `ETH.USDT`). Mirrors the
+   * backend allowlist that `POST /api/orders/loop` validates against.
+   */
+  ctxPaymentCurrencies: string[];
+  /**
    * Tranche 1 (MVP) launch gate. When true, the web client hides
    * every Phase 2+ surface (cashback navbar, /settings/wallet,
    * /settings/cashback, /cashback rates index, onboarding

@@ -32,7 +32,7 @@ export function registerAdminCashbackConfigCsvOpenApi(
     path: '/api/admin/merchant-cashback-configs.csv',
     summary: 'CSV export of merchant cashback-split configs (ADR 011 / 018).',
     description:
-      "Tier-3 bulk export per ADR 018 — finance / audit consumes the snapshot in a spreadsheet. Columns: merchant_id, merchant_name, wholesale_pct, user_cashback_pct, loop_margin_pct, active, updated_by, updated_at. Merchant-name falls back to merchant_id for rows whose merchant has evicted from the catalog (ADR 021 Rule A). Active serialises as the literal 'true' / 'false' so spreadsheet filters don't fight blanks. RFC 4180 (CRLF + quote-escape). Row cap 10 000 with a trailing `__TRUNCATED__` row on overflow — practically unreachable here (~hundreds of configs) but kept uniform with the other admin CSVs. 10/min rate limit.",
+      "Tier-3 bulk export per ADR 018 — finance / audit consumes the snapshot in a spreadsheet. Columns: merchant_id, merchant_name, user_cashback_pct, active, updated_by, updated_at. Merchant-name falls back to merchant_id for rows whose merchant has evicted from the catalog (ADR 021 Rule A). Active serialises as the literal 'true' / 'false' so spreadsheet filters don't fight blanks. RFC 4180 (CRLF + quote-escape). Row cap 10 000 with a trailing `__TRUNCATED__` row on overflow — practically unreachable here (~hundreds of configs) but kept uniform with the other admin CSVs. 10/min rate limit.",
     tags: ['Admin'],
     security: [{ bearerAuth: [] }],
     responses: {
@@ -42,7 +42,7 @@ export function registerAdminCashbackConfigCsvOpenApi(
           'text/csv': {
             schema: z.string().openapi({
               example:
-                'merchant_id,merchant_name,wholesale_pct,user_cashback_pct,loop_margin_pct,active,updated_by,updated_at\r\namazon,Amazon,70.00,25.00,5.00,true,admin-abc,2026-04-22T14:00:00.000Z\r\n',
+                'merchant_id,merchant_name,user_cashback_pct,active,updated_by,updated_at\r\namazon,Amazon,25.00,true,admin-abc,2026-04-22T14:00:00.000Z\r\n',
             }),
           },
         },

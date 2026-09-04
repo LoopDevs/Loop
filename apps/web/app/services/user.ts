@@ -21,18 +21,14 @@ import type {
   UserCashbackSummary,
   UserCreditRow,
   UserCreditsResponse,
-  UserFlywheelStats,
   UserMeView,
   UserOrdersSummary,
-  UserPaymentMethodBucket,
-  UserPaymentMethodShareResponse,
   UserPendingPayoutState,
   UserPendingPayoutView,
   UserPendingPayoutsResponse,
   UserPendingPayoutsSummaryResponse,
   UserPendingPayoutsSummaryRow,
   HomeCurrency,
-  OrderPaymentMethod,
   OrderState,
 } from '@loop/shared';
 import { authenticatedRequest } from './api-client';
@@ -51,11 +47,8 @@ export type {
   UserCashbackSummary,
   UserCreditRow,
   UserCreditsResponse,
-  UserFlywheelStats,
   UserMeView,
   UserOrdersSummary,
-  UserPaymentMethodBucket,
-  UserPaymentMethodShareResponse,
   UserPendingPayoutState,
   UserPendingPayoutView,
   UserPendingPayoutsResponse,
@@ -63,8 +56,7 @@ export type {
   UserPendingPayoutsSummaryRow,
 };
 
-// Legacy web-side aliases retained for call-site stability.
-export type UserPaymentMethod = OrderPaymentMethod;
+// Legacy web-side alias retained for call-site stability.
 export type UserOrderState = OrderState;
 
 /**
@@ -210,23 +202,6 @@ export async function getCashbackMonthly(): Promise<CashbackMonthlyResponse> {
  */
 export async function getUserOrdersSummary(): Promise<UserOrdersSummary> {
   return authenticatedRequest<UserOrdersSummary>('/api/users/me/orders/summary');
-}
-
-/** `GET /api/users/me/flywheel-stats` — scalar recycled-vs-total snapshot. */
-export async function getUserFlywheelStats(): Promise<UserFlywheelStats> {
-  return authenticatedRequest<UserFlywheelStats>('/api/users/me/flywheel-stats');
-}
-
-/** `GET /api/users/me/payment-method-share` — caller's own rail mix. */
-export async function getUserPaymentMethodShare(
-  opts: { state?: UserOrderState } = {},
-): Promise<UserPaymentMethodShareResponse> {
-  const params = new URLSearchParams();
-  if (opts.state !== undefined) params.set('state', opts.state);
-  const qs = params.toString();
-  return authenticatedRequest<UserPaymentMethodShareResponse>(
-    `/api/users/me/payment-method-share${qs.length > 0 ? `?${qs}` : ''}`,
-  );
 }
 
 // ─── DSR: data export / account deletion (CF-26 / X-PRIV-01) ─────────────────

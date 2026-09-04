@@ -12,8 +12,6 @@ import {
 } from '~/services/admin';
 import { AdminNav } from '~/components/features/admin/AdminNav';
 import { OrderDeliveryPanel } from '~/components/features/admin/OrderDeliveryPanel';
-import { OrderRedrivePanel } from '~/components/features/admin/OrderRedrivePanel';
-import { RefundOrderPanel } from '~/components/features/admin/RefundOrderPanel';
 import { RequireStaff } from '~/components/features/admin/RequireAdmin';
 import { CopyButton } from '~/components/features/admin/CopyButton';
 import { Spinner } from '~/components/ui/Spinner';
@@ -24,11 +22,11 @@ export function meta(): Route.MetaDescriptors {
 }
 
 const STATE_CLASSES: Record<AdminOrderState, string> = {
-  pending_payment: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
+  unpaid: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
   paid: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
-  procuring: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
   fulfilled: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
-  failed: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
+  rejected: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
+  refunded: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
   expired: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
 };
 
@@ -53,16 +51,15 @@ function TimelineRow({ label, iso }: { label: string; iso: string | null }): Rea
 
 /**
  * `/admin/orders/:orderId` — drill-down view for a Loop-native
- * order (ADR 011/015). Ops needs to quote a specific order in a
- * ticket or correlate a stuck row with a payout; this is the
- * permalink target. Shows state, the full cashback split, CTX
- * procurement metadata, state timeline, and any failure transcript.
+ * order (ADR 011 / ADR 052). Ops needs to quote a specific order in
+ * a ticket or correlate a stalled row with a payout; this is the
+ * permalink target. Shows state, the cashback discount + expected
+ * CTX commission, the CTX order/payment linkage, state timeline,
+ * and any failure transcript.
  */
 // A2-1101: see RequireAdmin.tsx for the shell-gate rationale.
 // ADR 037: support-visible — order reads + the redemption-refetch
 // delivery-unsticking action are both in support's permission set.
-// The A5-1 re-drive panel is admin-only (money write) and self-hides
-// for support via `OrderRedrivePanel`'s own `useStaffRole` check.
 export default function AdminOrderDetailRoute(): React.JSX.Element {
   return (
     <RequireStaff minimum="support">
@@ -114,21 +111,6 @@ function AdminOrderDetailRouteInner(): React.JSX.Element {
       ) : (
         <>
           <Detail row={query.data} />
-          {/* A5-1: order re-drive lever — admin-tier money write.
-              Self-hides for non-admin staff and for non-redrivable
-              states. Rendered before the (support-allowed) delivery
-              panel so the money-write action reads as the primary
-              "unstick this" affordance. */}
-          {orderId !== undefined ? (
-            <OrderRedrivePanel orderId={orderId} orderState={query.data.state} />
-          ) : null}
-          {/* A5-4: order-bound refund — admin-tier money write.
-              Self-hides for non-admin staff and for non-refundable
-              states (pending_payment / expired). For a `fulfilled`
-              order the dialog demands a code-unused attestation. */}
-          {orderId !== undefined ? (
-            <RefundOrderPanel orderId={orderId} orderState={query.data.state} />
-          ) : null}
           {/* ADR 037 §3: delivery panel — redemption status + the
               support-allowed refetch re-drive. Self-hides for
               non-fulfilled states. */}
@@ -263,40 +245,33 @@ function Detail({ row }: { row: AdminOrderView }): React.JSX.Element {
           <dt className="text-gray-500 dark:text-gray-400">Charge</dt>
           <dd className="text-gray-900 dark:text-white inline-flex items-center gap-2 flex-wrap">
             <span>{fmtMinor(row.chargeMinor, row.chargeCurrency)}</span>
-            <span className="text-gray-500 dark:text-gray-400">via</span>
-            {row.paymentMethod === 'loop_asset' ? (
-              // Cross-surface consistency: same green "Recycled" pill
-              // treatment as /admin/stuck-orders, /admin/orders (list),
-              // and the user-facing LoopOrdersList row. Makes a
-              // flywheel-closing order immediately legible regardless
-              // of which admin surface an operator comes in through.
-              <span
-                className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900/30 dark:text-green-300"
-                aria-label="Paid with recycled cashback"
-                title="The user paid for this order with LOOP-asset cashback they earned on earlier orders."
-              >
-                <span aria-hidden="true">♻️</span>
-                {row.paymentMethod}
-              </span>
-            ) : (
-              <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 dark:bg-gray-800 dark:text-gray-300">
-                {row.paymentMethod}
-              </span>
-            )}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-gray-500 dark:text-gray-400">CTX operator</dt>
-          <dd className="font-mono text-xs text-gray-700 dark:text-gray-300 break-all">
-            {row.ctxOperatorId ?? '—'}
+            {/* Chain-qualified CTX payment currency the customer
+                chose (ADR 052). Null on legacy rows. */}
+            {row.paymentCryptoCurrency !== null ? (
+              <>
+                <span className="text-gray-500 dark:text-gray-400">via</span>
+                <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+                  {row.paymentCryptoCurrency}
+                </span>
+              </>
+            ) : null}
           </dd>
         </div>
         <div>
           <dt className="text-gray-500 dark:text-gray-400">CTX order</dt>
           <dd className="font-mono text-xs text-gray-700 dark:text-gray-300 break-all inline-flex items-center gap-1">
             {row.ctxOrderId ?? '—'}
-            {row.ctxOrderId !== null && row.ctxOrderId !== undefined ? (
+            {row.ctxOrderId !== null ? (
               <CopyButton text={row.ctxOrderId} label="Copy CTX order id" />
+            ) : null}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-gray-500 dark:text-gray-400">CTX payment</dt>
+          <dd className="font-mono text-xs text-gray-700 dark:text-gray-300 break-all inline-flex items-center gap-1">
+            {row.ctxPaymentId ?? '—'}
+            {row.ctxPaymentId !== null ? (
+              <CopyButton text={row.ctxPaymentId} label="Copy CTX payment id" />
             ) : null}
           </dd>
         </div>
@@ -304,34 +279,21 @@ function Detail({ row }: { row: AdminOrderView }): React.JSX.Element {
 
       <section>
         <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-          Cashback split (ADR 011)
+          Economics (ADR 052)
         </h2>
-        <dl className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+        <dl className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
           <div>
-            <dt className="text-gray-500 dark:text-gray-400">Wholesale (ours)</dt>
+            <dt className="text-gray-500 dark:text-gray-400">Cashback discount</dt>
             <dd className="tabular-nums text-gray-900 dark:text-white">
-              {fmtMinor(row.wholesaleMinor, row.chargeCurrency)}{' '}
-              <span className="text-xs text-gray-500 dark:text-gray-400">
-                ({row.wholesalePct}%)
-              </span>
+              {fmtMinor(row.userCashbackMinor, row.chargeCurrency)}
             </dd>
           </div>
           <div>
-            <dt className="text-gray-500 dark:text-gray-400">Cashback (theirs)</dt>
-            <dd className="tabular-nums text-gray-900 dark:text-white">
-              {fmtMinor(row.userCashbackMinor, row.chargeCurrency)}{' '}
-              <span className="text-xs text-gray-500 dark:text-gray-400">
-                ({row.userCashbackPct}%)
-              </span>
-            </dd>
-          </div>
-          <div>
-            <dt className="text-gray-500 dark:text-gray-400">Loop margin</dt>
+            <dt className="text-gray-500 dark:text-gray-400">Expected commission</dt>
             <dd className="tabular-nums font-medium text-gray-900 dark:text-white">
-              {fmtMinor(row.loopMarginMinor, row.chargeCurrency)}{' '}
-              <span className="text-xs text-gray-500 dark:text-gray-400">
-                ({row.loopMarginPct}%)
-              </span>
+              {row.expectedCommissionMinor !== null
+                ? fmtMinor(row.expectedCommissionMinor, row.chargeCurrency)
+                : '—'}
             </dd>
           </div>
         </dl>
@@ -343,8 +305,6 @@ function Detail({ row }: { row: AdminOrderView }): React.JSX.Element {
         </h2>
         <div className="mt-2 divide-y divide-gray-100 dark:divide-gray-900">
           <TimelineRow label="Created" iso={row.createdAt} />
-          <TimelineRow label="Paid" iso={row.paidAt} />
-          <TimelineRow label="Procured" iso={row.procuredAt} />
           <TimelineRow label="Fulfilled" iso={row.fulfilledAt} />
           <TimelineRow label="Failed" iso={row.failedAt} />
         </div>

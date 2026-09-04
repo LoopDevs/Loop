@@ -95,24 +95,11 @@ export const infraEnvFields = {
   // a malformed URL fails `parseEnv()` at startup.
   LOOP_STELLAR_HORIZON_URL: z.string().url().default('https://horizon.stellar.org'),
 
-  // A2-1812: price-feed + operator-pool bypass fix. These three
-  // were previously read via `process.env[...]` in `payments/price-feed.ts`
-  // and `ctx/operator-pool.ts` with no zod schema — a malformed URL
-  // or malformed JSON only surfaced at first use (mid-request). Moved
-  // into the schema so boot catches them. Callers still read from
-  // `process.env` directly at their call sites — that's the
-  // documented test-reload pattern (A2-1513 resolution notes) where
-  // a test mutates `process.env[...]` and expects the next read to
-  // pick the mutation up. Zod validates at boot; runtime reads stay
-  // live.
-  //
-  // `CTX_OPERATOR_POOL` is a JSON-encoded array of
-  // `{ id, bearer }` objects (ADR 013). Left as `string` here — the
-  // full JSON-shape validation lives in `operator-pool.ts::loadOperators`
-  // where a good error message is easier to produce.
-  LOOP_XLM_PRICE_FEED_URL: z.string().url().optional(),
-  LOOP_FX_FEED_URL: z.string().url().optional(),
-  CTX_OPERATOR_POOL: z.string().min(1).optional(),
+  // ADR 052: chain-qualified CTX payment currencies Loop offers at
+  // checkout, comma-separated (e.g. "XLM,DASH,ETH.USDT"). The
+  // customer pays CTX directly in one of these; CTX validates the
+  // final say per company crypto permissions. Unset → XLM only.
+  LOOP_CTX_PAYMENT_CURRENCIES: z.string().min(1).optional(),
 
   // Payout-worker tick interval (seconds). 30s matches ADR 016's
   // recommended pacing — the worker is slower than the watcher
@@ -120,31 +107,6 @@ export const infraEnvFields = {
   // submit + ledger-close (~5s) and parallelism on the operator
   // account is unsafe (sequence numbers serialise).
   LOOP_PAYOUT_WORKER_INTERVAL_SECONDS: z.coerce.number().int().positive().default(30),
-
-  // R3-5: upper-band sanity check for CTX's SEP-7 settlement amount.
-  // Before paying CTX, procurement compares the URI amount against
-  // the order's expected wholesale XLM quote. Default 12_500 bps =
-  // 125%, leaving room for ordinary FX/oracle movement while refusing
-  // obvious CTX mispricing / tampered payment URLs. Exact lower-bound
-  // checking is intentionally omitted: an under-quoted CTX URI is not
-  // a treasury-loss vector and CTX owns its own requested amount.
-  LOOP_CTX_PAYMENT_MAX_BPS_OF_EXPECTED: z.coerce
-    .number()
-    .int()
-    .min(10_000)
-    .max(100_000)
-    .default(12_500),
-
-  // NS-13 (settlement reconciliation): the CTX-settlement-system cutover
-  // timestamp. The missing-settlement reconciliation watchdog only flags a
-  // fulfilled, on-chain-funded order that has NO `ctx_settlements` row when
-  // the order was created AT OR AFTER this instant — orders created before
-  // the settlement system went live (migration 0045, "hardening A4")
-  // legitimately have no row and must never page. Optional: when unset the
-  // watchdog falls back to the earliest `ctx_settlements.created_at` as the
-  // empirical cutover. Set it to the exact A4 go-live instant (ISO-8601,
-  // e.g. `2026-05-14T00:00:00Z`) for a precise, backfill-proof baseline.
-  LOOP_SETTLEMENT_RECONCILE_SINCE: z.coerce.date().optional(),
 
   // Max auto-retry attempts before a row promotes from transient
   // failure to terminal `failed`. ADR 016 default 5.
@@ -205,18 +167,6 @@ export const infraEnvFields = {
   // need to configure Soroban RPC at all.
   LOOP_SOROBAN_RPC_URL: z.string().url().optional(),
 
-  // Hardening A6: auto-refund late deposits. A deposit that lands just
-  // after its order expires is recorded + abandoned; an operator can
-  // always refund it to the sender via
-  // `POST /api/admin/deposits/:paymentId/refund` (step-up gated). When
-  // this is `true` (and the operator Stellar signer is configured), the
-  // skip-sweep ALSO refunds such `order_gone` late deposits
-  // automatically the moment they're abandoned — same
-  // `refundDeposit()` path, same idempotency, no button press. Default
-  // false (admin-triggered only). Read live (like the kill switches) so
-  // flipping it takes effect on the next sweep without a redeploy.
-  LOOP_DEPOSIT_REFUND_AUTO: envBoolean.default(false),
-
   // A2-1907: runtime kill switches. Setting any of these to `true` on
   // a running deployment makes the matching surface return 503
   // SUBSYSTEM_DISABLED without redeploying. Toggle via:
@@ -237,20 +187,12 @@ export const infraEnvFields = {
   // `.default(false)` on purpose: the unset/false distinction is the
   // fallback semantic (kill-switches.ts reads process.env directly;
   // these entries exist for boot-parse + .env.example parity).
-  LOOP_KILL_ORDERS_LEGACY: killSwitchBoolean.optional(),
   LOOP_KILL_ORDERS_LOOP: killSwitchBoolean.optional(),
   LOOP_KILL_AUTH: killSwitchBoolean.default(false),
   // Pre-ADR-036 name: LOOP_KILL_WITHDRAWALS (renamed with the
   // withdrawal→emission re-scope; gates admin emissions + the
   // payout-compensation endpoint).
   LOOP_KILL_EMISSIONS: killSwitchBoolean.default(false),
-
-  // Worker tick intervals (seconds). Defaults tuned for a moderate
-  // order volume: watcher every 10s to keep deposit latency low;
-  // procurement every 5s since a paid order is user-blocking until
-  // the gift card arrives.
-  LOOP_PAYMENT_WATCHER_INTERVAL_SECONDS: z.coerce.number().int().positive().default(10),
-  LOOP_PROCUREMENT_INTERVAL_SECONDS: z.coerce.number().int().positive().default(5),
 
   // Asset-drift watcher (ADR 015). 300s (5m) default — drift is an
   // accounting metric, not latency-sensitive; paging the monitoring
@@ -264,15 +206,6 @@ export const infraEnvFields = {
   // queue of say 20 × $5 cashbacks still fits) while catching
   // real accounting divergence.
   LOOP_ASSET_DRIFT_THRESHOLD_STROOPS: z.coerce.bigint().nonnegative().default(100_000_000n),
-
-  // R3-1: operator XLM/USDC float reconciliation. This is a historical
-  // conservation check over the deposit/operator wallet from an
-  // operator-created baseline. XLM gets a wider default tolerance for
-  // Stellar fees; USDC should be exact unless an approved manual
-  // movement explains the difference.
-  LOOP_OPERATOR_FLOAT_RECONCILIATION_INTERVAL_HOURS: z.coerce.number().int().positive().default(24),
-  LOOP_OPERATOR_FLOAT_XLM_THRESHOLD_STROOPS: z.coerce.bigint().nonnegative().default(10_000_000n),
-  LOOP_OPERATOR_FLOAT_USDC_THRESHOLD_STROOPS: z.coerce.bigint().nonnegative().default(1n),
 
   // ADR 030 Phase B: provider-agnostic embedded-wallet substrate.
   // '' (default) → the wallet layer is OFF: `getWalletProvider()`

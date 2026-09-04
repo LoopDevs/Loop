@@ -28,15 +28,14 @@ src/
 │   │                     requireStaff('admin') alias (zero behavioral change).
 ├── admin/              ← Admin-panel handlers (~60 files) grouped by domain:
 │   │                     ADR 011 cashback config, ADR 015 treasury + asset
-│   │                     drift + settlement lag, ADR 017/018 credit
+│   │                     drift, ADR 017/018 credit
 │   │                     primitives (adjustments / refunds / idempotency /
-│   │                     audit envelope), supplier-spend, operator pools,
+│   │                     audit envelope),
 │   │                     mix-axis matrix (ADR 022), per-merchant / per-user
 │   │                     drill-down (ADR 018). Every response shape lives in
 │   │                     `@loop/shared/admin-*` (A2-1506) so web + backend +
 │   │                     openapi registration compile against one definition.
 │   │                     ADR 037 adds: staff-roles.ts (role mgmt writes),
-│   │                     watcher-skips.ts (skip browser + reopen),
 │   │                     user-wallet.ts (wallet card + reprovision),
 │   │                     order-refetch-redemption.ts, lookup.ts (reverse
 │   │                     lookup), ledger.ts (fleet-wide credit_transactions
@@ -58,9 +57,12 @@ src/
 ├── config/handler.ts   ← GET /api/config (feature-flag snapshot — ADR 010)
 ├── public/             ← ADR 020 Tier-1 unauthenticated never-500 surface:
 │   │                     cashback-stats, top-cashback-merchants, cashback-preview,
-│   │                     loop-assets, flywheel-stats, merchant-by-id/slug.
+│   │                     loop-assets, merchant-by-id/slug.
 │   │                     Shared cache-control + last-known-good fallback.
-├── ctx/                ← CTX operator-pool client (ADR 013)
+├── ctx/                ← CTX API-key client (ADR 051): api-fetch (breaker +
+│                         credential-invalid paging), user-provisioning (act-as
+│                         headers), giftcard-ws-maintainer (ADR 052 /ws giftcard
+│                         topic → order mirror), catalog-snapshots
 ├── credits/
 │   ├── payout-asset.ts ← home-currency → LOOP asset code + issuer lookup (ADR 015)
 │   ├── payout-builder.ts ← Pure payout-intent decision (pay vs skip) for markOrderFulfilled (ADR 015)
@@ -116,32 +118,28 @@ src/
 │                           pages once per incident for rows stuck in-flight.
 │                           docs/invariants.md INV-V1/INV-V2.
 ├── fraud/              ← ADR 045 (B-3) Phase-1 fraud/abuse controls
-│   ├── velocity.ts     ← Per-user order-create velocity gate (bounded/indexed
-│   │                     query, fail-closed) — called from orders/loop-handler.ts
-│   │                     BEFORE order creation
-│   └── duplicate-account-signals.ts ← Shared-funding-source dup-account
-│                         detector — flag-only, writes to `fraud_signals`
-│                         (migration 0059), Discord page on first occurrence;
-│                         called from payments/watcher.ts AFTER a paid
-│                         transition commits, never inside it
-├── orders/
-│   ├── handler.ts      ← Legacy CTX-proxy order creation
-│   ├── loop-handler.ts ← Loop-native order creation with FX-pin (ADR 010 + 015)
-│   ├── loop-payment-instructions.ts ← Pure server-authoritative payment-guidance derivation (oracle/FX re-quote + SEP-7 build) shared by the idempotent-POST replay (loop-replay-response.ts, thin wrapper) AND GET /api/orders/loop/:id's payment fields (Q6-4b remount-restore hardening)
-│   ├── repo.ts         ← Order INSERT + cashback-split computation
-│   ├── transitions.ts  ← markOrderPaid (loop_asset: mirror debit + issuer-return burn enqueue, ADR 036) / markOrderProcuring / markOrderFulfilled (writes ledger + pending_payouts inside one txn)
-│   ├── procurement.ts  ← paid → procuring → fulfilled worker (USDC-default, XLM-floor fallback, ADR 015)
-│   ├── procurement-redemption.ts ← CTX gift-card detail fetch + waitForRedemption (SSE-first, polling fallback)
-│   ├── redeem.ts        ← POST /api/orders/loop/:id/redeem — embedded-wallet LOOP redemption (ADR 036 term): user-signed inner payment + operator fee-bump; watcher settles downstream (ADR 030 C3 / ADR 036)
+│   └── velocity.ts     ← Per-user order-create velocity gate (bounded/indexed
+│                         query, fail-closed) — called from orders/loop-handler.ts
+│                         BEFORE order creation
+├── orders/ (ADR 052 — CTX is the payment processor)
+│   ├── loop-handler.ts ← POST /api/orders/loop — act-as create at CTX (forwards the
+│   │                     originating platform's X-Client-Id), relays CTX's payment
+│   │                     instructions, allowlists cryptoCurrency (LOOP_CTX_PAYMENT_CURRENCIES)
+│   ├── handler-shared.ts ← act-as upstream headers + legacy read helpers (historical rows)
+│   ├── ctx-order.ts    ← CTX card/payment Zod schemas, operator-scope reads,
+│   │                     per-order economics (user cashback + expected commission)
+│   ├── repo.ts         ← Mirror-row INSERT + economics recording
+│   ├── transitions.ts  ← Guarded CAS mirror transitions (unpaid→paid→fulfilled /
+│   │                     rejected / refunded / expired); fulfilled encrypts redemption
+│   ├── mirror-apply.ts ← operatorReference→row resolution + applyCtxCardStatus
+│   ├── ctx-mirror-sweep.ts ← Advisory-locked belt-and-braces sweep: card re-reads,
+│   │                     orphan rejection, economics retry, CTX-window expiry
+│   ├── procurement-redemption.ts ← CTX gift-card redemption fetch (fetchRedemption)
 │   ├── redemption-backfill.ts ← Sweeper re-fetching redemption payloads for fulfilled orders that persisted nulls (migration 0034; pages ops after 10 attempts → runbooks/redemption-backfill-exhausted.md) + refetchOrderRedemption one-shot for the ADR 037 admin action
-│   ├── redeem-crypto.ts ← AES-256-GCM envelope for redeem_code/redeem_pin at rest (CF-25; LOOP_REDEEM_ENCRYPTION_KEY; encrypt-on-write, decrypt-on-read, legacy-plaintext passthrough)
-│   └── ctx-settlements.ts ← Durable operator→CTX settlement record (hardening A4): one row per order, tx hash persisted before submit (CF-18 pattern) so pay-ctx idempotency uses the authoritative Horizon point lookup, not a bounded memo scan
-├── payments/
-│   ├── watcher.ts      ← Horizon payment watcher (matches inbound deposits, accepts USDC/XLM/LOOP assets)
-│   ├── skipped-payments.ts ← Skipped-deposit retry ledger — persists skips before cursor advance, sweeps each tick (audit CRIT #1/#2)
+│   └── redeem-crypto.ts ← AES-256-GCM envelope for redeem_code/redeem_pin at rest (CF-25; LOOP_REDEEM_ENCRYPTION_KEY; encrypt-on-write, decrypt-on-read, legacy-plaintext passthrough)
+├── payments/ (payout side — the money-in watcher died with ADR 052)
 │   ├── horizon.ts      ← Horizon read client (listAccountPayments, findOutboundPaymentByMemo)
 │   ├── horizon-balances.ts ← Horizon /accounts balance reader with 30s cache
-│   ├── price-feed.ts   ← XLM + USDC stroops-per-cent + convertMinorUnits FX
 │   ├── payout-submit.ts ← @stellar/stellar-sdk sign+submit wrapper with classified error kinds (ADR 016)
 │   ├── issuer-signers.ts ← ADR 031 per-asset issuer keypairs (LOOP_STELLAR_*_ISSUER_SECRET,
 │   │                     boot-validated against the issuer address) for interest-mint signing

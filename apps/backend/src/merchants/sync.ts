@@ -12,6 +12,7 @@ import {
   UpstreamListResponseSchema,
   mapUpstreamMerchant,
 } from './sync-upstream.js';
+import { replaceMerchantLinks, reconcileUserDiscounts, type CtxMerchantLink } from './ctx-links.js';
 
 // Re-exported for the CTX contract-test suite, which imports them
 // from `merchants/sync.js`. Definitions live in `./sync-upstream.ts`.
@@ -275,6 +276,7 @@ async function refreshMerchantsInternal(opts: { rethrow?: boolean } = {}): Promi
   log.info('Refreshing merchant data from upstream API');
 
   const merchants: Merchant[] = [];
+  const links = new Map<string, CtxMerchantLink>();
   let page = 1;
   let totalPages = 1;
   // A2-1922: snapshot the denylist once at refresh start so a mid-
@@ -337,6 +339,14 @@ async function refreshMerchantsInternal(opts: { rethrow?: boolean } = {}): Promi
           );
           continue;
         }
+        const link = merchantParsed.data.link;
+        if (link?.id !== undefined) {
+          links.set(merchantParsed.data.id, {
+            id: link.id,
+            operatorDiscountBasisPoints: link.operatorDiscountBasisPoints ?? null,
+            userDiscountBasisPoints: link.userDiscountBasisPoints ?? null,
+          });
+        }
         const merchant = mapUpstreamMerchant(merchantParsed.data);
         if (merchant !== null) {
           merchants.push(merchant);
@@ -351,6 +361,11 @@ async function refreshMerchantsInternal(opts: { rethrow?: boolean } = {}): Promi
 
     const loadedAt = Date.now();
     store = buildMerchantStore(merchants, loadedAt);
+    replaceMerchantLinks(links);
+    // ADR 052 cashback reconcile — fire-and-forget: link drift heals
+    // on a later sweep if this pass fails, and a slow CTX write must
+    // not extend the sweep's critical section.
+    void reconcileUserDiscounts();
     try {
       await saveCatalogSnapshot({
         name: 'merchants',

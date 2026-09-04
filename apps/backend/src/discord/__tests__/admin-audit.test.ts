@@ -187,13 +187,13 @@ describe('notifyCashbackConfigChanged', () => {
       merchantName: 'Target',
       actorUserId: 'admin',
       previous: null,
-      next: { wholesalePct: '90', userCashbackPct: '4', loopMarginPct: '6', active: true },
+      next: { userCashbackPct: '4', active: true },
     });
     const e = lastEmbed();
     expect(e.title).toBe('🟢 Cashback config created');
     expect(e.fields.find((f) => f.name === 'Previous')).toBeUndefined();
     const next = e.fields.find((f) => f.name === 'New')!.value;
-    expect(next).toContain('cashback 4%');
+    expect(next).toContain('user cashback 4% of margin');
     expect(next).toContain('active');
   });
 
@@ -202,13 +202,15 @@ describe('notifyCashbackConfigChanged', () => {
       merchantId: 'm-1',
       merchantName: 'Target',
       actorUserId: 'admin',
-      previous: { wholesalePct: '92', userCashbackPct: '3', loopMarginPct: '5', active: true },
-      next: { wholesalePct: '90', userCashbackPct: '4', loopMarginPct: '6', active: true },
+      previous: { userCashbackPct: '3', active: true },
+      next: { userCashbackPct: '4', active: true },
     });
     const e = lastEmbed();
     expect(e.title).toBe('🔧 Cashback config updated');
-    expect(e.fields.find((f) => f.name === 'New')!.value).toContain('cashback 4%');
-    expect(e.fields.find((f) => f.name === 'Previous')!.value).toContain('cashback 3%');
+    expect(e.fields.find((f) => f.name === 'New')!.value).toContain('user cashback 4% of margin');
+    expect(e.fields.find((f) => f.name === 'Previous')!.value).toContain(
+      'user cashback 3% of margin',
+    );
   });
 
   it('marks inactive in the formatted line', () => {
@@ -217,7 +219,7 @@ describe('notifyCashbackConfigChanged', () => {
       merchantName: 'Target',
       actorUserId: 'admin',
       previous: null,
-      next: { wholesalePct: '0', userCashbackPct: '0', loopMarginPct: '0', active: false },
+      next: { userCashbackPct: '0', active: false },
     });
     const e = lastEmbed();
     expect(e.fields.find((f) => f.name === 'New')!.value).toContain('inactive');

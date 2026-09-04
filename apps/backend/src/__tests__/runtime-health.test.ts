@@ -54,7 +54,7 @@ describe('runtime health snapshot', () => {
   });
 
   it('treats a blocked required worker as degraded', () => {
-    markWorkerBlocked('payment_watcher', {
+    markWorkerBlocked('ctx_mirror_sweep', {
       reason: 'LOOP_STELLAR_DEPOSIT_ADDRESS is unset',
       staleAfterMs: 30_000,
     });
@@ -63,7 +63,7 @@ describe('runtime health snapshot', () => {
     expect(snapshot.degraded).toBe(true);
     expect(snapshot.workers).toEqual([
       expect.objectContaining({
-        name: 'payment_watcher',
+        name: 'ctx_mirror_sweep',
         degraded: true,
         running: false,
         blockedReason: 'LOOP_STELLAR_DEPOSIT_ADDRESS is unset',
@@ -87,11 +87,11 @@ describe('runtime health snapshot', () => {
   });
 
   it('S4-8: a lock-skipped tick counts as liveness (not stale/degraded) but is distinguishable from a led tick', () => {
-    markWorkerStarted('payment_watcher', { staleAfterMs: 1_000 });
+    markWorkerStarted('ctx_mirror_sweep', { staleAfterMs: 1_000 });
     // This machine keeps losing the fleet-wide single-flight lock —
     // its loop is alive (must NOT go stale → Fly must not restart a
     // healthy machine) but it has never actually led a tick.
-    markWorkerTickSkippedLocked('payment_watcher');
+    markWorkerTickSkippedLocked('ctx_mirror_sweep');
 
     const snap = getRuntimeHealthSnapshot();
     const worker = snap.workers[0]!;
@@ -107,7 +107,7 @@ describe('runtime health snapshot', () => {
     expect(fresh.workers[0]).toEqual(expect.objectContaining({ stale: false, degraded: false }));
 
     // A real led tick advances lastLeadTickAtMs.
-    markWorkerTickSuccess('payment_watcher');
+    markWorkerTickSuccess('ctx_mirror_sweep');
     const led = getRuntimeHealthSnapshot().workers[0]!;
     expect(led.lastLeadTickAtMs).not.toBeNull();
     expect(led.lastLeadTickAtMs).toBe(led.lastSuccessAtMs);

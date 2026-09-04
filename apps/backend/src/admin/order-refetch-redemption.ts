@@ -6,7 +6,7 @@
  * (runbook: docs/runbooks/redemption-backfill-exhausted.md). Drives
  * the SAME machinery as the backfill sweeper
  * (`refetchOrderRedemption` in orders/redemption-backfill.ts) — one
- * `fetchRedemption` through the operator pool, the idempotent
+ * `fetchRedemption` through the CTX API, the idempotent
  * persist guards, the attempts bookkeeping — with no backoff gate
  * and no attempts cap, because the action exists precisely for
  * exhausted rows.
@@ -45,7 +45,7 @@ const log = logger.child({ handler: 'admin-refetch-redemption' });
  */
 class RefetchNotApplicableError extends Error {
   constructor(
-    readonly kind: 'order_not_found' | 'not_eligible' | 'pool_unavailable',
+    readonly kind: 'order_not_found' | 'not_eligible' | 'ctx_unavailable',
     readonly reason?: string,
   ) {
     super(`refetch not applicable: ${kind}`);
@@ -103,7 +103,7 @@ export async function adminRefetchRedemptionHandler(c: Context): Promise<Respons
         const outcome = await refetchOrderRedemption(orderId);
         if (outcome.kind !== 'recovered' && outcome.kind !== 'still_empty') {
           // Throwing escapes the guard WITHOUT storing a snapshot —
-          // a retry with the same key after the order/pool state
+          // a retry with the same key after the order/upstream state
           // changes must re-evaluate, not replay a stale failure.
           throw new RefetchNotApplicableError(
             outcome.kind,
@@ -133,11 +133,11 @@ export async function adminRefetchRedemptionHandler(c: Context): Promise<Respons
       if (err.kind === 'order_not_found') {
         return c.json({ code: 'NOT_FOUND', message: 'Order not found' }, 404);
       }
-      if (err.kind === 'pool_unavailable') {
+      if (err.kind === 'ctx_unavailable') {
         return c.json(
           {
             code: 'SERVICE_UNAVAILABLE',
-            message: 'Operator pool unavailable — retry once CTX recovers',
+            message: 'CTX unavailable — retry once it recovers',
           },
           503,
         );

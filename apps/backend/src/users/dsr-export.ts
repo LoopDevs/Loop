@@ -101,14 +101,12 @@ export interface DsrExport {
     currency: string;
     chargeMinor: string;
     chargeCurrency: string;
-    paymentMethod: string;
-    paymentMemo: string | null;
+    paymentCryptoCurrency: string | null;
     userCashbackMinor: string;
     ctxOrderId: string | null;
     redeemIssued: boolean;
     failureReason: string | null;
     createdAt: string;
-    paidAt: string | null;
     fulfilledAt: string | null;
     failedAt: string | null;
   }>;
@@ -190,15 +188,13 @@ export async function buildDsrExport(userId: string): Promise<DsrExport | null> 
       currency: r.currency,
       chargeMinor: r.chargeMinor.toString(),
       chargeCurrency: r.chargeCurrency,
-      paymentMethod: r.paymentMethod,
-      paymentMemo: r.paymentMemo,
+      paymentCryptoCurrency: r.paymentCryptoCurrency,
       userCashbackMinor: r.userCashbackMinor.toString(),
       ctxOrderId: r.ctxOrderId,
       // Bool, not the secret. See module header for rationale.
       redeemIssued: r.redeemCode !== null || r.redeemUrl !== null,
       failureReason: r.failureReason,
       createdAt: r.createdAt.toISOString(),
-      paidAt: r.paidAt?.toISOString() ?? null,
       fulfilledAt: r.fulfilledAt?.toISOString() ?? null,
       failedAt: r.failedAt?.toISOString() ?? null,
     })),

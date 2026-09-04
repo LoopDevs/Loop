@@ -24,9 +24,8 @@ vi.mock('../../db/schema.js', () => ({
     state: 'orders.state',
     fulfilledAt: 'orders.fulfilled_at',
     faceValueMinor: 'orders.face_value_minor',
-    wholesaleMinor: 'orders.wholesale_minor',
     userCashbackMinor: 'orders.user_cashback_minor',
-    loopMarginMinor: 'orders.loop_margin_minor',
+    expectedCommissionMinor: 'orders.expected_commission_minor',
   },
 }));
 
@@ -91,9 +90,8 @@ describe('adminMerchantStatsCsvHandler', () => {
         order_count: 3n,
         unique_user_count: '2',
         face_value_minor: 15_000n,
-        wholesale_minor: '12000',
         user_cashback_minor: 1800,
-        loop_margin_minor: 1200n,
+        expected_commission_minor: '1200',
         last_fulfilled_at: new Date('2026-04-20T10:00:00Z'),
       },
       {
@@ -102,9 +100,8 @@ describe('adminMerchantStatsCsvHandler', () => {
         order_count: 1,
         unique_user_count: 1,
         face_value_minor: '5000',
-        wholesale_minor: '4000',
         user_cashback_minor: '600',
-        loop_margin_minor: '400',
+        expected_commission_minor: '400',
         last_fulfilled_at: '2026-04-18T14:00:00Z',
       },
     ];
@@ -112,8 +109,8 @@ describe('adminMerchantStatsCsvHandler', () => {
     const body = await res.text();
     const lines = body.split('\r\n').filter((l) => l.length > 0);
     expect(lines).toHaveLength(3);
-    expect(lines[1]).toBe('argos,GBP,3,2,15000,12000,1800,1200,2026-04-20T10:00:00.000Z');
-    expect(lines[2]).toBe('tesco,GBP,1,1,5000,4000,600,400,2026-04-18T14:00:00.000Z');
+    expect(lines[1]).toBe('argos,GBP,3,2,15000,1800,1200,2026-04-20T10:00:00.000Z');
+    expect(lines[2]).toBe('tesco,GBP,1,1,5000,600,400,2026-04-18T14:00:00.000Z');
   });
 
   it('RFC 4180 — escapes quotes + commas in a merchant slug with punctuation', async () => {
@@ -124,9 +121,8 @@ describe('adminMerchantStatsCsvHandler', () => {
         order_count: 1n,
         unique_user_count: 1n,
         face_value_minor: 100n,
-        wholesale_minor: 80n,
         user_cashback_minor: 10n,
-        loop_margin_minor: 10n,
+        expected_commission_minor: '10',
         last_fulfilled_at: '2026-04-22T00:00:00Z',
       },
     ];
@@ -142,9 +138,8 @@ describe('adminMerchantStatsCsvHandler', () => {
       order_count: 1n,
       unique_user_count: 1n,
       face_value_minor: 100n,
-      wholesale_minor: 80n,
       user_cashback_minor: 10n,
-      loop_margin_minor: 10n,
+      expected_commission_minor: '10',
       last_fulfilled_at: '2026-04-22T00:00:00Z',
     }));
     const res = await adminMerchantStatsCsvHandler(makeCtx());
@@ -179,16 +174,15 @@ describe('adminMerchantStatsCsvHandler', () => {
           order_count: 2n,
           unique_user_count: 2n,
           face_value_minor: 20_000n,
-          wholesale_minor: 16_000n,
           user_cashback_minor: 2_400n,
-          loop_margin_minor: 1_600n,
+          expected_commission_minor: 1_600n,
           last_fulfilled_at: '2026-04-22T00:00:00Z',
         },
       ],
     } as unknown as Array<Record<string, unknown>>;
     const res = await adminMerchantStatsCsvHandler(makeCtx());
     const body = await res.text();
-    expect(body).toContain('amazon,USD,2,2,20000,16000,2400,1600,2026-04-22T00:00:00.000Z');
+    expect(body).toContain('amazon,USD,2,2,20000,2400,1600,2026-04-22T00:00:00.000Z');
   });
 
   it('500 when the aggregate throws', async () => {
@@ -216,9 +210,8 @@ describe('adminMerchantStatsCsvHandler', () => {
           order_count: 5n,
           unique_user_count: 3n,
           face_value_minor: 50_000n,
-          wholesale_minor: 40_000n,
           user_cashback_minor: 2_500n,
-          loop_margin_minor: 7_500n,
+          expected_commission_minor: 7_500n,
           last_fulfilled_at: '2026-04-20T10:00:00Z',
         },
         {
@@ -227,9 +220,8 @@ describe('adminMerchantStatsCsvHandler', () => {
           order_count: 2n,
           unique_user_count: 2n,
           face_value_minor: 20_000n,
-          wholesale_minor: 16_000n,
           user_cashback_minor: 1_000n,
-          loop_margin_minor: 3_000n,
+          expected_commission_minor: 3_000n,
           last_fulfilled_at: '2026-04-18T00:00:00Z',
         },
       ];
@@ -237,8 +229,8 @@ describe('adminMerchantStatsCsvHandler', () => {
       const body = await res.text();
       const lines = body.split('\r\n').filter((l) => l.length > 0);
       expect(lines).toHaveLength(3);
-      expect(lines).toContain('amazon-uk,GBP,5,3,50000,40000,2500,7500,2026-04-20T10:00:00.000Z');
-      expect(lines).toContain('amazon-uk,EUR,2,2,20000,16000,1000,3000,2026-04-18T00:00:00.000Z');
+      expect(lines).toContain('amazon-uk,GBP,5,3,50000,2500,7500,2026-04-20T10:00:00.000Z');
+      expect(lines).toContain('amazon-uk,EUR,2,2,20000,1000,3000,2026-04-18T00:00:00.000Z');
     });
   });
 });

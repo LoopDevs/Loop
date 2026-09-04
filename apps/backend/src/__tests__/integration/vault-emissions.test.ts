@@ -163,13 +163,8 @@ async function seedOrder(args: { userId: string; cashbackMinor: bigint }): Promi
       currency: 'USD',
       chargeMinor: 5000n,
       chargeCurrency: 'USD',
-      paymentMethod: 'credit',
-      wholesalePct: '70.00',
-      userCashbackPct: '5.00',
-      loopMarginPct: '25.00',
-      wholesaleMinor: 3500n,
+      paymentCryptoCurrency: 'XLM',
       userCashbackMinor: args.cashbackMinor,
-      loopMarginMinor: 1250n,
       state: 'fulfilled',
     })
     .returning({ id: orders.id });

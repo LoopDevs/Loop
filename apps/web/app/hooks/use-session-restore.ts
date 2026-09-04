@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '~/stores/auth.store';
-import { validatePersistedPurchase } from '~/stores/purchase.store';
 
 // Module-load parallel restore. React hydration on cold start takes
 // ~1s on a mid-tier Android — we burn that wall-clock by firing the
@@ -112,22 +111,6 @@ export function useSessionRestore(): { isRestoring: boolean } {
     void getBootRestore().finally(() => {
       if (!cancelled) markRestored();
     });
-
-    // Pending-purchase restore — independent of auth.
-    void (async (): Promise<void> => {
-      try {
-        const { loadPendingOrder } = await import('~/native/purchase-storage');
-        const pending = await loadPendingOrder();
-        if (cancelled) return;
-        const validated = validatePersistedPurchase(pending);
-        if (validated !== null) {
-          const { usePurchaseStore } = await import('~/stores/purchase.store');
-          usePurchaseStore.setState(validated);
-        }
-      } catch {
-        // purchase restore failed — not critical
-      }
-    })();
 
     return () => {
       cancelled = true;

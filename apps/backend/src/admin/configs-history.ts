@@ -40,9 +40,7 @@ export interface AdminConfigHistoryEntry {
   merchantId: string;
   /** Display name from the catalog; falls back to merchantId. */
   merchantName: string;
-  wholesalePct: string;
   userCashbackPct: string;
-  loopMarginPct: string;
   active: boolean;
   changedBy: string;
   changedAt: string;
@@ -55,9 +53,7 @@ export interface AdminConfigHistoryResponse {
 interface DbRow {
   id: string;
   merchantId: string;
-  wholesalePct: string;
   userCashbackPct: string;
-  loopMarginPct: string;
   active: boolean;
   changedBy: string;
   changedAt: Date;
@@ -84,9 +80,7 @@ export async function adminConfigsHistoryHandler(c: Context): Promise<Response> 
       id: r.id,
       merchantId: r.merchantId,
       merchantName: merchantsById.get(r.merchantId)?.name ?? r.merchantId,
-      wholesalePct: r.wholesalePct,
       userCashbackPct: r.userCashbackPct,
-      loopMarginPct: r.loopMarginPct,
       active: r.active,
       changedBy: r.changedBy,
       changedAt: r.changedAt.toISOString(),

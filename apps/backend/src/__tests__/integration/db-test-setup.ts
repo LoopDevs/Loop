@@ -81,26 +81,11 @@ export const TABLES_TO_TRUNCATE = [
   'interest_pool_alert_state',
   'watchdog_alert_state',
   'otp_attempt_counters',
-  'ctx_settlements',
-  // The operator-wallet float-reconciliation subsystem (migration
-  // 0052). None of these have an FK PATH that CASCADE reaches from the
-  // roots below, so — like `vault_hot_float` /
-  // `vault_float_reconciliation_runs` above — they were NEVER cleared
-  // and latent-leaked across tests until listed explicitly here:
-  //   • `operator_float_reconciliation_runs` references
-  //     `operator_wallet_baselines` (its only FK, ON DELETE SET NULL —
-  //     which TRUNCATE CASCADE ignores anyway), so it's a child of a
-  //     table nothing truncates; and
-  //   • `operator_wallet_baselines` / `operator_manual_movements` are
-  //     pure PARENTS. The one child that references them
-  //     (`operator_wallet_movements`) IS swept transitively via
-  //     `orders` below, but CASCADE flows parent→child, so truncating
-  //     that child never reaches these parents.
-  // Listed children-first (runs → baselines) for the same
-  // deterministic-order reasoning as the rest of this list; CASCADE
-  // makes the exact order immaterial for correctness.
-  'operator_float_reconciliation_runs',
-  'operator_wallet_baselines',
+  // `operator_manual_movements` survives ADR 052 (the vault writer
+  // uses it); a pure PARENT no CASCADE reaches from the roots below,
+  // so it stays listed explicitly. Its sibling float-reconciliation
+  // tables (and ctx_settlements / payment_watcher_skips) dropped
+  // with the money-in rails — migration 0076.
   'operator_manual_movements',
   // The CTX gift-card catalog-snapshot cache (migration 0053). A
   // standalone table with NO foreign key to anything — same "CASCADE
@@ -119,7 +104,6 @@ export const TABLES_TO_TRUNCATE = [
   // before its parent) per this file's self-documenting convention.
   'payout_tx_hashes',
   'pending_payouts',
-  'payment_watcher_skips',
   'credit_transactions',
   'user_credits',
   'orders',

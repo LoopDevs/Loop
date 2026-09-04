@@ -9,10 +9,9 @@ import AdminOrderDetailRoute, { fmtMinor } from '../admin.orders.$orderId';
 
 afterEach(cleanup);
 
-// The route now mounts OrderDeliveryPanel (ADR 037) and
-// OrderRedrivePanel (A5-1), both of which read the ui.store for
-// toasts — the store resolves the initial theme via window.matchMedia
-// at import time, which jsdom doesn't implement.
+// The route mounts OrderDeliveryPanel (ADR 037), which reads the
+// ui.store for toasts — the store resolves the initial theme via
+// window.matchMedia at import time, which jsdom doesn't implement.
 vi.hoisted(() => {
   Object.defineProperty(window, 'matchMedia', {
     writable: true,
@@ -102,20 +101,14 @@ const baseRow = {
   currency: 'GBP',
   faceValueMinor: '10000',
   chargeCurrency: 'GBP',
-  chargeMinor: '10000',
-  paymentMethod: 'credit' as const,
-  wholesalePct: '80.00',
-  userCashbackPct: '10.00',
-  loopMarginPct: '10.00',
-  wholesaleMinor: '8000',
+  chargeMinor: '9000',
   userCashbackMinor: '1000',
-  loopMarginMinor: '1000',
+  expectedCommissionMinor: '500',
   ctxOrderId: 'ctx-xyz',
-  ctxOperatorId: 'operator-primary',
+  ctxPaymentId: 'ctxpay-123',
+  paymentCryptoCurrency: 'XLM',
   failureReason: null,
   createdAt: '2026-04-20T10:00:00.000Z',
-  paidAt: '2026-04-20T10:01:00.000Z',
-  procuredAt: '2026-04-20T10:02:00.000Z',
   fulfilledAt: '2026-04-20T10:03:00.000Z',
   failedAt: null,
 };
@@ -131,7 +124,7 @@ describe('fmtMinor', () => {
 });
 
 describe('<AdminOrderDetailRoute />', () => {
-  it('renders the split + timeline for a fulfilled order', async () => {
+  it('renders the economics + timeline for a fulfilled order', async () => {
     adminMock.getAdminOrder.mockResolvedValue(baseRow);
     renderAt();
     await waitFor(() => {
@@ -142,15 +135,20 @@ describe('<AdminOrderDetailRoute />', () => {
     expect(
       screen.getAllByText(/fulfilled/).some((el) => el.className.includes('rounded-full')),
     ).toBe(true);
-    // Cashback split percentages render.
-    expect(screen.getAllByText(/80\.00%/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/10\.00%/).length).toBeGreaterThan(0);
+    // ADR 052 economics: cashback discount + expected CTX commission.
+    expect(screen.getByText(/Cashback discount/)).toBeDefined();
+    expect(screen.getAllByText(/£10\.00/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Expected commission/)).toBeDefined();
+    expect(screen.getAllByText(/£5\.00/).length).toBeGreaterThan(0);
+    // CTX linkage renders.
+    expect(screen.getByText('ctx-xyz')).toBeDefined();
+    expect(screen.getByText('ctxpay-123')).toBeDefined();
   });
 
-  it('renders the failure-reason section on failed orders', async () => {
+  it('renders the failure-reason section on rejected orders', async () => {
     adminMock.getAdminOrder.mockResolvedValue({
       ...baseRow,
-      state: 'failed',
+      state: 'rejected',
       failureReason: 'CTX operator rejected: insufficient supply',
       fulfilledAt: null,
       failedAt: '2026-04-20T10:04:00.000Z',
@@ -209,38 +207,30 @@ describe('<AdminOrderDetailRoute />', () => {
     expect(screen.getByText(/GBPLOOP/)).toBeDefined();
   });
 
-  it('renders the green "♻️ Recycled" pill when paymentMethod is loop_asset', async () => {
-    adminMock.getAdminOrder.mockResolvedValue({
-      ...baseRow,
-      paymentMethod: 'loop_asset' as const,
-    });
+  it('renders the payment-currency pill (ADR 052) and omits it on legacy rows', async () => {
+    adminMock.getAdminOrder.mockResolvedValue(baseRow);
     adminMock.getAdminPayoutByOrder.mockRejectedValue(
       new ApiException(404, { code: 'NOT_FOUND', message: 'Not found' }),
     );
     renderAt();
     await waitFor(() => {
-      expect(screen.getByLabelText(/Paid with recycled cashback/i)).toBeDefined();
+      expect(screen.getByText('XLM')).toBeDefined();
     });
-    // The pill contains the raw payment-method text so ops can
-    // still grep the page for 'loop_asset'.
-    const pill = screen.getByLabelText(/Paid with recycled cashback/i);
-    expect(pill.textContent).toMatch(/loop_asset/);
   });
 
-  it('renders a neutral pill for non-recycled payment methods', async () => {
+  it('omits the payment-currency pill on legacy rows (null cryptoCurrency)', async () => {
     adminMock.getAdminOrder.mockResolvedValue({
       ...baseRow,
-      paymentMethod: 'xlm' as const,
+      paymentCryptoCurrency: null,
     });
     adminMock.getAdminPayoutByOrder.mockRejectedValue(
       new ApiException(404, { code: 'NOT_FOUND', message: 'Not found' }),
     );
     renderAt();
     await waitFor(() => {
-      expect(screen.getByText('xlm')).toBeDefined();
+      expect(screen.getByText('bbbb2222')).toBeDefined();
     });
-    // No recycled-cashback label anywhere for non-loop_asset orders.
-    expect(screen.queryByLabelText(/Paid with recycled cashback/i)).toBeNull();
+    expect(screen.queryByText('XLM')).toBeNull();
   });
 
   it('renders the "no payout yet" body when the endpoint 404s', async () => {
@@ -252,30 +242,5 @@ describe('<AdminOrderDetailRoute />', () => {
     await waitFor(() => {
       expect(screen.getByText(/No payout row for this order yet/)).toBeDefined();
     });
-  });
-
-  // A5-1: the order re-drive panel is admin-only and only shows for
-  // the two redrivable states. Component-level flow coverage (reason
-  // dialog, service call, toasts, step-up) lives in
-  // OrderRedrivePanel.test.tsx — this just proves the route wires it
-  // in with the right state.
-  it('A5-1: shows the re-drive panel for an admin on a stuck paid order', async () => {
-    adminMock.getAdminOrder.mockResolvedValue({ ...baseRow, state: 'paid', fulfilledAt: null });
-    adminMock.getAdminPayoutByOrder.mockRejectedValue(
-      new ApiException(404, { code: 'NOT_FOUND', message: 'Not found' }),
-    );
-    renderAt();
-    await waitFor(() => {
-      expect(screen.getByText(/Re-drive \(A5-1\)/i)).toBeDefined();
-    });
-  });
-
-  it('A5-1: hides the re-drive panel for a fulfilled order (nothing to redrive)', async () => {
-    adminMock.getAdminOrder.mockResolvedValue(baseRow); // state: 'fulfilled'
-    renderAt();
-    await waitFor(() => {
-      expect(screen.getByText('bbbb2222')).toBeDefined();
-    });
-    expect(screen.queryByText(/Re-drive \(A5-1\)/i)).toBeNull();
   });
 });

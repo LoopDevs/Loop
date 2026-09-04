@@ -32,7 +32,6 @@ import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 import { registerAdminCreditCsvsOpenApi } from './admin-fleet-monthly-credit-csvs.js';
 import { registerAdminMerchantsFlywheelOpenApi } from './admin-fleet-monthly-merchants-flywheel.js';
 import { registerAdminPayoutsAggregatesOpenApi } from './admin-fleet-monthly-payouts.js';
-import { registerAdminRecyclingActivityOpenApi } from './admin-fleet-monthly-recycling-activity.js';
 import { registerAdminUserCashbackDrillOpenApi } from './admin-fleet-monthly-user-cashback-drill.js';
 
 /**
@@ -109,44 +108,6 @@ export function registerAdminFleetMonthlyOpenApi(
 
   registry.registerPath({
     method: 'get',
-    path: '/api/admin/orders/payment-method-activity',
-    summary: 'Fleet payment-method-share activity per day (ADR 015 / 018).',
-    description:
-      'Daily bucketed counts and charge totals grouped by payment method (credit, loop_asset, usdc, xlm) — powers the rail-mix activity chart on /admin/cashback. Window: `?days=N` (default 30, cap 180).',
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      query: z.object({
-        days: z.coerce.number().int().min(1).max(180).optional(),
-      }),
-    },
-    responses: {
-      200: {
-        description: 'Per-day payment-method activity',
-        content: { 'application/json': { schema: z.unknown() } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      404: {
-        description:
-          'Not found — also returned to authenticated non-admin callers: requireAdmin masks the admin surface as 404 by design (see src/auth/require-admin.ts).',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (60/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: {
-        description: 'Internal error',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
-
-  registry.registerPath({
-    method: 'get',
     path: '/api/admin/cashback-monthly',
     summary: 'Fleet-wide monthly cashback aggregate (ADR 009 / 015).',
     description:
@@ -198,7 +159,6 @@ export function registerAdminFleetMonthlyOpenApi(
   // `/users/recycling-activity`) live in
   // `./admin-fleet-monthly-recycling-activity.ts`. Same
   // path-registration position as the original block.
-  registerAdminRecyclingActivityOpenApi(registry, errorResponse);
 
   // The two credit-side CSV exports
   // (`/api/admin/user-credits.csv` and

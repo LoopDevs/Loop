@@ -15,8 +15,8 @@
  *
  * Column layout is deliberately spreadsheet-friendly:
  *
- *   merchant_id, merchant_name, wholesale_pct, user_cashback_pct,
- *   loop_margin_pct, active, updated_by, updated_at
+ *   merchant_id, merchant_name, user_cashback_pct,
+ *   active, updated_by, updated_at
  *
  * Merchant-name resolution follows the ADR 021 Rule A fallback:
  * evicted-merchant rows render the `merchant_id` as the name so the
@@ -48,9 +48,7 @@ const ROW_CAP = 10_000;
 const HEADERS = [
   'merchant_id',
   'merchant_name',
-  'wholesale_pct',
   'user_cashback_pct',
-  'loop_margin_pct',
   'active',
   'updated_by',
   'updated_at',
@@ -62,9 +60,7 @@ function csvRow(values: Array<string | null | undefined>): string {
 
 interface ConfigRow {
   merchantId: string;
-  wholesalePct: string;
   userCashbackPct: string;
-  loopMarginPct: string;
   active: boolean;
   updatedBy: string;
   updatedAt: Date;
@@ -75,9 +71,7 @@ export async function adminCashbackConfigsCsvHandler(c: Context): Promise<Respon
     const rows = (await db
       .select({
         merchantId: merchantCashbackConfigs.merchantId,
-        wholesalePct: merchantCashbackConfigs.wholesalePct,
         userCashbackPct: merchantCashbackConfigs.userCashbackPct,
-        loopMarginPct: merchantCashbackConfigs.loopMarginPct,
         active: merchantCashbackConfigs.active,
         updatedBy: merchantCashbackConfigs.updatedBy,
         updatedAt: merchantCashbackConfigs.updatedAt,
@@ -100,9 +94,7 @@ export async function adminCashbackConfigsCsvHandler(c: Context): Promise<Respon
         csvRow([
           r.merchantId,
           name,
-          r.wholesalePct,
           r.userCashbackPct,
-          r.loopMarginPct,
           r.active ? 'true' : 'false',
           r.updatedBy,
           r.updatedAt.toISOString(),

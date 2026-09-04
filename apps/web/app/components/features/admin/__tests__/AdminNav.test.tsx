@@ -6,7 +6,7 @@ import { MemoryRouter } from 'react-router';
 import { ApiException } from '@loop/shared';
 import type { TreasurySnapshot } from '~/services/admin';
 import type * as AdminModule from '~/services/admin';
-import { AdminNav, failedPayoutsCount, operatorPoolStatus, visibleTabs } from '../AdminNav';
+import { AdminNav, ctxApiStatus, failedPayoutsCount, visibleTabs } from '../AdminNav';
 
 afterEach(cleanup);
 
@@ -59,19 +59,9 @@ vi.mock('~/hooks/query-retry', () => ({
 }));
 
 function baseSnapshot(
-  overrides?: Partial<TreasurySnapshot['operatorPool']>,
+  overrides?: Partial<TreasurySnapshot['ctxApi']>,
   payoutOverrides?: Partial<TreasurySnapshot['payouts']>,
 ): TreasurySnapshot {
-  const unknownFloat = {
-    state: 'unknown' as const,
-    expectedBalanceStroops: null,
-    actualBalanceStroops: null,
-    deltaStroops: null,
-    thresholdStroops: null,
-    unclassifiedCount: 0,
-    checkedAt: null,
-    error: null,
-  };
   return {
     outstanding: {},
     totals: {},
@@ -81,7 +71,6 @@ function baseSnapshot(
       EURLOOP: { outstandingMinor: '0', issuer: null },
     },
     assets: { USDC: { stroops: null }, XLM: { stroops: null } },
-    operatorFloat: { xlm: unknownFloat, usdc: unknownFloat },
     orderFlows: {},
     payouts: {
       pending: '0',
@@ -90,12 +79,9 @@ function baseSnapshot(
       failed: '0',
       ...(payoutOverrides ?? {}),
     },
-    operatorPool: {
-      size: 2,
-      operators: [
-        { id: 'op-1', state: 'closed' },
-        { id: 'op-2', state: 'closed' },
-      ],
+    ctxApi: {
+      configured: true,
+      state: 'closed',
       ...(overrides ?? {}),
     },
   };
@@ -165,7 +151,7 @@ describe('AdminNav — role-aware tabs (ADR 037 §6)', () => {
     adminMock.getTreasurySnapshot.mockResolvedValue(baseSnapshot());
   });
 
-  it('admin sees every tab, including Skips and Staff', async () => {
+  it('admin sees every tab, including Staff', async () => {
     userMock.staffRole = 'admin';
     renderAt('/admin');
     for (const label of [
@@ -175,9 +161,7 @@ describe('AdminNav — role-aware tabs (ADR 037 §6)', () => {
       'Orders',
       'Merchants',
       'Users',
-      'Skips',
       'Ledger',
-      'Operators',
       'Assets',
       'Audit',
       'Staff',
@@ -190,18 +174,10 @@ describe('AdminNav — role-aware tabs (ADR 037 §6)', () => {
     userMock.staffRole = 'support';
     userMock.isAdmin = false;
     renderAt('/admin');
-    for (const label of [
-      'Treasury',
-      'Payouts',
-      'Orders',
-      'Merchants',
-      'Users',
-      'Skips',
-      'Ledger',
-    ]) {
+    for (const label of ['Treasury', 'Payouts', 'Orders', 'Merchants', 'Users', 'Ledger']) {
       expect(await screen.findByRole('link', { name: label })).toBeDefined();
     }
-    for (const label of ['Cashback', 'Operators', 'Assets', 'Audit', 'Staff']) {
+    for (const label of ['Cashback', 'Assets', 'Audit', 'Staff']) {
       expect(screen.queryByRole('link', { name: label })).toBeNull();
     }
   });
@@ -229,20 +205,12 @@ describe('AdminNav — role-aware tabs (ADR 037 §6)', () => {
 
 describe('visibleTabs', () => {
   it('returns every tab for admin', () => {
-    expect(visibleTabs('admin').length).toBe(12);
+    expect(visibleTabs('admin').length).toBe(10);
   });
 
   it('filters to support-visible tabs for support', () => {
     const labels = visibleTabs('support').map((t) => t.label);
-    expect(labels).toEqual([
-      'Treasury',
-      'Payouts',
-      'Orders',
-      'Merchants',
-      'Users',
-      'Skips',
-      'Ledger',
-    ]);
+    expect(labels).toEqual(['Treasury', 'Payouts', 'Orders', 'Merchants', 'Users', 'Ledger']);
   });
 
   it('returns nothing for null', () => {
@@ -259,38 +227,24 @@ describe('AdminNav — CTX status pill', () => {
     });
   });
 
-  it('renders "CTX degraded" when any operator is half_open', async () => {
-    adminMock.getTreasurySnapshot.mockResolvedValue(
-      baseSnapshot({
-        operators: [
-          { id: 'op-1', state: 'closed' },
-          { id: 'op-2', state: 'half_open' },
-        ],
-      }),
-    );
+  it('renders "CTX degraded" when the circuit is half_open', async () => {
+    adminMock.getTreasurySnapshot.mockResolvedValue(baseSnapshot({ state: 'half_open' }));
     renderAt('/admin/cashback');
     await waitFor(() => {
       expect(screen.getByText(/CTX degraded/)).toBeDefined();
     });
   });
 
-  it('renders "CTX unavailable" when any operator circuit is open', async () => {
-    adminMock.getTreasurySnapshot.mockResolvedValue(
-      baseSnapshot({
-        operators: [
-          { id: 'op-1', state: 'open' },
-          { id: 'op-2', state: 'closed' },
-        ],
-      }),
-    );
+  it('renders "CTX unavailable" when the circuit is open', async () => {
+    adminMock.getTreasurySnapshot.mockResolvedValue(baseSnapshot({ state: 'open' }));
     renderAt('/admin/cashback');
     await waitFor(() => {
       expect(screen.getByText(/CTX unavailable/)).toBeDefined();
     });
   });
 
-  it('renders "CTX unconfigured" when the pool is empty', async () => {
-    adminMock.getTreasurySnapshot.mockResolvedValue(baseSnapshot({ size: 0, operators: [] }));
+  it('renders "CTX unconfigured" when the credentials are unset', async () => {
+    adminMock.getTreasurySnapshot.mockResolvedValue(baseSnapshot({ configured: false }));
     renderAt('/admin/cashback');
     await waitFor(() => {
       expect(screen.getByText(/CTX unconfigured/)).toBeDefined();
@@ -389,44 +343,20 @@ describe('failedPayoutsCount (pure)', () => {
   });
 });
 
-describe('operatorPoolStatus (pure)', () => {
-  it('returns unknown when the pool is undefined', () => {
-    expect(operatorPoolStatus(undefined)).toBe('unknown');
+describe('ctxApiStatus (pure)', () => {
+  it('returns unknown when the snapshot section is undefined', () => {
+    expect(ctxApiStatus(undefined)).toBe('unknown');
   });
-  it('returns unconfigured when size is 0', () => {
-    expect(operatorPoolStatus({ size: 0, operators: [] })).toBe('unconfigured');
+  it('returns unconfigured when the credentials are unset', () => {
+    expect(ctxApiStatus({ configured: false, state: 'closed' })).toBe('unconfigured');
   });
-  it('returns healthy when all operators are closed', () => {
-    expect(
-      operatorPoolStatus({
-        size: 2,
-        operators: [
-          { id: 'a', state: 'closed' },
-          { id: 'b', state: 'closed' },
-        ],
-      }),
-    ).toBe('healthy');
+  it('returns healthy when the circuit is closed', () => {
+    expect(ctxApiStatus({ configured: true, state: 'closed' })).toBe('healthy');
   });
-  it('returns degraded when any operator is half_open', () => {
-    expect(
-      operatorPoolStatus({
-        size: 2,
-        operators: [
-          { id: 'a', state: 'closed' },
-          { id: 'b', state: 'half_open' },
-        ],
-      }),
-    ).toBe('degraded');
+  it('returns degraded when the circuit is half_open', () => {
+    expect(ctxApiStatus({ configured: true, state: 'half_open' })).toBe('degraded');
   });
-  it('returns unavailable when any operator is open, overriding half_open', () => {
-    expect(
-      operatorPoolStatus({
-        size: 2,
-        operators: [
-          { id: 'a', state: 'open' },
-          { id: 'b', state: 'half_open' },
-        ],
-      }),
-    ).toBe('unavailable');
+  it('returns unavailable when the circuit is open', () => {
+    expect(ctxApiStatus({ configured: true, state: 'open' })).toBe('unavailable');
   });
 });

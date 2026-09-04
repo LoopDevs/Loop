@@ -12,7 +12,7 @@ import { randomBytes } from 'node:crypto';
 // `envState` MUST be built inside `vi.hoisted` (not a bare top-level
 // `const`): ES module imports link/evaluate their full transitive
 // graph BEFORE the importing file's own top-level statements run, so
-// `import { markOrderFulfilled } from '../fulfillment.js'` below
+// `import { markOrderFulfilled } from '../transitions.js'` below
 // pulls in `credits/vaults/vault-emissions.js` -> `runtime-health.js`
 // (ADR 031 V3), which reads `env.LOOP_AUTH_NATIVE_ENABLED` at ITS OWN
 // module top level — that read would hit `envState` in its TDZ if
@@ -88,7 +88,7 @@ vi.mock('../../credits/payout-builder.js', () => ({
   buildPayoutIntent: () => ({ kind: 'skip', reason: 'no_cashback' }),
 }));
 
-import { markOrderFulfilled } from '../fulfillment.js';
+import { markOrderFulfilled } from '../transitions.js';
 import {
   decryptRedeemField,
   isEncryptedRedeemField,
@@ -105,7 +105,6 @@ beforeEach(() => {
 describe('markOrderFulfilled — redeem secrets encrypted at rest', () => {
   it('persists code + PIN as ciphertext but leaves the URL plaintext', async () => {
     await markOrderFulfilled('o-1', {
-      ctxOrderId: 'ctx-abc',
       redemption: {
         code: 'PLAINTEXT-GIFT-CODE',
         pin: '4242',
@@ -134,7 +133,7 @@ describe('markOrderFulfilled — redeem secrets encrypted at rest', () => {
   });
 
   it('persists NULLs unchanged when there is no redemption payload', async () => {
-    await markOrderFulfilled('o-1', { ctxOrderId: 'ctx-abc' });
+    await markOrderFulfilled('o-1', {});
     const set = state.updateSet!;
     expect(set['redeemCode']).toBeNull();
     expect(set['redeemPin']).toBeNull();
@@ -145,7 +144,6 @@ describe('markOrderFulfilled — redeem secrets encrypted at rest', () => {
     envState.LOOP_REDEEM_ENCRYPTION_KEY = undefined;
     resetRedeemKeyCache();
     await markOrderFulfilled('o-1', {
-      ctxOrderId: 'ctx-abc',
       redemption: { code: 'DARK-MODE-CODE', pin: '9999', url: null },
     });
     const set = state.updateSet!;

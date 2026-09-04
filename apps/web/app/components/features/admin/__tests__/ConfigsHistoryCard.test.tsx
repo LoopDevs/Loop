@@ -84,9 +84,7 @@ describe('<ConfigsHistoryCard />', () => {
           id: 'h-1',
           merchantId: 'amazon',
           merchantName: 'Amazon',
-          wholesalePct: '70.00',
           userCashbackPct: '25.00',
-          loopMarginPct: '5.00',
           active: true,
           changedBy: 'admin-abcdef12',
           changedAt: new Date(Date.now() - 2 * 60_000).toISOString(),
@@ -95,9 +93,7 @@ describe('<ConfigsHistoryCard />', () => {
           id: 'h-2',
           merchantId: 'tesco',
           merchantName: 'Tesco',
-          wholesalePct: '60.00',
           userCashbackPct: '30.00',
-          loopMarginPct: '10.00',
           active: false,
           changedBy: 'admin-deadbeef',
           changedAt: new Date(Date.now() - 60 * 60_000).toISOString(),
@@ -109,10 +105,8 @@ describe('<ConfigsHistoryCard />', () => {
     expect(screen.getByText('Amazon')).toBeDefined();
     expect(screen.getByText('Tesco')).toBeDefined();
     // Pct summary reads as expected; inactive flag surfaces on Tesco.
-    expect(screen.getByText(/70\.00% wholesale · 25\.00% cashback · 5\.00% margin/)).toBeDefined();
-    expect(
-      screen.getByText(/60\.00% wholesale · 30\.00% cashback · 10\.00% margin · inactive/),
-    ).toBeDefined();
+    expect(screen.getByText(/25\.00% of margin to user/)).toBeDefined();
+    expect(screen.getByText(/30\.00% of margin to user · inactive/)).toBeDefined();
     // Drill links point at the merchant anchor on /admin/cashback.
     const amazonLink = screen.getByRole('link', { name: /Amazon/ });
     expect(amazonLink.getAttribute('href')).toBe('/admin/cashback#amazon');

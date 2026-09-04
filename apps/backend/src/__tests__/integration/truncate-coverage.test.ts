@@ -106,40 +106,26 @@ describe('truncateAllTables coverage', () => {
     await expect(truncateAllTables()).resolves.toBeUndefined();
   });
 
-  it('actually empties the four previously-uncovered tables', async () => {
+  it('actually empties the CASCADE-unreachable tables', async () => {
     // Seed one row in each table that had no CASCADE path (TST-07),
     // then prove the harness truncate now clears them. Uses only the
-    // NOT NULL columns each table requires.
+    // NOT NULL columns each table requires. (The operator-float
+    // siblings this originally covered dropped with the money-in
+    // rails — migration 0076.)
     await truncateAllTables();
     await db.execute(sql`
       INSERT INTO ctx_catalog_snapshots (name, payload, item_count, loaded_at)
       VALUES ('merchants', '[]'::jsonb, 0, now())
     `);
     await db.execute(sql`
-      INSERT INTO operator_wallet_baselines
-        (asset, account, opening_balance_stroops, starting_horizon_cursor,
-         current_horizon_cursor, reason, created_by)
-      VALUES ('usdc', 'GTESTACCOUNT', 0, 'cursor-0', 'cursor-0', 'seed', 'test-admin')
-    `);
-    await db.execute(sql`
       INSERT INTO operator_manual_movements
         (asset, account, direction, amount_stroops, reason, created_by)
       VALUES ('usdc', 'GTESTACCOUNT', 'in', 1, 'seed', 'test-admin')
     `);
-    await db.execute(sql`
-      INSERT INTO operator_float_reconciliation_runs
-        (asset, account, threshold_stroops, state)
-      VALUES ('usdc', 'GTESTACCOUNT', 0, 'ok')
-    `);
 
     await truncateAllTables();
 
-    for (const table of [
-      'ctx_catalog_snapshots',
-      'operator_wallet_baselines',
-      'operator_manual_movements',
-      'operator_float_reconciliation_runs',
-    ]) {
+    for (const table of ['ctx_catalog_snapshots', 'operator_manual_movements']) {
       const rows = (await db.execute(
         sql.raw(`SELECT count(*)::int AS n FROM "${table}"`),
       )) as unknown as Array<{ n: number }>;

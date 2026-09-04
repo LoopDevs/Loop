@@ -28,7 +28,6 @@
  */
 import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
-import { registerUsersFlywheelRailOpenApi } from './users-flywheel-rail.js';
 
 /**
  * Registers the user cashback-drill paths + their locally-scoped
@@ -187,5 +186,4 @@ export function registerUsersCashbackDrillOpenApi(
   // `UserPaymentMethodShareResponseSelf`) live in
   // `./users-flywheel-rail.ts`. Same path-registration position
   // as the original block.
-  registerUsersFlywheelRailOpenApi(registry, errorResponse);
 }

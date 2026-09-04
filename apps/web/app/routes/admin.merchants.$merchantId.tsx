@@ -25,7 +25,6 @@ import { ApiException, merchantSlug } from '@loop/shared';
 import type { Route } from './+types/admin.merchants.$merchantId';
 import { useAllMerchants } from '~/hooks/use-merchants';
 import { shouldRetry } from '~/hooks/query-retry';
-import { useStaffRole } from '~/hooks/use-staff-role';
 import {
   cashbackConfigHistory,
   listAdminOrders,
@@ -35,13 +34,8 @@ import {
 import { AdminNav } from '~/components/features/admin/AdminNav';
 import { RequireStaff } from '~/components/features/admin/RequireAdmin';
 import { CopyButton } from '~/components/features/admin/CopyButton';
-import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
 import { MerchantCashbackMonthlyChart } from '~/components/features/admin/MerchantCashbackMonthlyChart';
 import { MerchantCashbackPaidCard } from '~/components/features/admin/MerchantCashbackPaidCard';
-import { MerchantFlywheelActivityChart } from '~/components/features/admin/MerchantFlywheelActivityChart';
-import { MerchantFlywheelChip } from '~/components/features/admin/MerchantFlywheelChip';
-import { MerchantOperatorMixCard } from '~/components/features/admin/MerchantOperatorMixCard';
-import { MerchantRailMixCard } from '~/components/features/admin/MerchantRailMixCard';
 import { MerchantTopEarnersCard } from '~/components/features/admin/MerchantTopEarnersCard';
 import { Spinner } from '~/components/ui/Spinner';
 import { ADMIN_LOCALE } from '~/utils/locale';
@@ -62,8 +56,6 @@ export default function AdminMerchantDetailRoute(): React.JSX.Element {
 }
 
 function AdminMerchantDetailRouteInner(): React.JSX.Element {
-  // ADR 037: admin-only controls (CSV / money writes) key off this.
-  const { isAdminRole } = useStaffRole();
   const { merchantId = '' } = useParams<{ merchantId: string }>();
   const { merchants } = useAllMerchants();
   const merchant = merchants.find((m) => m.id === merchantId);
@@ -152,37 +144,6 @@ function AdminMerchantDetailRouteInner(): React.JSX.Element {
             orders still render below.
           </p>
         ) : null}
-        {/* Flywheel chip — recycled-vs-total over the last 31 days,
-            backed by /api/admin/merchants/:id/flywheel-stats (#623).
-            Gives ops a one-glance answer to "how much of this
-            merchant's volume is coming through the cashback rail?"
-            without leaving the drill-down. */}
-        <div className="mt-4">
-          <MerchantFlywheelChip merchantId={merchantId} />
-        </div>
-        {/* Flywheel trajectory sparkline (#641). The scalar chip
-            above says "12% over 31d"; this sparkline says "and
-            here's how that 12% got there, day by day". Green
-            recycled line diverging upward from the blue total
-            line is the shape of pivot success at this merchant. */}
-        <div className="mt-4">
-          <MerchantFlywheelActivityChart merchantId={merchantId} />
-        </div>
-        {/* Tier-3 CSV export (#645). Day-by-day flywheel series
-            pulled as a year-long spreadsheet for BD / commercial
-            prep — the long-form companion to the scalar chip and
-            the 30-day sparkline. Appends ?days=366 for a full-
-            year pull in one go. */}
-        {/* ADR 037 §3: bulk CSV exports are admin-only. */}
-        {isAdminRole ? (
-          <div className="mt-4">
-            <CsvDownloadButton
-              path={`/api/admin/merchants/${encodeURIComponent(merchantId)}/flywheel-activity.csv?days=366`}
-              filename={`${merchantId}-flywheel-activity-${new Date().toISOString().slice(0, 10)}.csv`}
-              label="Flywheel CSV (1y)"
-            />
-          </div>
-        ) : null}
       </section>
 
       {/* Current cashback config — small card. Shows the three
@@ -191,7 +152,7 @@ function AdminMerchantDetailRouteInner(): React.JSX.Element {
       <section className="rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
         <header className="border-b border-gray-200 px-6 py-4 dark:border-gray-800">
           <h2 className="text-base font-semibold text-gray-900 dark:text-white">
-            Current cashback split
+            Current user cashback
           </h2>
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
             Pinned at order-creation time. Editing on{' '}
@@ -201,7 +162,7 @@ function AdminMerchantDetailRouteInner(): React.JSX.Element {
             >
               /admin/cashback
             </Link>{' '}
-            creates a new audit row — in-flight orders keep their earlier split.
+            creates a new audit row — in-flight orders keep their earlier share.
           </p>
         </header>
         <div className="p-6">
@@ -212,10 +173,8 @@ function AdminMerchantDetailRouteInner(): React.JSX.Element {
               Admin access required to view config.
             </p>
           ) : config !== undefined ? (
-            <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3 text-sm">
-              <PctRow label="Wholesale" value={config.wholesalePct} />
-              <PctRow label="User cashback" value={config.userCashbackPct} />
-              <PctRow label="Loop margin" value={config.loopMarginPct} />
+            <dl className="grid grid-cols-1 gap-4 sm:grid-cols-1 text-sm">
+              <PctRow label="User cashback (% of margin)" value={config.userCashbackPct} />
             </dl>
           ) : (
             <p className="text-sm text-gray-500 dark:text-gray-400">
@@ -227,8 +186,8 @@ function AdminMerchantDetailRouteInner(): React.JSX.Element {
 
       {/* Cashback paid out (#625). Per-currency lifetime
           user_cashback_minor on fulfilled orders. Sits between the
-          current-config card (what the split *is*) and the audit
-          trail (how the split got there) — those two answer
+          current-config card (what the share *is*) and the audit
+          trail (how the share got there) — those two answer
           "what's the rule?"; this one answers "what has the rule
           cost us so far?". */}
       <MerchantCashbackPaidCard merchantId={merchantId} />
@@ -253,12 +212,6 @@ function AdminMerchantDetailRouteInner(): React.JSX.Element {
           <MerchantCashbackMonthlyChart merchantId={merchantId} />
         </div>
       </section>
-
-      {/* Rail mix (#627). Per-merchant payment-method share —
-          how users are paying for fulfilled orders at this one
-          merchant. A rising LOOP-asset share is the per-merchant
-          version of the fleet flywheel signal. */}
-      <MerchantRailMixCard merchantId={merchantId} />
 
       {/* Top earners (#655). Inverse axis of the user-drill's
           cashback-by-merchant table — ranks users by cashback
@@ -290,7 +243,7 @@ function AdminMerchantDetailRouteInner(): React.JSX.Element {
             <table className="min-w-full divide-y divide-gray-200 text-sm dark:divide-gray-800">
               <thead>
                 <tr>
-                  {['Changed', 'Wholesale', 'User', 'Loop margin', 'By', 'Active'].map((h) => (
+                  {['Changed', 'User cashback', 'By', 'Active'].map((h) => (
                     <th
                       key={h}
                       className="px-6 py-2 text-start text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400"
@@ -309,9 +262,7 @@ function AdminMerchantDetailRouteInner(): React.JSX.Element {
                         timeStyle: 'short',
                       })}
                     </td>
-                    <td className="px-6 py-2 tabular-nums">{h.wholesalePct}%</td>
                     <td className="px-6 py-2 tabular-nums">{h.userCashbackPct}%</td>
-                    <td className="px-6 py-2 tabular-nums">{h.loopMarginPct}%</td>
                     <td className="px-6 py-2 font-mono text-xs text-gray-600 dark:text-gray-400 truncate max-w-[10rem]">
                       {h.changedBy}
                     </td>
@@ -332,26 +283,6 @@ function AdminMerchantDetailRouteInner(): React.JSX.Element {
             </table>
           )}
         </div>
-      </section>
-
-      {/* Per-merchant × per-operator mix (ADR 013 / 022). Which
-          CTX operators have been carrying this merchant's orders
-          in the last 24h — the triage view during incidents, slot
-          above Recent orders so the "who's carrying this?" answer
-          sits right next to the "which orders just failed" list. */}
-      <section className="rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
-        <header className="flex flex-wrap items-start justify-between gap-3 border-b border-gray-200 px-6 py-4 dark:border-gray-800">
-          <div>
-            <h2 className="text-base font-semibold text-gray-900 dark:text-white">
-              Operator mix (24h)
-            </h2>
-            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              Which CTX operators carried this merchant&apos;s orders (ADR 013). Failed count drills
-              into the pre-scoped orders filter.
-            </p>
-          </div>
-        </header>
-        <MerchantOperatorMixCard merchantId={merchantId} />
       </section>
 
       {/* Recent orders for this merchant — 10 most-recent rows.
@@ -422,16 +353,11 @@ function OrderRow({ order }: { order: AdminOrderView }): React.JSX.Element {
         {order.id.slice(0, 8)}
       </Link>
       <span className="text-xs text-gray-500 dark:text-gray-400 tabular-nums">{date}</span>
-      <span
-        className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-          order.paymentMethod === 'loop_asset'
-            ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
-            : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'
-        }`}
-      >
-        {order.paymentMethod === 'loop_asset' ? '♻️ ' : ''}
-        {order.paymentMethod}
-      </span>
+      {order.paymentCryptoCurrency !== null ? (
+        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+          {order.paymentCryptoCurrency}
+        </span>
+      ) : null}
       <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 dark:bg-gray-800 dark:text-gray-300">
         {order.state}
       </span>

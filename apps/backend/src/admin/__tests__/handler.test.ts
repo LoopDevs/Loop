@@ -60,6 +60,9 @@ vi.mock('../../discord.js', () => ({
   notifyAdminAudit: (args: unknown) => notifyAdminAuditMock(args),
 }));
 
+vi.mock('../../merchants/ctx-links.js', () => ({
+  pushUserDiscountForMerchant: vi.fn(async () => true),
+}));
 vi.mock('../../merchants/sync.js', () => ({
   getMerchants: () => ({
     merchantsById: new Map([['m-1', { id: 'm-1', name: 'Test Merchant' }]]),
@@ -166,16 +169,12 @@ describe('listConfigsHandler', () => {
 
 describe('upsertConfigHandler', () => {
   const GOOD_BODY = {
-    wholesalePct: 70,
     userCashbackPct: 20,
-    loopMarginPct: 10,
     reason: 'tuning merchant split',
   };
   const ROW = {
     merchantId: 'm1',
-    wholesalePct: '70.00',
     userCashbackPct: '20.00',
-    loopMarginPct: '10.00',
     active: true,
     updatedBy: 'admin-uuid',
     updatedAt: new Date('2026-04-24T00:00:00Z'),
@@ -234,7 +233,7 @@ describe('upsertConfigHandler', () => {
   it('A2-502: 400 when the body omits reason', async () => {
     const { ctx } = makeCtx({
       param: { merchantId: 'm1' },
-      body: { wholesalePct: 70, userCashbackPct: 20, loopMarginPct: 10 },
+      body: { userCashbackPct: 20 },
       idempotencyKey: VALID_KEY,
     });
     const res = await upsertConfigHandler(ctx);
@@ -254,23 +253,11 @@ describe('upsertConfigHandler', () => {
   it('400 when the body fails zod validation (out-of-range percent)', async () => {
     const { ctx } = makeCtx({
       param: { merchantId: 'm1' },
-      body: { wholesalePct: 101, userCashbackPct: 0, loopMarginPct: 0, reason: 'bad' },
+      body: { userCashbackPct: 101, reason: 'bad' },
       idempotencyKey: VALID_KEY,
     });
     const res = await upsertConfigHandler(ctx);
     expect(res.status).toBe(400);
-  });
-
-  it('400 when the three pcts sum to more than 100', async () => {
-    const { ctx } = makeCtx({
-      param: { merchantId: 'm1' },
-      body: { wholesalePct: 60, userCashbackPct: 30, loopMarginPct: 20, reason: 'over' },
-      idempotencyKey: VALID_KEY,
-    });
-    const res = await upsertConfigHandler(ctx);
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { message: string };
-    expect(body.message).toMatch(/≤ 100|<= 100/);
   });
 
   it('A2-502: upserts and returns the ADR-017 {result, audit} envelope', async () => {
@@ -284,10 +271,10 @@ describe('upsertConfigHandler', () => {
     const res = await upsertConfigHandler(ctx);
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      result: { merchantId: string; wholesalePct: string };
+      result: { merchantId: string; userCashbackPct: string };
       audit: { actorUserId: string; idempotencyKey: string; replayed: boolean };
     };
-    expect(body.result).toMatchObject({ merchantId: 'm1', wholesalePct: '70.00' });
+    expect(body.result).toMatchObject({ merchantId: 'm1', userCashbackPct: '20.00' });
     expect(body.audit).toMatchObject({
       actorUserId: 'admin-uuid',
       idempotencyKey: VALID_KEY,
@@ -297,9 +284,7 @@ describe('upsertConfigHandler', () => {
     expect(dbMock['values']!).toHaveBeenCalledWith(
       expect.objectContaining({
         merchantId: 'm1',
-        wholesalePct: '70.00',
         userCashbackPct: '20.00',
-        loopMarginPct: '10.00',
         active: true,
         updatedBy: 'admin-uuid',
       }),
@@ -310,7 +295,7 @@ describe('upsertConfigHandler', () => {
     insertedRow.out = { ...ROW, merchantId: 'm2' };
     const { ctx } = makeCtx({
       param: { merchantId: 'm2' },
-      body: { ...GOOD_BODY, wholesalePct: 10, userCashbackPct: 10, loopMarginPct: 10 },
+      body: { ...GOOD_BODY, userCashbackPct: 10 },
       user: { id: 'admin-uuid' },
       idempotencyKey: VALID_KEY,
     });
@@ -325,13 +310,11 @@ describe('upsertConfigHandler', () => {
     insertedRow.out = {
       ...ROW,
       merchantId: 'm-1',
-      wholesalePct: '70.00',
       userCashbackPct: '25.00',
-      loopMarginPct: '5.00',
     };
     const { ctx } = makeCtx({
       param: { merchantId: 'm-1' },
-      body: { wholesalePct: 70, userCashbackPct: 25, loopMarginPct: 5, reason: 'first-time' },
+      body: { userCashbackPct: 25, reason: 'first-time' },
       user: { id: 'admin-uuid' },
       idempotencyKey: VALID_KEY,
     });
@@ -344,9 +327,7 @@ describe('upsertConfigHandler', () => {
         actorUserId: 'admin-uuid',
         previous: null,
         next: expect.objectContaining({
-          wholesalePct: '70.00',
           userCashbackPct: '25.00',
-          loopMarginPct: '5.00',
           active: true,
         }),
       }),
@@ -356,21 +337,17 @@ describe('upsertConfigHandler', () => {
   it('fires notifyCashbackConfigChanged with an old → new diff on update', async () => {
     preEditRow.value = {
       merchantId: 'm-1',
-      wholesalePct: '80.00',
       userCashbackPct: '15.00',
-      loopMarginPct: '5.00',
       active: true,
     };
     insertedRow.out = {
       ...ROW,
       merchantId: 'm-1',
-      wholesalePct: '75.00',
       userCashbackPct: '18.00',
-      loopMarginPct: '7.00',
     };
     const { ctx } = makeCtx({
       param: { merchantId: 'm-1' },
-      body: { wholesalePct: 75, userCashbackPct: 18, loopMarginPct: 7, reason: 'retune' },
+      body: { userCashbackPct: 18, reason: 'retune' },
       user: { id: 'admin-uuid' },
       idempotencyKey: VALID_KEY,
     });
@@ -378,15 +355,11 @@ describe('upsertConfigHandler', () => {
     expect(notifyMock).toHaveBeenCalledTimes(1);
     const call = notifyMock.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(call['previous']).toEqual({
-      wholesalePct: '80.00',
       userCashbackPct: '15.00',
-      loopMarginPct: '5.00',
       active: true,
     });
     expect(call['next']).toEqual({
-      wholesalePct: '75.00',
       userCashbackPct: '18.00',
-      loopMarginPct: '7.00',
       active: true,
     });
   });
@@ -417,13 +390,11 @@ describe('upsertConfigHandler', () => {
     insertedRow.out = {
       ...ROW,
       merchantId: 'ghost',
-      wholesalePct: '70.00',
       userCashbackPct: '25.00',
-      loopMarginPct: '5.00',
     };
     const { ctx } = makeCtx({
       param: { merchantId: 'ghost' },
-      body: { wholesalePct: 70, userCashbackPct: 25, loopMarginPct: 5, reason: 'ghost edit' },
+      body: { userCashbackPct: 25, reason: 'ghost edit' },
       user: { id: 'admin-uuid' },
       idempotencyKey: VALID_KEY,
     });

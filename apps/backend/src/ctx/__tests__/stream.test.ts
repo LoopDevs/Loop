@@ -21,7 +21,7 @@ function sseResponse(frames: string[]): Response {
   });
 }
 
-const CREDS = { bearer: 'tok-abc', clientId: 'loopweb' };
+const CREDS = { apiKey: 'key-abc', apiSecret: 'secret-abc', clientId: 'loopweb' };
 
 let fetchSpy: ReturnType<typeof vi.spyOn>;
 
@@ -129,20 +129,25 @@ describe('streamGiftCardStatus', () => {
     await expect(streamGiftCardStatus('o-1', CREDS)).rejects.toThrow(/503/);
   });
 
-  it('passes bearer in `?token=`, clientId via X-Client-Id header', async () => {
+  it('passes the API-key pair + clientId via headers, never the URL', async () => {
     fetchSpy.mockResolvedValueOnce(
       sseResponse([`data: ${JSON.stringify({ fulfilmentStatus: 'fulfilled' })}`]),
     );
-    await streamGiftCardStatus('o-1', { bearer: 'BEARER-XYZ', clientId: 'loopios' });
+    await streamGiftCardStatus('o-1', {
+      apiKey: 'KEY-XYZ',
+      apiSecret: 'SECRET-XYZ',
+      clientId: 'loopios',
+    });
     const [url, init] = fetchSpy.mock.calls[0]!;
     expect(String(url)).toContain('/gift-cards/o-1');
     expect(String(url)).toContain('stream=true');
-    expect(String(url)).toContain('token=BEARER-XYZ');
+    expect(String(url)).not.toContain('token=');
+    expect(String(url)).not.toContain('SECRET-XYZ');
     const headers = new Headers(init?.headers);
     expect(headers.get('Accept')).toBe('text/event-stream');
+    expect(headers.get('X-Api-Key')).toBe('KEY-XYZ');
+    expect(headers.get('X-Api-Secret')).toBe('SECRET-XYZ');
     expect(headers.get('X-Client-Id')).toBe('loopios');
-    // Never put the bearer in the Authorization header — CTX
-    // wires SSE auth via the query string only.
     expect(headers.get('Authorization')).toBeNull();
   });
 

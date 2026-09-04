@@ -46,7 +46,6 @@
 import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 import { registerAdminPayoutsClusterWritesOpenApi } from './admin-payouts-cluster-writes.js';
-import { registerAdminPayoutsSettlementLagOpenApi } from './admin-payouts-settlement-lag.js';
 import { registerAdminPayoutsByAssetOpenApi } from './admin-payouts-by-asset.js';
 
 /**
@@ -189,7 +188,6 @@ export function registerAdminPayoutsClusterOpenApi(
   // `./admin-payouts-settlement-lag.ts`. Fanned out from here so
   // the payouts-cluster registration in `admin.ts` keeps producing
   // one factory call for the whole surface.
-  registerAdminPayoutsSettlementLagOpenApi(registry, errorResponse);
 
   // The two write paths (`POST /api/admin/payouts/{id}/retry` and
   // `POST /api/admin/payouts/{id}/compensate`) plus their body /

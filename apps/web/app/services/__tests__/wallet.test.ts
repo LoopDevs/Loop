@@ -4,13 +4,7 @@ vi.mock('../api-client', () => ({
   authenticatedRequest: vi.fn(),
 }));
 
-import {
-  getMyWallet,
-  redeemLoopOrder,
-  balanceToStroops,
-  minorToStroops,
-  loopBalanceCoversCharge,
-} from '../wallet';
+import { getMyWallet, balanceToStroops, minorToStroops, loopBalanceCoversCharge } from '../wallet';
 import { authenticatedRequest } from '../api-client';
 
 const mockAuth = vi.mocked(authenticatedRequest);
@@ -37,25 +31,6 @@ describe('getMyWallet', () => {
     const result = await getMyWallet();
     expect(mockAuth).toHaveBeenCalledWith('/api/me/wallet');
     expect(result).toEqual(payload);
-  });
-});
-
-describe('redeemLoopOrder', () => {
-  it('POSTs /api/orders/loop/:id/redeem', async () => {
-    mockAuth.mockResolvedValue({ state: 'paid' });
-    const result = await redeemLoopOrder('order-123');
-    expect(mockAuth).toHaveBeenCalledWith('/api/orders/loop/order-123/redeem', {
-      method: 'POST',
-    });
-    expect(result).toEqual({ state: 'paid' });
-  });
-
-  it('URI-encodes the order id', async () => {
-    mockAuth.mockResolvedValue({ state: 'paid' });
-    await redeemLoopOrder('a/b');
-    expect(mockAuth).toHaveBeenCalledWith('/api/orders/loop/a%2Fb/redeem', {
-      method: 'POST',
-    });
   });
 });
 

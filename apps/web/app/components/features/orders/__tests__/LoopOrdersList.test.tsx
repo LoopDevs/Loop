@@ -43,21 +43,15 @@ function mkOrder(overrides: Partial<LoopOrderView> = {}): LoopOrderView {
     currency: 'USD',
     chargeMinor: '1000',
     chargeCurrency: 'USD',
-    paymentMethod: 'usdc',
-    paymentMemo: 'MEMO',
-    stellarAddress: null,
-    assetAmount: null,
-    paymentUri: null,
-    assetCode: null,
-    assetIssuer: null,
     userCashbackMinor: '50',
     ctxOrderId: 'ctx-1',
+    paymentCryptoCurrency: 'XLM',
+    payment: null,
     redeemCode: 'GIFT-123',
     redeemPin: '4242',
     redeemUrl: null,
     failureReason: null,
     createdAt: '2026-04-21T12:00:00Z',
-    paidAt: '2026-04-21T12:01:00Z',
     fulfilledAt: '2026-04-21T12:05:00Z',
     failedAt: null,
     ...overrides,
@@ -86,12 +80,14 @@ describe('LoopOrdersList', () => {
 
   it('shows a row per order with merchant + amount + state pill', async () => {
     listMock.mockResolvedValue({
-      orders: [mkOrder({ id: 'o-1' }), mkOrder({ id: 'o-2', state: 'pending_payment' })],
+      orders: [mkOrder({ id: 'o-1' }), mkOrder({ id: 'o-2', state: 'unpaid' })],
     });
     render(wrap(<LoopOrdersList enabled={true} />));
     await waitFor(() => screen.getAllByText('Target'));
     expect(screen.getAllByText('Target').length).toBe(2);
-    expect(screen.getAllByText(/\$10\.00/).length).toBe(2);
+    // Two rows + the unpaid row's auto-expanded awaiting-payment banner
+    // (which repeats the charge amount) = 3 matches.
+    expect(screen.getAllByText(/\$10\.00/).length).toBe(3);
     expect(screen.getByText('Ready')).toBeDefined();
     expect(screen.getByText('Waiting for payment')).toBeDefined();
   });
@@ -114,11 +110,11 @@ describe('LoopOrdersList', () => {
     expect(writeText).toHaveBeenCalledWith('GIFT-123');
   });
 
-  it('surfaces the failure reason when state=failed', async () => {
+  it('surfaces the failure reason when state=rejected', async () => {
     listMock.mockResolvedValue({
       orders: [
         mkOrder({
-          state: 'failed',
+          state: 'rejected',
           redeemCode: null,
           redeemPin: null,
           failureReason: 'CTX returned 500',
@@ -156,53 +152,21 @@ describe('LoopOrdersList', () => {
 
   it('hides the cashback pill on an unfulfilled order even if minor is non-zero', async () => {
     listMock.mockResolvedValue({
-      orders: [mkOrder({ state: 'pending_payment', userCashbackMinor: '250' })],
+      orders: [mkOrder({ state: 'unpaid', userCashbackMinor: '250' })],
     });
     render(wrap(<LoopOrdersList enabled={true} />));
     await waitFor(() => screen.getByText('Target'));
     expect(screen.queryByText(/\+2\.50 cashback/)).toBeNull();
   });
 
-  it('shows the "Recycled" pill when paymentMethod is loop_asset', async () => {
-    listMock.mockResolvedValue({
-      orders: [mkOrder({ paymentMethod: 'loop_asset' })],
-    });
-    render(wrap(<LoopOrdersList enabled={true} />));
-    await waitFor(() => screen.getByText('Target'));
-    expect(screen.getByLabelText(/Paid with recycled cashback/i)).toBeDefined();
-    expect(screen.getByText(/Recycled/)).toBeDefined();
-  });
-
-  it('renders the Recycled pill regardless of order state (intent signal, not outcome)', async () => {
-    // A pending loop_asset order — user has declared intent to
-    // recycle even if the order hasn't settled yet.
-    listMock.mockResolvedValue({
-      orders: [mkOrder({ paymentMethod: 'loop_asset', state: 'pending_payment' })],
-    });
-    render(wrap(<LoopOrdersList enabled={true} />));
-    await waitFor(() => screen.getByText('Target'));
-    expect(screen.getByLabelText(/Paid with recycled cashback/i)).toBeDefined();
-  });
-
-  it('hides the "Recycled" pill for non-loop_asset orders', async () => {
-    listMock.mockResolvedValue({
-      orders: [mkOrder({ paymentMethod: 'usdc' })],
-    });
-    render(wrap(<LoopOrdersList enabled={true} />));
-    await waitFor(() => screen.getByText('Target'));
-    expect(screen.queryByLabelText(/Paid with recycled cashback/i)).toBeNull();
-  });
-
-  it('A4-026: pending_payment row auto-expands and exposes deposit address + memo for recovery', async () => {
+  it('A4-026: unpaid row auto-expands and shows the awaiting-payment banner', async () => {
     listMock.mockResolvedValue({
       orders: [
         mkOrder({
-          state: 'pending_payment',
-          paymentMemo: 'MEMO-RECOVERY',
-          stellarAddress: 'GABCDEF',
+          state: 'unpaid',
           chargeMinor: '2500',
           chargeCurrency: 'USD',
-          paymentMethod: 'usdc',
+          paymentCryptoCurrency: 'XLM',
           redeemCode: null,
           redeemPin: null,
         }),
@@ -210,26 +174,7 @@ describe('LoopOrdersList', () => {
     });
     render(wrap(<LoopOrdersList enabled={true} />));
     // Auto-expanded — no click required.
-    await waitFor(() => screen.getByText('MEMO-RECOVERY'));
-    expect(screen.getByText('GABCDEF')).toBeDefined();
-    expect(screen.getByText(/Send \$25\.00 of USDC/i)).toBeDefined();
-  });
-
-  it('A4-026: pending_payment without stellarAddress / memo renders no panel (no NPE)', async () => {
-    listMock.mockResolvedValue({
-      orders: [
-        mkOrder({
-          state: 'pending_payment',
-          paymentMemo: null,
-          stellarAddress: null,
-          redeemCode: null,
-          redeemPin: null,
-        }),
-      ],
-    });
-    render(wrap(<LoopOrdersList enabled={true} />));
-    await waitFor(() => screen.getByText('Target'));
-    expect(screen.queryByText(/Send /i)).toBeNull();
+    await waitFor(() => screen.getByText(/Pay \$25\.00 in XLM/i));
   });
 
   // WUM-10 (2026-06-30 cold audit): CF-35's aria-live copy-confirmation

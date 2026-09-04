@@ -4,8 +4,8 @@
  * Covers `GET /api/users/me/recently-purchased`:
  *   - GROUP BY merchant_id: multiple orders to the same merchant
  *     collapse to one chip ordered by MAX(created_at) DESC.
- *   - State filter: only `paid` / `procuring` / `fulfilled` count;
- *     `pending_payment` / `failed` / `expired` are excluded.
+ *   - State filter: only `paid` / `fulfilled` count;
+ *     `unpaid` / `rejected` / `expired` are excluded.
  *   - Catalog join: known merchants surface with `merchant` set;
  *     evicted merchants surface with `merchant: null`.
  *   - Limit: default 8, clamped to [1, 20] via `?limit=`.
@@ -70,7 +70,7 @@ async function seedUser(email: string): Promise<SeededUser> {
 interface SeedOrderArgs {
   userId: string;
   merchantId: string;
-  state: 'pending_payment' | 'paid' | 'procuring' | 'fulfilled' | 'failed' | 'expired';
+  state: 'unpaid' | 'paid' | 'fulfilled' | 'rejected' | 'refunded' | 'expired';
   createdAt?: Date;
 }
 
@@ -82,13 +82,8 @@ async function seedOrder(args: SeedOrderArgs): Promise<void> {
     currency: 'USD',
     chargeMinor: 5000n,
     chargeCurrency: 'USD',
-    paymentMethod: 'credit',
-    wholesalePct: '70.00',
-    userCashbackPct: '5.00',
-    loopMarginPct: '25.00',
-    wholesaleMinor: 3500n,
+    paymentCryptoCurrency: 'XLM',
     userCashbackMinor: 250n,
-    loopMarginMinor: 1250n,
     state: args.state,
     ...(args.createdAt !== undefined ? { createdAt: args.createdAt } : {}),
   });
@@ -161,10 +156,10 @@ describeIf('user recently-purchased — real postgres', () => {
     expect(body.merchants[1]?.orderCount).toBe(3);
   });
 
-  it('excludes pending_payment, failed, and expired orders', async () => {
+  it('excludes unpaid, rejected, and expired orders', async () => {
     const me = await seedUser('rp-states@test.local');
-    await seedOrder({ userId: me.userId, merchantId: 'amazon', state: 'pending_payment' });
-    await seedOrder({ userId: me.userId, merchantId: 'starbucks', state: 'failed' });
+    await seedOrder({ userId: me.userId, merchantId: 'amazon', state: 'unpaid' });
+    await seedOrder({ userId: me.userId, merchantId: 'starbucks', state: 'rejected' });
     await seedOrder({ userId: me.userId, merchantId: 'home-depot', state: 'expired' });
     await seedOrder({ userId: me.userId, merchantId: 'target', state: 'fulfilled' });
 
@@ -175,7 +170,7 @@ describeIf('user recently-purchased — real postgres', () => {
     expect(body.merchants.map((m) => m.merchantId)).toEqual(['target']);
   });
 
-  it('includes paid and procuring states alongside fulfilled', async () => {
+  it('includes the paid state alongside fulfilled', async () => {
     const me = await seedUser('rp-inflight@test.local');
     const base = new Date('2026-01-01T00:00:00Z').getTime();
     await seedOrder({
@@ -187,7 +182,7 @@ describeIf('user recently-purchased — real postgres', () => {
     await seedOrder({
       userId: me.userId,
       merchantId: 'starbucks',
-      state: 'procuring',
+      state: 'paid',
       createdAt: new Date(base + 1000),
     });
     await seedOrder({

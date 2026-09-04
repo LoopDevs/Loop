@@ -16,9 +16,6 @@
  *     FROZEN (scope full) — money stays put when the state can't be read.
  *   - SCOPE (ASH decision #1/#2): `debits_only` blocks money OUT but lets
  *     earned payouts flow; `full` additionally holds money IN.
- *   - ENFORCEMENT #5 (authoritative, in-txn): a frozen account's
- *     credit-order spend throws `AccountFrozenError` and rolls the whole
- *     txn back — no order, no debit; unfrozen it commits normally.
  *   - ENTRY GATE (#1-#4 share this helper): `guardAccountNotFrozen`
  *     returns a 403 for a blocked intent, null otherwise.
  *   - PAYOUT DEFER #9: an earned payout to a `full`-frozen wallet is
@@ -32,19 +29,12 @@
  * Gated on `LOOP_E2E_DB=1`; run via `npm run test:integration`.
  */
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
-import { and, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 
 const RUN_INTEGRATION = process.env['LOOP_E2E_DB'] === '1';
 
 import { db } from '../../db/client.js';
-import {
-  users,
-  accountHolds,
-  orders,
-  userCredits,
-  creditTransactions,
-  pendingPayouts,
-} from '../../db/schema.js';
+import { users, accountHolds, pendingPayouts } from '../../db/schema.js';
 import { findOrCreateUserByEmail } from '../../db/users.js';
 import {
   getAccountFreezeState,
@@ -58,10 +48,6 @@ import {
   AccountHoldAlreadyReleasedError,
   AccountHoldNotFoundError,
 } from '../../fraud/account-freeze-service.js';
-import {
-  insertCreditOrderTxn,
-  type CreditOrderBaseValues,
-} from '../../orders/repo-credit-order.js';
 import { payOne } from '../../payments/payout-worker-pay-one.js';
 import {
   ensureMigrated,
@@ -95,30 +81,6 @@ async function liveHoldCount(userId: string): Promise<number> {
     .from(accountHolds)
     .where(eq(accountHolds.userId, userId));
   return rows.length;
-}
-
-function baseValues(
-  userId: string,
-  overrides: Partial<CreditOrderBaseValues> = {},
-): CreditOrderBaseValues {
-  return {
-    userId,
-    merchantId: 'merchant-ns08-test',
-    faceValueMinor: 5000n,
-    currency: 'USD',
-    chargeMinor: 5000n,
-    chargeCurrency: 'USD',
-    paymentMethod: 'credit',
-    paymentMemo: null,
-    wholesalePct: '90.00',
-    userCashbackPct: '5.00',
-    loopMarginPct: '5.00',
-    wholesaleMinor: 4500n,
-    userCashbackMinor: 250n,
-    loopMarginMinor: 250n,
-    idempotencyKey: null,
-    ...overrides,
-  };
 }
 
 describeIf('NS-08 account-freeze — ledger ↔ mirror service (real postgres)', () => {
@@ -353,96 +315,6 @@ describeIf('NS-08 account-freeze — hot-path read + scope semantics', () => {
     expect(await guardAccountNotFrozen(fakeCtx, userId, 'user_spend')).not.toBeNull();
     expect(await guardAccountNotFrozen(fakeCtx, userId, 'system_payout')).not.toBeNull();
     expect(captured.at(-1)).toEqual({ status: 403, code: 'ACCOUNT_FROZEN' });
-  });
-});
-
-describeIf('NS-08 enforcement #5 — insertCreditOrderTxn (authoritative in-txn)', () => {
-  beforeAll(async () => {
-    await ensureMigrated();
-  });
-  beforeEach(async () => {
-    await truncateAllTables();
-  });
-
-  async function seedBalance(userId: string, balanceMinor: bigint): Promise<void> {
-    await seedUserCreditsWithBackingLedger(db, { userId, currency: 'USD', balanceMinor });
-  }
-  async function orderCount(userId: string): Promise<number> {
-    return (await db.select({ id: orders.id }).from(orders).where(eq(orders.userId, userId)))
-      .length;
-  }
-  async function spendCount(userId: string): Promise<number> {
-    return (
-      await db
-        .select({ id: creditTransactions.id })
-        .from(creditTransactions)
-        .where(and(eq(creditTransactions.userId, userId), eq(creditTransactions.type, 'spend')))
-    ).length;
-  }
-  async function usdBalance(userId: string): Promise<bigint | null> {
-    const rows = await db
-      .select({ balanceMinor: userCredits.balanceMinor })
-      .from(userCredits)
-      .where(and(eq(userCredits.userId, userId), eq(userCredits.currency, 'USD')));
-    return rows[0]?.balanceMinor ?? null;
-  }
-
-  it('FROZEN (debits_only): the credit-order spend throws AccountFrozenError and rolls back — no order, no debit', async () => {
-    const userId = await seedUser();
-    const adminId = await seedUser();
-    await seedBalance(userId, 10_000n);
-    await accountFreezeService.placeHold({
-      userId,
-      scope: 'debits_only',
-      reasonCode: 'suspected_fraud',
-      reason: 'freeze before spend',
-      placedByUserId: adminId,
-    });
-
-    await expect(
-      insertCreditOrderTxn(baseValues(userId, { chargeMinor: 5000n })),
-    ).rejects.toBeInstanceOf(AccountFrozenError);
-
-    // Whole txn rolled back — un-debited, no order, no spend row.
-    expect(await orderCount(userId)).toBe(0);
-    expect(await spendCount(userId)).toBe(0);
-    expect(await usdBalance(userId)).toBe(10_000n);
-  });
-
-  it('UNFROZEN: the same credit-order spend commits (order paid + one spend + balance debited)', async () => {
-    const userId = await seedUser();
-    await seedBalance(userId, 10_000n);
-
-    const order = await insertCreditOrderTxn(baseValues(userId, { chargeMinor: 5000n }));
-    expect(order.state).toBe('paid');
-    expect(await orderCount(userId)).toBe(1);
-    expect(await spendCount(userId)).toBe(1);
-    expect(await usdBalance(userId)).toBe(5_000n);
-  });
-
-  it('UNFROZEN after release: a frozen-then-released account can spend again', async () => {
-    const userId = await seedUser();
-    const adminId = await seedUser();
-    await seedBalance(userId, 10_000n);
-    const hold = await accountFreezeService.placeHold({
-      userId,
-      scope: 'debits_only',
-      reasonCode: 'suspected_fraud',
-      reason: 'temp',
-      placedByUserId: adminId,
-    });
-    await expect(
-      insertCreditOrderTxn(baseValues(userId, { chargeMinor: 5000n })),
-    ).rejects.toBeInstanceOf(AccountFrozenError);
-
-    await accountFreezeService.releaseHold({
-      holdId: hold.id,
-      releaseReason: 'cleared',
-      releasedByUserId: adminId,
-    });
-    const order = await insertCreditOrderTxn(baseValues(userId, { chargeMinor: 5000n }));
-    expect(order.state).toBe('paid');
-    expect(await usdBalance(userId)).toBe(5_000n);
   });
 });
 

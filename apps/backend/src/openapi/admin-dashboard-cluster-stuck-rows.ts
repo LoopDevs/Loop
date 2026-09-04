@@ -28,30 +28,6 @@ export function registerAdminDashboardStuckRowsOpenApi(
   registry: OpenAPIRegistry,
   errorResponse: ReturnType<OpenAPIRegistry['register']>,
 ): void {
-  // ─── Admin — stuck-orders triage ───────────────────────────────────────────
-
-  const StuckOrderRow = registry.register(
-    'StuckOrderRow',
-    z.object({
-      id: z.string().uuid(),
-      userId: z.string().uuid(),
-      merchantId: z.string(),
-      state: z.enum(['paid', 'procuring']),
-      stuckSince: z.string().datetime(),
-      ageMinutes: z.number().int().min(0),
-      ctxOrderId: z.string().nullable(),
-      ctxOperatorId: z.string().nullable(),
-    }),
-  );
-
-  const StuckOrdersResponse = registry.register(
-    'StuckOrdersResponse',
-    z.object({
-      thresholdMinutes: z.number().int().min(1),
-      rows: z.array(StuckOrderRow),
-    }),
-  );
-
   // ─── Admin — stuck payouts (ADR 015 / 016) ─────────────────────────────────
 
   const StuckPayoutRow = registry.register(
@@ -76,45 +52,6 @@ export function registerAdminDashboardStuckRowsOpenApi(
       rows: z.array(StuckPayoutRow),
     }),
   );
-
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/stuck-orders',
-    summary: 'Orders stuck in paid/procuring past a threshold (ADR 011 / 013).',
-    description:
-      'Returns non-terminal orders (state `paid` or `procuring`) older than `?thresholdMinutes=` (default 5, max 10 080). Admin dashboard polls this as its SLO red-flag card — any row landing here means the CTX procurement worker is lagging or an upstream call is hung. Fulfilled / failed / expired rows are terminal and never appear.',
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      query: z.object({
-        thresholdMinutes: z.coerce.number().int().min(1).max(10_080).optional(),
-        limit: z.coerce.number().int().min(1).max(100).optional(),
-      }),
-    },
-    responses: {
-      200: {
-        description: 'Stuck rows (oldest first) plus the threshold used',
-        content: { 'application/json': { schema: StuckOrdersResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      404: {
-        description:
-          'Not found — also returned to authenticated non-admin callers: requireAdmin masks the admin surface as 404 by design (see src/auth/require-admin.ts).',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (120/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: {
-        description: 'Internal error reading the table',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
 
   registry.registerPath({
     method: 'get',

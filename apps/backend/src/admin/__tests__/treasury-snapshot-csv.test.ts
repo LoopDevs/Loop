@@ -7,7 +7,7 @@ interface SnapshotLike {
   liabilities: Record<string, { outstandingMinor: string; issuer: string | null }>;
   assets: Record<string, { stroops: string | null }>;
   payouts: Record<string, string>;
-  operatorPool: { size: number; operators: Array<{ id: string; state: string }> };
+  ctxApi: { configured: boolean; state: string };
 }
 
 const state = vi.hoisted(() => ({
@@ -54,7 +54,7 @@ const emptySnapshot: SnapshotLike = {
   liabilities: {},
   assets: {},
   payouts: {},
-  operatorPool: { size: 0, operators: [] },
+  ctxApi: { configured: false, state: 'closed' },
 };
 
 beforeEach(() => {
@@ -64,7 +64,7 @@ beforeEach(() => {
 });
 
 describe('adminTreasurySnapshotCsvHandler', () => {
-  it('returns header + snapshot_taken_at + operator_pool_size rows on empty snapshot', async () => {
+  it('returns header + snapshot_taken_at + ctx_api rows on empty snapshot', async () => {
     const res = await adminTreasurySnapshotCsvHandler(makeCtx());
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toBe('text/csv; charset=utf-8');
@@ -74,7 +74,8 @@ describe('adminTreasurySnapshotCsvHandler', () => {
     const lines = body.split('\r\n').filter((l) => l.length > 0);
     expect(lines[0]).toBe('metric,key,value');
     expect(lines[1]?.startsWith('snapshot_taken_at,,')).toBe(true);
-    expect(lines.some((l) => l === 'operator_pool_size,,0')).toBe(true);
+    expect(lines.some((l) => l === 'ctx_api_configured,,false')).toBe(true);
+    expect(lines.some((l) => l === 'ctx_api_state,,closed')).toBe(true);
   });
 
   it('emits stable Content-Disposition with a treasury-snapshot filename', async () => {
@@ -93,13 +94,7 @@ describe('adminTreasurySnapshotCsvHandler', () => {
       },
       assets: { USDC: { stroops: '50000000000' }, XLM: { stroops: null } },
       payouts: { pending: '12', submitted: '3', confirmed: '42', failed: '0' },
-      operatorPool: {
-        size: 2,
-        operators: [
-          { id: 'op-beta-02', state: 'half_open' },
-          { id: 'op-alpha-01', state: 'closed' },
-        ],
-      },
+      ctxApi: { configured: true, state: 'half_open' },
     };
     const res = await adminTreasurySnapshotCsvHandler(makeCtx());
     const body = await res.text();
@@ -127,14 +122,9 @@ describe('adminTreasurySnapshotCsvHandler', () => {
     expect(body).toContain('\r\npayout_state,failed,0\r\n');
     expect(body).toContain('\r\npayout_state,confirmed,42\r\n');
 
-    // Operator pool size.
-    expect(body).toContain('\r\noperator_pool_size,,2\r\n');
-
-    // Operators sorted by id ascending.
-    const alpha = body.indexOf('operator,op-alpha-01,closed');
-    const beta = body.indexOf('operator,op-beta-02,half_open');
-    expect(alpha).toBeGreaterThan(0);
-    expect(beta).toBeGreaterThan(alpha);
+    // CTX upstream state.
+    expect(body).toContain('\r\nctx_api_configured,,true\r\n');
+    expect(body).toContain('\r\nctx_api_state,,half_open\r\n');
   });
 
   it('passes through non-200 from the upstream snapshot handler', async () => {

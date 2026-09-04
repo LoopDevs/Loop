@@ -203,11 +203,8 @@ const ADMIN_ONLY_PROBES: Array<[string, string]> = [
   ['POST', `/api/admin/users/${NOBODY_ID}/home-currency`],
   ['POST', `/api/admin/users/${NOBODY_ID}/revoke-sessions`],
   ['POST', `/api/admin/users/${NOBODY_ID}/clear-otp-lockout`],
-  ['POST', '/api/admin/deposits/op-123/refund'],
   ['POST', '/api/admin/payouts/00000000-0000-4000-8000-00000000aaaa/retry'],
   ['POST', '/api/admin/payouts/00000000-0000-4000-8000-00000000aaaa/compensate'],
-  ['POST', `/api/admin/orders/${NOBODY_ID}/redrive`],
-  ['POST', `/api/admin/orders/${NOBODY_ID}/refund`],
   ['POST', `/api/admin/vault-emissions/${NOBODY_ID}/redrive`],
   ['POST', `/api/admin/vault-redemptions/${NOBODY_ID}/redrive`],
   ['PUT', '/api/admin/merchant-cashback-configs/some-merchant'],
@@ -238,44 +235,28 @@ describe('ADR 037 tier behaviour', () => {
     expect(unauthed.status).toBe(401);
   });
 
-  // A5-6: stuck-orders/stuck-payouts triage is the concrete surface
-  // support needs to do the ADR 037 "find → explain → unstick" job —
-  // an operator can't point a customer at an A5-1 re-drive or a
-  // payout retry without first SEEING the row is stuck. Both mounts
-  // are blanket riders (no explicit requireStaff gate — see
-  // admin-dashboard.ts), so this pins the tier explicitly rather
-  // than leaving it to the generic "riders" bucket count below.
-  it('support can read stuck-orders and stuck-payouts (A5-6)', async () => {
-    const orders = await app.request('/api/admin/stuck-orders', asUser(SUPPORT_ID));
-    expect(orders.status).toBe(200);
-    expect(await orders.json()).toEqual({ thresholdMinutes: 5, rows: [] });
-
+  // A5-6: stuck-payouts triage is the concrete surface support needs
+  // to do the ADR 037 "find → explain → unstick" job — an operator
+  // can't point a customer at a payout retry without first SEEING
+  // the row is stuck. The mount is a blanket rider (no explicit
+  // requireStaff gate — see admin-dashboard.ts), so this pins the
+  // tier explicitly rather than leaving it to the generic "riders"
+  // bucket count below. (stuck-orders retired with the money-in
+  // rails — ADR 052; the ctx mirror sweep owns stale mirrors now.)
+  it('support can read stuck-payouts (A5-6)', async () => {
     const payouts = await app.request('/api/admin/stuck-payouts', asUser(SUPPORT_ID));
     expect(payouts.status).toBe(200);
     expect(await payouts.json()).toEqual({ thresholdMinutes: 5, rows: [] });
-
-    const ordersDenied = await app.request('/api/admin/stuck-orders', asUser(NOBODY_ID));
-    expect(ordersDenied.status).toBe(404);
 
     const payoutsDenied = await app.request('/api/admin/stuck-payouts', asUser(NOBODY_ID));
     expect(payoutsDenied.status).toBe(404);
   });
 
   it('support can use the new ADR 037 surfaces', async () => {
-    const skips = await app.request('/api/admin/watcher-skips', asUser(SUPPORT_ID));
-    expect(skips.status).toBe(200);
-    expect(await skips.json()).toEqual({ rows: [] });
-
     // 400 (not 404) proves the support tier passed the gate and
     // reached the handler's own validation.
     const lookup = await app.request('/api/admin/lookup?q=%21%21', asUser(SUPPORT_ID));
     expect(lookup.status).toBe(400);
-
-    const reopen = await app.request(
-      '/api/admin/watcher-skips/12345/reopen',
-      asUser(SUPPORT_ID, { method: 'POST' }),
-    );
-    expect(reopen.status).toBe(400); // missing Idempotency-Key — gate passed
 
     const refetch = await app.request(
       `/api/admin/orders/${NOBODY_ID}/refetch-redemption`,
@@ -418,11 +399,10 @@ describe('ADR 037 mount inventory (default-deny)', () => {
       (g) => !g.gates.includes('requireStaff(admin)') && g.gates.includes('requireStaff(support)'),
     );
     const riders = groups.length - adminTier.length - supportExplicit.length;
-    // 45 = 23 CSV exports + 11 non-CSV admin writes (3 credit writes,
+    // 37 = CSV exports + non-CSV admin writes (3 credit writes,
     //      home-currency, cashback-config PUT, merchants/resync,
-    //      B4 revoke-sessions, A5-3 clear-otp-lockout, A6 deposit-refund,
-    //      R3-1 operator-float baseline/manual explanations) + payout
-    //      retry/compensate + A5-1 order redrive + A5-4 order refund
+    //      B4 revoke-sessions, A5-3 clear-otp-lockout) + payout
+    //      retry/compensate
     //      + ADR 031 V7 vault-emissions/vault-redemptions redrive (2)
     //      + 3 Discord surfaces + step-up mint
     //      + NS-04 rail kill switches (GET list + POST halt + POST resume)
@@ -432,13 +412,16 @@ describe('ADR 037 mount inventory (default-deny)', () => {
     //      money-write list below. NS-08's two GET reads (per-user hold
     //      history + live-holds dashboard) are support-tier blanket
     //      riders, not admin-tier, so they land in `riders` below.
-    expect(adminTier).toHaveLength(47);
-    // 10 = lookup, watcher-skips ×3, wallet ×2, refetch-redemption,
-    //      ledger (A5-8 fleet-wide ledger browser), audit timeline
-    //      (A5-7 per-subject audit timeline), auth-state (A5-3
-    //      login/OTP support state).
-    expect(supportExplicit).toHaveLength(10);
-    expect(riders).toBeGreaterThanOrEqual(50);
+    //      (ADR 052 retired the money-in writes: deposit-refund,
+    //      order redrive/refund, operator-float baselines/manual,
+    //      watcher-skips — see git history for the pre-rip table.)
+    expect(adminTier).toHaveLength(37);
+    // 7 = lookup, wallet ×2, refetch-redemption, ledger (A5-8
+    //     fleet-wide ledger browser), audit timeline (A5-7
+    //     per-subject audit timeline), auth-state (A5-3 login/OTP
+    //     support state).
+    expect(supportExplicit).toHaveLength(7);
+    expect(riders).toBeGreaterThanOrEqual(40);
   });
 
   it('every money write carries the explicit admin gate', () => {
@@ -449,13 +432,9 @@ describe('ADR 037 mount inventory (default-deny)', () => {
       'POST /api/admin/users/:userId/home-currency',
       'POST /api/admin/payouts/:id/retry',
       'POST /api/admin/payouts/:id/compensate',
-      'POST /api/admin/orders/:orderId/redrive',
-      'POST /api/admin/orders/:orderId/refund',
       'POST /api/admin/vault-emissions/:id/redrive',
       'POST /api/admin/vault-redemptions/:id/redrive',
       'PUT /api/admin/merchant-cashback-configs/:merchantId',
-      'POST /api/admin/operator-float/baselines',
-      'POST /api/admin/operator-float/manual-movements',
       'POST /api/admin/step-up',
       'PUT /api/admin/staff/:userId/role',
       'DELETE /api/admin/staff/:userId/role',
@@ -492,12 +471,6 @@ describe('ADR 037 mount inventory (default-deny)', () => {
       'POST /api/admin/users/:userId/home-currency': 'requireAdminStepUp(home-currency)',
       'POST /api/admin/payouts/:id/retry': 'requireAdminStepUp(payout-retry)',
       'POST /api/admin/payouts/:id/compensate': 'requireAdminStepUp(payout-compensation)',
-      // A5-1: re-driving a stuck order can submit a real outbound Stellar payment to CTX.
-      'POST /api/admin/orders/:orderId/redrive': 'requireAdminStepUp(order-redrive)',
-      // A5-4: order-bound refund — can submit a real outbound Stellar
-      // refund-to-sender, and is the compensating control for the
-      // fulfilled-order code-unused-attestation accepted risk.
-      'POST /api/admin/orders/:orderId/refund': 'requireAdminStepUp(order-refund)',
       // ADR 031 V7: re-driving a failed/stuck vault emission or
       // redemption row can submit a real outbound Soroban call.
       'POST /api/admin/vault-emissions/:id/redrive': 'requireAdminStepUp(vault-redrive)',
@@ -506,11 +479,6 @@ describe('ADR 037 mount inventory (default-deny)', () => {
       'DELETE /api/admin/staff/:userId/role': 'requireAdminStepUp(staff-role-revoke)',
       // Sets future emission rates — see the route mount's comment.
       'PUT /api/admin/merchant-cashback-configs/:merchantId': 'requireAdminStepUp(cashback-config)',
-      // A6: submits an outbound Stellar refund from the operator account.
-      'POST /api/admin/deposits/:paymentId/refund': 'requireAdminStepUp(deposit-refund)',
-      // R3-1: changes the baseline/explanation set for the operator float invariant.
-      'POST /api/admin/operator-float/baselines': 'requireAdminStepUp(operator-float)',
-      'POST /api/admin/operator-float/manual-movements': 'requireAdminStepUp(operator-float)',
       // NS-04: halting/resuming a money rail — separate scope per direction
       // so a halt token can't be replayed to resume.
       'POST /api/admin/rails/:rail/halt': 'requireAdminStepUp(rail-halt)',
@@ -563,7 +531,6 @@ describe('ADR 037 mount inventory (default-deny)', () => {
       // re-drives of existing intents (no new value creation), scoped
       // to the support remit on purpose — adding step-up would move
       // them back to admin-only.
-      'POST /api/admin/watcher-skips/:paymentId/reopen',
       'POST /api/admin/users/:userId/wallet/reprovision',
       'POST /api/admin/orders/:orderId/refetch-redemption',
     ]);

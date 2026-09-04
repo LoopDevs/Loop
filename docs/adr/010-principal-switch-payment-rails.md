@@ -1,6 +1,10 @@
 # ADR 010: Principal switch and payment rails
 
-Status: Accepted
+Status: Superseded (money-in half) by ADR 052 (2026-08-28) — CTX is
+the payment processor; the deposit watcher / procurement / settlement
+machinery this ADR specified is deleted. The principal-switch framing
+(Loop as CTX operator, act-as purchases, loop-native order surface)
+stands and is carried forward by ADR 052.
 Date: 2026-04-21
 Implemented: 2026-04-21 onwards (loop-native order surface `POST/GET /api/orders/loop` in orders/loop-handler.ts; order state machine in orders/transitions.ts; CTX treated as supplier rather than customer identity provider)
 Related: ADR 009 (credits ledger), ADR 011 (admin panel)

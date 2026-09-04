@@ -68,19 +68,13 @@ const baseRow = {
   faceValueMinor: 5000n,
   chargeCurrency: 'GBP',
   chargeMinor: 4000n,
-  paymentMethod: 'loop_asset',
-  wholesalePct: '80.00',
-  userCashbackPct: '15.00',
-  loopMarginPct: '5.00',
-  wholesaleMinor: 3200n,
   userCashbackMinor: 600n,
-  loopMarginMinor: 200n,
+  expectedCommissionMinor: 200n,
   ctxOrderId: 'ctx-abc',
-  ctxOperatorId: 'op-1',
+  ctxPaymentId: 'pay-abc',
+  paymentCryptoCurrency: 'XLM',
   failureReason: null,
   createdAt: new Date('2026-04-21T12:00:00Z'),
-  paidAt: new Date('2026-04-21T12:05:00Z'),
-  procuredAt: new Date('2026-04-21T12:06:00Z'),
   fulfilledAt: new Date('2026-04-21T12:07:00Z'),
   failedAt: null,
 };
@@ -126,9 +120,8 @@ describe('adminOrdersCsvHandler', () => {
     // Spot-check each bigint minor unit coerced, every timestamp ISO.
     expect(dataRow).toContain('5000'); // faceValueMinor
     expect(dataRow).toContain('4000'); // chargeMinor
-    expect(dataRow).toContain('3200'); // wholesaleMinor
     expect(dataRow).toContain('600'); // userCashbackMinor
-    expect(dataRow).toContain('200'); // loopMarginMinor
+    expect(dataRow).toContain('200'); // expectedCommissionMinor
     expect(dataRow).toContain('2026-04-21T12:00:00.000Z');
     expect(dataRow).toContain('2026-04-21T12:07:00.000Z');
     // Null timestamps serialise as empty — no literal "null" text.
@@ -139,7 +132,7 @@ describe('adminOrdersCsvHandler', () => {
     state.rows = [
       {
         ...baseRow,
-        state: 'failed',
+        state: 'rejected',
         failedAt: new Date('2026-04-21T14:00:00Z'),
         failureReason: 'boom: "quoted", comma, and CRLF\r\nhere',
       },

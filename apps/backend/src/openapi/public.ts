@@ -131,38 +131,6 @@ export function registerPublicOpenApi(
     },
   });
 
-  const PublicFlywheelStats = registry.register(
-    'PublicFlywheelStats',
-    z.object({
-      windowDays: z.number().int().openapi({ description: 'Fixed 30-day window.' }),
-      fulfilledOrders: z.number().int(),
-      recycledOrders: z.number().int(),
-      pctRecycled: z.string().openapi({
-        description:
-          'One-decimal percentage string, e.g. `"12.3"`. `"0.0"` when the denominator is zero.',
-      }),
-    }),
-  );
-
-  registry.registerPath({
-    method: 'get',
-    path: '/api/public/flywheel-stats',
-    summary: 'Fleet-wide cashback-flywheel scalar (ADR 015 / 020).',
-    description:
-      'Unauthenticated marketing surface. Scalar `{ fulfilledOrders, recycledOrders, pctRecycled }` over the last 30 days — the complement to `/api/public/cashback-stats` (emission) showing the recycle side of the story. `Cache-Control: public, max-age=300` on the happy path; `max-age=60` on the fallback path. Never 500.',
-    tags: ['Public'],
-    responses: {
-      200: {
-        description: '30-day flywheel scalar.',
-        content: { 'application/json': { schema: PublicFlywheelStats } },
-      },
-      429: {
-        description: 'Rate limit exceeded (60/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
-
   const PublicGeoResponse = registry.register(
     'PublicGeoResponse',
     z.object({

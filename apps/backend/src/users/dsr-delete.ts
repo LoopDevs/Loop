@@ -252,11 +252,7 @@ export async function deleteUserViaAnonymisation(userId: string): Promise<DsrDel
       .where(
         and(
           eq(orders.userId, userId),
-          inArray(orders.state, [
-            'pending_payment',
-            'paid',
-            'procuring',
-          ] satisfies (typeof ORDER_STATES)[number][]),
+          inArray(orders.state, ['unpaid', 'paid'] satisfies (typeof ORDER_STATES)[number][]),
         ),
       )
       .limit(1);

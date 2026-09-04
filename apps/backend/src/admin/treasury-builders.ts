@@ -24,12 +24,7 @@
  * them directly from this module.
  */
 import { eq, sql } from 'drizzle-orm';
-import type {
-  LoopLiability,
-  OperatorFloatTreasuryState,
-  TreasuryOrderFlow,
-  TreasurySnapshot,
-} from '@loop/shared';
+import type { LoopLiability, TreasuryOrderFlow, TreasurySnapshot } from '@loop/shared';
 import { db } from '../db/client.js';
 import {
   pendingPayouts,
@@ -72,16 +67,12 @@ export async function buildPayoutCounts(): Promise<Record<PayoutState, string>> 
 }
 
 /**
- * Aggregates fulfilled-order economics by charge currency (ADR 015).
- * Each row sums the four pinned minor-unit columns (`face_value`,
- * `wholesale`, `user_cashback`, `loop_margin`) plus a row count —
- * letting the admin UI render the CTX-as-supplier P&L without the
- * client re-running the math.
- *
- * Pending / failed / expired orders are excluded: an order hasn't
- * "flowed" until it lands fulfilled (CTX procured, user holds a
- * redeemable card). Refunds would show up as negative-sign entries
- * in the credits ledger, not here.
+ * Aggregates fulfilled-order economics by charge currency (ADR 052).
+ * Each row sums face value, the CTX-applied user-cashback discount,
+ * and the expected operator commission, plus a row count — the
+ * commission-side P&L the admin UI renders without re-running the
+ * math. Non-fulfilled orders are excluded: commission only accrues
+ * CTX-side once a card is paid + fulfilled.
  */
 export async function buildOrderFlows(): Promise<Record<string, TreasuryOrderFlow>> {
   const rows = await db
@@ -89,9 +80,8 @@ export async function buildOrderFlows(): Promise<Record<string, TreasuryOrderFlo
       currency: orders.chargeCurrency,
       count: sql<string>`COUNT(*)::text`,
       faceValue: sql<string>`COALESCE(SUM(${orders.faceValueMinor}), 0)::text`,
-      wholesale: sql<string>`COALESCE(SUM(${orders.wholesaleMinor}), 0)::text`,
       userCashback: sql<string>`COALESCE(SUM(${orders.userCashbackMinor}), 0)::text`,
-      loopMargin: sql<string>`COALESCE(SUM(${orders.loopMarginMinor}), 0)::text`,
+      expectedCommission: sql<string>`COALESCE(SUM(${orders.expectedCommissionMinor}), 0)::text`,
     })
     .from(orders)
     .where(eq(orders.state, 'fulfilled'))
@@ -101,9 +91,8 @@ export async function buildOrderFlows(): Promise<Record<string, TreasuryOrderFlo
     out[row.currency] = {
       count: row.count,
       faceValueMinor: row.faceValue,
-      wholesaleMinor: row.wholesale,
       userCashbackMinor: row.userCashback,
-      loopMarginMinor: row.loopMargin,
+      expectedCommissionMinor: row.expectedCommission,
     };
   }
   return out;
@@ -139,97 +128,6 @@ export async function buildAssets(): Promise<TreasurySnapshot['assets']> {
   }
 }
 
-function emptyOperatorFloatState(): OperatorFloatTreasuryState {
-  return {
-    state: 'unknown',
-    expectedBalanceStroops: null,
-    actualBalanceStroops: null,
-    deltaStroops: null,
-    thresholdStroops: null,
-    unclassifiedCount: 0,
-    checkedAt: null,
-    error: null,
-  };
-}
-
-export async function buildOperatorFloat(): Promise<TreasurySnapshot['operatorFloat']> {
-  const out: TreasurySnapshot['operatorFloat'] = {
-    xlm: emptyOperatorFloatState(),
-    usdc: emptyOperatorFloatState(),
-  };
-  const result = await db.execute<{
-    asset: 'xlm' | 'usdc';
-    state: OperatorFloatTreasuryState['state'];
-    expected_balance_stroops: string | null;
-    actual_balance_stroops: string | null;
-    delta_stroops: string | null;
-    threshold_stroops: string | null;
-    unclassified_count: number;
-    checked_at: string;
-    error: string | null;
-  }>(sql`
-    SELECT DISTINCT ON (asset)
-      asset,
-      state,
-      expected_balance_stroops::text,
-      actual_balance_stroops::text,
-      delta_stroops::text,
-      threshold_stroops::text,
-      unclassified_count,
-      checked_at::text,
-      error
-    FROM operator_float_reconciliation_runs
-    ORDER BY asset, checked_at DESC
-  `);
-  const normalized = result as
-    | Array<{
-        asset: 'xlm' | 'usdc';
-        state: OperatorFloatTreasuryState['state'];
-        expected_balance_stroops: string | null;
-        actual_balance_stroops: string | null;
-        delta_stroops: string | null;
-        threshold_stroops: string | null;
-        unclassified_count: number;
-        checked_at: string;
-        error: string | null;
-      }>
-    | {
-        rows: Array<{
-          asset: 'xlm' | 'usdc';
-          state: OperatorFloatTreasuryState['state'];
-          expected_balance_stroops: string | null;
-          actual_balance_stroops: string | null;
-          delta_stroops: string | null;
-          threshold_stroops: string | null;
-          unclassified_count: number;
-          checked_at: string;
-          error: string | null;
-        }>;
-      };
-  const rows = Array.isArray(normalized) ? normalized : normalized.rows;
-
-  for (const row of rows) {
-    out[row.asset] = {
-      state: row.state,
-      expectedBalanceStroops: row.expected_balance_stroops,
-      actualBalanceStroops: row.actual_balance_stroops,
-      deltaStroops: row.delta_stroops,
-      thresholdStroops: row.threshold_stroops,
-      unclassifiedCount: row.unclassified_count,
-      checkedAt: row.checked_at,
-      error: row.error,
-    };
-  }
-  return out;
-}
-
-/**
- * Re-frames `outstanding` as LOOP-asset liabilities: the currency
- * key is swapped for the matching LOOP asset code, and the issuer
- * is pinned alongside so the admin UI can flag "no issuer
- * configured" next to the number. Always returns entries for all
- * three assets so the UI shape is stable across deploys.
- */
 export function buildLiabilities(
   outstanding: Record<string, string>,
 ): Record<LoopAssetCode, LoopLiability> {

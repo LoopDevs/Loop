@@ -5,25 +5,18 @@ import type { Route } from './+types/admin._index';
 import { shouldRetry } from '~/hooks/query-retry';
 import { useStaffRole } from '~/hooks/use-staff-role';
 import { getTreasurySnapshot, type TreasurySnapshot } from '~/services/admin';
-import {
-  AdminNav,
-  failedPayoutsCount,
-  operatorPoolStatus,
-} from '~/components/features/admin/AdminNav';
+import { AdminNav, failedPayoutsCount, ctxApiStatus } from '~/components/features/admin/AdminNav';
 import { AdminLookupSearch } from '~/components/features/admin/AdminLookupSearch';
 import { RequireStaff } from '~/components/features/admin/RequireAdmin';
 import { AdminAuditTail } from '~/components/features/admin/AdminAuditTail';
 import { ConfigsHistoryCard } from '~/components/features/admin/ConfigsHistoryCard';
 import { CashbackSparkline } from '~/components/features/admin/CashbackSparkline';
 import { PayoutsSparkline } from '~/components/features/admin/PayoutsSparkline';
-import { FleetFlywheelHeadline } from '~/components/features/admin/FleetFlywheelHeadline';
 import { OrdersSparkline } from '~/components/features/admin/OrdersSparkline';
 import { RealizationSparkline } from '~/components/features/admin/RealizationSparkline';
-import { StuckOrdersCard } from '~/components/features/admin/StuckOrdersCard';
 import { StuckPayoutsCard } from '~/components/features/admin/StuckPayoutsCard';
 import { AssetDriftBadge } from '~/components/features/admin/AssetDriftBadge';
 import { AssetDriftWatcherCard } from '~/components/features/admin/AssetDriftWatcherCard';
-import { SettlementLagCard } from '~/components/features/admin/SettlementLagCard';
 import { CashbackRealizationCard } from '~/components/features/admin/CashbackRealizationCard';
 import { Spinner } from '~/components/ui/Spinner';
 
@@ -91,7 +84,7 @@ const CARDS: ReadonlyArray<CardLink> = [
     minRole: 'support',
     title: 'Treasury',
     description:
-      'Outstanding credit, LOOP liabilities, operator pool health, payout counts, per-asset breakdown.',
+      'Outstanding credit, LOOP liabilities, CTX commission, payout counts, per-asset breakdown.',
   },
   {
     href: '/admin/payouts',
@@ -125,13 +118,6 @@ const CARDS: ReadonlyArray<CardLink> = [
       'Searchable catalog index with cashback-config state per merchant. Exports the catalog as CSV for BD / finance.',
   },
   {
-    href: '/admin/operators',
-    minRole: 'admin',
-    title: 'Operators',
-    description:
-      'CTX supplier operator pool — volume, success rate, p50/p95 fulfilment latency per operator (ADR 013/022).',
-  },
-  {
     href: '/admin/assets',
     minRole: 'admin',
     title: 'Assets',
@@ -139,31 +125,11 @@ const CARDS: ReadonlyArray<CardLink> = [
       'LOOP stablecoins (USDLOOP / GBPLOOP / EURLOOP) — outstanding liability, issuer, in-flight payout state (ADR 015/022).',
   },
   {
-    href: '/admin/stuck-orders',
-    // A5-6: the backend read already rides the ADR 037 support-tier
-    // blanket (GET, non-CSV, non-Discord — staff-route-gating.test.ts
-    // pins this), and the page itself now gates at `minimum="support"`
-    // (see admin.stuck-orders.tsx). Money-moving actions reached from
-    // the drill pages (redrive, payout retry) stay admin-gated on
-    // their own buttons regardless.
-    minRole: 'support',
-    title: 'Stuck orders',
-    description:
-      'SLO-triage list for orders sitting past threshold in paid / procuring, plus stuck payouts (ADR 011/013/015/016).',
-  },
-  {
     href: '/admin/audit',
     minRole: 'admin',
     title: 'Audit',
     description:
       'Admin write-audit trail (ADR 017/018) — every POST/PUT/DELETE with actor email and result.',
-  },
-  {
-    href: '/admin/skips',
-    minRole: 'support',
-    title: 'Watcher skips',
-    description:
-      'Payments the deposit watcher skipped (ADR 037) — re-open abandoned rows to unstick delivery.',
   },
   {
     href: '/admin/staff',
@@ -178,7 +144,7 @@ const CARDS: ReadonlyArray<CardLink> = [
  * `/admin` landing — the tabs in AdminNav deep-link into subpages;
  * this index is the first thing an op sees when they navigate to the
  * admin root. Renders high-signal "is anything on fire right now?"
- * cards from the treasury snapshot (operator-pool state, failed
+ * cards from the treasury snapshot (CTX upstream state, failed
  * payouts count) followed by navigation cards into every subpage.
  *
  * Auth gate deliberately matches the subpages: show a sign-in CTA
@@ -209,7 +175,7 @@ function AdminIndexRouteInner(): React.JSX.Element {
   const denied =
     snapshotQuery.error instanceof ApiException &&
     (snapshotQuery.error.status === 401 || snapshotQuery.error.status === 404);
-  const status = operatorPoolStatus(snapshotQuery.data?.operatorPool);
+  const status = ctxApiStatus(snapshotQuery.data?.ctxApi);
   const failed = failedPayoutsCount(snapshotQuery.data?.payouts);
 
   return (
@@ -272,25 +238,19 @@ function AdminIndexRouteInner(): React.JSX.Element {
               {failed}
             </div>
           </Link>
-          {/* A5-6: /admin/stuck-orders is support-visible (both the
-              API read and the page gate), so both triage cards show
-              for support too — no dead end. */}
-          <StuckOrdersCard />
           <StuckPayoutsCard />
         </section>
       )}
 
-      {/* Three stablecoin-operator dashboard cards (ADR 009/015/016).
+      {/* Stablecoin-operator dashboard cards (ADR 009/015/016).
           Drift = ledger health ("is our on-chain mint matched to what
-          we owe?"); settlement-lag = SLA health ("is cashback hitting
-          users fast enough?"); realization = flywheel health ("are
-          users spending cashback back on Loop?"). Each self-hides
+          we owe?"); realization = discount health ("is cashback
+          landing as checkout discounts?"). Each self-hides
           independently so a fresh deployment sees only the signals
           it has data for. */}
       {denied ? null : (
-        <section className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <section className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <AssetDriftWatcherCard />
-          <SettlementLagCard />
           <CashbackRealizationCard />
         </section>
       )}
@@ -320,15 +280,6 @@ function AdminIndexRouteInner(): React.JSX.Element {
           })}
         </section>
       )}
-
-      {/* Fleet-wide flywheel headline — "X% of recent fulfilled
-          orders used recycled cashback". Mounted above the
-          sparklines so the first thing an operator sees on /admin
-          is the ADR-015 pivot indicator. Self-hides on error /
-          loading / fleet-empty; renders a muted "not yet" banner
-          when loop_asset share is zero so ops can distinguish "0"
-          from "component crashed". */}
-      {denied ? null : <FleetFlywheelHeadline />}
 
       {denied ? null : <CashbackSparkline />}
 

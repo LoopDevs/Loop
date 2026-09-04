@@ -16,7 +16,6 @@
  * Locally-scoped schemas (none referenced elsewhere — they
  * travel with the slice):
  *   - `AdminOrderState` (inline z.enum)
- *   - `AdminOrderPaymentMethod` (inline z.enum)
  *   - `AdminOrderView`
  *
  * `adminPayoutView` is registered upstream in admin.ts (also
@@ -42,10 +41,8 @@ export function registerAdminOrderClusterDrillsOpenApi(
   const AdminPayoutView = adminPayoutView;
 
   const AdminOrderState = z
-    .enum(['pending_payment', 'paid', 'procuring', 'fulfilled', 'failed', 'expired'])
-    .openapi({ description: 'Mirrors the CHECK constraint on orders.state.' });
-
-  const AdminOrderPaymentMethod = z.enum(['xlm', 'usdc', 'credit', 'loop_asset']);
+    .enum(['unpaid', 'paid', 'fulfilled', 'rejected', 'refunded', 'expired'])
+    .openapi({ description: 'Mirrors the CHECK constraint on orders.state (ADR 052).' });
 
   const AdminOrderView = registry.register(
     'AdminOrderView',
@@ -58,19 +55,20 @@ export function registerAdminOrderClusterDrillsOpenApi(
       faceValueMinor: z.string(),
       chargeCurrency: z.string().length(3),
       chargeMinor: z.string(),
-      paymentMethod: AdminOrderPaymentMethod,
-      wholesalePct: z.string(),
-      userCashbackPct: z.string(),
-      loopMarginPct: z.string(),
-      wholesaleMinor: z.string(),
-      userCashbackMinor: z.string(),
-      loopMarginMinor: z.string(),
+      userCashbackMinor: z.string().openapi({
+        description: 'Cashback CTX applied as a checkout discount (ADR 052). Minor units.',
+      }),
+      expectedCommissionMinor: z.string().nullable().openapi({
+        description:
+          'Commission Loop expects CTX to accrue for this order; null until the operator read-back lands.',
+      }),
       ctxOrderId: z.string().nullable(),
-      ctxOperatorId: z.string().nullable(),
+      ctxPaymentId: z.string().nullable(),
+      paymentCryptoCurrency: z.string().nullable().openapi({
+        description: 'Chain-qualified CTX payment currency the customer chose.',
+      }),
       failureReason: z.string().nullable(),
       createdAt: z.string().datetime(),
-      paidAt: z.string().datetime().nullable(),
-      procuredAt: z.string().datetime().nullable(),
       fulfilledAt: z.string().datetime().nullable(),
       failedAt: z.string().datetime().nullable(),
     }),

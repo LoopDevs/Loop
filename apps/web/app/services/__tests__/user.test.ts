@@ -19,8 +19,6 @@ import {
   getCashbackByMerchant,
   getCashbackMonthly,
   getUserOrdersSummary,
-  getUserFlywheelStats,
-  getUserPaymentMethodShare,
 } from '../user';
 import { authenticatedRequest } from '../api-client';
 
@@ -213,33 +211,5 @@ describe('getUserOrdersSummary', () => {
     mockAuth.mockResolvedValue({});
     await getUserOrdersSummary();
     expect(mockAuth).toHaveBeenCalledWith('/api/users/me/orders/summary');
-  });
-});
-
-describe('getUserFlywheelStats', () => {
-  it('GETs /api/users/me/flywheel-stats', async () => {
-    mockAuth.mockResolvedValue({
-      currency: 'USD',
-      recycledOrderCount: 0,
-      recycledChargeMinor: '0',
-      totalFulfilledCount: 0,
-      totalFulfilledChargeMinor: '0',
-    });
-    await getUserFlywheelStats();
-    expect(mockAuth).toHaveBeenCalledWith('/api/users/me/flywheel-stats');
-  });
-});
-
-describe('getUserPaymentMethodShare', () => {
-  it('omits the query string when no state passed', async () => {
-    mockAuth.mockResolvedValue({ buckets: [] });
-    await getUserPaymentMethodShare();
-    expect(mockAuth).toHaveBeenCalledWith('/api/users/me/payment-method-share');
-  });
-
-  it('passes ?state= when provided', async () => {
-    mockAuth.mockResolvedValue({ buckets: [] });
-    await getUserPaymentMethodShare({ state: 'fulfilled' });
-    expect(mockAuth).toHaveBeenCalledWith('/api/users/me/payment-method-share?state=fulfilled');
   });
 });

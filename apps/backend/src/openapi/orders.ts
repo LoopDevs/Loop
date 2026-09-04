@@ -17,11 +17,9 @@
  * identical to before this slice (validated via the existing
  * 1844 backend tests).
  */
-import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 import { registerOrdersLoopOpenApi } from './orders-loop.js';
 import { registerOrdersReadsOpenApi } from './orders-reads.js';
-import { CreateOrderBody as CreateOrderBodyRuntime } from '../orders/request-schemas.js';
 
 /**
  * Registers all `/api/orders/*` and `/api/orders/loop/*` schemas
@@ -32,37 +30,6 @@ export function registerOrdersOpenApi(
   errorResponse: ReturnType<OpenAPIRegistry['register']>,
   pagination: ReturnType<OpenAPIRegistry['register']>,
 ): void {
-  // A2-803 (orders slice): the create-body shape lives in
-  // `../orders/request-schemas.ts` as the single source of truth
-  // shared with the runtime parser in `orders/handler.ts`. The
-  // shared module calls `extendZodWithOpenApi(z)` itself so the
-  // imported schema carries `.openapi(...)` regardless of import
-  // order — top-level annotation works.
-  const CreateOrderBody = registry.register(
-    'CreateOrderBody',
-    CreateOrderBodyRuntime.openapi({
-      description:
-        'POST /api/orders body. `amount` is 2-decimal precision in merchant currency (0.01 – 10_000).',
-    }),
-  );
-
-  const CreateOrderResponse = registry.register(
-    'CreateOrderResponse',
-    z.object({
-      orderId: z.string(),
-      paymentUri: z.string().openapi({
-        description:
-          'Stellar payment URI, e.g. web+stellar:pay?destination=...&amount=...&memo=...',
-      }),
-      paymentAddress: z.string(),
-      xlmAmount: z.string(),
-      memo: z.string(),
-      expiresAt: z.number().openapi({
-        description: 'Unix timestamp (seconds) — server-authoritative payment window close.',
-      }),
-    }),
-  );
-
   // The two CTX-proxy read paths (list + detail) and their three
   // locally-scoped schemas (`Order`, `OrderListResponse`,
   // `OrderDetailResponse`) live in `./orders-reads.ts`. Same
@@ -73,45 +40,6 @@ export function registerOrdersOpenApi(
   // its own LoopOrderView / LoopCreateOrderBody / LoopPayment*
   // schemas. Zero schema overlap with the legacy CTX-proxy flow above.
   registerOrdersLoopOpenApi(registry, errorResponse);
-
-  registry.registerPath({
-    method: 'post',
-    path: '/api/orders',
-    summary: 'Create a gift card order (authenticated).',
-    tags: ['Orders'],
-    security: [{ bearerAuth: [] }],
-    request: { body: { content: { 'application/json': { schema: CreateOrderBody } } } },
-    responses: {
-      201: {
-        description: 'Order created',
-        content: { 'application/json': { schema: CreateOrderResponse } },
-      },
-      400: {
-        description: 'Validation error',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      401: {
-        description: 'Missing or invalid access token',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      404: {
-        description: 'Unknown merchant',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (10/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      502: {
-        description: 'Upstream error from CTX',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      503: {
-        description: 'Circuit breaker open',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
 
   // The CTX-proxy read paths (list + detail) live in
   // `./orders-reads.ts` along with their three locally-scoped

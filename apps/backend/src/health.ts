@@ -51,7 +51,7 @@ import { upstreamUrl } from './upstream.js';
 import { notifyGeoDbStale } from './discord.js';
 import { sendWebhook, GREEN, ORANGE, DESCRIPTION_MAX, truncate } from './discord/shared.js';
 import { applyBinaryWatchdogAlert } from './credits/vaults/vault-watchdog-alert.js';
-import { getOperatorHealth } from './ctx/operator-pool.js';
+import { getCtxApiHealth } from './ctx/api-fetch.js';
 import { getGeoDbStatus, GEO_DB_STALE_AFTER_DAYS } from './public/geo.js';
 import { currentFleetSizeEstimate, currentFleetSizeSource } from './middleware/fleet-size.js';
 import { probeGateAllows } from './middleware/probe-gate.js';
@@ -312,18 +312,16 @@ export async function healthHandler(c: Context): Promise<Response> {
   ]);
   const runtime = getRuntimeHealthSnapshot();
 
-  // CF2-01 (2026-06-30 cold audit): the operator-pool circuit-breaker
-  // state was previously invisible to /health entirely, so a pool-wide
-  // outage (every operator's breaker OPEN) had no external signal
-  // besides procurement/orders silently failing. Surfaced as SOFT
-  // degraded (visible, doesn't cycle the Fly machine) rather than
-  // critical — the isAvailable() fix means the pool self-heals via the
-  // cooldown+half-open probe on its own schedule; cycling this backend
-  // instance wouldn't fix an upstream CTX outage and would just reset
-  // the recovery timers.
-  const operatorHealth = getOperatorHealth();
-  const operatorPoolExhausted =
-    operatorHealth.length > 0 && operatorHealth.every((op) => op.state === 'open');
+  // CF2-01 (2026-06-30 cold audit): the CTX-upstream circuit-breaker
+  // state was previously invisible to /health entirely, so an outage
+  // (breaker OPEN) had no external signal besides procurement/orders
+  // silently failing. Surfaced as SOFT degraded (visible, doesn't
+  // cycle the Fly machine) rather than critical — the breaker
+  // self-heals via the cooldown+half-open probe on its own schedule;
+  // cycling this backend instance wouldn't fix an upstream CTX outage
+  // and would just reset the recovery timers.
+  const ctxApiHealth = getCtxApiHealth();
+  const ctxApiDown = ctxApiHealth.configured && ctxApiHealth.state === 'open';
 
   // Two-tier degradation. Critical = "the backend itself is in
   // trouble; orchestrator should cycle this machine". Soft = "an
@@ -347,11 +345,7 @@ export async function healthHandler(c: Context): Promise<Response> {
   //     Discord stays quiet on upstream blips.
   const criticalDegraded = !databaseReachable || runtime.degraded;
   const softDegraded =
-    merchantsStale ||
-    locationsStale ||
-    !upstreamReachable ||
-    operatorPoolExhausted ||
-    geoDbStatus.stale;
+    merchantsStale || locationsStale || !upstreamReachable || ctxApiDown || geoDbStatus.stale;
   const degraded = criticalDegraded || softDegraded;
 
   // Raw reading → rolling window. Keep the last N readings, flip
@@ -443,7 +437,7 @@ export async function healthHandler(c: Context): Promise<Response> {
   if (merchantsStale) softDegradedReasons.push('merchants_stale');
   if (locationsStale) softDegradedReasons.push('locations_stale');
   if (!upstreamReachable) softDegradedReasons.push('upstream_unreachable');
-  if (operatorPoolExhausted) softDegradedReasons.push('operator_pool_exhausted');
+  if (ctxApiDown) softDegradedReasons.push('ctx_api_down');
   if (geoDbStatus.stale) {
     softDegradedReasons.push('geo_db_stale');
     // go-live-plan §T1-F: unlike the other soft-degraded reasons above,
@@ -514,11 +508,11 @@ export async function healthHandler(c: Context): Promise<Response> {
       // A4-034: DB readiness component. False = pool exhausted /
       // credentials rotated / network partition / DB hard-down.
       databaseReachable,
-      // CF2-01: per-operator circuit-breaker snapshot so an operator
+      // CF2-01: CTX-upstream circuit-breaker snapshot so a breaker
       // stuck OPEN is visible externally, not just inferred from
       // procurement failures.
-      operatorPool: operatorHealth,
-      operatorPoolExhausted,
+      ctxApi: ctxApiHealth,
+      ctxApiDown,
       criticalDegraded,
       softDegraded,
       softDegradedReasons,

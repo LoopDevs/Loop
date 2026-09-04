@@ -39,6 +39,11 @@ export function defaultPhase1Only(): boolean {
 const DEFAULT_CONFIG: AppConfig = {
   loopAuthNativeEnabled: false,
   loopOrdersEnabled: false,
+  // ADR 052 — safe default matching the backend's own fallback
+  // (`LOOP_CTX_PAYMENT_CURRENCIES ?? 'XLM'`). A missing config keeps
+  // checkout on the universally-supported currency rather than
+  // offering rails the deployment may not accept.
+  ctxPaymentCurrencies: ['XLM'],
   // Base value only — `useAppConfig` overrides `phase1Only` with the
   // deploy-aware `defaultPhase1Only()` at call time so SSR/first-paint
   // tracks the deployment. Kept `true` here as the safe fallback for any

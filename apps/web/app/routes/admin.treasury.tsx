@@ -15,18 +15,12 @@ import { RequireStaff } from '~/components/features/admin/RequireAdmin';
 import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
 import { AssetDriftBadge } from '~/components/features/admin/AssetDriftBadge';
 import { PayoutsByAssetTable } from '~/components/features/admin/PayoutsByAssetTable';
-import { SupplierSpendCard } from '~/components/features/admin/SupplierSpendCard';
 import { CtxCommissionCard } from '~/components/features/admin/CtxCommissionCard';
-import { SupplierSpendActivityChart } from '~/components/features/admin/SupplierSpendActivityChart';
 import { CreditFlowChart } from '~/components/features/admin/CreditFlowChart';
-import { OperatorStatsCard } from '~/components/features/admin/OperatorStatsCard';
 import { TopUsersByPendingPayoutCard } from '~/components/features/admin/TopUsersByPendingPayoutCard';
-import { UsersRecyclingActivityCard } from '~/components/features/admin/UsersRecyclingActivityCard';
 import { AdminMonthlyCashbackChart } from '~/components/features/admin/AdminMonthlyCashbackChart';
 import { TreasuryReconciliationChart } from '~/components/features/admin/TreasuryReconciliationChart';
 import { DiscordNotifiersCard } from '~/components/features/admin/DiscordNotifiersCard';
-import { PaymentMethodActivityChart } from '~/components/features/admin/PaymentMethodActivityChart';
-import { PaymentMethodShareCard } from '~/components/features/admin/PaymentMethodShareCard';
 import { Spinner } from '~/components/ui/Spinner';
 import { fmtStroops } from '~/utils/format-stellar';
 
@@ -67,7 +61,7 @@ const KNOWN_TYPES = ['cashback', 'interest', 'refund', 'spend', 'withdrawal', 'a
 
 /**
  * `/admin/treasury` — admin-only snapshot of the credits ledger
- * + the CTX operator pool state (ADR 009 / 011 / 013).
+ * + the CTX upstream state (ADR 009 / 011 / 051).
  *
  * Backend returns a read-optimised shape so the UI doesn't run its
  * own aggregation — see `src/admin/treasury.ts`.
@@ -128,7 +122,7 @@ function AdminTreasuryRouteInner(): React.JSX.Element {
       <header>
         <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Admin · Treasury</h1>
         <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-          Snapshot of the credits ledger and the CTX supplier pool.
+          Snapshot of the credits ledger and the CTX upstream.
         </p>
       </header>
 
@@ -237,8 +231,9 @@ function AdminTreasuryRouteInner(): React.JSX.Element {
           </Link>
         </div>
         <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-          How fulfilled-order money splits between CTX (supplier), users (cashback), and Loop
-          (margin) — ADR 015. Keyed by the currency the user was charged in.
+          Fulfilled-order flow through CTX (ADR 052): face value sold, the cashback CTX applied as a
+          checkout discount, and the commission Loop expects CTX to accrue. Keyed by the currency
+          the user was charged in.
         </p>
         {Object.keys(snapshot.orderFlows).length === 0 ? (
           <p className="text-sm text-gray-500 dark:text-gray-400">No fulfilled orders yet.</p>
@@ -257,13 +252,10 @@ function AdminTreasuryRouteInner(): React.JSX.Element {
                     Face value
                   </th>
                   <th className="px-3 py-2 text-end font-medium text-gray-500 dark:text-gray-400">
-                    CTX wholesale
-                  </th>
-                  <th className="px-3 py-2 text-end font-medium text-gray-500 dark:text-gray-400">
                     User cashback
                   </th>
                   <th className="px-3 py-2 text-end font-medium text-gray-500 dark:text-gray-400">
-                    Loop margin
+                    Expected commission
                   </th>
                 </tr>
               </thead>
@@ -282,13 +274,10 @@ function AdminTreasuryRouteInner(): React.JSX.Element {
                         {fmtMinor(flow.faceValueMinor, currency)}
                       </td>
                       <td className="px-3 py-2 text-end tabular-nums text-gray-700 dark:text-gray-300">
-                        {fmtMinor(flow.wholesaleMinor, currency)}
-                      </td>
-                      <td className="px-3 py-2 text-end tabular-nums text-gray-700 dark:text-gray-300">
                         {fmtMinor(flow.userCashbackMinor, currency)}
                       </td>
                       <td className="px-3 py-2 text-end tabular-nums text-gray-700 dark:text-gray-300">
-                        {fmtMinor(flow.loopMarginMinor, currency)}
+                        {fmtMinor(flow.expectedCommissionMinor, currency)}
                       </td>
                     </tr>
                   ))}
@@ -444,55 +433,6 @@ function AdminTreasuryRouteInner(): React.JSX.Element {
       </section>
 
       <section>
-        <div className="flex items-baseline justify-between mb-3 gap-4">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-            Recycling activity (90 days)
-          </h2>
-          {/* Tier-3 CSV export (#615). Pairs with the merchants
-              flywheel-share CSV on /admin/cashback so ops can pull
-              both axes of the recycling story into one spreadsheet
-              workbook. */}
-          {/* ADR 037 §3: bulk CSV exports are admin-only. */}
-          {isAdminRole ? (
-            <CsvDownloadButton
-              path="/api/admin/users/recycling-activity.csv"
-              filename={`users-recycling-activity-${new Date().toISOString().slice(0, 10)}.csv`}
-              label="Recycling CSV"
-            />
-          ) : null}
-        </div>
-        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-          Who's closing the flywheel loop right now — users with at least one LOOP-asset paid order
-          in the last 90 days, ranked by most-recent recycle. Complement to the top-users
-          leaderboard above: that one ranks by earnings, this one ranks by recycling.
-        </p>
-        <UsersRecyclingActivityCard />
-      </section>
-
-      <section>
-        <div className="flex items-baseline justify-between mb-3">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-            Payment-method mix (fulfilled orders)
-          </h2>
-        </div>
-        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-          The cashback-flywheel metric (ADR 010/015). A rising{' '}
-          <span className="text-green-700 dark:text-green-400">LOOP asset</span> share means users
-          are recycling on-ledger cashback into more orders — the feedback loop the pivot is
-          optimising for. Other rails (<code className="text-xs">xlm</code>,{' '}
-          <code className="text-xs">usdc</code>, <code className="text-xs">credit</code>) read as
-          first-order top-ups.
-        </p>
-        <PaymentMethodShareCard />
-        <div className="mt-5">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-            30-day trend
-          </p>
-          <PaymentMethodActivityChart />
-        </div>
-      </section>
-
-      <section>
         <div className="flex items-baseline justify-between mb-3">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
             Monthly cashback emissions (last 12 months)
@@ -555,11 +495,6 @@ function AdminTreasuryRouteInner(): React.JSX.Element {
               label="Payouts activity CSV"
             />
             <CsvDownloadButton
-              path="/api/admin/supplier-spend/activity.csv"
-              filename={`supplier-spend-activity-${new Date().toISOString().slice(0, 10)}.csv`}
-              label="Supplier-spend activity CSV"
-            />
-            <CsvDownloadButton
               path="/api/admin/treasury/credit-flow.csv"
               filename={`treasury-credit-flow-${new Date().toISOString().slice(0, 10)}.csv`}
               label="Credit-flow CSV"
@@ -575,88 +510,42 @@ function AdminTreasuryRouteInner(): React.JSX.Element {
 
       <section>
         <div className="flex items-baseline justify-between mb-3">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-            Supplier spend (24h)
-          </h2>
-        </div>
-        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-          What Loop owes CTX for the goods shipped in the last 24 hours (ADR 013/015). The{' '}
-          <span className="text-green-700 dark:text-green-400">cashback</span> and{' '}
-          <span className="text-blue-700 dark:text-blue-400">margin</span> columns are the
-          consequences of those same orders — together with wholesale they should sum to the face
-          value column within the CTX discount.
-        </p>
-        <SupplierSpendCard />
-        <div className="mt-5">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-            30-day trend
-          </p>
-          <SupplierSpendActivityChart />
-        </div>
-      </section>
-
-      <section>
-        <div className="flex items-baseline justify-between mb-3">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">CTX commission</h2>
         </div>
         <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
           CTX&apos;s record of the operator commission it owes Loop for attributed orders
-          (ctx-interop) — the mirror of the supplier-spend card above. The two drifting apart is the
-          cross-company reconciliation alarm.
+          (ctx-interop) — the primary money surface now that ctx is the payment processor (ADR 052).
+          Reconcile against the expected-commission column in the supplier flow above; the two
+          drifting apart is the cross-company reconciliation alarm.
         </p>
         <CtxCommissionCard />
       </section>
 
       <section>
-        <div className="flex items-baseline justify-between mb-3">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-            Operator traffic (24h)
-          </h2>
-        </div>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">CTX upstream</h2>
         <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-          Per-operator breakdown of the orders each CTX service account carried (ADR 013). A non-
-          zero failed count or a sharply-skewed traffic distribution is usually an incident signal —
-          click any operator to see the orders behind the number.
+          Loop&rsquo;s operator API key into CTX (ADR 051) and the upstream circuit breaker in front
+          of every CTX call.
         </p>
-        <OperatorStatsCard />
-      </section>
-
-      <section>
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">
-          CTX operator pool
-        </h2>
-        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-          Service accounts fronting CTX — ADR 013. Each entry has its own circuit breaker.
-        </p>
-        {snapshot.operatorPool.size === 0 ? (
+        {!snapshot.ctxApi.configured ? (
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            Pool is unconfigured (<code>CTX_OPERATOR_POOL</code> not set).
+            Credentials unconfigured (<code>GIFT_CARD_API_KEY</code> not set).
           </p>
         ) : (
-          <ul className="divide-y divide-gray-100 dark:divide-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
-            {snapshot.operatorPool.operators.map((op) => (
-              <li key={op.id} className="flex items-center justify-between px-4 py-3 text-sm">
-                <Link
-                  to={`/admin/orders?ctxOperatorId=${encodeURIComponent(op.id)}`}
-                  className="font-medium text-blue-600 hover:underline dark:text-blue-400"
-                  aria-label={`Show orders carried by CTX operator ${op.id}`}
-                >
-                  {op.id}
-                </Link>
-                <span
-                  className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                    op.state === 'closed'
-                      ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
-                      : op.state === 'half_open'
-                        ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300'
-                        : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
-                  }`}
-                >
-                  {op.state}
-                </span>
-              </li>
-            ))}
-          </ul>
+          <div className="flex items-center justify-between rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-3 text-sm">
+            <span className="font-medium text-gray-900 dark:text-white">Circuit state</span>
+            <span
+              className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                snapshot.ctxApi.state === 'closed'
+                  ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                  : snapshot.ctxApi.state === 'half_open'
+                    ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300'
+                    : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
+              }`}
+            >
+              {snapshot.ctxApi.state}
+            </span>
+          </div>
         )}
       </section>
 

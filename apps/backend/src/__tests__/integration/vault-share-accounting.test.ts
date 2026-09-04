@@ -60,13 +60,8 @@ async function seedOrder(userId: string): Promise<string> {
       currency: 'USD',
       chargeMinor: 5000n,
       chargeCurrency: 'USD',
-      paymentMethod: 'credit',
-      wholesalePct: '70.00',
-      userCashbackPct: '5.00',
-      loopMarginPct: '25.00',
-      wholesaleMinor: 3500n,
+      paymentCryptoCurrency: 'XLM',
       userCashbackMinor: 250n,
-      loopMarginMinor: 1250n,
       state: 'fulfilled',
     })
     .returning({ id: orders.id });

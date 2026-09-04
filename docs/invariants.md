@@ -104,8 +104,8 @@ ledgerLiability×1e5 ≈ 0` per asset, within the operator threshold.
   Horizon/ledger reads per tick; this is a pure read-efficiency layer
   on top of the A3 paging dedup, not a change to the paging contract.
   Like the payout worker's INV-9 lease, the S4-8 single-flighted ticks
-  (payment-watcher, asset-drift, redemption-backfill, order-expiry
-  sweep) each race a hard lease deadline: a hung-but-alive lock holder
+  (asset-drift, redemption-backfill, the ADR 052 ctx mirror sweep)
+  each race a hard lease deadline: a hung-but-alive lock holder
   releases the lock at the deadline and the orphaned tick body
   degrades to the pre-S4-8 per-machine concurrency (which every tick
   body already tolerates — CAS-guarded transitions, the A3 row-locked
@@ -137,67 +137,50 @@ Per-currency, per-UTC-day emission total ≤ `ADMIN_DAILY_WITHDRAWAL_CAP_MINOR`.
 
 ---
 
-## Orders & settlement (ADR 010 principal switch)
+## Orders (ADR 052 — CTX is the payment processor)
 
-### INV-6 — Every paid order reaches a user-whole terminal state
+### INV-6 — The order mirror only holds known states and converges on CTX
 
-A `paid` order eventually becomes `fulfilled` (user has a card) OR the user
-is refunded. It never sits stranded.
+`orders.state` is exactly one of
+`unpaid | paid | fulfilled | rejected | refunded | expired`, and every
+non-terminal row eventually reaches CTX's own terminal disposition —
+Loop never invents an order outcome.
 
-- **runtime**: `procureOne`'s own failure paths all `autoRefundFailedOrder`.
-- **runtime**: the crash-recovery `sweepStuckProcurement` (hardening A5)
-  disambiguates via the durable CTX-settlement record + authoritative
-  Horizon hash lookup: Loop-didn't-pay → auto-refund; Loop-paid → hold +
-  page (a usable card may exist); uncertainty → fail closed to hold.
-- **DB**: order state machine CHECK `orders_state_known`.
+- **DB**: order state machine CHECK `orders_state_known` (migration
+  0076 — the ADR 052 mirror states).
+- **runtime**: transitions are guarded CASes (`orders/transitions.ts`)
+  driven only by CTX signals: the `/ws` giftcard topic
+  (`ctx/giftcard-ws-maintainer.ts`) and the advisory-locked mirror
+  sweep (`orders/ctx-mirror-sweep.ts`) — card re-reads, orphan
+  rejection (no CTX id after 1h → `rejected`), and expiry strictly
+  off CTX's payment window (`GET /payments/:id` + grace), never a
+  Loop-side clock guess.
+- **watcher**: the mirror sweep is the belt-and-braces for missed ws
+  events; both paths converge on the same `applyCtxCardStatus`.
 
-### INV-7 — CTX is paid at most once per order
+### INV-7 — (retired by ADR 052)
 
-The operator→CTX settlement payment is idempotent across worker re-runs.
-
-- **DB**: `ctx_settlements` table, one row per order (unique index),
-  tx hash persisted BEFORE the network submit (hardening A4).
-- **runtime**: `payCtxOrder` converges via the authoritative
-  `getOutboundPaymentByTxHash` point lookup (window-immune), memo scan as a
-  backfilling fallback, intent pinned against URI rotation.
+"CTX is paid at most once per order" guarded the operator→CTX
+settlement payment. Loop no longer pays CTX anything — the customer
+pays CTX directly and commission flows back — so the invariant (and
+`ctx_settlements`) is gone. Kept as a numbered tombstone so the
+INV numbering downstream stays stable.
 
 ### INV-8 — Refunds and cashback are single-issue per order
 
-No order is refunded twice; no order's cashback is credited twice.
+No order's credit-rail refund or cashback is credited twice.
 
 - **DB**: partial unique index on `(type, reference_type, reference_id)`
   for `type IN ('refund','cashback','spend','withdrawal')` (migration
   0013). A duplicate insert gets `23505` → typed `…AlreadyIssuedError`.
-- **runtime (R3-2 cross-check, 2026-07-08)**: an XLM/USDC failed-order
-  refund goes ON-CHAIN via `refundDeposit()` and writes no
-  `credit_transactions` row, so the index alone cannot exclude a
-  credit-refund/on-chain-refund pair. The two exits serialise on the
-  order row lock: `applyOnChainOrderAutoRefund` and `refundDeposit`'s
-  claim both refuse when a credit refund row exists for the order, and
-  `applyAdminRefund` refuses when the order's own paying deposit has a
-  skip row in `refunding`/`refunded`. Duplicate-deposit skip rows
-  (T0-1b, paymentId ≠ the persisted paying id) stay independently
-  refundable — returning an extraneous deposit is not an order refund.
-  Skip rows recorded with `orderId=null` (processing_error class) are
-  matched by the paying-payment id instead (both directions). Two
-  fail-closed residuals, both deliberate: a skip row stuck fresh
-  `refunding` (crashed claim) blocks the credit refund until the A6
-  re-POST converges it past `REFUND_RECLAIM_STALE_MS`; and an expired
-  never-paid order whose unlinked deposit was A6-refunded relies on the
-  admin not also crediting an order that never debited anything (both
-  actions are step-up-gated and audited).
-- **runtime (A5-4 order-bound refund, 2026-07-10)**: the admin refund
-  endpoint (`POST /api/admin/orders/:orderId/refund`,
-  `admin/order-refund.ts`) adds NO new uniqueness logic — it dispatches
-  to the SAME primitives (`applyOrderAutoRefund` for xlm/usdc → on-chain,
-  `applyAdminRefund` for credit) and therefore rides the exact guards
-  above. A second refund attempt for an already-refunded order surfaces
-  `RefundAlreadyIssuedError` → 409 `ORDER_ALREADY_REFUNDED`. Fulfilled-
-  order refunds (behind the code-unused attestation, see
-  `docs/threat-model.md`) are still just an order refund on this axis —
-  single-issue holds; the accepted risk is the external code's
-  usability, not a ledger double-issue. `loop_asset` refunds fail closed
-  (matching the R3-2 posture) rather than open a mirror-only path.
+- **scope (ADR 052)**: the on-chain refund rails (deposit refunds,
+  order redrive/refund, the R3-2 cross-checks between credit and
+  on-chain exits) are deleted with the money-in machine — order
+  refunds are CTX-side now (`refunded` arrives on the mirror like any
+  other status). What remains Loop-side is the dormant credit ledger:
+  `applyAdminRefund` still rides the unique index above, and
+  user-facing cashback is delivered as CTX's checkout discount
+  (recorded on the order row, no `credit_transactions` write).
 
 ---
 
@@ -609,35 +592,19 @@ is a separate, dedicated migration.
 
 ---
 
-## Deposit matching (the identity-adjacent invariant)
+## Deposit matching (retired by ADR 052)
 
-### INV-13 — A deposit's asset identity is issuer-pinned before it can pay an order
+### INV-13 — (retired by ADR 052)
 
-`markOrderPaid` only fires for a credit-asset (USDC / LOOP-asset) deposit
-whose Stellar issuer is explicitly configured and matches. Stellar asset
-codes are not unique — anyone can self-issue an asset called "USDC" (or
-any LOOP-asset code) from their own account, so a match on code alone
-would let an attacker's worthless self-issued asset pay a real order,
-triggering real CTX procurement against real operator funds (upstream of
-INV-7's "CTX paid at most once" — this invariant is what makes that
-payment legitimate in the first place).
-
-- **runtime**: `isMatchingIncomingPayment` (`payments/horizon.ts`) requires
-  a pinned `assetIssuer` for any non-native asset match — an omitted
-  issuer means NO match, never "any issuer" (AUDIT-2 finding A, fixed
-  2026-07). The LOOP-asset allowlist (`credits/payout-asset.ts`:
-  `configuredLoopPayableAssets`) has held this shape since ADR 015; the
-  USDC rail (`payments/watcher.ts`'s `matchesUsdc`) now mirrors it.
-- **DB/boot**: `env.ts` boot-fails in production when
-  `LOOP_STELLAR_USDC_ISSUER` is unset (mirrors the admin step-up guard,
-  hardening B3 precedent), unless `DISABLE_USDC_ISSUER_ENFORCEMENT=1`
-  deliberately ships the USDC rail disabled — this is INV-12's "config
-  that looks wired is actually wired" applied to the deposit identity
-  gate, not a substitute for the runtime check above.
-- **test**: `horizon.test.ts` (`isMatchingIncomingPayment` unit cases) +
-  `watcher.test.ts` (tick-level: fake USDC from an unconfigured issuer,
-  and from an attacker issuer when the real one IS configured, both
-  reject) + `env.test.ts` (production USDC-issuer boot guard).
+"A deposit's asset identity is issuer-pinned before it can pay an
+order" guarded the Horizon deposit watcher's order-payment matching.
+Loop no longer receives customer deposits — CTX is the money-in rail
+— so the watcher and its matching rules are deleted. The fail-closed
+issuer-pinning shape survives where Horizon is still read
+(`payments/horizon.ts` for the payout side, `horizon-balances.ts`
+for treasury), and `orders.state = paid` is now driven exclusively
+by CTX's own status signal (INV-6). Kept as a numbered tombstone so
+the INV numbering stays stable.
 
 ---
 

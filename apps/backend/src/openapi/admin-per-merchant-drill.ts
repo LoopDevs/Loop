@@ -35,7 +35,6 @@
 import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 import { registerAdminPerMerchantTimeAxisOpenApi } from './admin-per-merchant-drill-time-axis.js';
-import { registerAdminPerMerchantPaymentMethodShareOpenApi } from './admin-per-merchant-payment-method-share.js';
 
 /**
  * Registers the per-merchant drill (scalars + time-series) paths
@@ -46,67 +45,6 @@ export function registerAdminPerMerchantDrillOpenApi(
   registry: OpenAPIRegistry,
   errorResponse: ReturnType<OpenAPIRegistry['register']>,
 ): void {
-  // ─── Admin per-merchant drill metrics (ADR 011/015/022) ────────────────────
-  //
-  // Scalar-per-merchant trio that backs the /admin/merchants/:id drill-down.
-  // See ADR-022 for the triplet pattern — these are the per-merchant axis of
-  // the fleet + per-merchant + per-user + self quartet shipped around the
-  // cashback-flywheel pivot.
-
-  const AdminMerchantFlywheelStats = registry.register(
-    'AdminMerchantFlywheelStats',
-    z.object({
-      merchantId: z.string(),
-      since: z.string().datetime().openapi({ description: 'Window start — 31 days ago.' }),
-      totalFulfilledCount: z.number().int(),
-      recycledOrderCount: z.number().int(),
-      recycledChargeMinor: z.string().openapi({
-        description: 'SUM(charge_minor) over loop_asset orders. bigint-as-string.',
-      }),
-      totalChargeMinor: z.string().openapi({
-        description: 'SUM(charge_minor) over every fulfilled order. bigint-as-string.',
-      }),
-    }),
-  );
-
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/merchants/{merchantId}/flywheel-stats',
-    summary: 'Per-merchant recycled-vs-total scalar (ADR 011 / 015).',
-    description:
-      'Drives the flywheel chip on the merchant drill. 31-day fixed window, home-currency-agnostic at the merchant axis. Zero-volume merchants return zeroed fields (not 404) — a catalog merchant with no orders yet is a valid row.',
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: { params: z.object({ merchantId: z.string() }) },
-    responses: {
-      200: {
-        description: 'Per-merchant flywheel scalar',
-        content: { 'application/json': { schema: AdminMerchantFlywheelStats } },
-      },
-      400: {
-        description: 'Malformed merchantId',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      404: {
-        description:
-          'Not found — also returned to authenticated non-admin callers: requireAdmin masks the admin surface as 404 by design (see src/auth/require-admin.ts).',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (120/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: {
-        description: 'DB error',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
-
   const AdminMerchantCashbackCurrencyBucket = registry.register(
     'AdminMerchantCashbackCurrencyBucket',
     z.object({
@@ -180,7 +118,6 @@ export function registerAdminPerMerchantDrillOpenApi(
   // `./admin-per-merchant-payment-method-share.ts`. Fanned out
   // here so the per-merchant drill registers as one factory call
   // from `admin.ts`.
-  registerAdminPerMerchantPaymentMethodShareOpenApi(registry, errorResponse);
 
   // ─── Admin per-merchant time-series (ADR 011/015/022) ──────────────────────
   //

@@ -182,7 +182,6 @@ import {
   resolveOperatorPublicKey,
 } from './vault-client.js';
 import { generatePayoutMemo } from '../payout-builder.js';
-import { markOrderPaidViaVaultRedemption } from '../../orders/transitions.js';
 import { recordVaultOperatorMovement } from '../../treasury/vault-operator-movement.js';
 import {
   drawHotFloatInTx,
@@ -973,15 +972,14 @@ async function mirrorStep(
         pendingPayoutId = payout?.id ?? null;
 
         if (row.sourceType === 'order_redeem') {
-          // We hold the order FOR UPDATE and verified pending_payment
-          // above, so this MUST transition — a null return is an
-          // invariant violation (roll back, don't silently proceed).
-          const paid = await markOrderPaidViaVaultRedemption(tx, row.sourceId);
-          if (paid === null) {
-            throw new Error(
-              `vault redemption ${row.id}: markOrderPaidViaVaultRedemption returned null despite a held pending_payment lock on order ${row.sourceId}`,
-            );
-          }
+          // ADR 052 retired the order-redeem spend path (ctx is the
+          // payment processor; no order is ever payable Loop-side).
+          // No claimer writes 'order_redeem' rows any more, and the
+          // pending_payment guard above can never pass — reaching
+          // here is an invariant violation, so roll back loudly.
+          throw new Error(
+            `vault redemption ${row.id}: order_redeem source is retired (ADR 052) — manual review required for order ${row.sourceId}`,
+          );
         }
       });
     } catch (err) {

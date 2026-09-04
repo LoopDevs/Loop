@@ -14,6 +14,7 @@ vi.mock('~/services/orders-loop', async () => {
   };
 });
 
+import type { LoopOrderPaymentInstructions } from '~/services/orders-loop';
 import {
   useLoopOrderRestore,
   saveLoopPendingOrder,
@@ -30,38 +31,47 @@ import {
 
 const MERCHANT_ID = 'm1';
 const ORDER_ID = '12345678-aaaa-bbbb-cccc-000000000000';
-const STELLAR_ADDRESS = 'GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW';
-const PAYMENT_MEMO = 'MEMO-ABCDEFGHIJKLMN';
-// The server-authoritative payment guidance a pending usdc order returns.
-const SERVER_ASSET_AMOUNT = '10.0000000';
-const SERVER_PAYMENT_URI = `web+stellar:pay?destination=${STELLAR_ADDRESS}&amount=${SERVER_ASSET_AMOUNT}&memo=${PAYMENT_MEMO}&memo_type=MEMO_TEXT&asset_code=USDC`;
+const ADDRESS = 'GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW';
+// The server-authoritative payment instructions an unpaid order returns.
+const SERVER_CRYPTO_AMOUNT = '10.0000000';
+const SERVER_PAYMENT_URI = `web+stellar:pay?destination=${ADDRESS}&amount=${SERVER_CRYPTO_AMOUNT}`;
 
-/** A server `LoopOrderView` for a pending usdc order, with the Q6-4b
- *  server-derived payment-guidance fields populated. */
+function mkPayment(
+  overrides: Partial<LoopOrderPaymentInstructions> = {},
+): LoopOrderPaymentInstructions {
+  return {
+    ctxPaymentId: 'pay-1',
+    cryptoCurrency: 'XLM',
+    cryptoAmount: SERVER_CRYPTO_AMOUNT,
+    address: ADDRESS,
+    paymentUrls: { XLM: SERVER_PAYMENT_URI },
+    amountMinor: '1000',
+    currency: 'USD',
+    expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
+    ...overrides,
+  };
+}
+
+/** A server `LoopOrderView` for an unpaid order with the ADR 052
+ *  CTX payment instructions populated (detail-read shape). */
 function mkOrder(overrides: Partial<LoopOrderView> = {}): LoopOrderView {
   return {
     id: ORDER_ID,
     merchantId: MERCHANT_ID,
-    state: 'pending_payment',
+    state: 'unpaid',
     faceValueMinor: '1000',
     currency: 'USD',
     chargeMinor: '1000',
     chargeCurrency: 'USD',
-    paymentMethod: 'usdc',
-    paymentMemo: PAYMENT_MEMO,
-    stellarAddress: STELLAR_ADDRESS,
-    assetAmount: SERVER_ASSET_AMOUNT,
-    paymentUri: SERVER_PAYMENT_URI,
-    assetCode: null,
-    assetIssuer: null,
     userCashbackMinor: '0',
     ctxOrderId: null,
+    paymentCryptoCurrency: 'XLM',
+    payment: mkPayment(),
     redeemCode: null,
     redeemPin: null,
     redeemUrl: null,
     failureReason: null,
     createdAt: new Date().toISOString(),
-    paidAt: null,
     fulfilledAt: null,
     failedAt: null,
     ...overrides,
@@ -160,60 +170,22 @@ describe('validatePersistedLoopOrder (pointer-only)', () => {
 });
 
 describe('loopOrderViewToCreate (server-authoritative rebuild)', () => {
-  it('builds a usdc create purely from the server view', () => {
+  it('builds a create purely from the server view', () => {
     const create = loopOrderViewToCreate(mkOrder());
     expect(create).not.toBeNull();
     expect(create!.orderId).toBe(ORDER_ID);
+    expect(create!.state).toBe('unpaid');
     expect(create!.payment).toMatchObject({
-      method: 'usdc',
-      stellarAddress: STELLAR_ADDRESS,
-      memo: PAYMENT_MEMO,
+      cryptoCurrency: 'XLM',
+      cryptoAmount: SERVER_CRYPTO_AMOUNT,
+      address: ADDRESS,
       amountMinor: '1000',
       currency: 'USD',
-      assetAmount: SERVER_ASSET_AMOUNT,
-      paymentUri: SERVER_PAYMENT_URI,
     });
   });
 
-  it('builds a credit create (no stellar fields needed)', () => {
-    const create = loopOrderViewToCreate(
-      mkOrder({
-        paymentMethod: 'credit',
-        stellarAddress: null,
-        paymentMemo: null,
-        assetAmount: null,
-        paymentUri: null,
-      }),
-    );
-    expect(create).not.toBeNull();
-    expect(create!.payment).toEqual({ method: 'credit', amountMinor: '1000', currency: 'USD' });
-  });
-
-  it('builds a loop_asset create with the server assetCode/assetIssuer', () => {
-    const create = loopOrderViewToCreate(
-      mkOrder({ paymentMethod: 'loop_asset', assetCode: 'USDLOOP', assetIssuer: 'GISSUER' }),
-    );
-    expect(create).not.toBeNull();
-    expect(create!.payment).toMatchObject({
-      method: 'loop_asset',
-      assetCode: 'USDLOOP',
-      assetIssuer: 'GISSUER',
-      assetAmount: SERVER_ASSET_AMOUNT,
-    });
-  });
-
-  it('returns null when an on-chain order is missing server-derived guidance', () => {
-    expect(loopOrderViewToCreate(mkOrder({ assetAmount: null }))).toBeNull();
-    expect(loopOrderViewToCreate(mkOrder({ paymentUri: null }))).toBeNull();
-    expect(loopOrderViewToCreate(mkOrder({ stellarAddress: null }))).toBeNull();
-  });
-
-  it('returns null for a loop_asset order missing assetCode/assetIssuer', () => {
-    expect(
-      loopOrderViewToCreate(
-        mkOrder({ paymentMethod: 'loop_asset', assetCode: null, assetIssuer: null }),
-      ),
-    ).toBeNull();
+  it('returns null when the server carried no payment instructions', () => {
+    expect(loopOrderViewToCreate(mkOrder({ payment: null }))).toBeNull();
   });
 });
 
@@ -241,8 +213,8 @@ describe('useLoopOrderRestore', () => {
     );
     await waitFor(() => expect(result.current.restored).not.toBeNull());
     expect(result.current.restored!.create.payment).toMatchObject({
-      assetAmount: SERVER_ASSET_AMOUNT,
-      paymentUri: SERVER_PAYMENT_URI,
+      cryptoAmount: SERVER_CRYPTO_AMOUNT,
+      address: ADDRESS,
     });
     expect(getLoopOrderMock).toHaveBeenCalledWith(ORDER_ID);
     expect(getLoopOrderMock).toHaveBeenCalledTimes(1);
@@ -259,14 +231,14 @@ describe('useLoopOrderRestore', () => {
         create: {
           orderId: ORDER_ID,
           payment: {
-            method: 'usdc',
-            stellarAddress: STELLAR_ADDRESS,
-            memo: PAYMENT_MEMO,
+            cryptoCurrency: 'XLM',
+            cryptoAmount: '1000.0000000', // 100x
+            address: ADDRESS,
             amountMinor: '100000', // 100x
             currency: 'USD',
-            assetAmount: '1000.0000000', // 100x
-            paymentUri:
-              'web+stellar:pay?destination=GATTACKERADDRESS&amount=1000.0000000&memo=MEMO-ABCDEFGHIJKLMN',
+            paymentUrls: {
+              XLM: 'web+stellar:pay?destination=GATTACKERADDRESS&amount=1000.0000000',
+            },
           },
         },
       },
@@ -276,21 +248,17 @@ describe('useLoopOrderRestore', () => {
       useLoopOrderRestore({ merchantId: MERCHANT_ID, enabled: true }),
     );
     await waitFor(() => expect(result.current.restored).not.toBeNull());
-    const payment = result.current.restored!.create.payment as {
-      assetAmount: string;
-      amountMinor: string;
-      paymentUri: string;
-    };
+    const payment = result.current.restored!.create.payment;
     // Server-authoritative values, NOT the tampered blob's 100x figures.
-    expect(payment.assetAmount).toBe(SERVER_ASSET_AMOUNT);
+    expect(payment.cryptoAmount).toBe(SERVER_CRYPTO_AMOUNT);
     expect(payment.amountMinor).toBe('1000');
-    expect(payment.paymentUri).toBe(SERVER_PAYMENT_URI);
-    expect(payment.paymentUri).not.toContain('GATTACKERADDRESS');
+    expect(payment.paymentUrls['XLM']).toBe(SERVER_PAYMENT_URI);
+    expect(payment.paymentUrls['XLM']).not.toContain('GATTACKERADDRESS');
   });
 
-  it('also restores while the order is paid/procuring (still non-terminal)', async () => {
+  it('also restores while the order is paid (still non-terminal)', async () => {
     await seedPointer();
-    getLoopOrderMock.mockResolvedValue(mkOrder({ state: 'procuring' }));
+    getLoopOrderMock.mockResolvedValue(mkOrder({ state: 'paid' }));
     const { result } = renderHook(() =>
       useLoopOrderRestore({ merchantId: MERCHANT_ID, enabled: true }),
     );
@@ -359,16 +327,16 @@ describe('useLoopOrderRestore', () => {
     expect(await loadPendingOrder(LOOP_NATIVE_PENDING_ORDER_KEY)).not.toBeNull();
   });
 
-  it("does not restore (or clobber) when the server can't derive on-chain guidance (oracle down → null fields)", async () => {
+  it("does not restore (or clobber) when the server couldn't relay the CTX payment instructions (payment: null)", async () => {
     await seedPointer();
-    getLoopOrderMock.mockResolvedValue(mkOrder({ assetAmount: null, paymentUri: null }));
+    getLoopOrderMock.mockResolvedValue(mkOrder({ payment: null }));
     const { result } = renderHook(() =>
       useLoopOrderRestore({ merchantId: MERCHANT_ID, enabled: true }),
     );
     await waitFor(() => expect(getLoopOrderMock).toHaveBeenCalled());
     await new Promise((r) => setTimeout(r, 20));
     expect(result.current.restored).toBeNull();
-    // Pointer retained so a later remount retries once the oracle recovers.
+    // Pointer retained so a later remount retries once the upstream recovers.
     expect(await loadPendingOrder(LOOP_NATIVE_PENDING_ORDER_KEY)).not.toBeNull();
   });
 
@@ -411,9 +379,9 @@ describe('saveLoopPendingOrder / clearLoopPendingOrder', () => {
     // Nothing payment-directing is ever persisted.
     expect(raw).not.toHaveProperty('create');
     expect(raw).not.toHaveProperty('payment');
-    expect(raw).not.toHaveProperty('paymentUri');
-    expect(raw).not.toHaveProperty('assetAmount');
-    expect(raw).not.toHaveProperty('stellarAddress');
+    expect(raw).not.toHaveProperty('paymentUrls');
+    expect(raw).not.toHaveProperty('cryptoAmount');
+    expect(raw).not.toHaveProperty('address');
   });
 
   it('sets an explicit expiresAt = savedAt + LOOP_PENDING_ORDER_TTL_SECONDS', async () => {

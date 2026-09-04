@@ -29,11 +29,7 @@ vi.mock('../shared.js', () => ({
   RED: 0xe74c3c,
 }));
 
-import {
-  notifyStuckProcurementSwept,
-  notifyPaymentWatcherStuck,
-  notifyStuckPayouts,
-} from '../monitoring-stuck-sweepers.js';
+import { notifyStuckPayouts } from '../monitoring-stuck-sweepers.js';
 
 beforeEach(() => sendWebhookMock.mockReset());
 
@@ -49,59 +45,6 @@ function lastEmbed(): Embed {
   if (call === undefined) throw new Error('sendWebhook not called');
   return call[1] as Embed;
 }
-
-describe('notifyStuckProcurementSwept', () => {
-  it('emits per-row drilldown with stuck-for-N-min computed from procuredAtMs', () => {
-    const procuredAtMs = Date.now() - 11 * 60 * 1000; // 11 min ago
-    notifyStuckProcurementSwept({
-      orderId: 'order-uuid-1',
-      userId: 'user-uuid-1',
-      merchantId: 'amazon',
-      chargeMinor: '1000',
-      chargeCurrency: 'USD',
-      ctxOperatorId: 'op-1',
-      procuredAtMs,
-    });
-    const e = lastEmbed();
-    expect(e.title).toBe('🟡 Stuck Procuring Order Swept to Failed');
-    expect(e.color).toBe(0xe67e22);
-    const stuckFor = e.fields.find((f) => f.name === 'Stuck for (min)')!.value;
-    expect(['10', '11', '12']).toContain(stuckFor); // tolerate clock drift
-    expect(e.fields.find((f) => f.name === 'Order')!.value).toBe('`order-uuid-1`');
-    expect(e.fields.find((f) => f.name === 'Charge')!.value).toBe('1000 USD');
-  });
-
-  it('renders _none_ when ctxOperatorId is null', () => {
-    notifyStuckProcurementSwept({
-      orderId: 'o-2',
-      userId: 'u-2',
-      merchantId: 'amazon',
-      chargeMinor: '500',
-      chargeCurrency: 'USD',
-      ctxOperatorId: null,
-      procuredAtMs: Date.now(),
-    });
-    expect(lastEmbed().fields.find((f) => f.name === 'Operator')!.value).toBe('_none_');
-  });
-});
-
-describe('notifyPaymentWatcherStuck', () => {
-  it('emits red incident with cursor-age in minutes + ISO last-updated timestamp', () => {
-    notifyPaymentWatcherStuck({
-      cursorAgeMs: 12 * 60 * 1000,
-      lastCursor: '12345-67890',
-      lastUpdatedAtMs: 1_700_000_000_000,
-    });
-    const e = lastEmbed();
-    expect(e.title).toBe('🔴 Payment Watcher Cursor Stuck');
-    expect(e.color).toBe(0xe74c3c);
-    expect(e.fields.find((f) => f.name === 'Cursor age (min)')!.value).toBe('12');
-    expect(e.fields.find((f) => f.name === 'Last cursor')!.value).toContain('12345-67890');
-    expect(e.fields.find((f) => f.name === 'Last updated')!.value).toBe(
-      new Date(1_700_000_000_000).toISOString(),
-    );
-  });
-});
 
 describe('notifyStuckPayouts', () => {
   it('summarises pending+submitted counts + threshold + oldest age', () => {

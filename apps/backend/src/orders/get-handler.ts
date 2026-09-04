@@ -36,7 +36,7 @@ import { getUpstreamCircuit, CircuitOpenError } from '../circuit-breaker.js';
 import { upstreamUrl } from '../upstream.js';
 import { scrubUpstreamBody } from '../upstream-body-scrub.js';
 import { notifyCtxSchemaDrift, notifyOrderFulfilled } from '../discord.js';
-import { mapStatus, summariseZodIssues, upstreamHeaders } from './handler.js';
+import { mapStatus, summariseZodIssues, upstreamHeaders } from './handler-shared.js';
 import { applyBarcodeFields } from './barcode-fields.js';
 
 const log = logger.child({ handler: 'orders' });
@@ -239,13 +239,12 @@ export async function getOrderHandler(c: Context): Promise<Response> {
     // on subsequent polls or a returning user refreshing orders.
     if (status === 'completed' && !notifiedFulfilled.has(validated.data.id)) {
       markFulfilledNotified(validated.data.id);
-      notifyOrderFulfilled(
-        validated.data.id,
-        validated.data.merchantName ?? '',
-        amount,
+      notifyOrderFulfilled({
+        orderId: validated.data.id,
+        merchantId: validated.data.merchantName ?? '',
+        faceValueMinor: BigInt(Math.round(amount * 100)),
         currency,
-        validated.data.redeemType ?? 'unknown',
-      );
+      });
     }
 
     return c.json({ order });

@@ -65,9 +65,8 @@ export function buildAssetSummaries(
 }
 
 /**
- * `/admin/assets` — fleet index of LOOP stablecoins (ADR 015 / 022).
- * Sibling of `/admin/operators`: that one is the CTX-supplier fleet
- * view, this is the liability-side fleet view.
+ * `/admin/assets` — fleet index of LOOP stablecoins (ADR 015 / 022):
+ * the liability-side fleet view.
  *
  * One row per configured LOOP asset (USDLOOP / GBPLOOP / EURLOOP)
  * with outstanding fiat liability, issuer pubkey, and in-flight

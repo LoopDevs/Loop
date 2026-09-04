@@ -33,7 +33,8 @@ function clearEnv(): void {
   delete process.env['LOOP_AUTH_NATIVE_ENABLED'];
   delete process.env['LOOP_JWT_SIGNING_KEY'];
   delete process.env['LOOP_WORKERS_ENABLED'];
-  delete process.env['LOOP_STELLAR_DEPOSIT_ADDRESS'];
+  delete process.env['GIFT_CARD_API_KEY'];
+  delete process.env['GIFT_CARD_API_SECRET'];
   delete process.env['MIN_SUPPORTED_APP_VERSION_IOS'];
   delete process.env['MIN_SUPPORTED_APP_VERSION_ANDROID'];
   for (const k of LOOP_ISSUER_VARS) delete process.env[k];
@@ -107,33 +108,40 @@ describe('configHandler', () => {
       loopOrdersEnabled: boolean;
     };
     expect(body.loopAuthNativeEnabled).toBe(true);
-    // loopOrdersEnabled needs all three: auth flag, workers flag, deposit address.
+    // loopOrdersEnabled needs all three: auth flag, workers flag, CTX API creds.
     expect(body.loopOrdersEnabled).toBe(false);
   });
 
-  it('only sets loopOrdersEnabled when auth + workers + deposit-address are all configured', async () => {
+  it('only sets loopOrdersEnabled when auth + workers + CTX API creds are all configured', async () => {
     process.env['LOOP_AUTH_NATIVE_ENABLED'] = 'true';
     // Hardening B3: enabling native auth requires a signing key at parse.
     process.env['LOOP_JWT_SIGNING_KEY'] = 'unit-test-loop-jwt-signing-key-32ch!';
     process.env['LOOP_WORKERS_ENABLED'] = 'true';
-    process.env['LOOP_STELLAR_DEPOSIT_ADDRESS'] =
-      'GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW';
+    process.env['GIFT_CARD_API_KEY'] = 'loop-company-key';
+    process.env['GIFT_CARD_API_SECRET'] = 'loop-company-secret';
     const { configHandler } = await import('../handler.js');
     const { ctx } = makeCtx();
     const body = (await configHandler(ctx).json()) as { loopOrdersEnabled: boolean };
     expect(body.loopOrdersEnabled).toBe(true);
   });
 
-  it('keeps loopOrdersEnabled=false when the deposit address is missing', async () => {
+  it('keeps loopOrdersEnabled=false when the CTX API creds are missing', async () => {
     process.env['LOOP_AUTH_NATIVE_ENABLED'] = 'true';
     // Hardening B3: enabling native auth requires a signing key at parse.
     process.env['LOOP_JWT_SIGNING_KEY'] = 'unit-test-loop-jwt-signing-key-32ch!';
     process.env['LOOP_WORKERS_ENABLED'] = 'true';
-    // No LOOP_STELLAR_DEPOSIT_ADDRESS.
+    // No GIFT_CARD_API_KEY / GIFT_CARD_API_SECRET.
     const { configHandler } = await import('../handler.js');
     const { ctx } = makeCtx();
     const body = (await configHandler(ctx).json()) as { loopOrdersEnabled: boolean };
     expect(body.loopOrdersEnabled).toBe(false);
+  });
+
+  it('surfaces the CTX payment-currency allowlist (default XLM)', async () => {
+    const { configHandler } = await import('../handler.js');
+    const { ctx } = makeCtx();
+    const body = (await configHandler(ctx).json()) as { ctxPaymentCurrencies: string[] };
+    expect(body.ctxPaymentCurrencies).toEqual(['XLM']);
   });
 
   it('reflects LOOP_PHASE_1_ONLY independently of the loop-native flags', async () => {

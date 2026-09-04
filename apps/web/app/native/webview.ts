@@ -70,23 +70,48 @@ export function safeRedeemHref(url: string): string | null {
 }
 
 /**
- * Scheme-gates a SEP-7 payment URI before it is placed in an `<a href>`.
+ * Wallet-URI schemes CTX's `paymentUrls` map legitimately carries
+ * (ADR 052): BIP21-family per-chain schemes, SEP-7 for Stellar, plus
+ * the EVM/Solana/Monero-family conventions. Deliberately an explicit
+ * allow-list — a new chain's scheme must be added here consciously
+ * rather than any unknown scheme becoming a live tappable link.
+ */
+const PAYMENT_URI_SCHEMES = new Set([
+  'web+stellar:',
+  'stellar:',
+  'bitcoin:',
+  'bitcoincash:',
+  'litecoin:',
+  'dogecoin:',
+  'dash:',
+  'ethereum:',
+  'solana:',
+  'monero:',
+  'zcash:',
+  'zano:',
+  'radix:',
+  'tron:',
+]);
+
+/**
+ * Scheme-gates a crypto payment URI before it is placed in an `<a href>`.
  *
- * `paymentUri` is a server-supplied field on the create-order / order-read
- * API responses — Loop builds it via `buildSep7PayUri`, but it can also be
- * threaded straight through from CTX's upstream `paymentUrls` map. From the
- * client's side it is server/upstream-controlled and must not be trusted:
- * a `javascript:` / `data:` / `vbscript:` value dropped into an anchor
+ * The URI is threaded straight through from CTX's upstream `paymentUrls`
+ * map on the order's payment instructions (ADR 052). From the client's
+ * side it is server/upstream-controlled and must not be trusted: a
+ * `javascript:` / `data:` / `vbscript:` value dropped into an anchor
  * would execute on tap with app privileges inside the Capacitor native
  * WebView — the SAME XSS class `safeRedeemHref` closes for `redeemUrl`.
  *
- * A legitimate payment URI uses the SEP-7 `web+stellar:` / `stellar:`
- * scheme, which `safeRedeemHref` (http(s)-only, by design for redeem URLs)
- * deliberately rejects. So this gate allow-lists exactly those two schemes
- * — applying the same fail-closed embedded-credential guard as
- * `assertSafeUrl` — and defers every other scheme to `safeRedeemHref`,
- * reusing one sanitizer rather than forking a second. Anything outside the
- * allow-list yields `null`, and the caller renders no live link at all.
+ * A legitimate payment URI uses a per-chain wallet scheme (BIP21
+ * `dash:` / `bitcoin:` etc., SEP-7 `web+stellar:`, `ethereum:`,
+ * `solana:`…), which `safeRedeemHref` (http(s)-only, by design for
+ * redeem URLs) deliberately rejects. So this gate allow-lists exactly
+ * the known wallet schemes — applying the same fail-closed
+ * embedded-credential guard as `assertSafeUrl` — and defers every other
+ * scheme to `safeRedeemHref`, reusing one sanitizer rather than forking
+ * a second. Anything outside the allow-list yields `null`, and the
+ * caller renders no live link at all.
  */
 export function safePaymentUriHref(url: string): string | null {
   let parsed: URL;
@@ -95,15 +120,17 @@ export function safePaymentUriHref(url: string): string | null {
   } catch {
     return null;
   }
-  if (parsed.protocol === 'web+stellar:' || parsed.protocol === 'stellar:') {
-    // Mirror assertSafeUrl's embedded-credential guard. A legitimate SEP-7
-    // URI is opaque (`web+stellar:pay?...`) and carries none; the authority
-    // form `web+stellar://user:pass@…` is a phishing shape we fail closed.
+  if (PAYMENT_URI_SCHEMES.has(parsed.protocol)) {
+    // Mirror assertSafeUrl's embedded-credential guard. A legitimate
+    // wallet URI is opaque (`dash:X…?amount=`, `web+stellar:pay?...`)
+    // and carries none; the authority form `scheme://user:pass@…` is a
+    // phishing shape we fail closed.
     if (parsed.username !== '' || parsed.password !== '') return null;
     return url;
   }
-  // Not a SEP-7 scheme: fall back to the redeem-URL gate (http(s) only, no
-  // embedded credentials, https-only in production). javascript: / data: /
+  // Not a wallet scheme: fall back to the redeem-URL gate (http(s) only,
+  // no embedded credentials, https-only in production — BIP72 `?r=`
+  // payment-request pages resolve over https). javascript: / data: /
   // vbscript: fail closed to null there.
   return safeRedeemHref(url);
 }

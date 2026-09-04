@@ -13,74 +13,21 @@ import {
   index,
   check,
   uniqueIndex,
-  jsonb,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { orders } from './orders.js';
 import { users } from './users.js';
 
 /**
- * Cursor persistence for long-running background watchers (ADR 010
- * payment watcher is the first user). One row per watcher; the
- * watcher reads its cursor at tick start and writes the new cursor
- * at tick end. A crashed tick keeps the prior cursor so the next
- * tick reprocesses any unconsumed records — safe because every
- * transition is idempotent.
+ * Cursor persistence for long-running background workers — a generic
+ * named-cursor store (the interest-mint worker is the current user;
+ * the retired ADR 010 payment watcher was the first).
  */
 export const watcherCursors = pgTable('watcher_cursors', {
   name: text('name').primaryKey(),
   cursor: text('cursor'),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
-
-/**
- * Deposits the payment watcher skipped (comprehensive-audit
- * 2026-06-11, CRIT #1/#2). The watcher cursor advances past every
- * record on a Horizon page — a payment rejected for a transient
- * reason (oracle outage, A4-110 missing credit row, an unexpected
- * `markOrderPaid` error) would otherwise never be re-scanned. Each
- * skip is persisted here BEFORE the cursor advances; the sweep in
- * `payments/skipped-payments.ts` re-evaluates pending rows each tick.
- *
- * `payment` snapshots the parsed Horizon record (jsonb) so the retry
- * replays the exact matching/validation logic without a Horizon
- * round-trip. `order_id` is informational (no FK — the skip row is
- * operational telemetry and must survive any order lifecycle).
- */
-export const paymentWatcherSkips = pgTable(
-  'payment_watcher_skips',
-  {
-    /** Horizon operation id — stable replay key. */
-    paymentId: text('payment_id').primaryKey(),
-    memo: text('memo').notNull(),
-    orderId: uuid('order_id'),
-    reason: text('reason').notNull(),
-    payment: jsonb('payment').notNull(),
-    attempts: integer('attempts').notNull().default(1),
-    lastError: text('last_error'),
-    status: text('status')
-      .notNull()
-      .default('pending')
-      .$type<'pending' | 'resolved' | 'abandoned' | 'refunding' | 'refunded'>(),
-    // Hardening A6: Stellar tx hash of the admin-mediated refund-to-
-    // sender, set (via the CF-18 onSigned hook, before submit) when an
-    // operator refunds an abandoned late deposit back to its sender.
-    refundTxHash: text('refund_tx_hash'),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [
-    check(
-      'payment_watcher_skips_reason_known',
-      sql`${t.reason} IN ('asset_mismatch', 'amount_insufficient', 'missing_credit_row', 'processing_error', 'order_gone', 'unrecognized_deposit')`,
-    ),
-    check(
-      'payment_watcher_skips_status_known',
-      sql`${t.status} IN ('pending', 'resolved', 'abandoned', 'refunding', 'refunded')`,
-    ),
-    index('payment_watcher_skips_status_created').on(t.status, t.createdAt),
-  ],
-);
 
 /**
  * External identity links for a Loop user (ADR 014 — social login).
@@ -281,7 +228,9 @@ export const pendingPayouts = pgTable(
     check('pending_payouts_attempts_non_negative', sql`${t.attempts} >= 0`),
     // A2-901 / ADR-024 §2 + ADR 036: discriminator + per-kind shape
     // invariants. Emissions are user-addressed with no source order;
-    // burns reference the redeemed order and target the issuer;
+    // burns reference the redeemed order when one exists — a
+    // withdrawal-sourced vault redemption (ADR 031 V4) has no order,
+    // so its burn audit row carries order_id NULL (migration 0078);
     // interest mints (ADR 031 Phase D) are user-addressed with no
     // source order — their idempotency fence is the same-txn
     // `credit_transactions` period-cursor unique index, traceable via
@@ -295,7 +244,7 @@ export const pendingPayouts = pgTable(
       sql`
         (${t.kind} = 'order_cashback' AND ${t.orderId} IS NOT NULL)
         OR (${t.kind} = 'emission' AND ${t.orderId} IS NULL)
-        OR (${t.kind} = 'burn' AND ${t.orderId} IS NOT NULL)
+        OR (${t.kind} = 'burn')
         OR (${t.kind} = 'interest_mint' AND ${t.orderId} IS NULL)
       `,
     ),

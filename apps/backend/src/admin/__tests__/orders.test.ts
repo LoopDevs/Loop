@@ -50,7 +50,6 @@ vi.mock('../../db/schema.js', () => ({
     id: 'id',
     userId: 'user_id',
     state: 'state',
-    paymentMethod: 'payment_method',
     createdAt: 'created_at',
   },
 }));
@@ -81,19 +80,13 @@ function makeRow(
     faceValueMinor: bigint;
     chargeCurrency: string;
     chargeMinor: bigint;
-    paymentMethod: string;
-    wholesalePct: string;
-    userCashbackPct: string;
-    loopMarginPct: string;
-    wholesaleMinor: bigint;
     userCashbackMinor: bigint;
-    loopMarginMinor: bigint;
+    expectedCommissionMinor: bigint | null;
     ctxOrderId: string | null;
-    ctxOperatorId: string | null;
+    ctxPaymentId: string | null;
+    paymentCryptoCurrency: string | null;
     failureReason: string | null;
     createdAt: Date;
-    paidAt: Date | null;
-    procuredAt: Date | null;
     fulfilledAt: Date | null;
     failedAt: Date | null;
   }> = {},
@@ -107,19 +100,13 @@ function makeRow(
     faceValueMinor: 5000n,
     chargeCurrency: 'GBP',
     chargeMinor: 4000n,
-    paymentMethod: 'loop_asset',
-    wholesalePct: '80.00',
-    userCashbackPct: '15.00',
-    loopMarginPct: '5.00',
-    wholesaleMinor: 3200n,
     userCashbackMinor: 600n,
-    loopMarginMinor: 200n,
-    ctxOrderId: null,
-    ctxOperatorId: null,
+    expectedCommissionMinor: 200n,
+    ctxOrderId: 'ctx-1',
+    ctxPaymentId: 'pay-1',
+    paymentCryptoCurrency: 'XLM',
     failureReason: null,
     createdAt: new Date('2026-04-20T12:00:00Z'),
-    paidAt: new Date('2026-04-20T12:05:00Z'),
-    procuredAt: null,
     fulfilledAt: null,
     failedAt: null,
     ...overrides,
@@ -149,17 +136,12 @@ describe('adminListOrdersHandler', () => {
       state: 'paid',
       faceValueMinor: '5000',
       chargeMinor: '4000',
-      wholesaleMinor: '3200',
       userCashbackMinor: '600',
-      loopMarginMinor: '200',
-      wholesalePct: '80.00',
-      userCashbackPct: '15.00',
-      loopMarginPct: '5.00',
-      paymentMethod: 'loop_asset',
-      ctxOrderId: null,
+      expectedCommissionMinor: '200',
+      ctxOrderId: 'ctx-1',
+      ctxPaymentId: 'pay-1',
+      paymentCryptoCurrency: 'XLM',
       createdAt: '2026-04-20T12:00:00.000Z',
-      paidAt: '2026-04-20T12:05:00.000Z',
-      procuredAt: null,
     });
   });
 
@@ -176,8 +158,8 @@ describe('adminListOrdersHandler', () => {
   });
 
   it('accepts a valid ?state filter', async () => {
-    dbState.rows = [makeRow({ state: 'failed' })];
-    const res = await adminListOrdersHandler(makeCtx({ state: 'failed' }));
+    dbState.rows = [makeRow({ state: 'rejected' })];
+    const res = await adminListOrdersHandler(makeCtx({ state: 'rejected' }));
     expect(res.status).toBe(200);
     // WHERE predicate was built — exactly one filter.
     expect(dbState.whereCalls).toHaveLength(1);
@@ -213,8 +195,8 @@ describe('adminListOrdersHandler', () => {
     expect(dbState.whereCalls).toHaveLength(1);
   });
 
-  it('rejects an unknown ?chargeCurrency with 400', async () => {
-    const res = await adminListOrdersHandler(makeCtx({ chargeCurrency: 'JPY' }));
+  it('rejects a malformed ?chargeCurrency with 400', async () => {
+    const res = await adminListOrdersHandler(makeCtx({ chargeCurrency: 'usd1' }));
     expect(res.status).toBe(400);
   });
 
@@ -226,43 +208,6 @@ describe('adminListOrdersHandler', () => {
   it('accepts a home-currency ?chargeCurrency filter', async () => {
     dbState.rows = [makeRow({ chargeCurrency: 'GBP' })];
     const res = await adminListOrdersHandler(makeCtx({ chargeCurrency: 'GBP' }));
-    expect(res.status).toBe(200);
-    expect(dbState.whereCalls).toHaveLength(1);
-  });
-
-  it('rejects an unknown ?paymentMethod with 400', async () => {
-    const res = await adminListOrdersHandler(makeCtx({ paymentMethod: 'bitcoin' }));
-    expect(res.status).toBe(400);
-  });
-
-  it('rejects an uppercase ?paymentMethod with 400 (enum is lowercase)', async () => {
-    const res = await adminListOrdersHandler(makeCtx({ paymentMethod: 'XLM' }));
-    expect(res.status).toBe(400);
-  });
-
-  it('accepts every known ?paymentMethod enum value', async () => {
-    for (const pm of ['xlm', 'usdc', 'credit', 'loop_asset']) {
-      dbState.whereCalls = [];
-      dbState.rows = [];
-      const res = await adminListOrdersHandler(makeCtx({ paymentMethod: pm }));
-      expect(res.status).toBe(200);
-      expect(dbState.whereCalls).toHaveLength(1);
-    }
-  });
-
-  it('rejects a malformed ?ctxOperatorId with 400', async () => {
-    const res = await adminListOrdersHandler(makeCtx({ ctxOperatorId: 'has spaces' }));
-    expect(res.status).toBe(400);
-  });
-
-  it('rejects an empty ?ctxOperatorId with 400', async () => {
-    const res = await adminListOrdersHandler(makeCtx({ ctxOperatorId: '' }));
-    expect(res.status).toBe(400);
-  });
-
-  it('accepts an opaque-id ?ctxOperatorId filter', async () => {
-    dbState.rows = [makeRow({ ctxOperatorId: 'op-alpha-01' })];
-    const res = await adminListOrdersHandler(makeCtx({ ctxOperatorId: 'op-alpha-01' }));
     expect(res.status).toBe(200);
     expect(dbState.whereCalls).toHaveLength(1);
   });
@@ -320,12 +265,12 @@ describe('adminGetOrderHandler', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
     expect(body).toMatchObject({
-      id: validId,
-      state: 'fulfilled',
+      id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
       faceValueMinor: '5000',
-      wholesaleMinor: '3200',
+      chargeMinor: '4000',
       userCashbackMinor: '600',
-      loopMarginMinor: '200',
+      expectedCommissionMinor: '200',
+      paymentCryptoCurrency: 'XLM',
     });
   });
 

@@ -1,238 +1,177 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+/**
+ * `POST /api/orders/loop` create-handler tests (ADR 052). ctx is the
+ * payment processor — the handler's job is gates → local mirror row →
+ * CTX create act-as → relay payment instructions. These pin:
+ *
+ *   - the gate ladder (flag 404, auth 401, X-Client-Id 400,
+ *     cryptoCurrency allowlist 400, velocity 429/fails-closed 503,
+ *     freeze, face-value cap, merchant/denomination validation)
+ *   - the CTX call shape (act-as headers + platform client id,
+ *     operatorReference = the local row id, major-unit fiatAmount)
+ *   - CTX failure mapping (400 pass-through class, 5xx/transport →
+ *     503 + mirror row rejected)
+ *   - the idempotent replay short-circuit
+ */
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Context } from 'hono';
-import type { LoopAuthContext } from '../../auth/handler.js';
-import type * as SchemaModule from '../../db/schema.js';
-import { env } from '../../env.js';
+import type { LoopAuthContext } from '../../auth/require-auth.js';
 
 vi.hoisted(() => {
   process.env['LOOP_AUTH_NATIVE_ENABLED'] = 'true';
   process.env['LOOP_JWT_SIGNING_KEY'] ??= 'unit-test-loop-jwt-signing-key-32ch!';
-  process.env['LOOP_STELLAR_DEPOSIT_ADDRESS'] =
-    'GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW';
+  process.env['LOOP_CTX_PAYMENT_CURRENCIES'] = 'XLM,DASH';
 });
 
-const createOrderMock = vi.fn();
-const findOrderByIdempotencyKeyMock = vi.fn();
-const getMerchantsMock = vi.fn();
-
-const { IdempotentOrderConflictError, InsufficientCreditError } = vi.hoisted(() => {
-  class IdempotentOrderConflictError extends Error {
-    readonly existing: unknown;
-    constructor(existing: unknown) {
-      super('replay');
-      this.name = 'IdempotentOrderConflictError';
-      this.existing = existing;
-    }
-  }
-  class InsufficientCreditError extends Error {
-    constructor() {
-      super('balance');
-      this.name = 'InsufficientCreditError';
-    }
-  }
-  return { IdempotentOrderConflictError, InsufficientCreditError };
-});
-
-vi.mock('../repo.js', () => ({
-  createOrder: (args: unknown) => createOrderMock(args),
-  findOrderByIdempotencyKey: (userId: string, key: string) =>
-    findOrderByIdempotencyKeyMock(userId, key),
-  IdempotentOrderConflictError,
-  InsufficientCreditError,
+vi.mock('../../env.js', () => ({
+  get env() {
+    return {
+      LOOP_AUTH_NATIVE_ENABLED: process.env['LOOP_AUTH_NATIVE_ENABLED'] === 'true',
+      LOOP_CTX_PAYMENT_CURRENCIES: process.env['LOOP_CTX_PAYMENT_CURRENCIES'],
+      LOOP_ORDER_VELOCITY_WINDOW_HOURS: 24,
+      GIFT_CARD_API_KEY: 'k',
+      GIFT_CARD_API_SECRET: 's',
+      CTX_CLIENT_ID_WEB: 'loopweb',
+      GIFT_CARD_API_BASE_URL: 'https://ctx.test',
+    };
+  },
 }));
-vi.mock('../../merchants/sync.js', () => ({
-  getMerchants: () => getMerchantsMock(),
-}));
+
 vi.mock('../../logger.js', () => ({
   logger: {
-    child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+    child: () => ({
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    }),
   },
 }));
 
-// Mock the db client — the handler uses it for the credit balance
-// lookup (select/from/where) and the user lookup (query.users.findFirst,
-// via getUserById). Both resolve off hoisted state so individual tests
-// can stash rows / user profiles before calling the handler.
-const { dbChain, balanceState, userState } = vi.hoisted(() => {
-  const bState: { rows: unknown[] } = { rows: [] };
-  const uState: { user: unknown } = {
-    user: {
-      id: 'user-uuid',
-      email: 'a@b.com',
-      isAdmin: false,
-      homeCurrency: 'GBP',
-      ctxUserId: null,
-    },
-  };
-  const chain: Record<string, ReturnType<typeof vi.fn>> = {};
-  chain['select'] = vi.fn(() => chain);
-  chain['from'] = vi.fn(() => chain);
-  // `.where(...)` both resolves to rows (legacy call sites that await
-  // it directly — e.g. `hasSufficientCredit`) AND returns a handle
-  // with `.limit(...)` (the first-loop-asset check). Drizzle's real
-  // API is a thenable builder that has `.limit()` on it until awaited.
-  // Construct the thenable on every `.where` call so tests that
-  // mutate `bState.rows` between requests see the fresh value.
-  chain['where'] = vi.fn(() => {
-    const p = Promise.resolve(bState.rows);
-    return Object.assign(p, {
-      limit: vi.fn(async () => bState.rows),
-    });
-  });
-  return { dbChain: chain, balanceState: bState, userState: uState };
-});
-vi.mock('../../db/client.js', () => ({
-  db: {
-    ...dbChain,
-    query: {
-      users: {
-        findFirst: vi.fn(async () => userState.user),
-      },
-    },
+const {
+  merchantsState,
+  velocityState,
+  freezeState,
+  usersState,
+  repoState,
+  ctxFetchMock,
+  ctxOrderState,
+  transitionsCalls,
+  notifyCreatedMock,
+} = vi.hoisted(() => ({
+  merchantsState: {
+    map: new Map<string, { id: string; name: string; enabled: boolean; denominations?: unknown }>(),
   },
+  velocityState: { result: { allowed: true } as unknown, throws: null as unknown },
+  freezeState: { frozen: false },
+  usersState: { ctxUserId: 'ctx-u-1' as string | null },
+  repoState: {
+    created: undefined as Record<string, unknown> | undefined,
+    priorByKey: null as Record<string, unknown> | null,
+  },
+  ctxFetchMock: vi.fn(),
+  ctxOrderState: {
+    operatorCard: null as unknown,
+    payment: null as unknown,
+    profitShareBp: 5000 as number | null,
+  },
+  transitionsCalls: { rejected: [] as Array<[string, string | null]> },
+  notifyCreatedMock: vi.fn(),
 }));
-vi.mock('../../db/schema.js', async () => {
-  const actual = await vi.importActual<typeof SchemaModule>('../../db/schema.js');
+
+vi.mock('../../merchants/sync.js', () => ({
+  getMerchants: () => ({ merchantsById: merchantsState.map }),
+}));
+vi.mock('../../fraud/velocity.js', async (importActual) => {
+  const actual = (await importActual()) as Record<string, unknown>;
   return {
     ...actual,
-    userCredits: {
-      userId: 'userId',
-      currency: 'currency',
-      balanceMinor: 'balanceMinor',
-    },
-    users: { id: 'id' },
+    checkOrderVelocity: vi.fn(async () => {
+      if (velocityState.throws !== null) throw velocityState.throws;
+      return velocityState.result;
+    }),
   };
 });
-// FX conversion — tests don't need a real rate feed; echo the input so
-// the handler path exercises the charge_minor = face_value case
-// (user.home_currency === request.currency). Tests that exercise
-// cross-currency FX or the CF-19 "no rate yet" path swap in
-// `fxState.impl` (set per-test, reset in beforeEach).
-const { fxState, CurrencyRateUnavailableError } = vi.hoisted(() => {
-  class CurrencyRateUnavailableError extends Error {
-    readonly currency: string;
-    constructor(currency: string) {
-      super(`no rate for ${currency}`);
-      this.name = 'CurrencyRateUnavailableError';
-      this.currency = currency;
-    }
-  }
-  const fxState: { impl: (amount: bigint, from: string, to: string) => Promise<bigint> } = {
-    impl: async (amount: bigint) => amount,
-  };
-  return { fxState, CurrencyRateUnavailableError };
-});
-vi.mock('../../payments/price-feed.js', () => ({
-  convertMinorUnits: vi.fn((amount: bigint, from: string, to: string) =>
-    fxState.impl(amount, from, to),
+vi.mock('../../fraud/account-freeze-http.js', () => ({
+  guardAccountNotFrozen: vi.fn(async (c: Context) =>
+    freezeState.frozen ? c.json({ code: 'ACCOUNT_FROZEN' }, 403) : null,
   ),
-  CurrencyRateUnavailableError,
 }));
-// Payout-asset resolver — loop_asset orders read issuer from here.
-const { payoutAssetState } = vi.hoisted(() => ({
-  payoutAssetState: {
-    issuer: null as string | null,
-  },
+vi.mock('../../db/users.js', () => ({
+  getUserCtxUserId: vi.fn(async () => usersState.ctxUserId),
+  getUserById: vi.fn(async () => ({ id: 'user-uuid', email: 'a@b.com' })),
 }));
-vi.mock('../../credits/payout-asset.js', () => ({
-  payoutAssetFor: (currency: 'USD' | 'GBP' | 'EUR') => ({
-    code: { USD: 'USDLOOP', GBP: 'GBPLOOP', EUR: 'EURLOOP' }[currency],
-    issuer: payoutAssetState.issuer,
+vi.mock('../../ctx/user-provisioning.js', async (importActual) => {
+  const actual = (await importActual()) as Record<string, unknown>;
+  return {
+    ...actual,
+    provisionCtxUser: vi.fn(async () => undefined),
+    ctxActAsHeaders: (ctxUserId: string | null, clientId?: string) =>
+      ctxUserId === null
+        ? null
+        : {
+            'X-Api-Key': 'k',
+            'X-Api-Secret': 's',
+            'X-User-Id': ctxUserId,
+            'X-Client-Id': clientId ?? 'loopweb',
+          },
+  };
+});
+vi.mock('../../ctx/api-fetch.js', async (importActual) => {
+  const actual = (await importActual()) as Record<string, unknown>;
+  return {
+    ...actual,
+    ctxFetch: (url: string, init?: RequestInit) => ctxFetchMock(url, init),
+  };
+});
+vi.mock('../repo.js', async (importActual) => {
+  const actual = (await importActual()) as Record<string, unknown>;
+  return {
+    ...actual,
+    createOrder: vi.fn(async (args: Record<string, unknown>) => {
+      repoState.created = args;
+      return {
+        id: 'o-local-1',
+        userId: args['userId'],
+        merchantId: args['merchantId'],
+        faceValueMinor: args['faceValueMinor'],
+        currency: args['currency'],
+        chargeMinor: args['faceValueMinor'],
+        chargeCurrency: args['currency'],
+        userCashbackMinor: 0n,
+        expectedCommissionMinor: null,
+        ctxOrderId: null,
+        ctxPaymentId: null,
+        paymentCryptoCurrency: args['paymentCryptoCurrency'],
+        state: 'unpaid',
+        createdAt: new Date(),
+      };
+    }),
+    recordCtxCreate: vi.fn(async () => undefined),
+    recordOrderEconomics: vi.fn(async () => undefined),
+    findOrderByIdempotencyKey: vi.fn(async () => repoState.priorByKey),
+  };
+});
+vi.mock('../transitions.js', () => ({
+  markOrderRejected: vi.fn(async (id: string, reason: string | null) => {
+    transitionsCalls.rejected.push([id, reason]);
+    return { id };
   }),
 }));
-
-// Wallet layer (ADR 036 OQ3) — the credit-retirement gate checks
-// `getWalletProvider() !== null`. Toggleable per-test; default off.
-const { walletProviderState } = vi.hoisted(() => ({
-  walletProviderState: { on: false },
-}));
-vi.mock('../../wallet/provider.js', () => ({
-  getWalletProvider: () => (walletProviderState.on ? ({} as never) : null),
-}));
-
-// ADR 045 (B-3) velocity gate — fully mocked here; its own bounded-
-// query/fail-closed behaviour is covered by fraud/__tests__/velocity.test.ts.
-// Default: always allowed, so every pre-existing test in this file is
-// unaffected. `velocityState.calls` records every invocation so the
-// per-user (not per-IP) wiring can be asserted.
-const { velocityState, VelocityCheckUnavailableError } = vi.hoisted(() => {
-  class VelocityCheckUnavailableError extends Error {
-    constructor() {
-      super('velocity check unavailable');
-      this.name = 'VelocityCheckUnavailableError';
-    }
-  }
+vi.mock('../ctx-order.js', async (importActual) => {
+  const actual = (await importActual()) as Record<string, unknown>;
   return {
-    velocityState: {
-      decision: { allowed: true } as {
-        allowed: boolean;
-        reason?: 'count' | 'value';
-        currency?: string;
-      },
-      throwUnavailable: false,
-      calls: [] as string[],
-    },
-    VelocityCheckUnavailableError,
+    ...actual,
+    fetchCtxCardAsOperator: vi.fn(async () => ctxOrderState.operatorCard),
+    fetchCtxPayment: vi.fn(async () => ctxOrderState.payment),
+    operatorProfitShareBp: vi.fn(async () => ctxOrderState.profitShareBp),
   };
 });
-vi.mock('../../fraud/velocity.js', () => ({
-  checkOrderVelocity: async (userId: string) => {
-    velocityState.calls.push(userId);
-    if (velocityState.throwUnavailable) throw new VelocityCheckUnavailableError();
-    return velocityState.decision;
-  },
-  VelocityCheckUnavailableError,
+vi.mock('../../discord.js', () => ({
+  notifyCtxSchemaDrift: vi.fn(),
+  notifyOrderCreated: (args: unknown) => notifyCreatedMock(args),
 }));
 
-// NS-08: neutralize the account-freeze entry gate for these unit tests
-// (not-frozen default) — the freeze enforcement is covered end-to-end in
-// __tests__/integration/account-freeze.test.ts. Same pattern NS-04 used
-// for the rail-kill-switch gate.
-vi.mock('../../fraud/account-freeze-http.js', () => ({
-  guardAccountNotFrozen: vi.fn(async () => null),
-}));
-
-import { loopCreateOrderHandler, validateMerchantDenomination } from '../loop-handler.js';
-
-interface FakeCtx {
-  store: Map<string, unknown>;
-  body: unknown;
-  ctx: Context;
-}
-
-function makeCtx(opts: {
-  auth?: LoopAuthContext | undefined;
-  body?: unknown;
-  headers?: Record<string, string>;
-}): FakeCtx {
-  const store = new Map<string, unknown>();
-  if (opts.auth !== undefined) store.set('auth', opts.auth);
-  const headers: Record<string, string> = {};
-  if (opts.headers !== undefined) {
-    for (const [k, v] of Object.entries(opts.headers)) {
-      headers[k.toLowerCase()] = v;
-    }
-  }
-  return {
-    store,
-    body: opts.body,
-    ctx: {
-      req: {
-        json: async () => {
-          if (opts.body === '__throw__') throw new Error('bad json');
-          return opts.body;
-        },
-        header: (name: string) => headers[name.toLowerCase()],
-      },
-      get: (k: string) => store.get(k),
-      json: (b: unknown, status?: number) =>
-        new Response(JSON.stringify(b), {
-          status: status ?? 200,
-          headers: { 'content-type': 'application/json' },
-        }),
-    } as unknown as Context,
-  };
-}
+import { loopCreateOrderHandler } from '../loop-handler.js';
 
 const LOOP_AUTH: LoopAuthContext = {
   kind: 'loop',
@@ -241,1062 +180,267 @@ const LOOP_AUTH: LoopAuthContext = {
   bearerToken: 'loop-access',
 };
 
+function makeCtx(opts: {
+  auth?: LoopAuthContext;
+  clientId?: string;
+  body?: unknown;
+  idempotencyKey?: string;
+}): Context {
+  const store = new Map<string, unknown>();
+  if (opts.auth !== undefined) store.set('auth', opts.auth);
+  if (opts.clientId !== undefined) store.set('clientId', opts.clientId);
+  return {
+    req: {
+      json: async () => opts.body,
+      header: (k: string) =>
+        k.toLowerCase() === 'idempotency-key' ? opts.idempotencyKey : undefined,
+    },
+    get: (k: string) => store.get(k),
+    json: (body: unknown, status?: number) =>
+      new Response(JSON.stringify(body), {
+        status: status ?? 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+  } as unknown as Context;
+}
+
+const GOOD_BODY = {
+  merchantId: 'amazon',
+  amountMinor: 2500,
+  currency: 'usd',
+  cryptoCurrency: 'xlm',
+};
+
+function ctx201(body?: Record<string, unknown>): Response {
+  return new Response(
+    JSON.stringify({
+      id: 'ctx-card-1',
+      paymentId: 'ctx-pay-1',
+      displayStatus: 'unpaid',
+      paymentStatus: 'unpaid',
+      paymentFiatAmount: '24.00',
+      paymentFiatCurrency: 'USD',
+      paymentCryptoAmount: '150.5000000',
+      paymentCryptoCurrency: 'XLM',
+      paymentCryptoAddress: 'GCTXADDR',
+      paymentUrls: { XLM: 'web+stellar:pay?destination=GCTXADDR' },
+      ...body,
+    }),
+    { status: 201, headers: { 'content-type': 'application/json' } },
+  );
+}
+
 beforeEach(() => {
-  createOrderMock.mockReset();
-  findOrderByIdempotencyKeyMock.mockReset();
-  findOrderByIdempotencyKeyMock.mockResolvedValue(null);
-  getMerchantsMock.mockReset();
-  balanceState.rows = [];
-  payoutAssetState.issuer = null;
-  fxState.impl = async (amount: bigint) => amount;
-  walletProviderState.on = false;
-  velocityState.decision = { allowed: true };
-  velocityState.throwUnavailable = false;
-  velocityState.calls = [];
-  userState.user = {
-    id: 'user-uuid',
-    email: 'a@b.com',
-    isAdmin: false,
-    homeCurrency: 'GBP',
-    ctxUserId: null,
-    walletProvisioning: 'none',
+  process.env['LOOP_AUTH_NATIVE_ENABLED'] = 'true';
+  merchantsState.map = new Map([['amazon', { id: 'amazon', name: 'Amazon', enabled: true }]]);
+  velocityState.result = { allowed: true };
+  velocityState.throws = null;
+  freezeState.frozen = false;
+  usersState.ctxUserId = 'ctx-u-1';
+  repoState.created = undefined;
+  repoState.priorByKey = null;
+  ctxFetchMock.mockReset();
+  ctxFetchMock.mockResolvedValue(ctx201());
+  ctxOrderState.operatorCard = null;
+  ctxOrderState.payment = {
+    id: 'ctx-pay-1',
+    status: 'pending',
+    expires: '2026-08-01T00:10:00.000Z',
   };
-  for (const fn of Object.values(dbChain)) {
-    if (typeof fn === 'function' && 'mockClear' in fn) {
-      (fn as unknown as { mockClear: () => void }).mockClear();
-    }
-  }
-  getMerchantsMock.mockReturnValue({
-    merchantsById: new Map([['m1', { id: 'm1', name: 'Target', enabled: true }]]),
-  });
-  createOrderMock.mockResolvedValue({
-    id: 'order-uuid',
-    userId: 'user-uuid',
-    merchantId: 'm1',
-    faceValueMinor: 10_000n,
-    currency: 'GBP',
-    chargeMinor: 10_000n,
-    chargeCurrency: 'GBP',
-    paymentMethod: 'xlm',
-    paymentMemo: 'MEMO-ABCDEFGHIJKLMNOP',
-  });
-  balanceState.rows = [];
+  transitionsCalls.rejected = [];
+  notifyCreatedMock.mockReset();
 });
 
-describe('loopCreateOrderHandler', () => {
-  it('401 when auth is missing or not Loop-kind', async () => {
-    const { ctx } = makeCtx({ body: {} });
-    expect((await loopCreateOrderHandler(ctx)).status).toBe(401);
-
-    const { ctx: ctx2 } = makeCtx({
-      auth: { kind: 'ctx', bearerToken: 'ctx' },
-      body: {},
-    });
-    expect((await loopCreateOrderHandler(ctx2)).status).toBe(401);
-  });
-
-  it('400 on invalid body', async () => {
-    const { ctx } = makeCtx({ auth: LOOP_AUTH, body: { merchantId: 'm1' } });
-    expect((await loopCreateOrderHandler(ctx)).status).toBe(400);
-  });
-
-  it('400 when merchant is unknown or disabled', async () => {
-    getMerchantsMock.mockReturnValue({ merchantsById: new Map() });
-    const { ctx } = makeCtx({
-      auth: LOOP_AUTH,
-      body: {
-        merchantId: 'missing',
-        amountMinor: 10_000,
-        currency: 'GBP',
-        paymentMethod: 'xlm',
-      },
-    });
-    expect((await loopCreateOrderHandler(ctx)).status).toBe(400);
-  });
-
-  it('creates an xlm order and returns the deposit address + memo', async () => {
-    const { ctx } = makeCtx({
-      auth: LOOP_AUTH,
-      body: {
-        merchantId: 'm1',
-        amountMinor: 10_000,
-        currency: 'GBP',
-        paymentMethod: 'xlm',
-      },
-    });
-    const res = await loopCreateOrderHandler(ctx);
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      orderId: string;
-      payment: { method: string; memo: string; stellarAddress: string; amountMinor: string };
-    };
-    expect(body.orderId).toBe('order-uuid');
-    expect(body.payment.method).toBe('xlm');
-    expect(body.payment.memo).toBe('MEMO-ABCDEFGHIJKLMNOP');
-    expect(body.payment.stellarAddress).toMatch(/^G[A-Z2-7]{55}$/);
-    expect(body.payment.amountMinor).toBe('10000');
-    expect(createOrderMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userId: 'user-uuid',
-        merchantId: 'm1',
-        faceValueMinor: 10_000n,
-        currency: 'GBP',
-        paymentMethod: 'xlm',
-      }),
+describe('gate ladder', () => {
+  it('404s when LOOP_AUTH_NATIVE_ENABLED is off', async () => {
+    process.env['LOOP_AUTH_NATIVE_ENABLED'] = 'false';
+    const res = await loopCreateOrderHandler(
+      makeCtx({ auth: LOOP_AUTH, clientId: 'loopweb', body: GOOD_BODY }),
     );
+    expect(res.status).toBe(404);
   });
 
-  it('upper-cases the currency before passing to the repo', async () => {
-    const { ctx } = makeCtx({
-      auth: LOOP_AUTH,
-      body: {
-        merchantId: 'm1',
-        amountMinor: 10_000,
-        currency: 'gbp',
-        paymentMethod: 'xlm',
-      },
-    });
-    await loopCreateOrderHandler(ctx);
-    expect(createOrderMock).toHaveBeenCalledWith(expect.objectContaining({ currency: 'GBP' }));
-  });
-
-  it('credit path — 400 CREDIT_METHOD_RETIRED for wallet-activated users (ADR 036 OQ3)', async () => {
-    // ADR 036 OQ3 (resolved 2026-06-12): once the wallet layer is on
-    // and the user's wallet is `activated`, the balance IS the tokens
-    // — spending happens as token redemption, so the inline mirror
-    // debit ('credit') is retired. createOrder must NOT be called.
-    walletProviderState.on = true;
-    userState.user = {
-      id: 'user-uuid',
-      email: 'a@b.com',
-      isAdmin: false,
-      homeCurrency: 'GBP',
-      ctxUserId: null,
-      walletProvisioning: 'activated',
-    };
-    const { ctx } = makeCtx({
-      auth: LOOP_AUTH,
-      body: {
-        merchantId: 'm1',
-        amountMinor: 10_000,
-        currency: 'GBP',
-        paymentMethod: 'credit',
-      },
-    });
-    const res = await loopCreateOrderHandler(ctx);
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { code: string };
-    expect(body.code).toBe('CREDIT_METHOD_RETIRED');
-    expect(createOrderMock).not.toHaveBeenCalled();
-  });
-
-  it('pins charge_minor via FX when user.home_currency differs from the request currency', async () => {
-    // User is a GBP account; they're buying a $50 USD gift card.
-    // convertMinorUnits stub returns amount × 0.78 to simulate USD→GBP.
-    const priceFeed = await import('../../payments/price-feed.js');
-    vi.mocked(priceFeed.convertMinorUnits).mockResolvedValueOnce(3900n); // 5000 × 0.78
-    userState.user = {
-      id: 'user-uuid',
-      email: 'a@b.com',
-      isAdmin: false,
-      homeCurrency: 'GBP',
-      ctxUserId: null,
-    };
-    createOrderMock.mockResolvedValue({
-      id: 'order-uuid',
-      faceValueMinor: 5_000n,
-      currency: 'USD',
-      chargeMinor: 3_900n,
-      chargeCurrency: 'GBP',
-      paymentMethod: 'xlm',
-      paymentMemo: 'MEMO-xyz',
-    });
-    const { ctx } = makeCtx({
-      auth: LOOP_AUTH,
-      body: {
-        merchantId: 'm1',
-        amountMinor: 5_000,
-        currency: 'USD',
-        paymentMethod: 'xlm',
-      },
-    });
-    const res = await loopCreateOrderHandler(ctx);
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { payment: { amountMinor: string; currency: string } };
-    // The user sees their charge in pence of GBP, not the catalog USD.
-    expect(body.payment.amountMinor).toBe('3900');
-    expect(body.payment.currency).toBe('GBP');
-    expect(createOrderMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        faceValueMinor: 5_000n,
-        currency: 'USD',
-        chargeMinor: 3_900n,
-        chargeCurrency: 'GBP',
-      }),
-    );
-  });
-
-  it('rejects with 503 when the FX feed throws', async () => {
-    const priceFeed = await import('../../payments/price-feed.js');
-    vi.mocked(priceFeed.convertMinorUnits).mockRejectedValueOnce(new Error('feed 503'));
-    userState.user = {
-      id: 'user-uuid',
-      email: 'a@b.com',
-      isAdmin: false,
-      homeCurrency: 'GBP',
-      ctxUserId: null,
-    };
-    const { ctx } = makeCtx({
-      auth: LOOP_AUTH,
-      body: {
-        merchantId: 'm1',
-        amountMinor: 5_000,
-        currency: 'USD',
-        paymentMethod: 'xlm',
-      },
-    });
-    const res = await loopCreateOrderHandler(ctx);
-    expect(res.status).toBe(503);
-    expect(createOrderMock).not.toHaveBeenCalled();
-  });
-
-  it('rejects with 401 when the auth userId has no matching users row', async () => {
-    userState.user = undefined;
-    const { ctx } = makeCtx({
-      auth: LOOP_AUTH,
-      body: {
-        merchantId: 'm1',
-        amountMinor: 1_000,
-        currency: 'GBP',
-        paymentMethod: 'xlm',
-      },
-    });
-    const res = await loopCreateOrderHandler(ctx);
+  it('401s without a loop auth context', async () => {
+    const res = await loopCreateOrderHandler(makeCtx({ clientId: 'loopweb', body: GOOD_BODY }));
     expect(res.status).toBe(401);
   });
 
-  it('rejects with 400 when the request currency is not an orderable currency', async () => {
-    // JPY is neither a home nor an ADR-035 extended market currency —
-    // it's catalogue-only / unrouted, so the order path declines it.
-    const { ctx } = makeCtx({
-      auth: LOOP_AUTH,
-      body: {
-        merchantId: 'm1',
-        amountMinor: 10_000,
-        currency: 'JPY',
-        paymentMethod: 'xlm',
-      },
-    });
-    const res = await loopCreateOrderHandler(ctx);
+  it('400s without a trusted X-Client-Id — never a silent default', async () => {
+    const res = await loopCreateOrderHandler(makeCtx({ auth: LOOP_AUTH, body: GOOD_BODY }));
     expect(res.status).toBe(400);
-    const body = (await res.json()) as { code: string; message: string };
-    expect(body.code).toBe('VALIDATION_ERROR');
-    expect(body.message).toMatch(/Unsupported gift-card currency/);
+    const body = (await res.json()) as { message: string };
+    expect(body.message).toContain('X-Client-Id');
+    expect(ctxFetchMock).not.toHaveBeenCalled();
   });
 
-  // ── CF-19 / ADR 035: extended-market order path ─────────────────────
-  it('accepts an extended-market currency (AED) and FX-pins the charge to the home currency', async () => {
-    // Catalog currency AED, user home GBP. FX mock converts AED→GBP.
-    fxState.impl = async (_amount: bigint, from: string, to: string) => {
-      expect(from).toBe('AED');
-      expect(to).toBe('GBP');
-      return 2723n; // pretend FX result, in GBP pence
-    };
-    createOrderMock.mockResolvedValueOnce({
-      id: 'order-uuid',
-      userId: 'user-uuid',
-      merchantId: 'm1',
-      faceValueMinor: 10_000n,
-      currency: 'AED',
-      chargeMinor: 2723n,
-      chargeCurrency: 'GBP',
-      paymentMethod: 'xlm',
-      paymentMemo: 'MEMO-ABCDEFGHIJKLMNOP',
-    });
-    const { ctx } = makeCtx({
-      auth: LOOP_AUTH,
-      body: {
-        merchantId: 'm1',
-        amountMinor: 10_000,
-        currency: 'AED',
-        paymentMethod: 'xlm',
-      },
-    });
-    const res = await loopCreateOrderHandler(ctx);
-    expect(res.status).toBe(200);
-    // Catalog currency persisted as AED; charge currency is the home (GBP).
-    expect(createOrderMock).toHaveBeenCalledWith(
-      expect.objectContaining({ currency: 'AED', chargeCurrency: 'GBP', chargeMinor: 2723n }),
-    );
-  });
-
-  it.each(['AED', 'INR', 'SAR', 'AUD', 'MXN'] as const)(
-    'accepts every ADR-035 extended currency (%s) as a valid catalog currency — none 400 VALIDATION_ERROR',
-    async (currency) => {
-      // §P3 (go-live-plan): the AED test above proves the mechanism once;
-      // this closes coverage for all five so a future accidental narrowing
-      // of `isOrderableCurrency`/`EXTENDED_ORDER_CURRENCIES` to a subset
-      // fails a test, not just a prod 400.
-      fxState.impl = async () => 999n;
-      const { ctx } = makeCtx({
+  it('400s on a cryptoCurrency outside the allowlist', async () => {
+    const res = await loopCreateOrderHandler(
+      makeCtx({
         auth: LOOP_AUTH,
-        body: {
-          merchantId: 'm1',
-          amountMinor: 10_000,
-          currency,
-          paymentMethod: 'xlm',
-        },
-      });
-      const res = await loopCreateOrderHandler(ctx);
-      expect(res.status).toBe(200);
-      expect(createOrderMock).toHaveBeenCalledWith(expect.objectContaining({ currency }));
-    },
-  );
-
-  it('returns 503 CURRENCY_NOT_AVAILABLE when the rates service has no rate for the extended currency yet', async () => {
-    // CF-19: the market is SEO-promoted but the external rates service
-    // doesn't serve INR yet. Fail gracefully ("coming soon") — never
-    // create the order, never 500, never a wrong charge.
-    fxState.impl = async () => {
-      throw new CurrencyRateUnavailableError('INR');
-    };
-    const { ctx } = makeCtx({
-      auth: LOOP_AUTH,
-      body: {
-        merchantId: 'm1',
-        amountMinor: 10_000,
-        currency: 'INR',
-        paymentMethod: 'xlm',
-      },
-    });
-    const res = await loopCreateOrderHandler(ctx);
-    expect(res.status).toBe(503);
-    const body = (await res.json()) as { code: string; message: string };
-    expect(body.code).toBe('CURRENCY_NOT_AVAILABLE');
-    expect(body.message).toMatch(/coming soon/i);
-    // The order must NOT have been created on the no-rate path.
-    expect(createOrderMock).not.toHaveBeenCalled();
-  });
-
-  it('a generic FX feed outage stays 503 SERVICE_UNAVAILABLE (not CURRENCY_NOT_AVAILABLE)', async () => {
-    fxState.impl = async () => {
-      throw new Error('FX feed 500');
-    };
-    const { ctx } = makeCtx({
-      auth: LOOP_AUTH,
-      body: {
-        merchantId: 'm1',
-        amountMinor: 10_000,
-        currency: 'GBP',
-        paymentMethod: 'xlm',
-      },
-    });
-    const res = await loopCreateOrderHandler(ctx);
-    expect(res.status).toBe(503);
-    const body = (await res.json()) as { code: string };
-    expect(body.code).toBe('SERVICE_UNAVAILABLE');
-  });
-
-  it('credit path — still allowed for not-yet-activated users (ADR 036 migration window)', async () => {
-    // Mirror balance accrued pre-wallet has no emitted tokens, so the
-    // inline mirror debit is the only coherent spend path — 'credit'
-    // keeps working until provisioning completes.
-    walletProviderState.on = true;
-    userState.user = {
-      id: 'user-uuid',
-      email: 'a@b.com',
-      isAdmin: false,
-      homeCurrency: 'GBP',
-      ctxUserId: null,
-      walletProvisioning: 'wallet_created',
-    };
-    createOrderMock.mockResolvedValue({
-      id: 'order-uuid',
-      userId: 'user-uuid',
-      merchantId: 'm1',
-      faceValueMinor: 10_000n,
-      currency: 'GBP',
-      chargeMinor: 10_000n,
-      chargeCurrency: 'GBP',
-      paymentMethod: 'credit',
-      paymentMemo: null,
-    });
-    const { ctx } = makeCtx({
-      auth: LOOP_AUTH,
-      body: {
-        merchantId: 'm1',
-        amountMinor: 10_000,
-        currency: 'GBP',
-        paymentMethod: 'credit',
-      },
-    });
-    const res = await loopCreateOrderHandler(ctx);
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { payment: { method: string } };
-    expect(body.payment.method).toBe('credit');
-    expect(createOrderMock).toHaveBeenCalledWith(
-      expect.objectContaining({ paymentMethod: 'credit' }),
+        clientId: 'loopweb',
+        body: { ...GOOD_BODY, cryptoCurrency: 'BTC' },
+      }),
     );
+    expect(res.status).toBe(400);
   });
 
-  it('credit path — still allowed when the wallet layer is off, even if activated', async () => {
-    // LOOP_WALLET_PROVIDER='' deployments have no redemption rail to
-    // point users at; the retirement gate requires BOTH the provider
-    // and an activated wallet (ADR 036 OQ3).
-    walletProviderState.on = false;
-    userState.user = {
-      id: 'user-uuid',
-      email: 'a@b.com',
-      isAdmin: false,
-      homeCurrency: 'GBP',
-      ctxUserId: null,
-      walletProvisioning: 'activated',
-    };
-    createOrderMock.mockResolvedValue({
-      id: 'order-uuid',
-      userId: 'user-uuid',
-      merchantId: 'm1',
-      faceValueMinor: 10_000n,
-      currency: 'GBP',
-      chargeMinor: 10_000n,
-      chargeCurrency: 'GBP',
-      paymentMethod: 'credit',
-      paymentMemo: null,
-    });
-    const { ctx } = makeCtx({
-      auth: LOOP_AUTH,
-      body: {
-        merchantId: 'm1',
-        amountMinor: 10_000,
-        currency: 'GBP',
-        paymentMethod: 'credit',
-      },
-    });
-    const res = await loopCreateOrderHandler(ctx);
-    expect(res.status).toBe(200);
-    expect(createOrderMock).toHaveBeenCalledWith(
-      expect.objectContaining({ paymentMethod: 'credit' }),
+  it('429s when the velocity gate trips', async () => {
+    velocityState.result = { allowed: false, reason: 'count' };
+    const res = await loopCreateOrderHandler(
+      makeCtx({ auth: LOOP_AUTH, clientId: 'loopweb', body: GOOD_BODY }),
     );
+    expect(res.status).toBe(429);
   });
 
-  it('loop_asset path — returns deposit address + memo + asset code + issuer', async () => {
-    const issuer = 'GB' + '2'.repeat(55);
-    payoutAssetState.issuer = issuer;
-    createOrderMock.mockResolvedValue({
-      id: 'order-uuid',
-      faceValueMinor: 10_000n,
-      currency: 'GBP',
-      chargeMinor: 10_000n,
-      chargeCurrency: 'GBP',
-      paymentMethod: 'loop_asset',
-      paymentMemo: 'MEMO-LOOP-123',
+  it('refuses when frozen (NS-08)', async () => {
+    freezeState.frozen = true;
+    const res = await loopCreateOrderHandler(
+      makeCtx({ auth: LOOP_AUTH, clientId: 'loopweb', body: GOOD_BODY }),
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it('400s on an unknown merchant', async () => {
+    merchantsState.map = new Map();
+    const res = await loopCreateOrderHandler(
+      makeCtx({ auth: LOOP_AUTH, clientId: 'loopweb', body: GOOD_BODY }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('503s when the CTX customer mapping cannot be resolved', async () => {
+    usersState.ctxUserId = null;
+    const res = await loopCreateOrderHandler(
+      makeCtx({ auth: LOOP_AUTH, clientId: 'loopweb', body: GOOD_BODY }),
+    );
+    expect(res.status).toBe(503);
+    expect(ctxFetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('the CTX create call', () => {
+  it('creates the local row first and stamps its id as operatorReference', async () => {
+    const res = await loopCreateOrderHandler(
+      makeCtx({ auth: LOOP_AUTH, clientId: 'loopios', body: GOOD_BODY }),
+    );
+    expect(res.status).toBe(201);
+    expect(repoState.created).toMatchObject({
+      userId: 'user-uuid',
+      merchantId: 'amazon',
+      faceValueMinor: 2500n,
+      currency: 'USD',
+      paymentCryptoCurrency: 'XLM',
     });
-    const { ctx } = makeCtx({
-      auth: LOOP_AUTH,
-      body: {
-        merchantId: 'm1',
-        amountMinor: 10_000,
-        currency: 'GBP',
-        paymentMethod: 'loop_asset',
-      },
+    const [url, init] = ctxFetchMock.mock.calls[0] as [string, RequestInit];
+    expect(String(url)).toContain('/gift-cards');
+    const sent = JSON.parse(String(init.body)) as Record<string, unknown>;
+    expect(sent).toEqual({
+      cryptoCurrency: 'XLM',
+      fiatCurrency: 'USD',
+      fiatAmount: '25.00',
+      merchantId: 'amazon',
+      operatorReference: 'o-local-1',
     });
-    const res = await loopCreateOrderHandler(ctx);
-    expect(res.status).toBe(200);
+    const headers = init.headers as Record<string, string>;
+    expect(headers['X-User-Id']).toBe('ctx-u-1');
+    expect(headers['X-Client-Id']).toBe('loopios');
+  });
+
+  it('relays CTX payment instructions in the response', async () => {
+    const res = await loopCreateOrderHandler(
+      makeCtx({ auth: LOOP_AUTH, clientId: 'loopweb', body: GOOD_BODY }),
+    );
     const body = (await res.json()) as {
-      payment: {
-        method: string;
-        stellarAddress: string;
-        memo: string;
-        amountMinor: string;
-        currency: string;
-        assetCode: string;
-        assetIssuer: string;
-      };
+      orderId: string;
+      state: string;
+      payment: Record<string, unknown>;
     };
-    expect(body.payment.method).toBe('loop_asset');
-    expect(body.payment.assetCode).toBe('GBPLOOP');
-    expect(body.payment.assetIssuer).toBe(issuer);
-    expect(body.payment.memo).toBe('MEMO-LOOP-123');
-    expect(body.payment.amountMinor).toBe('10000');
-    expect(body.payment.currency).toBe('GBP');
+    expect(body.orderId).toBe('o-local-1');
+    expect(body.state).toBe('unpaid');
+    expect(body.payment).toMatchObject({
+      ctxPaymentId: 'ctx-pay-1',
+      cryptoCurrency: 'XLM',
+      cryptoAmount: '150.5000000',
+      address: 'GCTXADDR',
+      amountMinor: '2400',
+      currency: 'USD',
+      expiresAt: '2026-08-01T00:10:00.000Z',
+    });
+    expect(notifyCreatedMock).toHaveBeenCalledTimes(1);
   });
 
-  it('loop_asset path — 503 when the matching issuer env var is not set', async () => {
-    payoutAssetState.issuer = null;
-    createOrderMock.mockResolvedValue({
-      id: 'order-uuid',
-      faceValueMinor: 10_000n,
-      currency: 'GBP',
-      chargeMinor: 10_000n,
-      chargeCurrency: 'GBP',
-      paymentMethod: 'loop_asset',
-      paymentMemo: 'MEMO',
-    });
-    const { ctx } = makeCtx({
-      auth: LOOP_AUTH,
-      body: {
-        merchantId: 'm1',
-        amountMinor: 10_000,
-        currency: 'GBP',
-        paymentMethod: 'loop_asset',
-      },
-    });
-    const res = await loopCreateOrderHandler(ctx);
-    expect(res.status).toBe(503);
-  });
-
-  describe('LOOP_PHASE_1_ONLY gate on loop_asset (AUDIT-2 finding B)', () => {
-    const previous: { value: boolean } = { value: false };
-
-    beforeEach(() => {
-      previous.value = env.LOOP_PHASE_1_ONLY;
-    });
-
-    afterEach(() => {
-      env.LOOP_PHASE_1_ONLY = previous.value;
-    });
-
-    it('rejects loop_asset order-create with 400 LOOP_ASSET_UNAVAILABLE_PHASE_1 when the flag is true', async () => {
-      env.LOOP_PHASE_1_ONLY = true;
-      payoutAssetState.issuer = 'GB' + '2'.repeat(55);
-      const { ctx } = makeCtx({
-        auth: LOOP_AUTH,
-        body: {
-          merchantId: 'm1',
-          amountMinor: 10_000,
-          currency: 'GBP',
-          paymentMethod: 'loop_asset',
-        },
-      });
-      const res = await loopCreateOrderHandler(ctx);
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as { code: string };
-      expect(body.code).toBe('LOOP_ASSET_UNAVAILABLE_PHASE_1');
-      expect(createOrderMock).not.toHaveBeenCalled();
-    });
-
-    it('allows loop_asset order-create when the flag is false', async () => {
-      env.LOOP_PHASE_1_ONLY = false;
-      payoutAssetState.issuer = 'GB' + '2'.repeat(55);
-      createOrderMock.mockResolvedValue({
-        id: 'order-uuid',
-        faceValueMinor: 10_000n,
-        currency: 'GBP',
-        chargeMinor: 10_000n,
-        chargeCurrency: 'GBP',
-        paymentMethod: 'loop_asset',
-        paymentMemo: 'MEMO-LOOP-123',
-      });
-      const { ctx } = makeCtx({
-        auth: LOOP_AUTH,
-        body: {
-          merchantId: 'm1',
-          amountMinor: 10_000,
-          currency: 'GBP',
-          paymentMethod: 'loop_asset',
-        },
-      });
-      const res = await loopCreateOrderHandler(ctx);
-      expect(res.status).toBe(200);
-      expect(createOrderMock).toHaveBeenCalledWith(
-        expect.objectContaining({ paymentMethod: 'loop_asset' }),
-      );
-    });
-
-    it('does not affect xlm order-create when the flag is true', async () => {
-      env.LOOP_PHASE_1_ONLY = true;
-      const { ctx } = makeCtx({
-        auth: LOOP_AUTH,
-        body: { merchantId: 'm1', amountMinor: 10_000, currency: 'GBP', paymentMethod: 'xlm' },
-      });
-      const res = await loopCreateOrderHandler(ctx);
-      expect(res.status).toBe(200);
-      expect(createOrderMock).toHaveBeenCalledWith(
-        expect.objectContaining({ paymentMethod: 'xlm' }),
-      );
-    });
-
-    it('does not affect credit order-create (migration-window user) when the flag is true', async () => {
-      env.LOOP_PHASE_1_ONLY = true;
-      walletProviderState.on = true;
-      userState.user = {
-        id: 'user-uuid',
-        email: 'a@b.com',
-        isAdmin: false,
-        homeCurrency: 'GBP',
-        ctxUserId: null,
-        walletProvisioning: 'wallet_created',
-      };
-      createOrderMock.mockResolvedValue({
-        id: 'order-uuid',
-        userId: 'user-uuid',
-        merchantId: 'm1',
-        faceValueMinor: 10_000n,
-        currency: 'GBP',
-        chargeMinor: 10_000n,
-        chargeCurrency: 'GBP',
-        paymentMethod: 'credit',
-        paymentMemo: null,
-      });
-      const { ctx } = makeCtx({
-        auth: LOOP_AUTH,
-        body: { merchantId: 'm1', amountMinor: 10_000, currency: 'GBP', paymentMethod: 'credit' },
-      });
-      const res = await loopCreateOrderHandler(ctx);
-      expect(res.status).toBe(200);
-      expect(createOrderMock).toHaveBeenCalledWith(
-        expect.objectContaining({ paymentMethod: 'credit' }),
-      );
-    });
-  });
-
-  // A2-2003: Idempotency-Key support on POST /api/orders/loop
-  describe('Idempotency-Key (A2-2003)', () => {
-    const VALID_KEY = '0123456789abcdef-loop-order-idempotency-key';
-
-    it('400 when Idempotency-Key is too short', async () => {
-      const { ctx } = makeCtx({
-        auth: LOOP_AUTH,
-        headers: { 'Idempotency-Key': 'short' },
-        body: {
-          merchantId: 'm1',
-          amountMinor: 10_000,
-          currency: 'GBP',
-          paymentMethod: 'xlm',
-        },
-      });
-      const res = await loopCreateOrderHandler(ctx);
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as { code: string; message: string };
-      expect(body.code).toBe('VALIDATION_ERROR');
-      expect(body.message).toMatch(/Idempotency-Key/i);
-      expect(createOrderMock).not.toHaveBeenCalled();
-    });
-
-    it('400 when Idempotency-Key exceeds the 128-char ceiling', async () => {
-      const tooLong = 'x'.repeat(129);
-      const { ctx } = makeCtx({
-        auth: LOOP_AUTH,
-        headers: { 'Idempotency-Key': tooLong },
-        body: {
-          merchantId: 'm1',
-          amountMinor: 10_000,
-          currency: 'GBP',
-          paymentMethod: 'xlm',
-        },
-      });
-      const res = await loopCreateOrderHandler(ctx);
-      expect(res.status).toBe(400);
-      expect(createOrderMock).not.toHaveBeenCalled();
-    });
-
-    it('replays the prior order when (userId, key) already maps to one', async () => {
-      const prior = {
-        id: 'prior-order-id',
-        userId: 'user-uuid',
-        merchantId: 'm1',
-        faceValueMinor: 7_500n,
-        currency: 'GBP',
-        chargeMinor: 7_500n,
-        chargeCurrency: 'GBP',
-        paymentMethod: 'xlm',
-        paymentMemo: 'PRIORMEMO',
-      };
-      findOrderByIdempotencyKeyMock.mockResolvedValueOnce(prior);
-      const { ctx } = makeCtx({
-        auth: LOOP_AUTH,
-        headers: { 'Idempotency-Key': VALID_KEY },
-        body: {
-          merchantId: 'm1',
-          amountMinor: 10_000,
-          currency: 'GBP',
-          paymentMethod: 'xlm',
-        },
-      });
-      const res = await loopCreateOrderHandler(ctx);
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        orderId: string;
-        payment: { memo: string; amountMinor: string };
-      };
-      // Replay returns the PRIOR order's data — not the freshly-built
-      // FX result. Memo + amount come from the stored row.
-      expect(body.orderId).toBe('prior-order-id');
-      expect(body.payment.memo).toBe('PRIORMEMO');
-      expect(body.payment.amountMinor).toBe('7500');
-      // Crucially: createOrder is NOT called on replay, so no second
-      // row + (for credit-funded orders) no second debit lands.
-      expect(createOrderMock).not.toHaveBeenCalled();
-    });
-
-    it('passes the key through to createOrder when no prior order exists', async () => {
-      findOrderByIdempotencyKeyMock.mockResolvedValueOnce(null);
-      const { ctx } = makeCtx({
-        auth: LOOP_AUTH,
-        headers: { 'Idempotency-Key': VALID_KEY },
-        body: {
-          merchantId: 'm1',
-          amountMinor: 10_000,
-          currency: 'GBP',
-          paymentMethod: 'xlm',
-        },
-      });
-      const res = await loopCreateOrderHandler(ctx);
-      expect(res.status).toBe(200);
-      expect(createOrderMock).toHaveBeenCalledWith(
-        expect.objectContaining({ idempotencyKey: VALID_KEY }),
-      );
-    });
-
-    it('replays the existing order when createOrder hits a unique-violation race', async () => {
-      // Lookup says no prior — second caller raced past the lookup
-      // before the first caller's INSERT committed. Now createOrder
-      // throws IdempotentOrderConflictError carrying the prior row.
-      findOrderByIdempotencyKeyMock.mockResolvedValueOnce(null);
-      const winner = {
-        id: 'winner-order-id',
-        userId: 'user-uuid',
-        merchantId: 'm1',
-        faceValueMinor: 10_000n,
-        currency: 'GBP',
-        chargeMinor: 10_000n,
-        chargeCurrency: 'GBP',
-        paymentMethod: 'xlm',
-        paymentMemo: 'WINNERMEMO',
-      };
-      createOrderMock.mockRejectedValueOnce(new IdempotentOrderConflictError(winner));
-      const { ctx } = makeCtx({
-        auth: LOOP_AUTH,
-        headers: { 'Idempotency-Key': VALID_KEY },
-        body: {
-          merchantId: 'm1',
-          amountMinor: 10_000,
-          currency: 'GBP',
-          paymentMethod: 'xlm',
-        },
-      });
-      const res = await loopCreateOrderHandler(ctx);
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { orderId: string; payment: { memo: string } };
-      expect(body.orderId).toBe('winner-order-id');
-      expect(body.payment.memo).toBe('WINNERMEMO');
-    });
-
-    it('header is optional — request without it succeeds without lookup', async () => {
-      const { ctx } = makeCtx({
-        auth: LOOP_AUTH,
-        body: {
-          merchantId: 'm1',
-          amountMinor: 10_000,
-          currency: 'GBP',
-          paymentMethod: 'xlm',
-        },
-      });
-      const res = await loopCreateOrderHandler(ctx);
-      expect(res.status).toBe(200);
-      expect(findOrderByIdempotencyKeyMock).not.toHaveBeenCalled();
-      // createOrder receives no idempotencyKey on this path.
-      expect(createOrderMock).toHaveBeenCalledWith(
-        expect.not.objectContaining({ idempotencyKey: expect.anything() }),
-      );
-    });
-
-    it('R3-10: credit request without header gets a server fallback idempotency key', async () => {
-      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_800_000);
-      createOrderMock.mockResolvedValueOnce({
-        id: 'credit-order-id',
-        userId: 'user-uuid',
-        merchantId: 'm1',
-        faceValueMinor: 10_000n,
-        currency: 'GBP',
-        chargeMinor: 10_000n,
-        chargeCurrency: 'GBP',
-        paymentMethod: 'credit',
-        paymentMemo: null,
-      });
-      try {
-        const { ctx } = makeCtx({
-          auth: LOOP_AUTH,
-          body: {
-            merchantId: 'm1',
-            amountMinor: 10_000,
-            currency: 'GBP',
-            paymentMethod: 'credit',
-          },
-        });
-        const res = await loopCreateOrderHandler(ctx);
-        expect(res.status).toBe(200);
-        expect(findOrderByIdempotencyKeyMock).toHaveBeenCalledTimes(2);
-        expect(createOrderMock).toHaveBeenCalledWith(
-          expect.objectContaining({
-            paymentMethod: 'credit',
-            idempotencyKey: expect.stringMatching(/^server-credit-v1-[0-9a-f]{48}$/),
-          }),
-        );
-      } finally {
-        nowSpy.mockRestore();
-      }
-    });
-
-    it('R3-10: duplicate no-header credit request replays without a second debit', async () => {
-      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_800_000);
-      let created: {
-        id: string;
-        userId: string;
-        merchantId: string;
-        faceValueMinor: bigint;
-        currency: string;
-        chargeMinor: bigint;
-        chargeCurrency: string;
-        paymentMethod: 'credit';
-        paymentMemo: null;
-      } | null = null;
-      let createdKey: string | null = null;
-      findOrderByIdempotencyKeyMock.mockImplementation(async (_userId: string, key: string) =>
-        key === createdKey ? created : null,
-      );
-      createOrderMock.mockImplementation(async (args: { idempotencyKey?: string }) => {
-        createdKey = args.idempotencyKey ?? null;
-        created = {
-          id: 'credit-order-id',
-          userId: 'user-uuid',
-          merchantId: 'm1',
-          faceValueMinor: 10_000n,
-          currency: 'GBP',
-          chargeMinor: 10_000n,
-          chargeCurrency: 'GBP',
-          paymentMethod: 'credit',
-          paymentMemo: null,
-        };
-        return created;
-      });
-      const body = {
-        merchantId: 'm1',
-        amountMinor: 10_000,
-        currency: 'GBP',
-        paymentMethod: 'credit',
-      };
-      try {
-        const first = await loopCreateOrderHandler(makeCtx({ auth: LOOP_AUTH, body }).ctx);
-        const second = await loopCreateOrderHandler(makeCtx({ auth: LOOP_AUTH, body }).ctx);
-        expect(first.status).toBe(200);
-        expect(second.status).toBe(200);
-        expect(createOrderMock).toHaveBeenCalledTimes(1);
-        expect((await second.json()) as unknown).toMatchObject({ orderId: 'credit-order-id' });
-      } finally {
-        nowSpy.mockRestore();
-      }
-    });
-  });
-});
-
-describe('loopCreateOrderHandler — ADR 045 (B-3) order velocity gate', () => {
-  it('429 ORDER_VELOCITY_EXCEEDED (count) — no order created', async () => {
-    velocityState.decision = { allowed: false, reason: 'count' };
-    const { ctx } = makeCtx({
-      auth: LOOP_AUTH,
-      body: { merchantId: 'm1', amountMinor: 10_000, currency: 'GBP', paymentMethod: 'xlm' },
-    });
-    const res = await loopCreateOrderHandler(ctx);
-    expect(res.status).toBe(429);
-    const body = (await res.json()) as { code: string; message: string };
-    expect(body.code).toBe('ORDER_VELOCITY_EXCEEDED');
-    expect(body.message).toMatch(/maximum number of orders/i);
-    expect(createOrderMock).not.toHaveBeenCalled();
-  });
-
-  it('429 ORDER_VELOCITY_EXCEEDED (value) — distinct message, no order created', async () => {
-    velocityState.decision = { allowed: false, reason: 'value', currency: 'GBP' };
-    const { ctx } = makeCtx({
-      auth: LOOP_AUTH,
-      body: { merchantId: 'm1', amountMinor: 10_000, currency: 'GBP', paymentMethod: 'xlm' },
-    });
-    const res = await loopCreateOrderHandler(ctx);
-    expect(res.status).toBe(429);
-    const body = (await res.json()) as { code: string; message: string };
-    expect(body.code).toBe('ORDER_VELOCITY_EXCEEDED');
-    expect(body.message).toMatch(/maximum order value/i);
-    expect(createOrderMock).not.toHaveBeenCalled();
-  });
-
-  it('503 ORDER_VELOCITY_CHECK_UNAVAILABLE when the check itself fails — fails closed, no order created', async () => {
-    velocityState.throwUnavailable = true;
-    const { ctx } = makeCtx({
-      auth: LOOP_AUTH,
-      body: { merchantId: 'm1', amountMinor: 10_000, currency: 'GBP', paymentMethod: 'xlm' },
-    });
-    const res = await loopCreateOrderHandler(ctx);
-    expect(res.status).toBe(503);
-    const body = (await res.json()) as { code: string };
-    expect(body.code).toBe('ORDER_VELOCITY_CHECK_UNAVAILABLE');
-    expect(createOrderMock).not.toHaveBeenCalled();
-  });
-
-  it('allows order creation when under the velocity budget', async () => {
-    velocityState.decision = { allowed: true };
-    const { ctx } = makeCtx({
-      auth: LOOP_AUTH,
-      body: { merchantId: 'm1', amountMinor: 10_000, currency: 'GBP', paymentMethod: 'xlm' },
-    });
-    const res = await loopCreateOrderHandler(ctx);
-    expect(res.status).toBe(200);
-    expect(createOrderMock).toHaveBeenCalledTimes(1);
-  });
-
-  it('checks velocity keyed on the authenticated userId — per-USER, not per-IP', async () => {
-    const { ctx } = makeCtx({
-      auth: LOOP_AUTH,
-      body: { merchantId: 'm1', amountMinor: 10_000, currency: 'GBP', paymentMethod: 'xlm' },
-    });
-    await loopCreateOrderHandler(ctx);
-    expect(velocityState.calls).toEqual(['user-uuid']); // LOOP_AUTH.userId
-  });
-
-  it('an Idempotency-Key replay does NOT re-check velocity — a repeat request creates nothing new', async () => {
-    const prior = {
-      id: 'prior-order-id',
-      userId: 'user-uuid',
-      merchantId: 'm1',
-      faceValueMinor: 7_500n,
-      currency: 'GBP',
-      chargeMinor: 7_500n,
-      chargeCurrency: 'GBP',
-      paymentMethod: 'xlm',
-      paymentMemo: 'PRIORMEMO',
-    };
-    findOrderByIdempotencyKeyMock.mockResolvedValueOnce(prior);
-    const { ctx } = makeCtx({
-      auth: LOOP_AUTH,
-      headers: { 'Idempotency-Key': '0123456789abcdef-loop-order-idempotency-key' },
-      body: { merchantId: 'm1', amountMinor: 10_000, currency: 'GBP', paymentMethod: 'xlm' },
-    });
-    const res = await loopCreateOrderHandler(ctx);
-    expect(res.status).toBe(200);
-    expect(velocityState.calls).toEqual([]);
-    expect(createOrderMock).not.toHaveBeenCalled();
-  });
-});
-
-describe('loopCreateOrderHandler — A4-017 global face-value cap', () => {
-  it('rejects amounts above the 50,000-major hard ceiling', async () => {
-    const fake = makeCtx({
-      auth: LOOP_AUTH,
-      body: {
-        merchantId: 'm1',
-        amountMinor: '5000001', // $50,000.01 — one cent past the cap
-        currency: 'GBP',
-        paymentMethod: 'xlm',
-      },
-    });
-    const res = await loopCreateOrderHandler(fake.ctx);
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { code: string; message: string };
-    expect(body.code).toBe('VALIDATION_ERROR');
-    expect(body.message).toMatch(/exceeds maximum order value/);
-    expect(createOrderMock).not.toHaveBeenCalled();
-  });
-
-  it('accepts amounts at the cap when merchant denominations allow', async () => {
-    getMerchantsMock.mockReturnValue({
-      merchantsById: new Map([
-        [
-          'm1',
-          {
-            id: 'm1',
-            name: 'Target',
-            enabled: true,
-            denominations: { type: 'min-max', denominations: [], currency: 'GBP', max: 50000 },
-          },
-        ],
-      ]),
-    });
-    const fake = makeCtx({
-      auth: LOOP_AUTH,
-      body: {
-        merchantId: 'm1',
-        amountMinor: '5000000', // $50,000.00 — exactly at the cap
-        currency: 'GBP',
-        paymentMethod: 'xlm',
-      },
-    });
-    const res = await loopCreateOrderHandler(fake.ctx);
-    expect(res.status).toBe(200);
-    expect(createOrderMock).toHaveBeenCalledWith(
-      expect.objectContaining({ faceValueMinor: 5_000_000n }),
+  it('maps a CTX 400 to a client validation error and rejects the mirror row', async () => {
+    ctxFetchMock.mockResolvedValue(
+      new Response('{"error":"denomination invalid"}', { status: 400 }),
     );
+    const res = await loopCreateOrderHandler(
+      makeCtx({ auth: LOOP_AUTH, clientId: 'loopweb', body: GOOD_BODY }),
+    );
+    expect(res.status).toBe(400);
+    expect(transitionsCalls.rejected).toEqual([['o-local-1', 'supplier rejected create (400)']]);
+  });
+
+  it('maps CTX transport failure to 503 and rejects the mirror row', async () => {
+    ctxFetchMock.mockRejectedValue(new Error('socket hang up'));
+    const res = await loopCreateOrderHandler(
+      makeCtx({ auth: LOOP_AUTH, clientId: 'loopweb', body: GOOD_BODY }),
+    );
+    expect(res.status).toBe(503);
+    expect(transitionsCalls.rejected).toHaveLength(1);
+  });
+
+  it('maps CTX schema drift to 503 and rejects the mirror row', async () => {
+    ctxFetchMock.mockResolvedValue(
+      new Response('{"unexpected":"shape"}', {
+        status: 201,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    const res = await loopCreateOrderHandler(
+      makeCtx({ auth: LOOP_AUTH, clientId: 'loopweb', body: GOOD_BODY }),
+    );
+    expect(res.status).toBe(503);
+    expect(transitionsCalls.rejected).toEqual([['o-local-1', 'supplier response schema drift']]);
   });
 });
 
-describe('validateMerchantDenomination (A4-103)', () => {
-  it('passes when merchant has no denomination contract', () => {
-    expect(validateMerchantDenomination(1000n, 'GBP', undefined)).toBeNull();
+describe('idempotency', () => {
+  it('replays the prior order without touching CTX create', async () => {
+    repoState.priorByKey = {
+      id: 'o-prior',
+      state: 'unpaid',
+      ctxOrderId: 'ctx-prior',
+      ctxPaymentId: 'pay-prior',
+      chargeMinor: 2400n,
+      chargeCurrency: 'USD',
+      paymentCryptoCurrency: 'XLM',
+    };
+    ctxOrderState.operatorCard = {
+      id: 'ctx-prior',
+      displayStatus: 'unpaid',
+      paymentId: 'pay-prior',
+      paymentFiatAmount: '24.00',
+      paymentFiatCurrency: 'USD',
+      paymentUrls: {},
+    };
+    const res = await loopCreateOrderHandler(
+      makeCtx({
+        auth: LOOP_AUTH,
+        clientId: 'loopweb',
+        body: GOOD_BODY,
+        idempotencyKey: 'k'.repeat(20),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { orderId: string };
+    expect(body.orderId).toBe('o-prior');
+    expect(ctxFetchMock).not.toHaveBeenCalled();
   });
 
-  it('rejects mismatched currency', () => {
-    expect(
-      validateMerchantDenomination(1000n, 'EUR', {
-        type: 'min-max',
-        denominations: [],
-        currency: 'GBP',
-        min: 5,
-        max: 100,
-      }),
-    ).toMatch(/currency must be GBP/);
-  });
-
-  it('rejects under min on min-max', () => {
-    expect(
-      validateMerchantDenomination(400n, 'GBP', {
-        type: 'min-max',
-        denominations: [],
-        currency: 'GBP',
-        min: 5,
-        max: 100,
-      }),
-    ).toMatch(/below merchant minimum/);
-  });
-
-  it('rejects over max on min-max', () => {
-    expect(
-      validateMerchantDenomination(15_000n, 'GBP', {
-        type: 'min-max',
-        denominations: [],
-        currency: 'GBP',
-        min: 5,
-        max: 100,
-      }),
-    ).toMatch(/above merchant maximum/);
-  });
-
-  it('passes inside min-max range', () => {
-    expect(
-      validateMerchantDenomination(2_500n, 'GBP', {
-        type: 'min-max',
-        denominations: [],
-        currency: 'GBP',
-        min: 5,
-        max: 100,
-      }),
-    ).toBeNull();
-  });
-
-  it('rejects amount not in fixed denominations', () => {
-    expect(
-      validateMerchantDenomination(2_500n, 'USD', {
-        type: 'fixed',
-        denominations: ['10', '50', '100'],
-        currency: 'USD',
-      }),
-    ).toMatch(/fixed denominations/);
-  });
-
-  it('passes amount matching fixed denomination (decimal)', () => {
-    expect(
-      validateMerchantDenomination(2_500n, 'USD', {
-        type: 'fixed',
-        denominations: ['25.00', '50'],
-        currency: 'USD',
-      }),
-    ).toBeNull();
+  it('400s on a malformed Idempotency-Key length', async () => {
+    const res = await loopCreateOrderHandler(
+      makeCtx({ auth: LOOP_AUTH, clientId: 'loopweb', body: GOOD_BODY, idempotencyKey: 'short' }),
+    );
+    expect(res.status).toBe(400);
   });
 });

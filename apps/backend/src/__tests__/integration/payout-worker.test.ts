@@ -929,14 +929,8 @@ describeIf('payout-worker integration — ADR 036 issuer-return burns', () => {
         currency: 'USD',
         chargeMinor: 2500n,
         chargeCurrency: 'USD',
-        paymentMethod: 'loop_asset',
-        paymentMemo: `burn-memo-${Date.now()}-${Math.random()}`,
-        wholesalePct: '70.00',
-        userCashbackPct: '5.00',
-        loopMarginPct: '25.00',
-        wholesaleMinor: 1750n,
+        paymentCryptoCurrency: 'XLM',
         userCashbackMinor: 125n,
-        loopMarginMinor: 625n,
         state: 'paid',
       })
       .returning({ id: orders.id });

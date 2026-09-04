@@ -80,8 +80,7 @@ function ConfigHistoryRow({ row }: { row: AdminConfigHistoryEntry }): React.JSX.
             {row.merchantName}
           </div>
           <div className="text-xs tabular-nums text-gray-500 dark:text-gray-400">
-            {row.wholesalePct}% wholesale · {row.userCashbackPct}% cashback · {row.loopMarginPct}%
-            margin{row.active ? '' : ' · inactive'}
+            {row.userCashbackPct}% of margin to user{row.active ? '' : ' · inactive'}
           </div>
         </div>
         <div className="shrink-0 text-end text-xs text-gray-500 dark:text-gray-400">

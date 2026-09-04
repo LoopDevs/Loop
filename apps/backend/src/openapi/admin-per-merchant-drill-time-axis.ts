@@ -35,66 +35,6 @@ export function registerAdminPerMerchantTimeAxisOpenApi(
   registry: OpenAPIRegistry,
   errorResponse: ReturnType<OpenAPIRegistry['register']>,
 ): void {
-  const MerchantFlywheelActivityDay = registry.register(
-    'MerchantFlywheelActivityDay',
-    z.object({
-      day: z.string().openapi({ description: 'YYYY-MM-DD (UTC).' }),
-      recycledCount: z.number().int(),
-      totalCount: z.number().int(),
-      recycledChargeMinor: z.string().openapi({ description: 'bigint-as-string.' }),
-      totalChargeMinor: z.string().openapi({ description: 'bigint-as-string.' }),
-    }),
-  );
-
-  const MerchantFlywheelActivityResponse = registry.register(
-    'MerchantFlywheelActivityResponse',
-    z.object({
-      merchantId: z.string(),
-      days: z.number().int().openapi({ description: 'Window size — default 30, max 180.' }),
-      rows: z.array(MerchantFlywheelActivityDay),
-    }),
-  );
-
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/merchants/{merchantId}/flywheel-activity',
-    summary: 'Per-merchant daily flywheel trajectory (ADR 011/015).',
-    description:
-      'Time-axis companion to /flywheel-stats — scalar answers "what is the share?", this answers "is it trending up?". generate_series LEFT JOIN zero-fills every day. Bucketed on fulfilled_at::date. Only state=fulfilled counts.',
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      params: z.object({ merchantId: z.string() }),
-      query: z.object({
-        days: z.coerce.number().int().min(1).max(180).optional(),
-      }),
-    },
-    responses: {
-      200: {
-        description: 'Daily recycled-vs-total series for the merchant',
-        content: { 'application/json': { schema: MerchantFlywheelActivityResponse } },
-      },
-      400: {
-        description: 'Malformed merchantId',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      404: {
-        description:
-          'Not found — also returned to authenticated non-admin callers: requireAdmin masks the admin surface as 404 by design (see src/auth/require-admin.ts).',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (120/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: { description: 'DB error', content: { 'application/json': { schema: errorResponse } } },
-    },
-  });
-
   const MerchantTopEarnerRow = registry.register(
     'MerchantTopEarnerRow',
     z.object({

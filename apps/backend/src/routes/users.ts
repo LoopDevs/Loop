@@ -74,8 +74,6 @@ import { getUserStellarTrustlinesHandler } from '../users/stellar-trustlines.js'
 import { getCashbackByMerchantHandler } from '../users/cashback-by-merchant.js';
 import { getCashbackMonthlyHandler } from '../users/cashback-monthly.js';
 import { getUserOrdersSummaryHandler } from '../users/orders-summary.js';
-import { getUserFlywheelStatsHandler } from '../users/flywheel-stats.js';
-import { getUserPaymentMethodShareHandler } from '../users/payment-method-share.js';
 import {
   addFavoriteHandler,
   listFavoritesHandler,
@@ -208,17 +206,6 @@ export function mountUserRoutes(app: Hono): void {
     '/api/users/me/orders/summary',
     rateLimit('GET /api/users/me/orders/summary', 60, 60_000),
     getUserOrdersSummaryHandler,
-  );
-  app.get(
-    '/api/users/me/flywheel-stats',
-    rateLimit('GET /api/users/me/flywheel-stats', 60, 60_000),
-    getUserFlywheelStatsHandler,
-  );
-  // #643 — user-side mirror of /api/admin/orders/payment-method-share.
-  app.get(
-    '/api/users/me/payment-method-share',
-    rateLimit('GET /api/users/me/payment-method-share', 60, 60_000),
-    getUserPaymentMethodShareHandler,
   );
 
   // ── Favourites ──────────────────────────────────────────────

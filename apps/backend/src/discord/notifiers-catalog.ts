@@ -45,24 +45,6 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
       'Fires on merchant cashback-config create / update (ADR 011). Embeds the old→new pct diff so the commercial impact of the edit is legible in the channel without drilling to the admin UI.',
   },
   {
-    name: 'notifyCashbackCredited',
-    channel: 'orders',
-    description:
-      'Fires on every fulfilled order with userCashbackMinor > 0 (ADR 009). Distinct from notifyOrderFulfilled so the "cashback handed out" signal stays separate from the broader fulfillment stream.',
-  },
-  {
-    name: 'notifyCashbackRecycled',
-    channel: 'orders',
-    description:
-      'Fires when a new loop-native order is paid with LOOP-asset cashback the user earned earlier (ADR 015 flywheel). Subset qualifier on notifyOrderCreated — same channel so ops reads volume + flywheel-close together.',
-  },
-  {
-    name: 'notifyFirstCashbackRecycled',
-    channel: 'orders',
-    description:
-      "Fires once per user, on their FIRST loop_asset order — the flywheel-onboarding milestone (ADR 015). Subset of notifyCashbackRecycled; same channel so ops sees the user's graduation from earning → recycling alongside the continuing-recycle signal.",
-  },
-  {
     name: 'notifyOrderCreated',
     channel: 'orders',
     description: 'Fires on every new loop-native order (ADR 010). Embed lists merchant + amount.',
@@ -137,19 +119,7 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
     name: 'notifyCircuitBreaker',
     channel: 'monitoring',
     description:
-      'Fires when the upstream-CTX circuit breaker transitions open or closed (ADR 013 pool health).',
-  },
-  {
-    name: 'notifyOperatorPoolExhausted',
-    channel: 'monitoring',
-    description:
-      'Fires when every operator in the CTX pool is unhealthy — procurement is blocked. Throttled to once per 15 min per deployment so a sustained outage stays loud without flooding the channel (ADR 013).',
-  },
-  {
-    name: 'notifyLoopAssetOverpayment',
-    channel: 'monitoring',
-    description:
-      'Hardening A7: fires when a LOOP-asset payment overpaid its order charge. The order still fulfils (the user paid enough), but markOrderPaid burns/debits only the charged amount, so the excess is parked at the deposit account (reads as positive drift). Attributed (order/user/excess) so ops can return the excess LOOP directly.',
+      'Fires when the upstream-CTX circuit breaker transitions open or closed (ADR 051 upstream health).',
   },
   {
     name: 'notifyLedgerDrift',
@@ -158,16 +128,10 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
       'Hardening C1: fires when the off-chain ledger invariant is violated — user_credits.balance_minor disagrees with SUM(credit_transactions) for at least one (user, currency) pair. Run by the ledger-invariant watcher (default daily, single-flighted across machines via advisory lock); deliberately re-pages every tick while the drift persists because an unresolved ledger-integrity incident must not go quiet. Triage via /api/admin/reconciliation.',
   },
   {
-    name: 'notifyOperatorCredentialExpired',
+    name: 'notifyCtxCredentialInvalid',
     channel: 'monitoring',
     description:
-      'CF-13: fires when a CTX operator returns 401 ("token invalid") — its bearer expired or was revoked. operatorFetch pulls the operator from rotation (forces its breaker open) and fails over to a healthy sibling. Per-operator 10-min dedup so a sustained 401 produces one alert per operator per ten minutes (ADR 013).',
-  },
-  {
-    name: 'notifyOperatorFloatDrift',
-    channel: 'monitoring',
-    description:
-      'R3-1: fires when the operator XLM/USDC wallet no longer conserves from its active baseline, when a Horizon wallet movement is unclassified, or when no active baseline is configured yet (needs_baseline — a deployed reconciler with nothing to check must not read as healthy). Triage via Treasury and the operator-float movement drilldown before treating float as healthy.',
+      'CF-13 / ADR 051: fires when CTX returns 401 — the operator API key was rejected (revoked, rotated upstream, or misconfigured). ctxFetch forces the upstream breaker OPEN so procurement defers instead of failing paid orders. 10-min dedup so a sustained 401 produces one alert per ten minutes.',
   },
   {
     name: 'notifyCtxSchemaDrift',
@@ -212,12 +176,6 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
       "A4-023: fires when an order's pinned chargeCurrency diverges from the user's home_currency at fulfillment time. Off-chain cashback ledger row writes; on-chain payout is skipped. Ops gets a paging-grade signal so the 1:1 LOOP-asset peg can be restored manually before reconciliation drift accumulates.",
   },
   {
-    name: 'notifyOrderFailedAfterCtxPaid',
-    channel: 'monitoring',
-    description:
-      'CF-20 (x-flows F1-1): fires when an order fails AFTER Loop already paid CTX (operator XLM/USDC spent) and the user already paid Loop. The worker auto-refunds the user off-chain; ops must chase the wholesale cost back from CTX (operator-side debt). Title escalates to a P0 shape when the auto-refund itself failed (user + treasury both out).',
-  },
-  {
     name: 'notifyInterestPoolLow',
     channel: 'monitoring',
     description:
@@ -240,12 +198,6 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
     channel: 'monitoring',
     description:
       "Fires when the wallet-provisioning sweeper (ADR 030 Phase C) has failed to provision + activate a user's embedded wallet 10 times and stops retrying. Per-row — each exhaustion needs its own investigation against the wallet-provider dashboard, operator-account funding, and Horizon (see docs/runbooks/wallet-provisioning-stuck.md).",
-  },
-  {
-    name: 'notifyStuckProcurementSwept',
-    channel: 'monitoring',
-    description:
-      'Fires when the sweep flips a stuck `procuring` order to `failed` (A2-621). Per-row so ops can reconcile individually — each row might be a CTX-minted-but-we-lost-track case where refunding the user would double-spend.',
   },
   {
     name: 'notifyStuckPayouts',
@@ -276,42 +228,6 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
     channel: 'monitoring',
     description:
       "ADR 031 V4: fires once per incident when vault redemptions sit in an in-flight state (`collecting`/`redeemed`) past the watchdog window — the sweep isn't advancing them. Fire-once/re-arm dedup in `watchdog_alert_state`, at-least-once fleet-wide. Complements notifyVaultRedemptionFailed (terminal) by catching rows stuck WITHOUT exhausting attempts.",
-  },
-  {
-    name: 'notifyPaymentWatcherStuck',
-    channel: 'monitoring',
-    description:
-      "Fires when the payment watcher's Horizon cursor has not advanced in >10 min (A2-626). Catches crashed / hung tickers that would otherwise silently stop processing deposits. One-shot per stuck period.",
-  },
-  {
-    name: 'notifyDepositSkipRecorded',
-    channel: 'monitoring',
-    description:
-      'Fires when the payment watcher skips an incoming deposit for a reason ops should look at immediately (A4-110 missing_credit_row, or an unexpected processing_error). Fired once on first record — the upsert keyed on the Horizon payment id keeps retries from re-paging. Transient skips (amount_insufficient during an oracle blip, asset_mismatch user error) retry quietly under the skip-table budget and only page on abandonment.',
-  },
-  {
-    name: 'notifyUnrecognizedDepositRecorded',
-    channel: 'monitoring',
-    description:
-      'AUDIT-2 finding C: throttled + rolled-up page (at most once per ~15 min) for deposits that landed at the deposit address but matched no order rail (wrong/no memo, or an unrecognized asset). The deposit address is PUBLIC and can be cheaply dust-spammed, so a burst collapses to one count-bearing page; every row is still recorded unconditionally on /admin/skips for manual reconciliation. A genuine lone stranded deposit into a quiet channel still pages promptly (leading edge).',
-  },
-  {
-    name: 'notifyDepositSkipAbandoned',
-    channel: 'monitoring',
-    description:
-      "Fires when a skipped deposit exhausts its retry budget, or its order left `pending_payment` without it — the user's funds sit in the deposit account with no order to credit. Always pages: this is the 'user paid and got nothing' state that needs a manual refund or recovery decision.",
-  },
-  {
-    name: 'notifyUsdcBelowFloor',
-    channel: 'monitoring',
-    description:
-      "Fires when Loop's USDC operator balance drops below the alerting floor — time to fund the treasury account before payouts can't clear (ADR 015).",
-  },
-  {
-    name: 'notifyPriceFeedAnomaly',
-    channel: 'monitoring',
-    description:
-      'CF2-06 (2026-06-30 cold audit): fires when the XLM oracle or fiat FX feed returns a rate that jumps by more than the sanity-bound ratio (default 50%) from the last known-good value for that currency. The anomalous rate is rejected (the caller throws and the tick defers), but a feed glitch or compromise still needs operator eyes.',
   },
   {
     name: 'notifyWebhookPing',

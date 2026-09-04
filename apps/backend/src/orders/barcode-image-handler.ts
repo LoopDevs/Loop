@@ -29,7 +29,7 @@ import { logger } from '../logger.js';
 import { getUpstreamCircuit, CircuitOpenError } from '../circuit-breaker.js';
 import { upstreamUrl } from '../upstream.js';
 import { scrubUpstreamBody } from '../upstream-body-scrub.js';
-import { upstreamHeaders } from './handler.js';
+import { upstreamHeaders } from './handler-shared.js';
 import { extractBarcodeImageUrl } from './barcode-fields.js';
 import {
   fetchAndTransformImage,

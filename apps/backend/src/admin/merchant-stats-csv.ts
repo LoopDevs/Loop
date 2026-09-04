@@ -35,9 +35,8 @@ const HEADERS = [
   'order_count',
   'unique_user_count',
   'face_value_minor',
-  'wholesale_minor',
   'user_cashback_minor',
-  'loop_margin_minor',
+  'expected_commission_minor',
   'last_fulfilled_at',
 ] as const;
 
@@ -51,9 +50,8 @@ interface AggRow {
   order_count: string | number | bigint;
   unique_user_count: string | number | bigint;
   face_value_minor: string | number | bigint;
-  wholesale_minor: string | number | bigint;
+  expected_commission_minor: string | number | bigint;
   user_cashback_minor: string | number | bigint;
-  loop_margin_minor: string | number | bigint;
   last_fulfilled_at: string | Date;
 }
 
@@ -106,16 +104,15 @@ export async function adminMerchantStatsCsvHandler(c: Context): Promise<Response
         COUNT(*)::bigint      AS order_count,
         COUNT(DISTINCT ${orders.userId})::bigint AS unique_user_count,
         COALESCE(SUM(${orders.faceValueMinor}), 0)::bigint    AS face_value_minor,
-        COALESCE(SUM(${orders.wholesaleMinor}), 0)::bigint    AS wholesale_minor,
         COALESCE(SUM(${orders.userCashbackMinor}), 0)::bigint AS user_cashback_minor,
-        COALESCE(SUM(${orders.loopMarginMinor}), 0)::bigint   AS loop_margin_minor,
+        COALESCE(SUM(${orders.expectedCommissionMinor}), 0)::bigint AS expected_commission_minor,
         MAX(${orders.fulfilledAt}) AS last_fulfilled_at
       FROM ${orders}
       WHERE ${orders.state} = 'fulfilled'
         AND ${orders.fulfilledAt} IS NOT NULL
         AND ${orders.fulfilledAt} >= ${since.toISOString()}
       GROUP BY ${orders.merchantId}, ${orders.chargeCurrency}
-      ORDER BY loop_margin_minor DESC, order_count DESC
+      ORDER BY expected_commission_minor DESC, order_count DESC
       LIMIT ${ROW_CAP + 1}
     `);
 
@@ -137,9 +134,8 @@ export async function adminMerchantStatsCsvHandler(c: Context): Promise<Response
           toNumericString(r.order_count),
           toNumericString(r.unique_user_count),
           toNumericString(r.face_value_minor),
-          toNumericString(r.wholesale_minor),
           toNumericString(r.user_cashback_minor),
-          toNumericString(r.loop_margin_minor),
+          toNumericString(r.expected_commission_minor),
           toIso(r.last_fulfilled_at),
         ]),
       );

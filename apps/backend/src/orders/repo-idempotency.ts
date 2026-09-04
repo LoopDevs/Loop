@@ -26,7 +26,7 @@
 import { and, eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { orders } from '../db/schema.js';
-import type { Order, CreateOrderArgs } from './repo.js';
+import type { Order } from './repo.js';
 
 /**
  * A2-2003: thrown by `createOrder` when the (userId, idempotencyKey)
@@ -88,7 +88,7 @@ export async function findOrderByIdempotencyKey(
  * exception bubbles unchanged.
  */
 export async function maybeFetchIdempotentConflict(
-  args: CreateOrderArgs,
+  args: { userId: string; idempotencyKey?: string },
   err: unknown,
 ): Promise<Order | null> {
   if (args.idempotencyKey === undefined) return null;

@@ -1,12 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import {
-  ORDER_STATES,
-  ORDER_PAYMENT_METHODS,
-  PAYOUT_STATES,
-  CREDIT_TRANSACTION_TYPES,
-} from '@loop/shared';
+import { ORDER_STATES, PAYOUT_STATES, CREDIT_TRANSACTION_TYPES } from '@loop/shared';
 
 /**
  * COR-14 (ADR 019): single-source parity for the money/order enums.
@@ -91,12 +86,6 @@ const ENUMS = [
     name: 'ORDER_STATES → orders_state_known (ADR 010)',
     tuple: ORDER_STATES,
     constraint: 'orders_state_known',
-    schemaFile: 'src/db/schema/orders.ts',
-  },
-  {
-    name: 'ORDER_PAYMENT_METHODS → orders_payment_method_known (ADR 010/015)',
-    tuple: ORDER_PAYMENT_METHODS,
-    constraint: 'orders_payment_method_known',
     schemaFile: 'src/db/schema/orders.ts',
   },
   {

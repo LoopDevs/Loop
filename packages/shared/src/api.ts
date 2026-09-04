@@ -96,6 +96,11 @@ export const ApiErrorCode = {
   UPSTREAM_REDIRECT: 'UPSTREAM_REDIRECT',
   UPSTREAM_UNAVAILABLE: 'UPSTREAM_UNAVAILABLE',
   SERVICE_UNAVAILABLE: 'SERVICE_UNAVAILABLE',
+  // ADR 052: CTX (the payment processor + card supplier) is unreachable,
+  // rate-limited, or returned a response we couldn't parse while placing
+  // an order. Returned 503 by POST /api/orders/loop; the order row (if
+  // any) is rejected and the client should retry later.
+  SUPPLIER_UNAVAILABLE: 'SUPPLIER_UNAVAILABLE',
   SUBSYSTEM_DISABLED: 'SUBSYSTEM_DISABLED',
   // NS-04: a money rail (deposit/payout/vault/refund) is halted by an
   // admin runtime kill switch. Returned 503 by the enforced rail

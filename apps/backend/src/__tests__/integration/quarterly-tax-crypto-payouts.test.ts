@@ -62,10 +62,7 @@ async function seedUser(tag: string): Promise<string> {
 }
 
 /** Seed a minimal order row so a payout/burn can satisfy its order_id FK. */
-async function seedOrder(
-  userId: string,
-  opts: { paymentMethod: string; state: string },
-): Promise<string> {
+async function seedOrder(userId: string, opts: { state: string }): Promise<string> {
   const [row] = await db
     .insert(orders)
     .values({
@@ -75,14 +72,8 @@ async function seedOrder(
       currency: 'USD',
       chargeMinor: 2500n,
       chargeCurrency: 'USD',
-      paymentMethod: opts.paymentMethod,
-      paymentMemo: `ft04-memo-${Date.now()}-${Math.random()}`,
-      wholesalePct: '70.00',
-      userCashbackPct: '5.00',
-      loopMarginPct: '25.00',
-      wholesaleMinor: 1750n,
+      paymentCryptoCurrency: 'XLM',
       userCashbackMinor: 125n,
-      loopMarginMinor: 625n,
       state: opts.state,
     })
     .returning({ id: orders.id });
@@ -130,8 +121,8 @@ describeIf('FT-04: crypto-payouts excludes redemption burns', () => {
     // redemption burn, same user + asset, same quarter. The regulatory
     // total must count ONLY the payout.
     const userU = await seedUser('u');
-    const cashbackOrder = await seedOrder(userU, { paymentMethod: 'xlm', state: 'fulfilled' });
-    const redeemOrder = await seedOrder(userU, { paymentMethod: 'loop_asset', state: 'paid' });
+    const cashbackOrder = await seedOrder(userU, { state: 'fulfilled' });
+    const redeemOrder = await seedOrder(userU, { state: 'paid' });
     // MNY-01-INV3 (migration 0067): a confirmed `order_cashback` payout is
     // a BACKED mint — the on-chain half of a cashback liability that
     // credited the USD mirror in the same fulfilment txn. The 0067 INSERT
@@ -180,7 +171,7 @@ describeIf('FT-04: crypto-payouts excludes redemption burns', () => {
     // phantom "crypto paid" row for them. Pre-fix, the burn surfaces V
     // with BURN_STROOPS.
     const userV = await seedUser('v');
-    const redeemOrder = await seedOrder(userV, { paymentMethod: 'loop_asset', state: 'paid' });
+    const redeemOrder = await seedOrder(userV, { state: 'paid' });
     await seedConfirmedPayout({
       userId: userV,
       orderId: redeemOrder,

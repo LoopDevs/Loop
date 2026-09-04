@@ -15,11 +15,9 @@ import type * as OrdersLoopModule from '~/services/orders-loop';
  * refresh — strands the user at the amount-selection form despite a
  * live, payable order existing server-side. This suite proves the
  * restore mechanism (`~/hooks/use-loop-order-restore.ts`) fixes that
- * without regressing Q6-4's first-touch fix or the legacy CTX-proxy
- * path.
+ * without regressing Q6-4's first-touch fix.
  *
- * Mocking mirrors PurchaseContainer.credit-rail.test.tsx's established
- * pattern, with two deliberate differences:
+ * Mocking notes:
  *  - `~/stores/purchase.store` is NOT mocked — the restore mechanism's
  *    correctness depends on the real `startPurchase`/`reset` semantics
  *    (specifically: `isCurrentMerchant` gating survives a remount).
@@ -27,23 +25,18 @@ import type * as OrdersLoopModule from '~/services/orders-loop';
  *    so tests can drive `handlePurchase` through the UI.
  */
 
-const { authState, walletState, userMock, appConfigState } = vi.hoisted(() => ({
+const { authState, appConfigState } = vi.hoisted(() => ({
   authState: { email: 'a@b.com' as string | null, accessToken: 'tok' as string | null },
-  walletState: { isActivated: false },
-  userMock: { getMyCredits: vi.fn() },
-  appConfigState: { loopOrdersEnabled: true, phase1Only: false },
+  appConfigState: {
+    loopOrdersEnabled: true,
+    phase1Only: false,
+    ctxPaymentCurrencies: ['XLM'] as string[],
+  },
 }));
 
 vi.mock('~/stores/auth.store', () => ({
   useAuthStore: (sel: (s: { email: string | null; accessToken: string | null }) => unknown) =>
     sel({ email: authState.email, accessToken: authState.accessToken }),
-}));
-
-vi.mock('~/services/user', () => ({ getMyCredits: () => userMock.getMyCredits() }));
-
-const createOrderMock = vi.fn();
-vi.mock('~/services/orders', () => ({
-  createOrder: (...args: unknown[]) => createOrderMock(...args),
 }));
 
 const createLoopOrderMock = vi.fn();
@@ -64,22 +57,13 @@ vi.mock('~/hooks/use-app-config', () => ({
     config: {
       loopOrdersEnabled: appConfigState.loopOrdersEnabled,
       phase1Only: appConfigState.phase1Only,
+      ctxPaymentCurrencies: appConfigState.ctxPaymentCurrencies,
     },
     isLoading: false,
   }),
 }));
 vi.mock('~/hooks/use-merchants', () => ({
   useMerchantCashbackRate: () => ({ userCashbackPct: null }),
-}));
-vi.mock('~/hooks/use-wallet', () => ({
-  WALLET_QUERY_KEY: ['me', 'wallet'],
-  useWallet: () => ({
-    wallet: undefined,
-    isActivated: walletState.isActivated,
-    balanceFor: () => '0',
-    isLoading: false,
-    isError: false,
-  }),
 }));
 vi.mock('~/hooks/use-auth', () => ({
   useAuth: () => ({ isAuthenticated: authState.accessToken !== null }),
@@ -111,53 +95,52 @@ const MERCHANT: Merchant = {
   denominations: { type: 'min-max', denominations: [], currency: 'USD' },
 } as unknown as Merchant;
 
-const STELLAR_ADDRESS = 'GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW';
-const PAYMENT_MEMO = 'MEMO-ABCDEFGHIJKLMN';
-const SERVER_ASSET_AMOUNT = '10.0000000';
-const SERVER_PAYMENT_URI = `web+stellar:pay?destination=${STELLAR_ADDRESS}&amount=${SERVER_ASSET_AMOUNT}&memo=${PAYMENT_MEMO}&memo_type=MEMO_TEXT&asset_code=USDC`;
+const ADDRESS = 'GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW';
+const SERVER_CRYPTO_AMOUNT = '10.0000000';
+const SERVER_PAYMENT_URI = `web+stellar:pay?destination=${ADDRESS}&amount=${SERVER_CRYPTO_AMOUNT}`;
+
+function mkPayment(): CreateLoopOrderResponse['payment'] {
+  return {
+    ctxPaymentId: 'pay-1',
+    cryptoCurrency: 'XLM',
+    cryptoAmount: SERVER_CRYPTO_AMOUNT,
+    address: ADDRESS,
+    paymentUrls: { XLM: SERVER_PAYMENT_URI },
+    amountMinor: '1000',
+    currency: 'USD',
+    expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
+  };
+}
 
 function mkCreateResponse(): CreateLoopOrderResponse {
   return {
     orderId: '12345678-aaaa-bbbb-cccc-000000000000',
-    payment: {
-      method: 'usdc',
-      stellarAddress: STELLAR_ADDRESS,
-      memo: PAYMENT_MEMO,
-      amountMinor: '1000',
-      currency: 'USD',
-      assetAmount: SERVER_ASSET_AMOUNT,
-      paymentUri: SERVER_PAYMENT_URI,
-    },
+    state: 'unpaid',
+    payment: mkPayment(),
   };
 }
 
-/** The server GET response. Q6-4b: on-chain non-terminal orders carry the
- *  server-derived payment-guidance fields; the restore rebuilds the pay
- *  screen ENTIRELY from these. */
+/** The server GET response. Q6-4b: still-unpaid orders carry CTX's
+ *  payment instructions; the restore rebuilds the pay screen ENTIRELY
+ *  from these. */
 function mkOrderView(overrides: Partial<LoopOrderView> = {}): LoopOrderView {
   return {
     id: '12345678-aaaa-bbbb-cccc-000000000000',
     merchantId: 'm1',
-    state: 'pending_payment',
+    state: 'unpaid',
     faceValueMinor: '1000',
     currency: 'USD',
     chargeMinor: '1000',
     chargeCurrency: 'USD',
-    paymentMethod: 'usdc',
-    paymentMemo: PAYMENT_MEMO,
-    stellarAddress: STELLAR_ADDRESS,
-    assetAmount: SERVER_ASSET_AMOUNT,
-    paymentUri: SERVER_PAYMENT_URI,
-    assetCode: null,
-    assetIssuer: null,
     userCashbackMinor: '0',
     ctxOrderId: null,
+    paymentCryptoCurrency: 'XLM',
+    payment: mkPayment(),
     redeemCode: null,
     redeemPin: null,
     redeemUrl: null,
     failureReason: null,
     createdAt: new Date().toISOString(),
-    paidAt: null,
     fulfilledAt: null,
     failedAt: null,
     ...overrides,
@@ -177,11 +160,9 @@ beforeEach(() => {
   sessionStorage.clear();
   authState.email = 'a@b.com';
   authState.accessToken = 'tok';
-  walletState.isActivated = false;
   appConfigState.loopOrdersEnabled = true;
   appConfigState.phase1Only = false;
-  userMock.getMyCredits.mockReset().mockResolvedValue({ credits: [] });
-  createOrderMock.mockReset();
+  appConfigState.ctxPaymentCurrencies = ['XLM'];
   createLoopOrderMock.mockReset();
   getLoopOrderMock.mockReset();
   usePurchaseStore.getState().reset();
@@ -232,7 +213,7 @@ describe('loop-native order restore across a remount', () => {
       expect(screen.getByText(/Order 12345678/i)).toBeDefined();
     });
     // The rendered pay screen is built from the SERVER GET response.
-    expect(screen.getByText(new RegExp(`${SERVER_ASSET_AMOUNT} USDC`))).toBeDefined();
+    expect(screen.getByText(new RegExp(`${SERVER_CRYPTO_AMOUNT} XLM`))).toBeDefined();
     expect(screen.getByRole('link', { name: /Open in wallet/i }).getAttribute('href')).toBe(
       SERVER_PAYMENT_URI,
     );
@@ -261,13 +242,14 @@ describe('loop-native order restore across a remount', () => {
         create: {
           orderId: '12345678-aaaa-bbbb-cccc-000000000000',
           payment: {
-            method: 'usdc',
-            stellarAddress: STELLAR_ADDRESS,
-            memo: PAYMENT_MEMO,
+            cryptoCurrency: 'XLM',
+            cryptoAmount: '1000.0000000', // 100x
+            address: ADDRESS,
             amountMinor: '100000', // 100x
             currency: 'USD',
-            assetAmount: '1000.0000000', // 100x
-            paymentUri: `web+stellar:pay?destination=${STELLAR_ADDRESS}&amount=1000.0000000&memo=${PAYMENT_MEMO}&memo_type=MEMO_TEXT`,
+            paymentUrls: {
+              XLM: `web+stellar:pay?destination=${ADDRESS}&amount=1000.0000000`,
+            },
           },
         },
       }),
@@ -279,8 +261,8 @@ describe('loop-native order restore across a remount', () => {
       expect(screen.getByText(/Order 12345678/i)).toBeDefined();
     });
     // Server-authoritative amount + deep-link, NOT the tampered blob's.
-    expect(screen.getByText(new RegExp(`${SERVER_ASSET_AMOUNT} USDC`))).toBeDefined();
-    expect(screen.queryByText(/1000\.0000000 USDC/)).toBeNull();
+    expect(screen.getByText(new RegExp(`${SERVER_CRYPTO_AMOUNT} XLM`))).toBeDefined();
+    expect(screen.queryByText(/1000\.0000000 XLM/)).toBeNull();
     expect(screen.getByText(/\$10\.00/)).toBeDefined();
     expect(screen.queryByText(/\$1,000\.00/)).toBeNull();
     expect(screen.getByRole('link', { name: /Open in wallet/i }).getAttribute('href')).toBe(
@@ -369,26 +351,5 @@ describe('loop-native order restore across a remount', () => {
       expect(screen.getByText('confirm-amount')).toBeDefined();
     });
     expect(getLoopOrderMock).not.toHaveBeenCalled();
-  });
-
-  it('legacy CTX-proxy path is unaffected: with loopOrdersEnabled=false, restore never fires and createOrder drives the payment step', async () => {
-    appConfigState.loopOrdersEnabled = false;
-    createOrderMock.mockResolvedValue({
-      orderId: 'legacy-1',
-      paymentAddress: 'GLEGACYADDRESSXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
-      xlmAmount: '100',
-      expiresAt: Math.floor(Date.now() / 1000) + 900,
-      memo: 'LEGACY-MEMO',
-    });
-    renderContainer();
-
-    fireEvent.click(await screen.findByText('confirm-amount'));
-
-    await waitFor(() => {
-      expect(createOrderMock).toHaveBeenCalledTimes(1);
-    });
-    // No loop-native restore GET ever fires on this path.
-    expect(getLoopOrderMock).not.toHaveBeenCalled();
-    expect(createLoopOrderMock).not.toHaveBeenCalled();
   });
 });

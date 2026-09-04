@@ -18,7 +18,7 @@ vi.mock('../../env.js', () => ({ env: mockEnv }));
 const { mockUpstreamHeaders } = vi.hoisted(() => ({
   mockUpstreamHeaders: vi.fn<() => Promise<Record<string, string> | null>>(),
 }));
-vi.mock('../handler.js', () => ({
+vi.mock('../handler-shared.js', () => ({
   upstreamHeaders: mockUpstreamHeaders,
 }));
 

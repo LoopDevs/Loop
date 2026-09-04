@@ -551,7 +551,7 @@ describe('CF2-01 (2026-06-30 cold audit) — isAvailable() self-heal without cal
   });
 
   it('flips to available once the cooldown elapses — WITHOUT any .fetch() call in between', async () => {
-    // This is the exact bug: a caller (operator-pool's pickHealthyOperator)
+    // This is the exact bug: a caller pre-filtering on breaker availability
     // that filters on isAvailable() before ever calling .fetch() must see
     // the breaker become eligible again once the cooldown passes. Before
     // CF2-01, only .fetch() itself ran the cooldown-expiry check, so a

@@ -1,18 +1,5 @@
-import type {
-  CreateOrderRequest,
-  CreateOrderResponse,
-  Order,
-  OrderListResponse,
-} from '@loop/shared';
+import type { Order, OrderListResponse } from '@loop/shared';
 import { authenticatedRequest } from './api-client';
-
-/** Creates a new gift card order. Requires authentication. */
-export async function createOrder(request: CreateOrderRequest): Promise<CreateOrderResponse> {
-  return authenticatedRequest<CreateOrderResponse>('/api/orders', {
-    method: 'POST',
-    body: request,
-  });
-}
 
 /**
  * Fetches the order history for the current user.

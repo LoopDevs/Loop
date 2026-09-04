@@ -5,13 +5,7 @@ import { BLUE, escapeMarkdown, sendWebhook } from './discord/shared.js';
 // Re-exported here so existing call sites
 // (`notifyOrderCreated` etc. imported from `./discord.js`) keep
 // working without re-targeting their imports.
-export {
-  notifyOrderCreated,
-  notifyCashbackRecycled,
-  notifyFirstCashbackRecycled,
-  notifyOrderFulfilled,
-  notifyCashbackCredited,
-} from './discord/orders.js';
+export { notifyOrderCreated, notifyOrderFulfilled } from './discord/orders.js';
 
 // Monitoring-channel notifiers (covering health, payouts, asset
 // drift, stuck-row sweepers, redemption backfill, upstream contract,
@@ -24,10 +18,6 @@ export {
   notifyPayoutFailed,
   notifyPayoutAwaitingTrustline,
   notifyPayoutTxHashOverwriteRefused,
-  notifyOrderFailedAfterCtxPaid,
-  notifyPriceFeedAnomaly,
-  notifyUsdcBelowFloor,
-  notifyOperatorFloatDrift,
   notifyPegBreakOnFulfillment,
   notifyInterestPoolLow,
   notifyInterestPoolRecovered,
@@ -42,9 +32,6 @@ export {
   notifyVaultFloatDesync,
   notifyHotFloatBackingShortfall,
   notifyLedgerDrift,
-  notifyLoopAssetOverpayment,
-  notifyStuckProcurementSwept,
-  notifyPaymentWatcherStuck,
   notifyStuckPayouts,
   notifyRedemptionBackfillExhausted,
   notifyWalletProvisioningStuck,
@@ -53,13 +40,12 @@ export {
   notifyVaultRedemptionFailed,
   notifyVaultRedemptionsStuck,
   notifyCtxSchemaDrift,
-  notifyOperatorPoolExhausted,
-  notifyOperatorCredentialExpired,
+  notifyCtxCredentialInvalid,
   notifyCircuitBreaker,
   notifyDuplicateAccountSignal,
   __resetCircuitNotifyDedupForTests,
   __resetCtxSchemaDriftDedupForTests,
-  __resetOperatorCredentialDedupForTests,
+  __resetCtxCredentialDedupForTests,
   __resetAwaitingTrustlineDedupForTests,
 } from './discord/monitoring.js';
 

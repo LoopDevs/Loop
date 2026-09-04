@@ -17,7 +17,7 @@ import { describe, it, expect } from 'vitest';
 import { generateOpenApiSpec } from '../openapi.js';
 import { RequestOtpBody, VerifyOtpBody, RefreshBody } from '../auth/request-schemas.js';
 import { SocialLoginBody } from '../auth/social-schemas.js';
-import { CreateOrderBody } from '../orders/request-schemas.js';
+import { LoopCreateOrderBody } from '../orders/request-schemas.js';
 
 type SpecSchema = { properties?: Record<string, unknown> };
 
@@ -48,7 +48,7 @@ const cases: Array<{ name: string; schema: { shape: Record<string, unknown> } }>
   { name: 'VerifyOtpBody', schema: VerifyOtpBody },
   { name: 'RefreshBody', schema: RefreshBody },
   { name: 'SocialLoginBody', schema: SocialLoginBody },
-  { name: 'CreateOrderBody', schema: CreateOrderBody },
+  { name: 'LoopCreateOrderBody', schema: LoopCreateOrderBody },
 ];
 
 describe('D1: OpenAPI request bodies are DERIVED from the handler Zod schemas', () => {
@@ -66,6 +66,11 @@ describe('D1: OpenAPI request bodies are DERIVED from the handler Zod schemas', 
     // Concrete pin so a silent field change is obvious in the diff.
     expect(Object.keys(VerifyOtpBody.shape).sort()).toEqual(['email', 'otp', 'platform']);
     expect(Object.keys(SocialLoginBody.shape).sort()).toEqual(['idToken', 'platform']);
-    expect(Object.keys(CreateOrderBody.shape).sort()).toEqual(['amount', 'merchantId']);
+    expect(Object.keys(LoopCreateOrderBody.shape).sort()).toEqual([
+      'amountMinor',
+      'cryptoCurrency',
+      'currency',
+      'merchantId',
+    ]);
   });
 });

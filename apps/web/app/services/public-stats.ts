@@ -91,11 +91,11 @@ export async function getPublicCashbackPreview(args: {
   return apiRequest<PublicCashbackPreview>(`/api/public/cashback-preview?${qs}`);
 }
 
-// PublicLoopAsset, PublicLoopAssetsResponse, and PublicFlywheelStats are now
+// PublicLoopAsset and PublicLoopAssetsResponse are now
 // the single source of truth from @loop/shared (ADR 019). Re-exported so
 // existing import sites that read them from this module keep resolving.
-export type { PublicFlywheelStats, PublicLoopAsset, PublicLoopAssetsResponse } from '@loop/shared';
-import type { PublicFlywheelStats, PublicLoopAssetsResponse } from '@loop/shared';
+export type { PublicLoopAsset, PublicLoopAssetsResponse } from '@loop/shared';
+import type { PublicLoopAssetsResponse } from '@loop/shared';
 
 /**
  * `GET /api/public/loop-assets` (ADR 015 / 020) — unauthenticated list
@@ -105,13 +105,4 @@ import type { PublicFlywheelStats, PublicLoopAssetsResponse } from '@loop/shared
  */
 export async function getPublicLoopAssets(): Promise<PublicLoopAssetsResponse> {
   return apiRequest<PublicLoopAssetsResponse>('/api/public/loop-assets');
-}
-
-/**
- * `GET /api/public/flywheel-stats` (ADR 015 / 020) — 30-day fleet-
- * wide flywheel scalar. Never-500: serves last-known-good snapshot
- * on DB trouble, zeros on bootstrap.
- */
-export async function getPublicFlywheelStats(): Promise<PublicFlywheelStats> {
-  return apiRequest<PublicFlywheelStats>('/api/public/flywheel-stats');
 }

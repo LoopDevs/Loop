@@ -225,15 +225,6 @@ export const authEnvFields = {
   // must never coexist (the halves would diverge nightly).
   LOOP_INTEREST_ONCHAIN_ENABLED: envBoolean.default(false),
 
-  // Procurement USDC-reserve floor (ADR 015). When the operator account's
-  // USDC balance drops below this many stroops (7 decimals; 10^7 = 1 USDC),
-  // procurement falls back to paying CTX in XLM instead — trades a small
-  // XLM burn for unblocking fulfillment while the ops top-up is in flight.
-  // Absent → the fallback is disabled and procurement always uses USDC.
-  // Below-floor events are ops-flagged in admin/treasury so the operator
-  // sees them immediately (ADR 015 treasury strategy).
-  LOOP_STELLAR_USDC_FLOOR_STROOPS: z.coerce.bigint().nonnegative().optional(),
-
   // Operator Stellar secret key for outbound payouts (ADR 016).
   // Signs LOOP-asset Payment ops from Loop's operator account to
   // users' linked wallets. Never logged (pino redaction allowlist).

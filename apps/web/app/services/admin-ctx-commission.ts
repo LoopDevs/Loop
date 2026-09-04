@@ -5,7 +5,7 @@
  *   it owes Loop for attributed orders (per-currency balances +
  *   recent settlements), proxied by the backend with Loop's operator
  *   API credentials. The reconciliation counterpart to
- *   `admin-supplier-spend.ts` (Loop's own record of the traffic).
+ *   the orders' logged expected commission (ADR 052).
  *
  * Response shapes live in `@loop/shared/admin-ctx-commission.ts`.
  * Amounts are MAJOR-unit decimal strings exactly as CTX returns

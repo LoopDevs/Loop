@@ -26,6 +26,7 @@ import {
   type CashbackConfigSnapshot,
 } from '../discord.js';
 import { getMerchants } from '../merchants/sync.js';
+import { pushUserDiscountForMerchant } from '../merchants/ctx-links.js';
 import { logger } from '../logger.js';
 import { buildAuditEnvelope, type AdminAuditEnvelope } from './audit-envelope.js';
 import {
@@ -37,27 +38,23 @@ import {
 
 const log = logger.child({ handler: 'admin-cashback-configs' });
 
-const UpsertBody = z
-  .object({
-    wholesalePct: z.coerce.number().min(0).max(100),
-    userCashbackPct: z.coerce.number().min(0).max(100),
-    loopMarginPct: z.coerce.number().min(0).max(100),
-    active: z.boolean().optional(),
-    // A2-502: ADR-017 compliance. Every admin write is now required
-    // to carry a rationale so the audit trail answers "why" without
-    // having to reach for Slack / ops chat. 2..500 chars mirrors the
-    // adjustment + refund handlers.
-    reason: z.string().min(2).max(500),
-  })
-  .refine((v) => v.wholesalePct + v.userCashbackPct + v.loopMarginPct <= 100, {
-    message: 'wholesale + cashback + margin must be ≤ 100',
-  });
+const UpsertBody = z.object({
+  // ADR 052: the single cashback knob — the share of Loop's CTX
+  // margin handed to the customer. 0 = Loop keeps the whole spread,
+  // 100 = all of it goes to the customer (delivered as CTX's native
+  // user discount at checkout).
+  userCashbackPct: z.coerce.number().min(0).max(100),
+  active: z.boolean().optional(),
+  // A2-502: ADR-017 compliance. Every admin write is now required
+  // to carry a rationale so the audit trail answers "why" without
+  // having to reach for Slack / ops chat. 2..500 chars mirrors the
+  // adjustment + refund handlers.
+  reason: z.string().min(2).max(500),
+});
 
 export interface CashbackConfigResult {
   merchantId: string;
-  wholesalePct: string;
   userCashbackPct: string;
-  loopMarginPct: string;
   active: boolean;
   updatedBy: string;
   /** ISO-8601 — when the DB row landed. */
@@ -142,9 +139,7 @@ export async function upsertConfigHandler(c: Context): Promise<Response> {
           previous === undefined
             ? null
             : {
-                wholesalePct: previous.wholesalePct,
                 userCashbackPct: previous.userCashbackPct,
-                loopMarginPct: previous.loopMarginPct,
                 active: previous.active,
               };
 
@@ -152,9 +147,7 @@ export async function upsertConfigHandler(c: Context): Promise<Response> {
         // on the way in to keep the type contract explicit.
         const values = {
           merchantId,
-          wholesalePct: parsed.data.wholesalePct.toFixed(2),
           userCashbackPct: parsed.data.userCashbackPct.toFixed(2),
-          loopMarginPct: parsed.data.loopMarginPct.toFixed(2),
           active: parsed.data.active ?? true,
           updatedBy: actor.id,
         };
@@ -164,9 +157,7 @@ export async function upsertConfigHandler(c: Context): Promise<Response> {
           .onConflictDoUpdate({
             target: merchantCashbackConfigs.merchantId,
             set: {
-              wholesalePct: values.wholesalePct,
               userCashbackPct: values.userCashbackPct,
-              loopMarginPct: values.loopMarginPct,
               active: values.active,
               updatedBy: values.updatedBy,
               updatedAt: new Date(),
@@ -179,9 +170,7 @@ export async function upsertConfigHandler(c: Context): Promise<Response> {
 
         const result: CashbackConfigResult = {
           merchantId: row.merchantId,
-          wholesalePct: row.wholesalePct,
           userCashbackPct: row.userCashbackPct,
-          loopMarginPct: row.loopMarginPct,
           active: row.active,
           updatedBy: row.updatedBy,
           updatedAt: row.updatedAt.toISOString(),
@@ -216,12 +205,19 @@ export async function upsertConfigHandler(c: Context): Promise<Response> {
       actorUserId: actor.id,
       previous: previousSnapshot,
       next: {
-        wholesalePct: nextResult.wholesalePct,
         userCashbackPct: nextResult.userCashbackPct,
-        loopMarginPct: nextResult.loopMarginPct,
         active: nextResult.active,
       },
     });
+    // ADR 052: deliver the new share as CTX's native user discount.
+    // Fail-soft fire-and-forget — the hourly sweep reconciles any
+    // missed push, and a slow CTX write must not delay the admin
+    // response.
+    void pushUserDiscountForMerchant(
+      merchantId,
+      Number(nextResult.userCashbackPct),
+      nextResult.active,
+    );
   }
   notifyAdminAudit({
     actorUserId: actor.id,

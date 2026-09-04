@@ -1,36 +1,25 @@
 /**
  * A2-1165 (slice 24): admin orders surface extracted from
  * `services/admin.ts`. The Loop-native orders table view that
- * powers `/admin/orders` (ADR 011 / 015):
+ * powers `/admin/orders` (ADR 011 / ADR 052):
  *
  * - `AdminOrderState` — re-export of `OrderState` from
  *   `@loop/shared`. The single source of truth for the order
- *   state machine (ADR 010 + the backend CHECK constraint).
+ *   state machine (ADR 052 + the backend CHECK constraint).
  *   The alias is kept so existing consumers (`UserOrdersTable`,
  *   the admin orders routes) don't need to re-import.
- * - `AdminOrderView` — admin-shaped order row. Carries the full
- *   cashback split (`wholesalePct` / `userCashbackPct` /
- *   `loopMarginPct` as `numeric(5,2)` strings + matching minor-
- *   unit columns), CTX procurement metadata, every state
- *   transition timestamp.
+ * - `AdminOrderView` — admin-shaped order row. ADR 052: ctx is
+ *   the payment processor, so the row carries the CTX linkage
+ *   (`ctxOrderId` / `ctxPaymentId` / `paymentCryptoCurrency`),
+ *   the cashback discount (`userCashbackMinor`) and the
+ *   commission Loop expects CTX to accrue
+ *   (`expectedCommissionMinor`) — mirrors the backend's
+ *   `apps/backend/src/admin/orders.ts` shape.
  * - `GET /api/admin/orders/:orderId` — single drill-down. 404
  *   when the id doesn't match.
- * - `POST /api/admin/orders/:orderId/redrive` — A5-1 order re-drive
- *   lever. Re-runs the same procurement path the worker uses for a
- *   stuck `paid` order (`procuring` is refused with 409). Admin-tier + step-up (ADR 028
- *   `order-redrive` scope) — unlike the ADR 037 support-tier
- *   delivery-unsticking actions this can submit a real outbound
- *   Stellar payment to CTX.
  * - `GET /api/admin/orders` — paginated list with mix-axis
- *   filters (`state` / `userId` / `merchantId` / `chargeCurrency`
- *   / `paymentMethod` / `ctxOperatorId`). Cursor via
- *   `before=<iso>`.
- * - `POST /api/admin/orders/:orderId/refund` — A5-4 order-bound
- *   refund. `paid`/`procuring`/`failed` refund directly; `fulfilled`
- *   requires a code-unused attestation. Admin-tier + step-up (ADR 028
- *   `order-refund` scope) — reuses the existing refund primitives per
- *   payment method (on-chain refund-to-sender for xlm/usdc, mirror
- *   credit for `credit`, fails closed for `loop_asset`).
+ *   filters (`state` / `userId` / `merchantId` / `chargeCurrency`).
+ *   Cursor via `before=<iso>`.
  *
  * `AdminOrderView` was inline in `services/admin.ts` and moves
  * with the functions. It's the single row shape behind every
@@ -39,18 +28,10 @@
  * keeping it here defers that until a real cross-package
  * consumer appears (ADR 019 three-part test). `services/admin.ts`
  * keeps a barrel re-export so existing consumers
- * (`AdminOrdersTable.tsx`, `UserOrdersTable.tsx`,
- * `routes/admin.orders.tsx`, paired tests) don't have to
- * re-target imports.
+ * (`UserOrdersTable.tsx`, `routes/admin.orders.tsx`, paired
+ * tests) don't have to re-target imports.
  */
-import type {
-  AdminOrderRedriveResult,
-  AdminOrderRefundAttestation,
-  AdminOrderRefundResult,
-  OrderState,
-} from '@loop/shared';
-import type { AdminPaymentMethod } from './admin-payment-method-share';
-import { generateIdempotencyKey, type AdminWriteEnvelope } from './admin-write-envelope';
+import type { OrderState } from '@loop/shared';
 import { authenticatedRequest } from './api-client';
 
 /**
@@ -60,30 +41,29 @@ import { authenticatedRequest } from './api-client';
  */
 export type AdminOrderState = OrderState;
 
-/** Admin-shaped row from `/api/admin/orders` (ADR 011 / 015). */
+/** Admin-shaped row from `/api/admin/orders` (ADR 011 / ADR 052). */
 export interface AdminOrderView {
   id: string;
   userId: string;
   merchantId: string;
   state: AdminOrderState;
+  /** ISO currency of the face value (merchant region). */
   currency: string;
+  /** Face-value minor units (pence / cents), bigint-string. */
   faceValueMinor: string;
+  /** What the customer pays CTX (face minus cashback discount). */
   chargeCurrency: string;
   chargeMinor: string;
-  paymentMethod: 'xlm' | 'usdc' | 'credit' | 'loop_asset';
-  /** `numeric(5,2)` as string (e.g. `"80.00"`). */
-  wholesalePct: string;
-  userCashbackPct: string;
-  loopMarginPct: string;
-  wholesaleMinor: string;
+  /** Cashback CTX applied as a checkout discount (ADR 052). */
   userCashbackMinor: string;
-  loopMarginMinor: string;
+  /** Commission Loop expects CTX to accrue; null until read-back lands. */
+  expectedCommissionMinor: string | null;
   ctxOrderId: string | null;
-  ctxOperatorId: string | null;
+  ctxPaymentId: string | null;
+  /** Chain-qualified CTX payment currency the customer chose. */
+  paymentCryptoCurrency: string | null;
   failureReason: string | null;
   createdAt: string;
-  paidAt: string | null;
-  procuredAt: string | null;
   fulfilledAt: string | null;
   failedAt: string | null;
 }
@@ -103,8 +83,6 @@ export async function listAdminOrders(opts: {
   userId?: string;
   merchantId?: string;
   chargeCurrency?: string;
-  paymentMethod?: AdminPaymentMethod;
-  ctxOperatorId?: string;
   limit?: number;
   before?: string;
 }): Promise<{ orders: AdminOrderView[] }> {
@@ -113,63 +91,10 @@ export async function listAdminOrders(opts: {
   if (opts.userId !== undefined) params.set('userId', opts.userId);
   if (opts.merchantId !== undefined) params.set('merchantId', opts.merchantId);
   if (opts.chargeCurrency !== undefined) params.set('chargeCurrency', opts.chargeCurrency);
-  if (opts.paymentMethod !== undefined) params.set('paymentMethod', opts.paymentMethod);
-  if (opts.ctxOperatorId !== undefined) params.set('ctxOperatorId', opts.ctxOperatorId);
   if (opts.limit !== undefined) params.set('limit', String(opts.limit));
   if (opts.before !== undefined) params.set('before', opts.before);
   const qs = params.toString();
   return authenticatedRequest<{ orders: AdminOrderView[] }>(
     `/api/admin/orders${qs.length > 0 ? `?${qs}` : ''}`,
-  );
-}
-
-/**
- * `POST /api/admin/orders/:orderId/redrive` — A5-1 order re-drive
- * lever, ADR 017 admin write. Reuses the `idempotencyKey` pass-through
- * pattern from `retryPayout` so the same key threads across a
- * step-up retry.
- */
-export async function redriveOrder(args: {
-  orderId: string;
-  reason: string;
-  idempotencyKey?: string;
-}): Promise<AdminWriteEnvelope<AdminOrderRedriveResult>> {
-  return authenticatedRequest<AdminWriteEnvelope<AdminOrderRedriveResult>>(
-    `/api/admin/orders/${encodeURIComponent(args.orderId)}/redrive`,
-    {
-      method: 'POST',
-      headers: { 'Idempotency-Key': args.idempotencyKey ?? generateIdempotencyKey() },
-      body: { reason: args.reason },
-      // ADR-028 / A4-063: gated by step-up auth.
-      withStepUp: true,
-    },
-  );
-}
-
-/**
- * `POST /api/admin/orders/:orderId/refund` — A5-4 order-bound refund,
- * ADR 017 admin write. `attestation` is required (and validated
- * server-side) only when the order is `fulfilled` — a code-unused
- * attestation, the accepted compensating control for the fulfilled-
- * order double-spend risk.
- */
-export async function refundOrder(args: {
-  orderId: string;
-  reason: string;
-  attestation?: AdminOrderRefundAttestation;
-  idempotencyKey?: string;
-}): Promise<AdminWriteEnvelope<AdminOrderRefundResult>> {
-  return authenticatedRequest<AdminWriteEnvelope<AdminOrderRefundResult>>(
-    `/api/admin/orders/${encodeURIComponent(args.orderId)}/refund`,
-    {
-      method: 'POST',
-      headers: { 'Idempotency-Key': args.idempotencyKey ?? generateIdempotencyKey() },
-      body: {
-        reason: args.reason,
-        ...(args.attestation !== undefined ? { attestation: args.attestation } : {}),
-      },
-      // ADR-028 / A4-063: gated by step-up auth.
-      withStepUp: true,
-    },
   );
 }

@@ -1,5 +1,5 @@
 /**
- * Loop-native order read OpenAPI registrations (ADR 015).
+ * Loop order read OpenAPI registrations (ADR 052).
  *
  * Lifted out of `apps/backend/src/openapi/orders-loop.ts` so the
  * two read paths sit alongside their two locally-scoped schemas,
@@ -39,48 +39,44 @@ export function registerOrdersLoopReadsOpenApi(
       merchantId: z.string(),
       state: z.string().openapi({
         description:
-          'Order state machine — pending_payment, paid, procuring, fulfilled, failed, expired.',
+          'Mirror of CTX displayStatus — unpaid, paid, fulfilled, rejected, refunded, expired (ADR 052).',
       }),
       faceValueMinor: z.string().openapi({
         description: 'Gift-card face value, catalog currency, minor units. BigInt as string.',
       }),
       currency: z.string(),
       chargeMinor: z.string().openapi({
-        description:
-          'What the user was charged, in their home currency. Mirrors faceValueMinor when home === catalog currency.',
+        description: 'What the customer pays CTX (face value minus the cashback discount).',
       }),
       chargeCurrency: z.string(),
-      paymentMethod: z.enum(['xlm', 'usdc', 'credit', 'loop_asset']).openapi({
-        description:
-          'A4-102: payment rail used to pay the order. The runtime view exposes all four ORDER_PAYMENT_METHODS values exactly as stored. (Earlier OpenAPI mapped `loop_asset` to `credit`; that erased the distinction needed by clients deciding whether to render an on-chain LOOP-asset deposit prompt.)',
+      userCashbackMinor: z.string().openapi({
+        description: 'Cashback CTX applied as a checkout discount. Minor units, bigint-string.',
       }),
-      paymentMemo: z.string().nullable(),
-      stellarAddress: z.string().nullable().openapi({
-        description: "Loop's deposit address for on-chain methods; null for credit-funded orders.",
-      }),
-      assetAmount: z.string().nullable().openapi({
-        description:
-          'Q6-4b: server-derived asset-native amount to send (7-decimal string), re-quoted on read from the order row. Populated by GET /api/orders/loop/{id} ONLY for a non-terminal, on-chain order; null for credit/terminal orders, in the list endpoint, and when the oracle/issuer is unavailable at read time. Lets the client rebuild the pay screen server-authoritatively on a remount.',
-      }),
-      paymentUri: z.string().nullable().openapi({
-        description:
-          'Q6-4b: server-derived SEP-7 `web+stellar:pay?...` deep-link. Same population rule as assetAmount.',
-      }),
-      assetCode: z.string().nullable().openapi({
-        description:
-          'Q6-4b: LOOP-asset code for a `loop_asset` order (USDLOOP/GBPLOOP/EURLOOP); null for xlm/usdc/credit and terminal orders.',
-      }),
-      assetIssuer: z.string().nullable().openapi({
-        description: 'Q6-4b: LOOP-asset issuer for a `loop_asset` order; null otherwise.',
-      }),
-      userCashbackMinor: z.string(),
       ctxOrderId: z.string().nullable(),
+      paymentCryptoCurrency: z.string().nullable().openapi({
+        description: 'Chain-qualified CTX payment currency chosen at create. Null on legacy rows.',
+      }),
+      payment: z
+        .object({
+          ctxPaymentId: z.string().nullable(),
+          cryptoCurrency: z.string(),
+          cryptoAmount: z.string().nullable(),
+          address: z.string().nullable(),
+          paymentUrls: z.record(z.string(), z.string()),
+          amountMinor: z.string(),
+          currency: z.string(),
+          expiresAt: z.string().datetime().nullable(),
+        })
+        .nullable()
+        .openapi({
+          description:
+            'CTX payment instructions — non-null only while the order is `unpaid` on the detail read, so the pay screen is fully server-rebuildable.',
+        }),
       redeemCode: z.string().nullable(),
       redeemPin: z.string().nullable(),
       redeemUrl: z.string().nullable(),
       failureReason: z.string().nullable(),
       createdAt: z.string().datetime(),
-      paidAt: z.string().datetime().nullable(),
       fulfilledAt: z.string().datetime().nullable(),
       failedAt: z.string().datetime().nullable(),
     }),

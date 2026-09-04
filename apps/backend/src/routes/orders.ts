@@ -40,14 +40,11 @@ import { rateLimit } from '../middleware/rate-limit.js';
 import { killSwitch } from '../middleware/kill-switch.js';
 import { privateNoStoreResponse } from '../middleware/cache-control.js';
 import { requireAuth } from '../auth/handler.js';
-import { createOrderHandler, listOrdersHandler, getOrderHandler } from '../orders/handler.js';
+import { listOrdersHandler } from '../orders/list-handler.js';
+import { getOrderHandler } from '../orders/get-handler.js';
 import { orderBarcodeImageHandler } from '../orders/barcode-image-handler.js';
-import {
-  loopCreateOrderHandler,
-  loopGetOrderHandler,
-  loopListOrdersHandler,
-} from '../orders/loop-handler.js';
-import { redeemLoopOrderHandler } from '../orders/redeem.js';
+import { loopCreateOrderHandler } from '../orders/loop-handler.js';
+import { loopGetOrderHandler, loopListOrdersHandler } from '../orders/loop-read-handlers.js';
 
 /** Mounts all `/api/orders/*` routes on the supplied Hono app. */
 export function mountOrderRoutes(app: Hono): void {
@@ -68,30 +65,11 @@ export function mountOrderRoutes(app: Hono): void {
   // POST first: collisions only matter within the same method,
   // but we also keep semantically related routes co-located.
   app.post(
-    '/api/orders',
-    killSwitch('orders-legacy'),
-    rateLimit('POST /api/orders', 10, 60_000),
-    createOrderHandler,
-  );
-  app.post(
     '/api/orders/loop',
     killSwitch('orders-loop'),
     rateLimit('POST /api/orders/loop', 10, 60_000),
     loopCreateOrderHandler,
   );
-  // ADR 030 Phase C3 / ADR 036 — server-orchestrated redemption
-  // (UI: "pay with Loop balance" — the balance IS the tokens).
-  // Shares the loop-orders kill switch: an operator gating the
-  // loop-native order surface must also stop new on-chain payments
-  // for orders already created. 10/min mirrors order creation —
-  // one payment per order with retry headroom.
-  app.post(
-    '/api/orders/loop/:id/redeem',
-    killSwitch('orders-loop'),
-    rateLimit('POST /api/orders/loop/:id/redeem', 10, 60_000),
-    redeemLoopOrderHandler,
-  );
-
   // GET literals BEFORE GET parameter routes.
   app.get('/api/orders', rateLimit('GET /api/orders', 60, 60_000), listOrdersHandler);
   // Loop-native orders list (ADR 010). Must register before
@@ -100,9 +78,8 @@ export function mountOrderRoutes(app: Hono): void {
   app.get('/api/orders/loop', rateLimit('GET /api/orders/loop', 60, 60_000), loopListOrdersHandler);
 
   // GET parameter routes — registered AFTER all literal siblings.
-  // Loop-native order GET. The UI polls this while an order is
-  // `pending_payment → paid → procuring → fulfilled`, so the
-  // rate is generous. Owner-scoped: the handler 404s on a
+  // Loop order GET. The UI polls this while an order is
+  // `unpaid → paid → fulfilled`, so the rate is generous. Owner-scoped: the handler 404s on a
   // non-owner read so existence isn't leaked.
   app.get(
     '/api/orders/loop/:id',

@@ -5,8 +5,7 @@ title: Loop service-level objectives
 # Loop service-level objectives
 
 > Closes A2-1325. Prior to this document the word "SLO" appeared
-> 40+ times in admin-route names and code comments (e.g. `/admin/stuck-orders`,
-> `notifyStuckProcurementSwept`, `past-SLO` log-line comments) without a
+> 40+ times in admin-route names and code comments without a
 > single concrete number attached. Operators reading a "past-SLO" log
 > line had no way to answer "past-SLO by how much?" because no SLO
 > was ever pinned.
@@ -70,7 +69,7 @@ sum by (method, route) (rate(loop_requests_total[7d]))
 | Flow                      | SLI                              | Target                   | Window | Surface                                            |
 | ------------------------- | -------------------------------- | ------------------------ | ------ | -------------------------------------------------- |
 | `/api/merchants` (cached) | p95 duration                     | ≤ 200ms                  | 7d     | `loop_request_duration_seconds` histogram          |
-| `/api/orders` create      | p95 round-trip (client-observed) | ≤ 1500ms                 | 7d     | histogram + web `forwardQueryErrorToSentry` on 5xx |
+| `/api/orders/loop` create | p95 round-trip (client-observed) | ≤ 1500ms                 | 7d     | histogram + web `forwardQueryErrorToSentry` on 5xx |
 | `/api/admin/treasury`     | p95 duration                     | ≤ 800ms                  | 7d     | `loop_request_duration_seconds` histogram          |
 | CTX `/status` probe       | p95 response time                | ≤ 3 seconds (5s timeout) | 24h    | `probeUpstream` cache + Discord health             |
 
@@ -89,29 +88,27 @@ window so the doc and the code agree.
 
 ## Admin-operational targets — "stuck-X" thresholds
 
-These are the numbers `admin.stuck-orders.tsx` / `admin.stuck-payouts.tsx`
-were hinting at without ever pinning:
+These are the numbers `admin.stuck-payouts.tsx` was hinting at
+without ever pinning (ADR 052 retired the stuck-order surface — the
+ctx mirror sweep now owns stale mirrors, and orders stall CTX-side,
+not Loop-side):
 
-| Surface              | Threshold                           | Paging                                                       |
-| -------------------- | ----------------------------------- | ------------------------------------------------------------ |
-| Stuck order          | > 15 min in `procuring` or `paid`   | Discord `monitoring` via `notifyStuckProcurementSwept` sweep |
-| Stuck payout         | > 5 min in `pending` or `submitted` | Discord `monitoring` via `notifyStuckPayouts`                |
-| Operator pool health | ≥ 1 operator in `closed` state      | Discord `monitoring` via `notifyOperatorPoolExhausted`       |
-| USDC reserve floor   | `balance < LOOP_USDC_FLOOR_STROOPS` | Discord `monitoring` via `notifyUsdcBelowFloor`              |
+| Surface             | Threshold                           | Paging                                                                         |
+| ------------------- | ----------------------------------- | ------------------------------------------------------------------------------ |
+| Stale order mirror  | `unpaid` past CTX expiry + 5 min    | none — the mirror sweep transitions it to `expired` (self-healing)             |
+| Stuck payout        | > 5 min in `pending` or `submitted` | Discord `monitoring` via `notifyStuckPayouts`                                  |
+| CTX upstream health | breaker `closed` (ADR 051)          | Discord `monitoring` via `notifyCircuitBreaker` / `notifyCtxCredentialInvalid` |
 
-The admin UI slider (5 / 15 / 60 min on `stuck-orders`) is
-**exploratory** — ops uses narrower windows for triage. The 15-min
-paging threshold is the documented default that the sweep worker
-enforces. `/health` now also exposes `otpDelivery` and per-worker
-state so auth-delivery failures and money-moving worker stalls show up
-as first-class degraded signals instead of log-only symptoms.
+`/health` also exposes `otpDelivery` and per-worker state so
+auth-delivery failures and money-moving worker stalls show up as
+first-class degraded signals instead of log-only symptoms.
 
-## Settlement (ADR 015)
+## Settlement
 
-| Flow                              | SLI                                          | Target  | Window | Surface                                                    |
-| --------------------------------- | -------------------------------------------- | ------- | ------ | ---------------------------------------------------------- |
-| Cashback credit → Stellar confirm | `pendingPayouts.confirmedAt - createdAt` p95 | ≤ 5 min | 24h    | `/api/admin/payouts/settlement-lag` (A2-1506 shared shape) |
-| Order `paid → fulfilled`          | `orders.fulfilledAt - paidAt` p95            | ≤ 2 min | 24h    | `admin/operator-latency`                                   |
+| Flow                           | SLI                                          | Target  | Window | Surface                                    |
+| ------------------------------ | -------------------------------------------- | ------- | ------ | ------------------------------------------ |
+| Order `paid → fulfilled` (CTX) | `orders.fulfilledAt - createdAt` p95         | ≤ 5 min | 24h    | admin orders list (mirror timestamps)      |
+| CTX commission visibility      | commission entry visible per fulfilled order | 100%    | 24h    | `/api/admin/ctx-commission` reconciliation |
 
 ## On-chain asset drift
 
@@ -169,23 +166,24 @@ Phase-1 traffic is "tens of orders per day." This section pins the
 the **next-step lever** for each surface when steady-state traffic
 approaches one.
 
-| Surface                          | Phase-1 ceiling                                                                                         | Next-step lever (Phase 2 / 3)                                                                                                                                                |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Backend Fly machines             | 1× shared-cpu-1x at launch; ~200 r/s ceiling per machine                                                | Horizontal scale via `fly scale count`; the in-memory rate-limiter is per-process so scaling out widens the per-IP ceiling — accept that, or move to a Redis-backed limiter. |
-| Postgres connections             | Drizzle pool max default 10; Fly Postgres `max_connections` typically 100                               | Bump `DATABASE_POOL_MAX` first; PgBouncer (transaction mode) only after the ledger primitives are reviewed for compatibility (ADR 009 `FOR UPDATE` semantics).               |
-| Stellar payout-worker throughput | ~1 tx / 5s per operator (sequence-number serialisation; ADR 016)                                        | Add multi-signer parallelism (multiple operator accounts); per-asset workers; pull `/fee_stats` before each batch (currently in A2-1921 fee-bump path).                      |
-| CTX operator pool                | 1 operator at minimum, 2+ recommended (ADR 013 `CTX_OPERATOR_POOL`); rate-limit ceiling unknown to Loop | Provision more operators; coordinate with CTX ops on per-operator quota.                                                                                                     |
-| Discord webhook rate             | 30 req/min per webhook (Discord docs) — current notifiers + dedup well inside this                      | A2-1326 dedup already throttles flap; Phase-2 Pager tier (A2-1927) takes the high-priority surface off Discord entirely.                                                     |
-| Frankfurter FX feed              | 1 r/min per source (free tier); cached daily in price-feed module                                       | Move to a paid feed if the daily cache miss rate climbs.                                                                                                                     |
-| Image proxy                      | 300 r/min per IP × N machines × Fly egress quota                                                        | Per-host CDN cache for merchant logo / card-image URLs (Cloudflare in front of `/api/image`).                                                                                |
-| Frontend bundle delivery         | Vercel / Fly static-host CDN; budget per route checked by `scripts/check-bundle-budget.sh` (A2-1711)    | Lazy-load admin routes (large), service-worker pre-cache, etc.                                                                                                               |
+| Surface                          | Phase-1 ceiling                                                                                      | Next-step lever (Phase 2 / 3)                                                                                                                                                |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Backend Fly machines             | 1× shared-cpu-1x at launch; ~200 r/s ceiling per machine                                             | Horizontal scale via `fly scale count`; the in-memory rate-limiter is per-process so scaling out widens the per-IP ceiling — accept that, or move to a Redis-backed limiter. |
+| Postgres connections             | Drizzle pool max default 10; Fly Postgres `max_connections` typically 100                            | Bump `DATABASE_POOL_MAX` first; PgBouncer (transaction mode) only after the ledger primitives are reviewed for compatibility (ADR 009 `FOR UPDATE` semantics).               |
+| Stellar payout-worker throughput | ~1 tx / 5s per operator (sequence-number serialisation; ADR 016)                                     | Add multi-signer parallelism (multiple operator accounts); per-asset workers; pull `/fee_stats` before each batch (currently in A2-1921 fee-bump path).                      |
+| CTX API key                      | Single company API key (ADR 051 `GIFT_CARD_API_KEY`); rate-limit ceiling set CTX-side per company    | Coordinate with CTX ops on the company quota — Loop is a first-class operator, so limits are negotiated, not multiplexed.                                                    |
+| Discord webhook rate             | 30 req/min per webhook (Discord docs) — current notifiers + dedup well inside this                   | A2-1326 dedup already throttles flap; Phase-2 Pager tier (A2-1927) takes the high-priority surface off Discord entirely.                                                     |
+| Frankfurter FX feed              | 1 r/min per source (free tier); cached daily in price-feed module                                    | Move to a paid feed if the daily cache miss rate climbs.                                                                                                                     |
+| Image proxy                      | 300 r/min per IP × N machines × Fly egress quota                                                     | Per-host CDN cache for merchant logo / card-image URLs (Cloudflare in front of `/api/image`).                                                                                |
+| Frontend bundle delivery         | Vercel / Fly static-host CDN; budget per route checked by `scripts/check-bundle-budget.sh` (A2-1711) | Lazy-load admin routes (large), service-worker pre-cache, etc.                                                                                                               |
 
 **Spike plan.** A sudden 10× traffic burst at Phase 1 (e.g. a
 viral social post) hits the rate-limit + circuit-breaker walls
 first, not the capacity walls. Procedure:
 
 1. **Watch the on-call channel** for `notifyHealthChange` and
-   `notifyOperatorPoolExhausted` — those fire before user pain is
+   the CTX-breaker alerts (`notifyCircuitBreaker` /
+   `notifyCtxCredentialInvalid`) — those fire before user pain is
    visible.
 2. **Loosen the impacted rate-limit** following the
    "Rate-limit review cadence (A2-1918)" loosen-when-in-doubt
@@ -277,8 +275,5 @@ the attack surface that the request-validators + circuit breakers
   lines reference these numbers
 - `docs/architecture.md §Backend API endpoints` — maps every
   route to its latency target
-- `apps/backend/src/admin/settlement-lag.ts` + the A2-1506 shared
-  shapes back the Settlement SLI data feed
-- `apps/backend/src/admin/stuck-orders.ts` /
-  `apps/backend/src/admin/stuck-payouts.ts` — admin UI that
+- `apps/backend/src/admin/stuck-payouts.ts` — admin UI that
   surfaces breaches against the "admin-operational" thresholds above

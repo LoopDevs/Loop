@@ -15,7 +15,6 @@ import { PageHeader } from '~/components/ui/PageHeader';
 import { Spinner } from '~/components/ui/Spinner';
 import { Button } from '~/components/ui/Button';
 import { PurchaseComplete } from '~/components/features/purchase/PurchaseComplete';
-import { EarnedCashbackCard } from '~/components/features/purchase/EarnedCashbackCard';
 import { OrderPayoutCard } from '~/components/features/order/OrderPayoutCard';
 import { LinkWalletNudge } from '~/components/features/cashback/LinkWalletNudge';
 import { formatDateTime, formatMoney, useLocaleTag } from '~/i18n/format';
@@ -197,16 +196,9 @@ function OrderDetailBody({ order, now }: { order: Order; now: number }): React.J
 
       {order.status === 'completed' && order.giftCardCode !== undefined && (
         <div className="flex flex-col gap-3">
-          <EarnedCashbackCard
-            merchantId={order.merchantId}
-            amount={order.amount}
-            currency={order.currency}
-          />
           {/* Per-order settlement state (ADR 015/016). Self-hides
               when there's no payout row — fresh-fulfil orders show
-              nothing here until the builder queues a row, and
-              credit-only ledgers (user has no Stellar trustline)
-              render the EarnedCashbackCard alone. */}
+              nothing here until the builder queues a row. */}
           <OrderPayoutCard orderId={order.id} />
           {/* Link-wallet nudge — self-hides when user has already
               linked a Stellar address or has zero balance. For the

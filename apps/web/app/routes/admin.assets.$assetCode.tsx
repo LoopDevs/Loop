@@ -23,7 +23,7 @@ import { AdminNav } from '~/components/features/admin/AdminNav';
 import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
 import { AssetCirculationCard } from '~/components/features/admin/AssetCirculationCard';
 import { Spinner } from '~/components/ui/Spinner';
-import { shortDay } from '~/components/features/admin/PaymentMethodActivityChart';
+import { shortDay } from '~/components/features/admin/CreditFlowChart';
 import { fmtStroops } from '~/utils/format-stellar';
 
 export function meta(): Route.MetaDescriptors {
@@ -56,9 +56,7 @@ const STATE_PILL: Record<PayoutState, string> = {
 
 /**
  * `/admin/assets/:assetCode` — single-asset drill for a LOOP
- * stablecoin (ADR 015). Companion to `/admin/operators/:operatorId`
- * — that page is the CTX-supplier drill, this is the
- * liability-side drill.
+ * stablecoin (ADR 015): the liability-side drill.
  *
  * Sections:
  *   - Header — outstanding fiat liability, Stellar issuer pubkey

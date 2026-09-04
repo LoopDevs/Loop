@@ -64,9 +64,7 @@ export function registerAdminCashbackConfigUpsertOpenApi(
     'UpsertCashbackConfigBody',
     z
       .object({
-        wholesalePct: z.coerce.number().min(0).max(100),
         userCashbackPct: z.coerce.number().min(0).max(100),
-        loopMarginPct: z.coerce.number().min(0).max(100),
         active: z.boolean().optional(),
         reason: z.string().min(2).max(500).openapi({
           description:

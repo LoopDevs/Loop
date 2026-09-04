@@ -4,16 +4,17 @@
  * `spend.ctx.com` exposes a Server-Sent Events variant of the
  * gift-card lookup at:
  *
- *   GET /gift-cards/{id}?stream=true&token={bearer}
+ *   GET /gift-cards/{id}?stream=true
  *   Accept:        text/event-stream
  *   Cache-Control: no-cache
- *   X-Client-Id:   <must match the bearer's JWT clientId>
+ *   X-Api-Key:     <operator API key>
+ *   X-Api-Secret:  <operator API secret>
+ *   X-Client-Id:   <request-origin client under Loop's CTX company>
  *
- * The bearer goes in the query string, not the `Authorization`
- * header — this is a workaround for the browser EventSource API
- * (which can't set custom request headers). CTX's reference web
- * client uses this same path, so it's the well-trodden contract
- * even though we're not actually using EventSource on our side.
+ * ADR 051: auth is the operator API-key header pair. CTX's reference
+ * web client passes a bearer in `?token=` instead — a workaround for
+ * the browser EventSource API (which can't set custom request
+ * headers) that we don't need in a server-side fetch.
  *
  * Each SSE frame is a plain `data: {json}` line, where the JSON
  * carries fields like `{fulfilmentStatus, paymentStatus, ...}`.
@@ -23,13 +24,13 @@
  * authoritative `GET /gift-cards/:id` to pull those.
  *
  * Ported from `vcc/api/src/ctx/client.js:362-431` (the working
- * reference implementation). Operator pool integration is at the
- * call-site: pick credentials via `pickOperatorCredentials()` from
- * `./operator-pool.js` and pass them in.
+ * reference implementation). Credential wiring is at the call-site:
+ * pick the API-key pair via `ctxApiCredentials()` from
+ * `./api-fetch.js` and pass it in.
  *
  * On any stream error (network blip, timeout, abort), the caller is
- * expected to fall back to polling via `operatorFetch` — the stream
- * is opportunistic, polling is the safety net.
+ * expected to fall back to polling via `ctxFetch` — the stream is
+ * opportunistic, polling is the safety net.
  */
 import { upstreamUrl } from '../upstream.js';
 import { logger } from '../logger.js';
@@ -62,9 +63,11 @@ export interface StreamFrame {
 }
 
 export interface StreamCredentials {
-  /** Operator bearer to use in `?token=`. */
-  bearer: string;
-  /** Must match the `clientId` baked into the bearer JWT or CTX 401s. */
+  /** Operator API key (`X-Api-Key`). */
+  apiKey: string;
+  /** Operator API secret (`X-Api-Secret`). */
+  apiSecret: string;
+  /** Request-origin client under Loop's CTX company (`X-Client-Id`). */
   clientId: string;
 }
 
@@ -95,18 +98,20 @@ export async function streamGiftCardStatus(
   ctxOrderId: string,
   opts: StreamGiftCardOptions,
 ): Promise<StreamFrame> {
-  // Build the URL with the bearer in `?token=`. Never log this URL —
-  // it carries the operator credential. Access-log middleware records
-  // method+path on inbound requests only; outbound fetch URLs aren't
-  // captured, but we still keep the URL out of any `log.*` call.
+  // ADR 051: authenticate with the operator API-key headers. The
+  // `?token=` query form CTX's reference web client uses exists only
+  // because browser EventSource can't set request headers — this is
+  // a server-side fetch, so the credential stays out of the URL.
   const base = upstreamUrl(`/gift-cards/${encodeURIComponent(ctxOrderId)}`);
-  const url = `${base}?stream=true&token=${encodeURIComponent(opts.bearer)}`;
+  const url = `${base}?stream=true`;
 
   const init: RequestInit = {
     method: 'GET',
     headers: {
       Accept: 'text/event-stream',
       'Cache-Control': 'no-cache',
+      'X-Api-Key': opts.apiKey,
+      'X-Api-Secret': opts.apiSecret,
       'X-Client-Id': opts.clientId,
     },
   };

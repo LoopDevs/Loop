@@ -11,7 +11,7 @@
  *
  * This sweeper periodically finds fulfilled orders that captured a
  * `ctx_order_id` but no redemption payload, re-runs `fetchRedemption`
- * per order through the operator pool, and persists any recovered
+ * per order through the CTX API, and persists any recovered
  * fields. Per-order bookkeeping (migration 0034):
  *
  *   - `redemption_backfill_attempts` — bumped on every empty /
@@ -36,7 +36,7 @@ import { db, withAdvisoryLock } from '../db/client.js';
 import { orders } from '../db/schema.js';
 import { logger } from '../logger.js';
 import { notifyRedemptionBackfillExhausted } from '../discord.js';
-import { OperatorPoolUnavailableError, OperatorRateLimitedError } from '../ctx/operator-pool.js';
+import { CtxUnavailableError, CtxRateLimitedError } from '../ctx/api-fetch.js';
 import { fetchRedemption } from './procurement-redemption.js';
 import { encryptRedeemField } from './redeem-crypto.js';
 import {
@@ -89,10 +89,10 @@ export interface RedemptionBackfillTickResult {
   stillEmpty: number;
   /** Rows that crossed the attempts cap this tick (Discord alert fired). */
   exhausted: number;
-  /** Rows whose fetch threw a non-pool error (attempts bumped). */
+  /** Rows whose fetch threw a non-transient error (attempts bumped). */
   errors: number;
-  /** True when the tick aborted early on a pool-wide operator outage. */
-  abortedPoolUnavailable: boolean;
+  /** True when the tick aborted early on a CTX outage or rate-limit. */
+  abortedCtxUnavailable: boolean;
   /** S4-8: true when another machine held the fleet-wide sweep lock. */
   skippedLocked: boolean;
 }
@@ -154,7 +154,7 @@ async function runRedemptionBackfillTickLocked(args?: {
     stillEmpty: 0,
     exhausted: 0,
     errors: 0,
-    abortedPoolUnavailable: false,
+    abortedCtxUnavailable: false,
     skippedLocked: false,
   };
 
@@ -206,17 +206,17 @@ async function runRedemptionBackfillTickLocked(args?: {
     try {
       redemption = await fetchRedemption(row.ctxOrderId);
     } catch (err) {
-      if (err instanceof OperatorPoolUnavailableError || err instanceof OperatorRateLimitedError) {
+      if (err instanceof CtxUnavailableError || err instanceof CtxRateLimitedError) {
         // Pool-wide outage or CTX rate-limit (CF-12) — every subsequent
         // row would hit the same wall. Abort WITHOUT bumping attempts:
         // this is our-side back-pressure / outage, not evidence that
         // CTX has no payload for the order, and it shouldn't consume
         // the order's retry budget.
         log.warn(
-          { orderId: row.id, rateLimited: err instanceof OperatorRateLimitedError },
-          'Operator pool unavailable / rate-limited — aborting redemption-backfill tick without burning attempts',
+          { orderId: row.id, rateLimited: err instanceof CtxRateLimitedError },
+          'CTX unavailable / rate-limited — aborting redemption-backfill tick without burning attempts',
         );
-        result.abortedPoolUnavailable = true;
+        result.abortedCtxUnavailable = true;
         break;
       }
       log.warn(
@@ -251,7 +251,7 @@ function emptyBackfillTickResult(skippedLocked: boolean): RedemptionBackfillTick
     stillEmpty: 0,
     exhausted: 0,
     errors: 0,
-    abortedPoolUnavailable: false,
+    abortedCtxUnavailable: false,
     skippedLocked,
   };
 }
@@ -381,7 +381,7 @@ async function persistRecoveredRedemption(
 export type AdminRedemptionRefetchOutcome =
   | { kind: 'order_not_found' }
   | { kind: 'not_eligible'; reason: 'not_fulfilled' | 'no_ctx_order_id' | 'already_present' }
-  | { kind: 'pool_unavailable' }
+  | { kind: 'ctx_unavailable' }
   | {
       kind: 'recovered' | 'still_empty';
       attempts: number;
@@ -421,7 +421,7 @@ export async function refetchOrderRedemption(
   try {
     redemption = await fetchRedemption(row.ctxOrderId);
   } catch (err) {
-    if (err instanceof OperatorPoolUnavailableError) return { kind: 'pool_unavailable' };
+    if (err instanceof CtxUnavailableError) return { kind: 'ctx_unavailable' };
     throw err;
   }
 

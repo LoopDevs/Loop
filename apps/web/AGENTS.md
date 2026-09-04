@@ -13,11 +13,10 @@ app/
 │   ├── orders.tsx, orders.$id.tsx          ← order history + detail
 │   ├── cashback.tsx, cashback.$slug.tsx    ← user cashback dashboard
 │   ├── settings.*.tsx                      ← profile / wallet / cashback / home-currency
-│   └── admin.*.tsx (19 routes)             ← admin panel: treasury / cashback /
-│                                             orders / users / merchants / operators /
-│                                             payouts / assets / audit / stuck-orders /
-│                                             skips (watcher skip-rows) / staff (ADR 037
-│                                             role management, admin-only)
+│   └── admin.*.tsx                         ← admin panel: treasury / cashback /
+│                                             orders / users / merchants / payouts /
+│                                             assets / audit / staff (ADR 037 role
+│                                             management, admin-only)
 ├── components/
 │   ├── features/     ← Domain components, grouped by feature:
 │   │   ├── admin/    ← ~45 components (treasury, cashback, operator, supplier,
@@ -27,8 +26,8 @@ app/
 │   │   │               login/OTP support state: read for both staff roles, the
 │   │   │               "Clear OTP lockout" action admin-only)
 │   │   ├── auth/     ← social login button, email+OTP flow
-│   │   ├── cashback/ ← flywheel chip, balance, pending-payouts, rail-mix
-│   │   ├── home/     ← stats bands (cashback + flywheel)
+│   │   ├── cashback/ ← balance, pending-payouts
+│   │   ├── home/     ← stats bands (cashback)
 │   │   ├── onboarding/ ← biometric, currency, wallet-trust, signup-tail
 │   │   ├── order/    ← per-order payout card
 │   │   ├── orders/   ← loop-orders list + summary header
@@ -51,7 +50,7 @@ app/
 ├── services/         ← Typed API client (api-client, auth, clusters, merchants,
 │                       orders, orders-loop, wallet, vault-apy (ADR 031 V6), config,
 │                       admin (+ per-surface admin-*
-│                       slices incl. ADR 037 admin-staff / admin-watcher-skips /
+│                       slices incl. ADR 037 admin-staff /
 │                       admin-user-wallet / admin-lookup / admin-order-redemption /
 │                       admin-user-auth-state — A5-3 login/OTP support state),
 │                       user, public-stats, parse-error-response)

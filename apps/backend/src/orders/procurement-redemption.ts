@@ -28,7 +28,7 @@
  */
 import { z } from 'zod';
 import { logger } from '../logger.js';
-import { operatorFetch, pickOperatorCredentials } from '../ctx/operator-pool.js';
+import { ctxFetch, ctxApiCredentials } from '../ctx/api-fetch.js';
 import { streamGiftCardStatus } from '../ctx/stream.js';
 import { upstreamUrl } from '../upstream.js';
 import { notifyCtxSchemaDrift } from '../discord.js';
@@ -82,7 +82,7 @@ export async function fetchRedemption(ctxOrderId: string): Promise<{
   pin: string | null;
   url: string | null;
 }> {
-  const res = await operatorFetch(upstreamUrl(`/gift-cards/${encodeURIComponent(ctxOrderId)}`), {
+  const res = await ctxFetch(upstreamUrl(`/gift-cards/${encodeURIComponent(ctxOrderId)}`), {
     method: 'GET',
     headers: { Accept: 'application/json' },
     signal: AbortSignal.timeout(30_000),
@@ -191,13 +191,14 @@ export async function waitForRedemption(
     opts.pollIntervalMs ?? numericEnv('LOOP_REDEMPTION_POLL_INTERVAL_MS', 1000);
   const deadline = Date.now() + totalTimeoutMs;
 
-  const creds = pickOperatorCredentials();
+  const creds = ctxApiCredentials();
   if (creds === null) {
-    // No healthy operators — fall straight through to polling, which
-    // uses `operatorFetch` and has its own pool-exhausted handling.
+    // No API credentials configured — fall straight through to
+    // polling, which uses `ctxFetch` and surfaces the misconfig via
+    // its own unavailable handling.
     log.warn(
       { ctxOrderId },
-      'No healthy operator for SSE stream — falling back to polling immediately',
+      'No CTX API credentials for SSE stream — falling back to polling immediately',
     );
   } else {
     try {
@@ -205,7 +206,8 @@ export async function waitForRedemption(
       const timer = setTimeout(() => controller.abort(), totalTimeoutMs);
       try {
         await streamGiftCardStatus(ctxOrderId, {
-          bearer: creds.bearer,
+          apiKey: creds.apiKey,
+          apiSecret: creds.apiSecret,
           clientId: creds.clientId,
           signal: controller.signal,
           onUpdate: (frame) => {

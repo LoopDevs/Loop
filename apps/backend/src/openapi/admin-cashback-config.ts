@@ -69,9 +69,7 @@ export function registerAdminCashbackConfigOpenApi(
     'AdminCashbackConfig',
     z.object({
       merchantId: z.string(),
-      wholesalePct: CashbackPctString,
       userCashbackPct: CashbackPctString,
-      loopMarginPct: CashbackPctString,
       active: z.boolean(),
       updatedBy: z.string().openapi({
         description: 'Admin user id that performed the most recent upsert.',
@@ -163,9 +161,7 @@ export function registerAdminCashbackConfigOpenApi(
                   id: z.string().uuid(),
                   merchantId: z.string(),
                   merchantName: z.string(),
-                  wholesalePct: z.string(),
                   userCashbackPct: z.string(),
-                  loopMarginPct: z.string(),
                   active: z.boolean(),
                   changedBy: z.string(),
                   changedAt: z.string().datetime(),

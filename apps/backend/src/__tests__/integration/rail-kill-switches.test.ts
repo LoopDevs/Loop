@@ -8,7 +8,7 @@
  *
  * What's mocked: the external money edges only — `submitPayout` (Stellar
  * submit), Horizon reads (`listAccountPayments` / outbound lookups),
- * trustlines, price-feed, and the fire-and-forget Discord notifiers.
+ * trustlines, and the fire-and-forget Discord notifiers.
  * What's REAL: the `rail_kill_switches` table + `DbKillSwitchService`, the
  * worker ticks' halt guards, the refund/vault primitives' halt guards, and
  * the full admin request path (requireAuth + requireStaff + step-up +
@@ -59,11 +59,6 @@ vi.mock('../../payments/horizon-trustlines.js', async (importActual) => {
   };
 });
 
-vi.mock('../../payments/price-feed.js', async (importActual) => {
-  const actual = (await importActual()) as Record<string, unknown>;
-  return { ...actual, getUsdToGbpRate: vi.fn(async () => 0.8) };
-});
-
 vi.mock('../../discord.js', async (importActual) => {
   const actual = (await importActual()) as Record<string, unknown>;
   const noop = vi.fn();
@@ -85,11 +80,9 @@ import { signLoopToken } from '../../auth/tokens.js';
 import { signAdminStepUpToken, type AdminStepUpScope } from '../../auth/admin-step-up.js';
 import { DbKillSwitchService, RailHaltedError } from '../../rail-kill-switches/index.js';
 import { runPayoutTick } from '../../payments/payout-worker.js';
-import { runPaymentWatcherTick } from '../../payments/watcher.js';
-import { listAccountPayments, findOutboundPaymentByMemo } from '../../payments/horizon.js';
+import { findOutboundPaymentByMemo } from '../../payments/horizon.js';
 import { submitPayout } from '../../payments/payout-submit.js';
 import { applyAdminRefund } from '../../credits/refunds.js';
-import { refundDeposit } from '../../payments/deposit-refund.js';
 import { depositToVault } from '../../credits/vaults/vault-client.js';
 import {
   ensureMigrated,
@@ -183,13 +176,8 @@ async function seedRefundableOrder(): Promise<{ userId: string; orderId: string 
       currency: 'USD',
       chargeMinor: 5000n,
       chargeCurrency: 'USD',
-      paymentMethod: 'credit',
-      wholesalePct: '70.00',
-      userCashbackPct: '5.00',
-      loopMarginPct: '25.00',
-      wholesaleMinor: 3500n,
+      paymentCryptoCurrency: 'XLM',
       userCashbackMinor: 250n,
-      loopMarginMinor: 1250n,
       state: 'fulfilled',
     })
     .returning({ id: orders.id });
@@ -276,35 +264,7 @@ describeIf('NS-04 — payout rail enforcement (block-new-only)', () => {
   });
 });
 
-describeIf('NS-04 — deposit rail enforcement (block-new-only, before Horizon)', () => {
-  beforeAll(async () => ensureMigrated());
-  beforeEach(async () => {
-    await truncateAllTables();
-    vi.mocked(listAccountPayments).mockClear();
-    vi.mocked(listAccountPayments).mockResolvedValue({ records: [], nextCursor: null });
-  });
-
-  it('halted → tick early-returns and NEVER reads Horizon; resume → Horizon IS read', async () => {
-    const admin = await seedAdmin();
-    await haltRow('deposit', admin.id);
-
-    const halted = await runPaymentWatcherTick({ account: 'GTESTDEPOSITACCOUNT' });
-    expect(halted.scanned).toBe(0);
-    expect(halted.matched).toBe(0);
-    expect(listAccountPayments).not.toHaveBeenCalled();
-
-    await svc.resume({
-      rail: 'deposit',
-      actorUserId: admin.id,
-      reason: 'resume',
-      idempotencyKey: idemKey(),
-    });
-    await runPaymentWatcherTick({ account: 'GTESTDEPOSITACCOUNT' });
-    expect(listAccountPayments).toHaveBeenCalled();
-  });
-});
-
-describeIf('NS-04 — refund rail enforcement (both primitives)', () => {
+describeIf('NS-04 — refund rail enforcement', () => {
   beforeAll(async () => ensureMigrated());
   beforeEach(async () => truncateAllTables());
 
@@ -339,12 +299,6 @@ describeIf('NS-04 — refund rail enforcement (both primitives)', () => {
       reason: 'test',
     });
     expect(refund.amountMinor).toBe(1000n);
-  });
-
-  it('refundDeposit throws RailHaltedError when halted (before touching Horizon/DB)', async () => {
-    const admin = await seedAdmin();
-    await haltRow('refund', admin.id);
-    await expect(refundDeposit('any-payment-id')).rejects.toBeInstanceOf(RailHaltedError);
   });
 });
 

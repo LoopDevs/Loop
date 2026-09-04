@@ -3,7 +3,7 @@
  *
  * Top-level navigation between the three admin surfaces:
  *   - /admin/cashback  — per-merchant cashback-split config + history
- *   - /admin/treasury  — credit-ledger + LOOP liabilities + operator pool
+ *   - /admin/treasury  — credit-ledger + LOOP liabilities + CTX upstream
  *   - /admin/payouts   — pending-payouts backlog with retry
  *
  * Rendered at the top of every admin page so ops can flip between them
@@ -11,10 +11,11 @@
  * based on `useLocation` — React Router keeps this in sync with the
  * current route without a prop drill.
  *
- * Also carries a compact CTX supplier-pool health pill (ADR 013). The
- * pool is the set of service accounts Loop fronts to CTX — open
- * circuits mean the supplier is degraded and user-facing order flows
- * will 503. The pill reads from the same `/api/admin/treasury`
+ * Also carries a compact CTX supplier health pill (ADR 051): the
+ * credential + circuit-breaker state of Loop's operator API key into
+ * CTX — an open circuit means the supplier is degraded and
+ * user-facing order flows will 503. The pill reads from the same
+ * `/api/admin/treasury`
  * snapshot the Treasury page uses, so a TanStack shared query means
  * both surfaces share the fetch + cache line.
  *
@@ -49,9 +50,7 @@ const TABS: ReadonlyArray<{ href: string; label: string; minRole: StaffRole }> =
   { href: '/admin/orders', label: 'Orders', minRole: 'support' },
   { href: '/admin/merchants', label: 'Merchants', minRole: 'support' },
   { href: '/admin/users', label: 'Users', minRole: 'support' },
-  { href: '/admin/skips', label: 'Skips', minRole: 'support' },
   { href: '/admin/ledger', label: 'Ledger', minRole: 'support' },
-  { href: '/admin/operators', label: 'Operators', minRole: 'admin' },
   { href: '/admin/assets', label: 'Assets', minRole: 'admin' },
   { href: '/admin/audit', label: 'Audit', minRole: 'admin' },
   { href: '/admin/staff', label: 'Staff', minRole: 'admin' },
@@ -65,7 +64,7 @@ export function visibleTabs(role: StaffRole | null): ReadonlyArray<(typeof TABS)
 }
 
 /**
- * Summarises an operator-pool snapshot into one of four display
+ * Summarises the CTX upstream snapshot into one of four display
  * states. The definition errs on the side of flagging anything
  * non-green — ops needs to notice degradation immediately, so a
  * half-open circuit is already "degraded", not "healthy-with-an-
@@ -73,19 +72,11 @@ export function visibleTabs(role: StaffRole | null): ReadonlyArray<(typeof TABS)
  */
 type CtxStatus = 'healthy' | 'degraded' | 'unavailable' | 'unconfigured' | 'unknown';
 
-export function operatorPoolStatus(
-  operatorPool: TreasurySnapshot['operatorPool'] | undefined,
-): CtxStatus {
-  if (operatorPool === undefined) return 'unknown';
-  if (operatorPool.size === 0) return 'unconfigured';
-  let anyOpen = false;
-  let anyHalfOpen = false;
-  for (const op of operatorPool.operators) {
-    if (op.state === 'open') anyOpen = true;
-    else if (op.state === 'half_open') anyHalfOpen = true;
-  }
-  if (anyOpen) return 'unavailable';
-  if (anyHalfOpen) return 'degraded';
+export function ctxApiStatus(ctxApi: TreasurySnapshot['ctxApi'] | undefined): CtxStatus {
+  if (ctxApi === undefined) return 'unknown';
+  if (!ctxApi.configured) return 'unconfigured';
+  if (ctxApi.state === 'open') return 'unavailable';
+  if (ctxApi.state === 'half_open') return 'degraded';
   return 'healthy';
 }
 
@@ -98,28 +89,28 @@ const STATUS_UI: Record<
     classes:
       'border-green-200 bg-green-50 text-green-800 dark:border-green-900/60 dark:bg-green-900/20 dark:text-green-300',
     dot: 'bg-green-500',
-    description: 'All operator circuits closed. Supplier calls are flowing.',
+    description: 'CTX circuit closed. Supplier calls are flowing.',
   },
   degraded: {
     label: 'CTX degraded',
     classes:
       'border-yellow-200 bg-yellow-50 text-yellow-800 dark:border-yellow-900/60 dark:bg-yellow-900/20 dark:text-yellow-300',
     dot: 'bg-yellow-500',
-    description: 'At least one operator is in HALF_OPEN probe state.',
+    description: 'CTX circuit is in HALF_OPEN probe state.',
   },
   unavailable: {
     label: 'CTX unavailable',
     classes:
       'border-red-200 bg-red-50 text-red-800 dark:border-red-900/60 dark:bg-red-900/20 dark:text-red-300',
     dot: 'bg-red-500',
-    description: 'At least one operator circuit is OPEN. Orders may 503.',
+    description: 'CTX circuit is OPEN. Orders may 503.',
   },
   unconfigured: {
     label: 'CTX unconfigured',
     classes:
       'border-gray-200 bg-gray-50 text-gray-700 dark:border-gray-800 dark:bg-gray-900/40 dark:text-gray-300',
     dot: 'bg-gray-400',
-    description: 'CTX_OPERATOR_POOL is empty — no supplier calls can run.',
+    description: 'GIFT_CARD_API_KEY is unset — no supplier calls can run.',
   },
   unknown: {
     label: 'CTX status loading',
@@ -195,7 +186,7 @@ export function AdminNav(): React.JSX.Element {
   // Share the `['admin-treasury']` cache key with /admin/treasury so
   // the pill's fetch deduplicates with the page's fetch — loading
   // either surface warms the other. 30s stale matches the
-  // operator-pool refresh cadence, which is driven by the
+  // CTX-upstream refresh cadence, which is driven by the
   // request-side circuit breaker reset window.
   const snapshotQuery = useQuery<TreasurySnapshot, Error>({
     queryKey: ['admin-treasury'],
@@ -211,7 +202,7 @@ export function AdminNav(): React.JSX.Element {
   const denied =
     snapshotQuery.error instanceof ApiException &&
     (snapshotQuery.error.status === 401 || snapshotQuery.error.status === 404);
-  const status = denied ? null : operatorPoolStatus(snapshotQuery.data?.operatorPool);
+  const status = denied ? null : ctxApiStatus(snapshotQuery.data?.ctxApi);
   const failedCount = denied ? 0 : failedPayoutsCount(snapshotQuery.data?.payouts);
 
   return (

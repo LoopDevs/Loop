@@ -15,9 +15,9 @@
  *      `pending_payouts_burn_order_unique` partial index is what its
  *      `onConflictDoNothing({target: pendingPayouts.orderId, where:
  *      kind='burn'})` actually targets.
- *   3. The `orders.pending_payment -> paid` transition
- *      (`markOrderPaidViaVaultRedemption`) and the `user_credits`
- *      debit land in the SAME real transaction as the burn row.
+ *   3. The `user_credits` debit lands in the SAME real transaction as
+ *      the burn row, and a retired `order_redeem` source fails closed
+ *      to needs-refund (ADR 052) without ever debiting.
  *   4. The ledger-invariant `afterEach` assertion (hardening C7) — the
  *      vault redemption mirror step never desyncs `user_credits` from
  *      `credit_transactions`.
@@ -177,19 +177,9 @@ async function seedOrder(args: { userId: string; chargeMinor: bigint }): Promise
       currency: 'USD',
       chargeMinor: args.chargeMinor,
       chargeCurrency: 'USD',
-      paymentMethod: 'loop_asset',
-      // orders_payment_memo_coherence (migration 0025): every
-      // non-'credit'-method order must carry a non-null payment memo;
-      // orders_payment_memo_unique also requires it be unique among
-      // non-null memos, so a fresh id per seeded order is required.
-      paymentMemo: `test-memo-${crypto.randomUUID()}`,
-      wholesalePct: '70.00',
-      userCashbackPct: '5.00',
-      loopMarginPct: '25.00',
-      wholesaleMinor: (args.chargeMinor * 70n) / 100n,
+      paymentCryptoCurrency: 'XLM',
       userCashbackMinor: (args.chargeMinor * 5n) / 100n,
-      loopMarginMinor: (args.chargeMinor * 25n) / 100n,
-      state: 'pending_payment',
+      state: 'unpaid',
     })
     .returning({ id: orders.id });
   return order!.id;
@@ -268,15 +258,15 @@ describeIf('vault-redemptions integration — real postgres (ADR 031 V4)', () =>
     expect(drift).toEqual([]);
   });
 
-  it('the full happy-path FAST redemption reaches settled, flips the order to paid, debits user_credits by exactly valueMinor, and writes a real burn row the conservation trigger accepts', async () => {
+  it('the full happy-path FAST redemption reaches settled, debits user_credits by exactly valueMinor, and writes a real burn row the conservation trigger accepts', async () => {
     const user = await seedUser();
     await seedUserCreditsBalance(user.id, 'USD', 10_000n);
     await seedHotFloat(5_000n); // covers the 500n redemption
-    const orderId = await seedOrder({ userId: user.id, chargeMinor: 500n });
+    const sourceId = crypto.randomUUID();
 
     const row = await claimVaultRedemption({
-      sourceType: 'order_redeem',
-      sourceId: orderId,
+      sourceType: 'withdrawal',
+      sourceId,
       userId: user.id,
       assetCode: 'LOOPUSD',
       network: 'testnet',
@@ -285,11 +275,6 @@ describeIf('vault-redemptions integration — real postgres (ADR 031 V4)', () =>
     });
     const outcome = await driveOneVaultRedemption(row);
     expect(outcome).toBe('settled');
-
-    // orders.state really flipped, for real, via markOrderPaidViaVaultRedemption.
-    const [freshOrder] = await db.select().from(orders).where(eq(orders.id, orderId));
-    expect(freshOrder?.state).toBe('paid');
-    expect(freshOrder?.paidAt).not.toBeNull();
 
     // user_credits debited by EXACTLY valueMinor (10_000 - 500).
     const [balance] = await db
@@ -305,7 +290,7 @@ describeIf('vault-redemptions integration — real postgres (ADR 031 V4)', () =>
         and(
           eq(creditTransactions.userId, user.id),
           eq(creditTransactions.type, 'spend'),
-          eq(creditTransactions.referenceId, orderId),
+          eq(creditTransactions.referenceId, sourceId),
         ),
       );
     expect(spendRows).toHaveLength(1);
@@ -322,7 +307,7 @@ describeIf('vault-redemptions integration — real postgres (ADR 031 V4)', () =>
       .where(and(eq(pendingPayouts.userId, user.id), eq(pendingPayouts.kind, 'burn')));
     expect(burnRows).toHaveLength(1);
     expect(burnRows[0]).toMatchObject({
-      orderId,
+      orderId: null,
       assetCode: 'LOOPUSD',
       assetIssuer: SHARE_CONTRACT_ID,
       state: 'confirmed',
@@ -341,21 +326,21 @@ describeIf('vault-redemptions integration — real postgres (ADR 031 V4)', () =>
     const [redemptionRow] = await db
       .select()
       .from(vaultRedemptions)
-      .where(eq(vaultRedemptions.sourceId, orderId));
+      .where(eq(vaultRedemptions.sourceId, sourceId));
     expect(redemptionRow?.state).toBe('settled');
     expect(redemptionRow?.payoutPath).toBe('fast');
   });
 
-  it('the full happy-path SLOW redemption (float empty) also reaches settled and flips the order to paid', async () => {
+  it('the full happy-path SLOW redemption (float empty) also reaches settled', async () => {
     const user = await seedUser();
     await seedUserCreditsBalance(user.id, 'USD', 10_000n);
     // No hot float seeded — starts at 0, forcing the slow synchronous withdraw.
-    const orderId = await seedOrder({ userId: user.id, chargeMinor: 500n });
+    const sourceId = crypto.randomUUID();
     vaultClientState.withdrawResult = { txHash: 'withdraw-tx-int-1', amountsOut: [52_000_000n] };
 
     const row = await claimVaultRedemption({
-      sourceType: 'order_redeem',
-      sourceId: orderId,
+      sourceType: 'withdrawal',
+      sourceId,
       userId: user.id,
       assetCode: 'LOOPUSD',
       network: 'testnet',
@@ -365,13 +350,10 @@ describeIf('vault-redemptions integration — real postgres (ADR 031 V4)', () =>
     const outcome = await driveOneVaultRedemption(row);
     expect(outcome).toBe('settled');
 
-    const [freshOrder] = await db.select().from(orders).where(eq(orders.id, orderId));
-    expect(freshOrder?.state).toBe('paid');
-
     const [redemptionRow] = await db
       .select()
       .from(vaultRedemptions)
-      .where(eq(vaultRedemptions.sourceId, orderId));
+      .where(eq(vaultRedemptions.sourceId, sourceId));
     expect(redemptionRow?.payoutPath).toBe('slow');
     expect(redemptionRow?.redeemTxHash).toBe('withdraw-tx-int-1');
 
@@ -382,7 +364,7 @@ describeIf('vault-redemptions integration — real postgres (ADR 031 V4)', () =>
     const user = await seedUser();
     await seedUserCreditsBalance(user.id, 'USD', 500n); // their WHOLE balance
     await seedHotFloat(5_000n); // fast payout
-    const orderId = await seedOrder({ userId: user.id, chargeMinor: 500n });
+    const sourceId = crypto.randomUUID();
 
     // The user holds EXACTLY baseShares: valueMinor 500 × PER at a 1:1
     // share price = 50_000_000 shares, and NOT one share more. Under the
@@ -393,8 +375,8 @@ describeIf('vault-redemptions integration — real postgres (ADR 031 V4)', () =>
     vaultClientState.shareBalance = baseShares;
 
     const row = await claimVaultRedemption({
-      sourceType: 'order_redeem',
-      sourceId: orderId,
+      sourceType: 'withdrawal',
+      sourceId,
       userId: user.id,
       assetCode: 'LOOPUSD',
       network: 'testnet',
@@ -407,15 +389,13 @@ describeIf('vault-redemptions integration — real postgres (ADR 031 V4)', () =>
     const [redemptionRow] = await db
       .select()
       .from(vaultRedemptions)
-      .where(eq(vaultRedemptions.sourceId, orderId));
+      .where(eq(vaultRedemptions.sourceId, sourceId));
     expect(redemptionRow?.state).toBe('settled');
     // Collected the user's ENTIRE holding — position drained to zero, no
     // stranded share dust — and never more than they held.
     expect(redemptionRow?.sharesToRedeem).toBe(baseShares);
 
-    // Order paid; user_credits debited by EXACTLY valueMinor (500 -> 0).
-    const [freshOrder] = await db.select().from(orders).where(eq(orders.id, orderId));
-    expect(freshOrder?.state).toBe('paid');
+    // user_credits debited by EXACTLY valueMinor (500 -> 0).
     const [balance] = await db
       .select()
       .from(userCredits)
@@ -427,7 +407,7 @@ describeIf('vault-redemptions integration — real postgres (ADR 031 V4)', () =>
     const user = await seedUser();
     await seedUserCreditsBalance(user.id, 'USD', 10_000n);
     await seedHotFloat(400n); // < valueMinor → slow path, but has balance to absorb a small draw-down
-    const orderId = await seedOrder({ userId: user.id, chargeMinor: 500n });
+    const sourceId = crypto.randomUUID();
     // Proceeds = 498 minor worth of stroops: 2 minor BELOW valueMinor,
     // inside the 0.5% band (min floor = 497.5 minor), so the withdraw
     // passes and the NEGATIVE net delta (-2) is applied to the float.
@@ -437,8 +417,8 @@ describeIf('vault-redemptions integration — real postgres (ADR 031 V4)', () =>
     };
 
     const row = await claimVaultRedemption({
-      sourceType: 'order_redeem',
-      sourceId: orderId,
+      sourceType: 'withdrawal',
+      sourceId,
       userId: user.id,
       assetCode: 'LOOPUSD',
       network: 'testnet',
@@ -451,7 +431,7 @@ describeIf('vault-redemptions integration — real postgres (ADR 031 V4)', () =>
     const [redemptionRow] = await db
       .select()
       .from(vaultRedemptions)
-      .where(eq(vaultRedemptions.sourceId, orderId));
+      .where(eq(vaultRedemptions.sourceId, sourceId));
     expect(redemptionRow?.payoutPath).toBe('slow');
 
     // Real CHECK-constrained float: 400 + (498 - 500) = 398, still >= 0.
@@ -471,11 +451,11 @@ describeIf('vault-redemptions integration — real postgres (ADR 031 V4)', () =>
 
   it('vault_redemptions_source_unique fires as a real 23505 on a genuine duplicate INSERT', async () => {
     const user = await seedUser();
-    const orderId = await seedOrder({ userId: user.id, chargeMinor: 500n });
+    const sourceId = crypto.randomUUID();
 
     await db.insert(vaultRedemptions).values({
-      sourceType: 'order_redeem',
-      sourceId: orderId,
+      sourceType: 'withdrawal',
+      sourceId,
       userId: user.id,
       assetCode: 'LOOPUSD',
       network: 'testnet',
@@ -485,8 +465,8 @@ describeIf('vault-redemptions integration — real postgres (ADR 031 V4)', () =>
 
     await expect(
       db.insert(vaultRedemptions).values({
-        sourceType: 'order_redeem',
-        sourceId: orderId,
+        sourceType: 'withdrawal',
+        sourceId,
         userId: user.id,
         assetCode: 'LOOPUSD',
         network: 'testnet',
@@ -501,16 +481,16 @@ describeIf('vault-redemptions integration — real postgres (ADR 031 V4)', () =>
     const rows = await db
       .select()
       .from(vaultRedemptions)
-      .where(eq(vaultRedemptions.sourceId, orderId));
+      .where(eq(vaultRedemptions.sourceId, sourceId));
     expect(rows).toHaveLength(1);
   });
 
   it('claimVaultRedemption itself resolves a genuine duplicate claim to the SAME row (graceful onConflictDoNothing path, real postgres)', async () => {
     const user = await seedUser();
-    const orderId = await seedOrder({ userId: user.id, chargeMinor: 500n });
+    const sourceId = crypto.randomUUID();
     const args = {
-      sourceType: 'order_redeem' as const,
-      sourceId: orderId,
+      sourceType: 'withdrawal' as const,
+      sourceId,
       userId: user.id,
       assetCode: 'LOOPUSD' as const,
       network: 'testnet' as const,
@@ -525,7 +505,7 @@ describeIf('vault-redemptions integration — real postgres (ADR 031 V4)', () =>
     const rows = await db
       .select()
       .from(vaultRedemptions)
-      .where(eq(vaultRedemptions.sourceId, orderId));
+      .where(eq(vaultRedemptions.sourceId, sourceId));
     expect(rows).toHaveLength(1);
   });
 
@@ -591,11 +571,10 @@ describeIf('vault-redemptions integration — real postgres (ADR 031 V4)', () =>
 
   it('P1-B: a fresh collect_claimed_at lease blocks a second collect — claimCollect matches zero rows, transferShares is NOT re-invoked (real CAS)', async () => {
     const user = await seedUser();
-    const orderId = await seedOrder({ userId: user.id, chargeMinor: 500n });
 
     const row = await claimVaultRedemption({
-      sourceType: 'order_redeem',
-      sourceId: orderId,
+      sourceType: 'withdrawal',
+      sourceId: crypto.randomUUID(),
       userId: user.id,
       assetCode: 'LOOPUSD',
       network: 'testnet',
@@ -626,11 +605,11 @@ describeIf('vault-redemptions integration — real postgres (ADR 031 V4)', () =>
     const user = await seedUser();
     await seedUserCreditsBalance(user.id, 'USD', 10_000n);
     await seedHotFloat(5_000n);
-    const orderId = await seedOrder({ userId: user.id, chargeMinor: 500n });
+    const sourceId = crypto.randomUUID();
 
     const row = await claimVaultRedemption({
-      sourceType: 'order_redeem',
-      sourceId: orderId,
+      sourceType: 'withdrawal',
+      sourceId,
       userId: user.id,
       assetCode: 'LOOPUSD',
       network: 'testnet',
@@ -666,7 +645,7 @@ describeIf('vault-redemptions integration — real postgres (ADR 031 V4)', () =>
         and(
           eq(creditTransactions.userId, user.id),
           eq(creditTransactions.type, 'spend'),
-          eq(creditTransactions.referenceId, orderId),
+          eq(creditTransactions.referenceId, sourceId),
         ),
       );
     expect(spendRows).toHaveLength(1);
@@ -678,13 +657,12 @@ describeIf('vault-redemptions integration — real postgres (ADR 031 V4)', () =>
     const user = await seedUser();
     await seedUserCreditsBalance(user.id, 'USD', 10_000n);
     await seedHotFloat(0n); // insufficient — forces the SLOW path so payout can be made to fail independently of collect
-    const orderId = await seedOrder({ userId: user.id, chargeMinor: 500n });
     vaultClientState.transferResult = { txHash: 'collect-tx-v7' };
     vaultClientMocks.withdrawFromVault.mockRejectedValueOnce(new Error('forced slow-path failure'));
 
     const claimed = await claimVaultRedemption({
-      sourceType: 'order_redeem',
-      sourceId: orderId,
+      sourceType: 'withdrawal',
+      sourceId: crypto.randomUUID(),
       userId: user.id,
       assetCode: 'LOOPUSD',
       network: 'testnet',
@@ -749,9 +727,6 @@ describeIf('vault-redemptions integration — real postgres (ADR 031 V4)', () =>
     expect(finalRow?.state).toBe('settled');
     expect(finalRow?.payoutPath).toBe('slow');
     expect(finalRow?.collectTxHash).toBe('collect-tx-v7'); // untouched from the original collect
-
-    const [finalOrder] = await db.select().from(orders).where(eq(orders.id, orderId));
-    expect(finalOrder?.state).toBe('paid');
   });
 
   it('V7: isVaultRedemptionNeedsRefund detects a REAL needs-refund row (P2-3 path) and reclaimFailedVaultRedemptionForRedrive refuses it without mutating', async () => {
@@ -798,9 +773,9 @@ describeIf('vault-redemptions integration — real postgres (ADR 031 V4)', () =>
   // ─── MNY-15 — stuck-redemption watchdog covers the `pending` strand ──────
   it('MNY-15: the stuck-redemption watchdog DETECTS + pages a stale `pending` strand (deregistered-vault case) but NOT a fresh pending row within the grace window — the state the old watchdog silently skipped', async () => {
     // A `pending` vault_redemptions row is a user-OWED redemption claimed
-    // at `claimVaultRedemption` with nothing on-chain yet (source order
-    // still `pending_payment`, `user_credits` not yet debited — the user
-    // is owed their money-out). If its vault is deregistered,
+    // at `claimVaultRedemption` with nothing on-chain yet (nothing
+    // collected, `user_credits` not yet debited — the user is owed
+    // their money-out). If its vault is deregistered,
     // `driveOneVaultRedemption` returns `no_vault` and leaves the row in
     // `pending` forever — a silent money-owed strand. The pre-fix
     // `VAULT_REDEMPTION_STUCK_STATES` (['collecting','redeemed']) excluded
@@ -813,10 +788,9 @@ describeIf('vault-redemptions integration — real postgres (ADR 031 V4)', () =>
     // must NEVER be surfaced while it is within the grace window — proof
     // the staleness threshold, not merely the state, is the gate.
     const user1 = await seedUser();
-    const order1 = await seedOrder({ userId: user1.id, chargeMinor: 500n });
     const r1 = await claimVaultRedemption({
-      sourceType: 'order_redeem',
-      sourceId: order1,
+      sourceType: 'withdrawal',
+      sourceId: crypto.randomUUID(),
       userId: user1.id,
       assetCode: 'LOOPUSD',
       network: 'testnet',
@@ -824,10 +798,9 @@ describeIf('vault-redemptions integration — real postgres (ADR 031 V4)', () =>
       fromAddress: user1.walletAddress,
     });
     const user2 = await seedUser();
-    const order2 = await seedOrder({ userId: user2.id, chargeMinor: 700n });
     await claimVaultRedemption({
-      sourceType: 'order_redeem',
-      sourceId: order2,
+      sourceType: 'withdrawal',
+      sourceId: crypto.randomUUID(),
       userId: user2.id,
       assetCode: 'LOOPUSD',
       network: 'testnet',

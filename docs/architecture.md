@@ -279,10 +279,10 @@ CLOSED ──(N consecutive failures)──→ OPEN ──(cooldown elapsed)─�
 | `cooldownMs`       | 30 000  | Milliseconds in OPEN before allowing a probe |
 
 - **4xx responses** do not count as failures (client errors, not upstream outage) — **except 429** (CF-12): a `429 Too Many Requests` is upstream back-pressure, not a client bug, so it counts toward the failure threshold and never resets the success counter. Without this the breaker would treat every rate-limited response as a success and never open under a CTX rate-limit storm.
-- **`forceOpen()`** (CF-13) trips a breaker OPEN out-of-band, bypassing the consecutive-failure count. `operatorFetch` uses it on a CTX `401` (an expired/invalid operator bearer is dead until rotated, so there's no value in waiting for five), pulling the operator from rotation and alerting via `notifyOperatorCredentialExpired`.
+- **`forceOpen()`** (CF-13) trips a breaker OPEN out-of-band, bypassing the consecutive-failure count. `ctxFetch` uses it on a CTX `401` (a rejected operator API key is dead until rotated, so there's no value in waiting for five), deferring all CTX calls and alerting via `notifyCtxCredentialInvalid` (ADR 051).
 - When OPEN, upstream proxy handlers return **503** `Service temporarily unavailable` (not 502).
 - The `/health` endpoint bypasses the circuit breaker — it probes upstream directly so external monitors can detect recovery. Probe result is cached 10s (PR #131) to stop an attacker from turning `/health` into an outbound-fetch amplifier; the probe's own fetch timeout is 8s so marginal CTX `/status` latency does not flap the service down prematurely.
-- `/health` now reports five operational classes in one response: CTX reachability, merchant/location/GeoLite2-db freshness (`geoDbStale` / `geoDbBuildEpoch` — go-live-plan §T1-F, `docs/deployment.md` §GeoLite2; false when GeoLite2 was never configured at all, not just when fresh), native-auth OTP delivery state, and per-worker runtime state (`payment_watcher`, `procurement_worker`, `payout_worker`, `asset_drift_watcher`, `interest_scheduler`, `interest_mint`, `auth_row_purge`, `redemption_backfill`, `wallet_provisioning`). It also exposes the rate limiter's current fleet-size divisor (`rateLimitFleetEstimate` / `rateLimitFleetEstimateSource` — S4-4, `docs/deployment.md` §Rate-limiter fleet-size estimate; purely informational, doesn't affect `status`).
+- `/health` now reports five operational classes in one response: CTX reachability, merchant/location/GeoLite2-db freshness (`geoDbStale` / `geoDbBuildEpoch` — go-live-plan §T1-F, `docs/deployment.md` §GeoLite2; false when GeoLite2 was never configured at all, not just when fresh), native-auth OTP delivery state, and per-worker runtime state (`ctx_mirror_sweep`, `payout_worker`, `asset_drift_watcher`, `interest_scheduler`, `interest_mint`, `auth_row_purge`, `redemption_backfill`, `wallet_provisioning`). It also exposes the rate limiter's current fleet-size divisor (`rateLimitFleetEstimate` / `rateLimitFleetEstimateSource` — S4-4, `docs/deployment.md` §Rate-limiter fleet-size estimate; purely informational, doesn't affect `status`).
 - Status-change notifications to the Discord monitoring channel are flap-damped by a rolling window: a healthy→degraded flip requires **5 degraded readings in the last 10 probes**, and a degraded→healthy flip requires **8 healthy readings in the last 10 probes**. On top of that detector, `notifyHealthChange` has a 30-minute per-process cooldown so a noisy incident does not flood the channel. The raw `/health` response body is always the current reading so Fly's liveness probe remains undebounced.
 - One breaker **per upstream endpoint** — `login`, `verify-email`, `refresh-token`, `logout`, `merchants`, `locations`, `gift-cards`. Lazily created via `getUpstreamCircuit(key)` in `circuit-breaker.ts`. Independent so a failing merchants sync can't trip auth, and a failing gift-cards endpoint can't trip clusters.
 
@@ -344,17 +344,11 @@ Phase-1 build, two controls, both in `apps/backend/src/fraud/`:
   per-IP — bounds one account's blast radius independent of the
   existing per-IP rate limiter. Fails CLOSED (503
   `ORDER_VELOCITY_CHECK_UNAVAILABLE`) if the query itself errors.
-- **Duplicate-account detection** (`fraud/duplicate-account-signals.ts`).
-  Called from `payments/watcher.ts` AFTER a `pending_payment → paid`
-  transition commits (fire-and-forget, never inside the transition).
-  Looks for other users' paid orders funded from the same on-chain
-  source account (`orders.payment_received_payment->>'from'`,
-  expression-indexed via `orders_payment_source_account`); a match
-  writes one row to `fraud_signals` (migration 0059) and pages
-  `#loop-monitoring` on first occurrence. **Flag only — never
-  auto-blocks.**
+  (Duplicate-account detection via shared on-chain funding source died
+  with the deposit watcher — ADR 052; customers no longer pay Loop, so
+  there is no on-chain source account to correlate.)
 
-Both controls, the full design rationale (why per-currency not
+The control, the full design rationale (why per-currency not
 FX-converted, why the query is shaped the way it is, the fail-safe
 posture), and what's explicitly deferred (device/IP signup capture, a
 real chargeback state machine for the eventual card/Plaid rail) are in
@@ -392,7 +386,6 @@ POST /api/orders             [authenticated]
 POST /api/orders/loop        [authenticated — Loop-native flow, ADR 010 + Idempotency-Key, A2-2003; `credit` method is migration-window only — wallet-activated users get 400 CREDIT_METHOD_RETIRED and spend via token redemption, ADR 036 OQ3; `loop_asset` gets 400 LOOP_ASSET_UNAVAILABLE_PHASE_1 while LOOP_PHASE_1_ONLY=true (AUDIT-2 finding B); gated by the ADR 045 (B-3) per-user velocity check before creation — 429 ORDER_VELOCITY_EXCEEDED / 503 ORDER_VELOCITY_CHECK_UNAVAILABLE]
 GET  /api/orders/loop        [authenticated — Loop-native list, ADR 010]
 GET  /api/orders/loop/:id    [authenticated — Loop-native flow, ADR 010]
-POST /api/orders/loop/:id/redeem [authenticated — one-tap LOOP-asset redemption from the embedded wallet: user-signed inner payment + operator fee-bump; watcher settles downstream, ADR 030 C3 / ADR 036; 400 LOOP_ASSET_UNAVAILABLE_PHASE_1 while LOOP_PHASE_1_ONLY=true, fail-closed even for pre-existing orders (AUDIT-2 finding B). ADR 031 §D6 (V4): when the order's chargeCurrency is vault-eligible (USD/EUR) and LOOP_VAULTS_ENABLED is on, forks internally to a Soroban vault-share redemption (orders/redeem-vault.ts + credits/vaults/vault-redemptions.ts) instead of the classic on-chain payment — same request/response shape, same status codes; gated off is byte-identical to the classic path above]
 GET  /api/orders             [authenticated]
 GET  /api/orders/:id         [authenticated]
 GET  /api/orders/:id/barcode-image [authenticated — reference-keyed barcode proxy, ADR 050: resolves the CTX barcode URL server-side, serves JPEG bytes private/no-store]
@@ -413,8 +406,6 @@ GET  /api/users/me/cashback-summary [authenticated — compact { lifetime, thisM
 GET  /api/users/me/cashback-by-merchant [authenticated — top cashback-earning merchants in window, ADR 009/015]
 GET  /api/users/me/cashback-monthly [authenticated — last 12 months of cashback totals by (month,currency), ADR 009/015]
 GET  /api/users/me/orders/summary   [authenticated — 5-number orders-page summary header, ADR 010/015]
-GET  /api/users/me/flywheel-stats   [authenticated — caller's LOOP-asset recycled order count + charge, ADR 015]
-GET  /api/users/me/payment-method-share [authenticated — caller's own rail mix, home-currency locked, ADR 010/015]
 GET  /api/me/wallet                [authenticated — embedded-wallet balance surface: address + provisioning + on-chain LOOP balances + interest APY (non-zero only when the ADR 031 on-chain mint path is enabled); never-500 last-known-good fallback, ADR 030 C4 / ADR 036]
 GET  /api/me/vault-apy             [authenticated — past-30d/90d realised APY per LOOP-branded yield asset (LOOPUSD/LOOPEUR from vault share-price history, GBPLOOP from interest-mint history); never discloses the yield mechanism, ADR 031 §D8]
 GET  /api/public/cashback-stats    [public — landing-page aggregates, never-500, ADR 009/015/020]
@@ -422,7 +413,6 @@ GET  /api/public/top-cashback-merchants [public — landing-page "best cashback"
 GET  /api/public/merchants/:id     [public — per-merchant SEO detail (accepts id or slug); ?country (CAT-02) 404s an out-of-country merchant, never-500, ADR 011/020]
 GET  /api/public/cashback-preview  [public — pre-signup "calculate your cashback" preview: ?merchantId + ?amountMinor → floor-rounded cashback, never-500, ADR 011/015/020]
 GET  /api/public/loop-assets       [public — configured (code, issuer) pairs for trustline setup, never-500, ADR 015/020]
-GET  /api/public/flywheel-stats    [public — 30-day fulfilled + recycled counts + % pill, never-500, ADR 015/020]
 GET  /api/public/geo               [public — IP-geolocation first guess for the `/` locale redirect + onboarding currency → { countryCode, region }, never-500, ADR 020/033/034]
 POST /api/public/rum               [public — first-party, cookieless RUM intake: one Core Web Vital observation or a bare page-view marker, folded into /metrics (loop_web_vital_* / loop_page_views_total); no DB, no PII, no persistent id, never-500, ADR 020/048]
 GET  /api/admin/merchant-cashback-configs              [admin]
@@ -435,11 +425,7 @@ GET  /api/admin/treasury/credit-flow                   [admin — per-day credit
 GET  /api/admin/treasury/credit-flow.csv               [admin — Tier-3 CSV of the credit-flow time series for month-end ledger reconciliation, ADR 009/015/018]
 GET  /api/admin/assets/:assetCode/circulation          [admin — per-asset circulation drift: onChain stroops vs ledger liability, ADR 015]
 GET  /api/admin/asset-drift/state                      [admin — persisted snapshot of the asset-drift watcher (asset_drift_state table): per-asset drift state + failed burn/mint rows dimension + last tick ms, ADR 015]
-GET  /api/admin/operator-float/movements               [admin — R3-1 operator XLM/USDC wallet movement drilldown, defaults to unclassified movements for float-reconciliation triage]
-POST /api/admin/operator-float/baselines               [admin + step-up(operator-float) — R3-1 audited reconciliation baseline, idempotent ADR 017 write]
-POST /api/admin/operator-float/manual-movements        [admin + step-up(operator-float) — R3-1 audited manual float movement/explanation, idempotent ADR 017 write]
 GET  /api/admin/interest/mint-forecast                 [admin — forward-mint forecast for the interest pool: per-currency cohort balance, daily interest, pool balance, days of cover, recommended next-mint amount, ADR 009/015]
-GET  /api/admin/payouts/settlement-lag                 [admin — p50/p95/max seconds from payout-intent to on-chain confirm, per LOOP asset + fleet-wide, ADR 015/016]
 GET  /api/admin/cashback-realization                   [admin — per-currency lifetime earned vs spent vs outstanding; recycledBps = flywheel-health KPI, ADR 009/015]
 GET  /api/admin/cashback-realization/daily             [admin — daily time-series of earned/spent/recycledBps per currency over N days; sparkline-ready dense output, ADR 009/015]
 GET  /api/admin/cashback-realization/daily.csv         [admin — Tier-3 finance CSV export of the daily realization trend (day,currency,earned_minor,spent_minor,recycled_bps), ADR 009/015/018]
@@ -458,7 +444,6 @@ POST /api/admin/users/:userId/home-currency              [admin — change home_
 POST /api/admin/users/:userId/revoke-sessions            [admin — B4: revoke a user's live sessions (incident response); step-up-exempt]
 GET  /api/admin/users/:userId/auth-state                 [staff — A5-3: B5 verify-otp lockout snapshot + OTP request/verify timestamps + live-session count; read-only, never returns a code/hash]
 POST /api/admin/users/:userId/clear-otp-lockout          [admin — A5-3: clear the B5 verify-otp lockout counter (reuses clearOtpAttempts); ADR-017-lite (Idempotency-Key + reason), step-up-exempt]
-POST /api/admin/deposits/:paymentId/refund               [admin + step-up — A6: refund an abandoned late deposit to its on-chain sender]
 GET  /api/admin/rails/kill-switches                      [admin — NS-04: list the four money rails (deposit/payout/vault/refund) and their halt state]
 POST /api/admin/rails/:rail/halt                         [admin + step-up — NS-04: halt a money rail; rejects new ops (block-new-only), ADR-017]
 POST /api/admin/rails/:rail/resume                       [admin + step-up — NS-04: resume a halted money rail, ADR-017]
@@ -473,17 +458,12 @@ GET  /api/users/me/recently-purchased                   [user — distinct merch
 POST /api/admin/step-up                                 [admin — mint 5-min step-up token, ADR-028 / A4-063]
 GET  /api/admin/payouts.csv                            [admin — finance-ready CSV export, ADR 015]
 GET  /api/admin/orders                                  [admin — Loop-native orders drill-down + ?state/?userId/?merchantId/?chargeCurrency/?paymentMethod/?ctxOperatorId filters, ADR 011/013/015]
-GET  /api/admin/merchant-flows                          [admin — per-merchant fulfilled-order flow, ADR 011/015]
 GET  /api/admin/discord/config                          [admin — webhook env-var configured? ADR 018]
 GET  /api/admin/users/search                            [admin — find users by email fragment, ADR 011]
 GET  /api/admin/user-credits.csv                        [admin — Tier-3 CSV of off-chain balances, ADR 009/019]
 GET  /api/admin/reconciliation                          [admin — ledger drift check, ADR 009]
-GET  /api/admin/operator-stats                          [admin — per-operator order volume + success rate, ADR 013]
-GET  /api/admin/operators/latency                       [admin — per-operator p50/p95/p99 fulfilment latency, ADR 013/022]
-GET  /api/admin/operators-snapshot.csv                  [admin — Tier-3 CSV joining operator-stats + latency per operator for CTX quarterly reviews, ADR 013/018/022]
 GET  /api/admin/orders/activity                         [admin — N-day created/fulfilled sparkline, ADR 010]
 GET  /api/admin/orders.csv                              [admin — finance-ready CSV export, ADR 011/015]
-GET  /api/admin/stuck-orders                            [admin — SLO stuck-in-paid/procuring triage, ADR 011/013]
 GET  /api/admin/stuck-payouts                           [admin — SLO stuck-in-pending/submitted payouts, ADR 015/016]
 GET  /api/admin/cashback-activity                       [admin — daily cashback-accrual sparkline, ADR 009/015]
 GET  /api/admin/cashback-activity.csv                   [admin — finance CSV export of daily × per-currency accrual, ADR 009/015/018]
@@ -493,44 +473,24 @@ GET  /api/admin/payouts-activity                        [admin — daily per-ass
 GET  /api/admin/payouts-activity.csv                    [admin — Tier-3 CSV of daily × per-asset confirmed payouts for month-end close, ADR 015/016/018]
 GET  /api/admin/merchant-stats                          [admin — per-merchant cashback stats, ADR 011/015]
 GET  /api/admin/merchant-stats.csv                      [admin — per-merchant CSV for CTX negotiation, ADR 011/015/018]
-GET  /api/admin/merchants/:merchantId/operator-mix      [admin — per-merchant × per-operator attribution for incident triage, ADR 013/022]
-GET  /api/admin/merchants/flywheel-share                [admin — per-merchant loop_asset recycled leaderboard, ADR 011/015]
-GET  /api/admin/merchants/flywheel-share.csv            [admin — Tier-3 CSV export of the flywheel leaderboard, ADR 011/015/018]
-GET  /api/admin/merchants/:merchantId/flywheel-stats    [admin — per-merchant scalar flywheel stats for the drill page, ADR 011/015]
 GET  /api/admin/merchants/:merchantId/cashback-summary  [admin — per-currency lifetime cashback paid out on fulfilled orders, ADR 009/011/015]
-GET  /api/admin/merchants/:merchantId/payment-method-share [admin — rail mix for one merchant, sibling of fleet-wide share, ADR 010/015]
 GET  /api/admin/merchants/:merchantId/cashback-monthly  [admin — 12-month per-merchant cashback emission trend, ADR 009/011/015]
-GET  /api/admin/merchants/:merchantId/flywheel-activity [admin — daily per-merchant recycled-vs-total fulfilled-order series (1-180d), ADR 011/015]
-GET  /api/admin/merchants/:merchantId/flywheel-activity.csv [admin — Tier-3 CSV of per-merchant flywheel-activity for BD / commercial prep, ADR 011/015/018]
 GET  /api/admin/merchants/:merchantId/top-earners       [admin — ranked top cashback earners at one merchant (inverse of user-cashback-by-merchant), ADR 009/011/015]
 GET  /api/admin/merchant-cashback-configs.csv           [admin — snapshot CSV of commercial terms, ADR 011/018]
 GET  /api/admin/merchants-catalog.csv                   [admin — full catalog + joined cashback config state as CSV for finance/BD, ADR 011/018]
 GET  /api/admin/orders/:orderId                         [admin — single order detail, ADR 011/015]
 GET  /api/admin/orders/:orderId/payout                  [admin — payout row for a given order]
-GET  /api/admin/orders/payment-method-share             [admin — cashback-flywheel metric: xlm/usdc/credit/loop_asset share, ADR 010/015]
-GET  /api/admin/orders/payment-method-activity          [admin — daily payment-method time-series (1-90d), trend complement to the share, ADR 010/015]
-GET  /api/admin/supplier-spend                          [admin — per-currency supplier spend, ADR 013/015]
 GET  /api/admin/ctx-commission                          [admin — CTX operator-commission balances + recent settlements (proxy of CTX GET /companies/:id/commission), ctx-interop]
-GET  /api/admin/supplier-spend/activity                 [admin — per-day per-currency supplier spend time-series (1-180d, ?currency=USD|GBP|EUR), ADR 013/015]
-GET  /api/admin/supplier-spend/activity.csv             [admin — Tier-3 CSV of daily × per-currency supplier spend for month-end CTX-invoice reconciliation, ADR 013/015/018]
-GET  /api/admin/operators/:operatorId/supplier-spend    [admin — per-operator per-currency supplier spend (axis of fleet supplier-spend), ADR 013/015/022]
-GET  /api/admin/operators/:operatorId/activity          [admin — per-operator daily created/fulfilled/failed time-series (1-90d), ADR 013/022]
-GET  /api/admin/operators/:operatorId/merchant-mix      [admin — per-operator × per-merchant attribution (dual of /merchants/:id/operator-mix), ADR 013/022]
 GET  /api/admin/users                                   [admin — paginated user directory w/ email fragment filter]
 GET  /api/admin/users/by-email?email=                   [admin — exact-match user lookup for support-ticket workflow]
 GET  /api/admin/users/top-by-pending-payout             [admin — ops funding prioritisation leaderboard, ADR 015/016]
-GET  /api/admin/users/recycling-activity                 [admin — 90-day list of users recycling LOOP-asset cashback, ADR 015]
-GET  /api/admin/users/recycling-activity.csv             [admin — Tier-3 CSV export of the user recycling leaderboard, ADR 015/018]
 GET  /api/admin/users/:userId                           [admin — single-user detail]
 GET  /api/admin/users/:userId/credits                   [admin — per-user credit balance, ADR 009]
 GET  /api/admin/users/:userId/cashback-by-merchant       [admin — per-user cashback-by-merchant support triage, ADR 009/015]
 GET  /api/admin/users/:userId/cashback-summary           [admin — scalar lifetime + this-month cashback headline, ADR 009/015]
-GET  /api/admin/users/:userId/flywheel-stats             [admin — scalar recycled-vs-total per-user flywheel mirror, ADR 015]
 GET  /api/admin/users/:userId/cashback-monthly           [admin — 12-month per-user cashback emission trend, ADR 009/015]
-GET  /api/admin/users/:userId/payment-method-share       [admin — per-user rail mix, sibling of fleet + per-merchant share, ADR 010/015]
 GET  /api/admin/users/:userId/credit-transactions       [admin — per-user credit-ledger log, ADR 009]
 GET  /api/admin/users/:userId/credit-transactions.csv   [admin — per-user credit-ledger CSV for compliance / SAR, ADR 009/015]
-GET  /api/admin/users/:userId/operator-mix              [admin — per-user × per-operator attribution for support triage, ADR 013/022]
 POST /api/admin/merchants/resync                        [admin — force an immediate CTX merchant-catalog sweep, ADR 011]
 GET  /api/admin/discord/notifiers                       [admin — static catalog of Discord notifiers, ADR 018]
 POST /api/admin/discord/test                            [admin — fire a benign test ping at a Discord channel, ADR 018]
@@ -538,14 +498,9 @@ GET  /api/admin/staff                                   [admin — staff list in
 PUT  /api/admin/staff/:userId/role                      [admin — grant/change a staff role; step-up + ADR-017 envelope; last-admin + self-demotion guards, ADR 037]
 DELETE /api/admin/staff/:userId/role                    [admin — revoke staff access; step-up + ADR-017 envelope; last-admin + self-revoke guards, ADR 037]
 GET  /api/admin/lookup?q=                               [staff — reverse lookup: order id | payment memo | Stellar address → owning user; index-backed only, ADR 037]
-GET  /api/admin/watcher-skips                           [staff — payment_watcher_skips browser, ?status/?reason filters + ?before keyset cursor, ADR 037]
-GET  /api/admin/watcher-skips/:paymentId                [staff — skip-row detail incl. the Horizon payment snapshot, ADR 037]
-POST /api/admin/watcher-skips/:paymentId/reopen         [staff — support action: abandoned → pending with attempts reset; ADR-017 envelope, ADR 037]
 GET  /api/admin/users/:userId/wallet                    [staff — wallet card: provider/wallet_id/addresses/provisioning + on-chain balances via the trustline reader, ADR 030/037]
 POST /api/admin/users/:userId/wallet/reprovision        [staff — support action: reset provisioning attempts + re-enqueue the drive; ADR-017 envelope, ADR 037]
 POST /api/admin/orders/:orderId/refetch-redemption      [staff — support action: one-shot redemption re-fetch via the backfill machinery; ADR-017 envelope, ADR 037]
-POST /api/admin/orders/:orderId/redrive                 [admin — A5-1 order re-drive lever: re-runs the procurement worker's own path for a stuck PAID order the worker never drained (procuring refused — the recovery sweep owns those); step-up gated, ADR-017 envelope]
-POST /api/admin/orders/:orderId/refund                  [admin — A5-4 order-bound refund: paid/failed refund directly, procuring only once stale (>15-min sweep cutoff) AND CTX-unpaid, fulfilled needs a code-unused attestation ({codeUnused,attestationNote}); reuses the existing refund primitives per payment_method (on-chain refund-to-sender for xlm/usdc, mirror credit for credit, fail-closed for loop_asset); paid/procuring fenced to failed first; INV-8-idempotent; step-up gated (order-refund scope), ADR-017 envelope]
 POST /api/admin/vault-emissions/:id/redrive              [admin — ADR 031 V7 vault-emission re-drive: re-enters the existing driveOneVaultEmission for a failed (attempts-exhausted) or operator-confirmed-stuck row; resume state inferred from persisted depositedAt/transferredAt landing markers (never blindly reset to pending) so a completed deposit/transfer is verified via CF-18 priorTxHash, never re-submitted; serialised against the emission sweep via its fleet-wide advisory lock (a reclaimed row skips the pending→depositing CAS, so an un-serialised re-drive racing the sweep is a double-deposit/double-transfer vector) — 409 VAULT_EMISSION_REDRIVE_SWEEP_IN_PROGRESS when the sweep holds the lock; refuses (409) an already-mirrored row; step-up gated (vault-redrive scope), ADR-017 envelope]
 POST /api/admin/vault-redemptions/:id/redrive            [admin — ADR 031 V7 vault-redemption re-drive: re-enters the existing driveOneVaultRedemption; failed rows resume from redeemedAt (redeemed → only the mirror step re-runs; otherwise collecting → the existing branch skips an already-landed collect); a needs-refund row (markRedemptionNeedsRefund signature) is refused with 409 rather than silently re-attempting a payout; refuses (409) an already-settled row; step-up gated (vault-redrive scope, shared with the emission-side endpoint), ADR-017 envelope]
 GET  /api/admin/ledger                                  [staff — fleet-wide credit_transactions browser: ?userId/?type/?referenceType+?referenceId/?since/?before filters, keyset-paginated (?before cursor, limit [1,200] default 50), read-only, ADR 037 §4.2 / A5-8]

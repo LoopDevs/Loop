@@ -36,11 +36,6 @@
 import type { Hono } from 'hono';
 import { rateLimit } from '../middleware/rate-limit.js';
 import { requireStaff } from '../auth/require-staff.js';
-import {
-  adminGetWatcherSkipHandler,
-  adminListWatcherSkipsHandler,
-  adminReopenWatcherSkipHandler,
-} from '../admin/watcher-skips.js';
 import { adminGetUserWalletHandler, adminWalletReprovisionHandler } from '../admin/user-wallet.js';
 import { adminRefetchRedemptionHandler } from '../admin/order-refetch-redemption.js';
 import { adminLookupHandler } from '../admin/lookup.js';
@@ -61,28 +56,6 @@ export function mountAdminSupportOpsRoutes(app: Hono): void {
     rateLimit('GET /api/admin/lookup', 60, 60_000),
     requireStaff('support'),
     adminLookupHandler,
-  );
-  // Watcher skip-row browser (payment_watcher_skips, migration
-  // 0033). List before :paymentId so the literal path wins.
-  app.get(
-    '/api/admin/watcher-skips',
-    rateLimit('GET /api/admin/watcher-skips', 60, 60_000),
-    requireStaff('support'),
-    adminListWatcherSkipsHandler,
-  );
-  app.get(
-    '/api/admin/watcher-skips/:paymentId',
-    rateLimit('GET /api/admin/watcher-skips/:paymentId', 120, 60_000),
-    requireStaff('support'),
-    adminGetWatcherSkipHandler,
-  );
-  // Support action: abandoned → pending with the attempt budget
-  // reset (runbook: deposit-skip-abandoned.md).
-  app.post(
-    '/api/admin/watcher-skips/:paymentId/reopen',
-    rateLimit('POST /api/admin/watcher-skips/:paymentId/reopen', 20, 60_000),
-    requireStaff('support'),
-    adminReopenWatcherSkipHandler,
   );
   // Per-user wallet card — provisioning state + provider linkage +
   // on-chain balances via the Horizon trustline reader.

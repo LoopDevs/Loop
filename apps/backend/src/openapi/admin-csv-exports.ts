@@ -18,11 +18,10 @@
  * unlike the JSON-response sections that share dozens of inline
  * `z.object` definitions further up admin.ts.
  *
- * The bottom-of-file `/api/admin/treasury.csv` and
- * `/api/admin/operators-snapshot.csv` declare 401/403 responses
- * because the matching handlers wrap the CSV emission with the
- * usual `requireAuth` + `requireAdmin` chain — the other CSV
- * handlers fall through the same chain but the original openapi
+ * The bottom-of-file `/api/admin/treasury.csv` declares 401/403
+ * responses because the matching handler wraps the CSV emission
+ * with the usual `requireAuth` + `requireAdmin` chain — the other
+ * CSV handlers fall through the same chain but the original openapi
  * registrations only declared 429 + 500, so we preserve that
  * verbatim rather than retrofit (a later parity-pass on admin
  * 401/403 documentation can sweep them all together).
@@ -93,46 +92,6 @@ export function registerAdminCsvExportsOpenApi(
 
   registry.registerPath({
     method: 'get',
-    path: '/api/admin/merchants/{merchantId}/flywheel-activity.csv',
-    summary: 'Per-merchant flywheel-activity CSV for BD/commercial prep (ADR 011/015/018).',
-    description:
-      "Tier-3 CSV of /api/admin/merchants/:merchantId/flywheel-activity. Columns: day,recycled_count,total_count,recycled_charge_minor,total_charge_minor. Filename includes merchantId so multi-merchant BD pulls don't collide.",
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      params: z.object({ merchantId: z.string() }),
-      query: z.object({
-        days: z.coerce.number().int().min(1).max(366).optional(),
-      }),
-    },
-    responses: {
-      200: {
-        description: 'CSV body',
-        content: { 'text/csv; charset=utf-8': { schema: z.string() } },
-      },
-      400: {
-        description: 'Malformed merchantId',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      404: {
-        description:
-          'Not found — also returned to authenticated non-admin callers: requireAdmin masks the admin surface as 404 by design (see src/auth/require-admin.ts).',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (10/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: { description: 'DB error', content: { 'application/json': { schema: errorResponse } } },
-    },
-  });
-
-  registry.registerPath({
-    method: 'get',
     path: '/api/admin/merchants-catalog.csv',
     summary: 'Full merchant catalog + cashback-config state as CSV (ADR 011/018).',
     description:
@@ -161,46 +120,6 @@ export function registerAdminCsvExportsOpenApi(
     },
   });
 
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/supplier-spend/activity.csv',
-    summary: 'Daily × per-currency supplier-spend CSV (ADR 013/015/018).',
-    description:
-      "Tier-3 CSV of /api/admin/supplier-spend/activity. Columns: day,currency,count,face_value_minor,wholesale_minor,user_cashback_minor,loop_margin_minor. Finance runs this at month-end to reconcile CTX's invoice — wholesale_minor per (day, currency) should tie to CTX's line items. Zero-activity days emit day,,0,0,0,0,0. Window: ?days (default 31, cap 366). Row cap 10 000.",
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      query: z.object({
-        days: z.coerce.number().int().min(1).max(366).optional(),
-        currency: z.enum(['USD', 'GBP', 'EUR']).optional(),
-      }),
-    },
-    responses: {
-      200: {
-        description: 'CSV body',
-        content: { 'text/csv; charset=utf-8': { schema: z.string() } },
-      },
-      400: {
-        description: 'Unknown `currency`',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      404: {
-        description:
-          'Not found — also returned to authenticated non-admin callers: requireAdmin masks the admin surface as 404 by design (see src/auth/require-admin.ts).',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (10/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: { description: 'DB error', content: { 'application/json': { schema: errorResponse } } },
-    },
-  });
-
   // The two treasury CSVs (`/api/admin/treasury/credit-flow.csv`
   // and `/api/admin/treasury.csv`) live in
   // `./admin-csv-exports-treasury.ts`. Both fund the SOC-2 /
@@ -208,45 +127,6 @@ export function registerAdminCsvExportsOpenApi(
   // time snapshot diff cleanly in audit tooling. Same path-
   // registration position as the original block.
   registerAdminCsvExportsTreasuryOpenApi(registry, errorResponse);
-
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/operators-snapshot.csv',
-    summary: 'Per-operator fleet snapshot CSV for CTX reviews (ADR 013/018/022).',
-    description:
-      'Tier-3 CSV joining operator-stats + operator-latency into one row per operator. Columns: operator_id,order_count,fulfilled_count,failed_count,success_pct,sample_count,p50_ms,p95_ms,p99_ms,mean_ms,last_order_at. Handed to CTX relationship owners for quarterly review meetings — SLA + volume + success rate on one sheet. Stats is the LEFT side: operators with orders but no fulfilled-with-timings samples get zero-filled latency columns. ?since default 24h, cap 366d.',
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      query: z.object({
-        since: z.string().datetime().optional(),
-      }),
-    },
-    responses: {
-      200: {
-        description: 'CSV body',
-        content: { 'text/csv; charset=utf-8': { schema: z.string() } },
-      },
-      400: {
-        description: 'Invalid or out-of-window `since`',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      404: {
-        description:
-          'Not found — also returned to authenticated non-admin callers: requireAdmin masks the admin surface as 404 by design (see src/auth/require-admin.ts).',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (10/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: { description: 'DB error', content: { 'application/json': { schema: errorResponse } } },
-    },
-  });
 
   // ─── Three CSV exports lifted from the treasury+payouts block ───────────────
   //

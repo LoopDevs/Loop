@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ApiException, type LoopAssetCode } from '@loop/shared';
+import { ApiException } from '@loop/shared';
 import {
   LOOP_NATIVE_PENDING_ORDER_KEY,
   savePendingOrder,
@@ -31,13 +31,12 @@ import {
  * to sessionStorage / Keychain is a POINTER only — `{ merchantId, orderId }`
  * — never any payment-directing value. On restore we GET the order
  * (`GET /api/orders/loop/:id`, owner-scoped) and rebuild the ENTIRE pay
- * screen from that server response's fields (`stellarAddress`,
- * `paymentMemo`, `assetAmount`, `paymentUri`, `assetCode`, `assetIssuer`
- * — the last four re-quoted server-side, see the read handler). NOTHING
- * that directs a payment (destination, memo, amount, asset, deep-link)
- * ever comes from client storage, so there is no client-side field to
- * tamper: an attacker with sessionStorage/Keychain write access can at
- * most change the `orderId` we look up, and:
+ * screen from that server response's `payment` object (ADR 052: CTX's
+ * own payment instructions, populated only while the order is still
+ * `unpaid`). NOTHING that directs a payment (destination, amount,
+ * currency, deep-link) ever comes from client storage, so there is no
+ * client-side field to tamper: an attacker with sessionStorage/Keychain
+ * write access can at most change the `orderId` we look up, and:
  *   - an unknown / other-user id → owner-scoped GET 404s → we clear it;
  *   - a different order the SAME user owns → the server rebuilds THAT
  *     order's real payment payload → still safe (it's the caller's own
@@ -47,7 +46,7 @@ import {
  *   1. Read-only — only ever `GET /api/orders/loop/:id`, never
  *      `POST /api/orders/loop`, so a restore can never create a
  *      duplicate order.
- *   2. Refuses to restore a terminal order (fulfilled/failed/expired) —
+ *   2. Refuses to restore a terminal order (fulfilled/rejected/refunded/expired) —
  *      those belong on order history, not a resurrected pay form — and
  *      clears the pointer.
  *   3. Fail-closed: a 404/401/403 clears the pointer; any other error
@@ -111,7 +110,7 @@ export function saveLoopPendingOrder(record: PersistedLoopOrderPointer): void {
 }
 
 /** Clears the persisted pointer. Call on terminal state (fulfilled /
- *  failed / expired) and on a not-found/forbidden restore GET. */
+ *  rejected / refunded / expired) and on a not-found/forbidden restore GET. */
 export function clearLoopPendingOrder(): void {
   enqueuePersist(() => clearPendingOrder(LOOP_NATIVE_PENDING_ORDER_KEY));
 }
@@ -154,64 +153,18 @@ export function validatePersistedLoopOrder(
  * server response, none from client storage.
  *
  * Returns null when the server didn't supply enough to render a pay
- * screen — a credit order that isn't `credit` (impossible), or an
- * on-chain order whose server-derived guidance fields are absent (oracle
- * down / issuer unset at read time, or a terminal order the caller should
- * not be resuming). A null result means "can't resume right now"; the
- * caller leaves the pointer in place so a later remount can retry once
- * the server can derive the guidance.
+ * screen — the detail read only populates `payment` while the order is
+ * still `unpaid` and the CTX payment read succeeded. A null result
+ * means "can't resume right now"; the caller leaves the pointer in
+ * place so a later remount can retry once the server can relay the
+ * instructions.
  */
 export function loopOrderViewToCreate(view: LoopOrderView): CreateLoopOrderResponse | null {
-  if (view.paymentMethod === 'credit') {
-    return {
-      orderId: view.id,
-      payment: {
-        method: 'credit',
-        amountMinor: view.chargeMinor,
-        currency: view.chargeCurrency,
-      },
-    };
-  }
-  // On-chain: require the full server-derived payment guidance. Any
-  // missing field means we cannot render a corroborated pay screen.
-  if (
-    view.stellarAddress === null ||
-    view.paymentMemo === null ||
-    view.assetAmount === null ||
-    view.paymentUri === null
-  ) {
-    return null;
-  }
-  if (view.paymentMethod === 'loop_asset') {
-    if (view.assetCode === null || view.assetIssuer === null) return null;
-    return {
-      orderId: view.id,
-      payment: {
-        method: 'loop_asset',
-        stellarAddress: view.stellarAddress,
-        memo: view.paymentMemo,
-        amountMinor: view.chargeMinor,
-        currency: view.chargeCurrency,
-        // The server only ever writes a valid LoopAssetCode here.
-        assetCode: view.assetCode as LoopAssetCode,
-        assetIssuer: view.assetIssuer,
-        assetAmount: view.assetAmount,
-        paymentUri: view.paymentUri,
-      },
-    };
-  }
-  // xlm / usdc
+  if (view.payment === null) return null;
   return {
     orderId: view.id,
-    payment: {
-      method: view.paymentMethod,
-      stellarAddress: view.stellarAddress,
-      memo: view.paymentMemo,
-      amountMinor: view.chargeMinor,
-      currency: view.chargeCurrency,
-      assetAmount: view.assetAmount,
-      paymentUri: view.paymentUri,
-    },
+    state: view.state,
+    payment: view.payment,
   };
 }
 
@@ -246,9 +199,9 @@ export function useLoopOrderRestore({ merchantId, enabled }: UseLoopOrderRestore
         }
 
         // Rebuild the pay screen ENTIRELY from the server response. If the
-        // server couldn't derive the on-chain guidance (oracle down /
-        // issuer unset at read time), don't restore — but leave the
-        // pointer so a later remount retries once the server can derive.
+        // server couldn't relay CTX's payment instructions (upstream
+        // payment read unavailable), don't restore — but leave the
+        // pointer so a later remount retries once the server can relay.
         const create = loopOrderViewToCreate(order);
         if (create === null) return;
 

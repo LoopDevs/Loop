@@ -1,14 +1,10 @@
 /**
  * Embedded-wallet API (ADR 030 Phase C).
  *
- * Thin wrappers over `GET /api/me/wallet` (balance surface) and
- * `POST /api/orders/loop/:id/redeem` (one-tap redemption, ADR 036
- * term). Wire shapes live in `@loop/shared/users-wallet.ts` (the
- * balance surface) and `@loop/shared/loop-orders.ts`
- * (`RedeemLoopOrderResponse`) — ADR 019, shared with the backend's
- * handlers, one definition each; this module holds fetchers, local
- * re-exports, and the pure cover-math helpers the checkout button
- * needs.
+ * Thin wrappers over `GET /api/me/wallet` (balance surface). Wire
+ * shapes live in `@loop/shared/users-wallet.ts` — ADR 019, shared
+ * with the backend's handlers, one definition each; this module holds
+ * fetchers, local re-exports, and the pure balance-math helpers.
  *
  * The on-chain LOOP-asset balance is the user's authoritative balance
  * — the off-chain mirror is never user-visible. Balances arrive as
@@ -17,20 +13,10 @@
  * normalises both to stroops before comparing so no float precision
  * is involved.
  */
-import type {
-  RedeemLoopOrderResponse,
-  UserWalletBalance,
-  UserWalletResponse,
-  WalletProvisioningState,
-} from '@loop/shared';
+import type { UserWalletBalance, UserWalletResponse, WalletProvisioningState } from '@loop/shared';
 import { authenticatedRequest } from './api-client';
 
-export type {
-  UserWalletBalance,
-  UserWalletResponse,
-  RedeemLoopOrderResponse,
-  WalletProvisioningState,
-};
+export type { UserWalletBalance, UserWalletResponse, WalletProvisioningState };
 
 /**
  * `GET /api/me/wallet` — the caller's embedded-wallet surface:
@@ -38,25 +24,6 @@ export type {
  */
 export async function getMyWallet(): Promise<UserWalletResponse> {
   return authenticatedRequest<UserWalletResponse>('/api/me/wallet');
-}
-
-/**
- * `POST /api/orders/loop/:id/redeem` — one-tap payment of a
- * `pending_payment` Loop-native order from the user's on-chain LOOP
- * balance. Idempotent on order id server-side, so a double-tap can't
- * double-spend. The response carries the order's post-submit `state`;
- * callers keep polling `GET /api/orders/loop/:id` exactly as the
- * crypto-deposit path does — the watcher stays authoritative.
- *
- * Errors surface as `ApiException`: 400 `INSUFFICIENT_BALANCE` when
- * the balance doesn't cover the charge, 503 when the wallet provider
- * or Horizon is unavailable.
- */
-export async function redeemLoopOrder(orderId: string): Promise<RedeemLoopOrderResponse> {
-  return authenticatedRequest<RedeemLoopOrderResponse>(
-    `/api/orders/loop/${encodeURIComponent(orderId)}/redeem`,
-    { method: 'POST' },
-  );
 }
 
 /**

@@ -11,8 +11,8 @@ import {
 } from './merchants/sync.js';
 import { startMerchantWs, stopMerchantWs } from './merchants/ws-maintainer.js';
 import { runMigrations, closeDb } from './db/client.js';
-import { startPaymentWatcher, stopPaymentWatcher } from './payments/watcher.js';
-import { startProcurementWorker, stopProcurementWorker } from './orders/procurement.js';
+import { startGiftcardWs, stopGiftcardWs } from './ctx/giftcard-ws-maintainer.js';
+import { startMirrorSweep, stopMirrorSweep } from './orders/ctx-mirror-sweep.js';
 import { startRedemptionBackfill, stopRedemptionBackfill } from './orders/redemption-backfill.js';
 import {
   startPayoutWorker,
@@ -20,10 +20,6 @@ import {
   resolvePayoutConfig,
 } from './payments/payout-worker.js';
 import { startAssetDriftWatcher, stopAssetDriftWatcher } from './payments/asset-drift-watcher.js';
-import {
-  startOperatorFloatReconciliationWatcher,
-  stopOperatorFloatReconciliationWatcher,
-} from './payments/operator-float-reconciliation.js';
 import {
   startInterestPoolWatcher,
   stopInterestPoolWatcher,
@@ -148,43 +144,18 @@ const locationStartTimer = setTimeout(() => {
   void startLocationRefresh();
 }, 3000);
 
-// Loop-native order workers (ADR 010). Gated behind LOOP_WORKERS_ENABLED
-// so a fresh checkout doesn't start hammering Horizon / CTX before an
-// operator has configured the Stellar deposit address + operator pool.
-// Missing LOOP_STELLAR_DEPOSIT_ADDRESS with the flag on is a config
-// error — log loudly but don't crash, so operators can still hit /health.
+// Loop order workers (ADR 052). Gated behind LOOP_WORKERS_ENABLED so a
+// fresh checkout doesn't start hammering CTX before an operator has
+// configured the API credentials. ctx is the payment processor — the
+// giftcard ws maintainer pushes status onto the mirror, the mirror
+// sweep reconciles missed events + payment expiry.
 if (env.LOOP_WORKERS_ENABLED) {
-  if (env.LOOP_STELLAR_DEPOSIT_ADDRESS === undefined) {
-    markWorkerBlocked('payment_watcher', {
-      reason: 'LOOP_STELLAR_DEPOSIT_ADDRESS is unset',
-      staleAfterMs: env.LOOP_PAYMENT_WATCHER_INTERVAL_SECONDS * 3000,
-    });
-    markWorkerBlocked('operator_float_reconciliation', {
-      reason: 'LOOP_STELLAR_DEPOSIT_ADDRESS is unset',
-      staleAfterMs: env.LOOP_OPERATOR_FLOAT_RECONCILIATION_INTERVAL_HOURS * 3 * 60 * 60 * 1000,
-    });
-    logger.error(
-      'LOOP_WORKERS_ENABLED=true but LOOP_STELLAR_DEPOSIT_ADDRESS is unset — payment watcher and operator-float reconciliation will not start',
-    );
-  } else {
-    startPaymentWatcher({
-      account: env.LOOP_STELLAR_DEPOSIT_ADDRESS,
-      ...(env.LOOP_STELLAR_USDC_ISSUER !== undefined
-        ? { usdcIssuer: env.LOOP_STELLAR_USDC_ISSUER }
-        : {}),
-      intervalMs: env.LOOP_PAYMENT_WATCHER_INTERVAL_SECONDS * 1000,
-    });
-    startOperatorFloatReconciliationWatcher({
-      intervalMs: env.LOOP_OPERATOR_FLOAT_RECONCILIATION_INTERVAL_HOURS * 60 * 60 * 1000,
-    });
-  }
-  startProcurementWorker({
-    intervalMs: env.LOOP_PROCUREMENT_INTERVAL_SECONDS * 1000,
-  });
-  // Redemption-backfill sweeper — backstops waitForRedemption's
-  // budget-exhaustion path: fulfilled orders that captured a
-  // ctx_order_id but no redemption payload get re-fetched with
-  // backoff until recovered or the attempts cap pages ops.
+  startGiftcardWs();
+  startMirrorSweep();
+  // Redemption-backfill sweeper — backstops the fulfil-time
+  // redemption fetch: fulfilled orders that captured a ctx_order_id
+  // but no redemption payload get re-fetched with backoff until
+  // recovered or the attempts cap pages ops.
   startRedemptionBackfill();
   // Payout worker (ADR 016). Resolve reads LOOP_STELLAR_OPERATOR_SECRET
   // + network passphrase; returns null when the secret is unset, in
@@ -360,9 +331,7 @@ if (env.LOOP_WORKERS_ENABLED) {
     markWorkerDisabled('vault_apy_snapshot', 'LOOP_VAULTS_ENABLED is false');
   }
 } else {
-  markWorkerDisabled('payment_watcher', 'LOOP_WORKERS_ENABLED is false');
-  markWorkerDisabled('operator_float_reconciliation', 'LOOP_WORKERS_ENABLED is false');
-  markWorkerDisabled('procurement_worker', 'LOOP_WORKERS_ENABLED is false');
+  markWorkerDisabled('ctx_mirror_sweep', 'LOOP_WORKERS_ENABLED is false');
   markWorkerDisabled('redemption_backfill', 'LOOP_WORKERS_ENABLED is false');
   markWorkerDisabled('payout_worker', 'LOOP_WORKERS_ENABLED is false');
   markWorkerDisabled('asset_drift_watcher', 'LOOP_WORKERS_ENABLED is false');
@@ -405,9 +374,8 @@ function shutdown(signal: string): void {
   stopMerchantWs();
   cancelPendingSnapshotPersist();
   stopLocationRefresh();
-  stopPaymentWatcher();
-  stopOperatorFloatReconciliationWatcher();
-  stopProcurementWorker();
+  stopGiftcardWs();
+  stopMirrorSweep();
   stopRedemptionBackfill();
   stopPayoutWorker();
   stopAssetDriftWatcher();

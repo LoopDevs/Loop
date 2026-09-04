@@ -29,14 +29,14 @@ vi.mock('../../discord.js', () => ({
   notifyRedemptionBackfillExhausted: (args: unknown) => notifyExhaustedMock(args),
 }));
 
-vi.mock('../../ctx/operator-pool.js', () => {
-  class OperatorPoolUnavailableError extends Error {
+vi.mock('../../ctx/api-fetch.js', () => {
+  class CtxUnavailableError extends Error {
     constructor(message: string) {
       super(message);
-      this.name = 'OperatorPoolUnavailableError';
+      this.name = 'CtxUnavailableError';
     }
   }
-  return { OperatorPoolUnavailableError };
+  return { CtxUnavailableError };
 });
 
 // db mock — awaiting the select chain resolves the stashed row;
@@ -72,7 +72,7 @@ const { dbMock, dbState } = vi.hoisted(() => {
 });
 vi.mock('../../db/client.js', () => ({ db: dbMock }));
 
-import { OperatorPoolUnavailableError } from '../../ctx/operator-pool.js';
+import { CtxUnavailableError } from '../../ctx/api-fetch.js';
 import {
   refetchOrderRedemption,
   REDEMPTION_BACKFILL_MAX_ATTEMPTS,
@@ -125,11 +125,11 @@ describe('refetchOrderRedemption — eligibility gates', () => {
     expect(fetchRedemptionMock).not.toHaveBeenCalled();
   });
 
-  it('pool_unavailable maps the operator-pool error (no attempt burned)', async () => {
+  it('ctx_unavailable maps the CTX-unavailable error (no attempt burned)', async () => {
     dbState.rows = [makeRow()];
-    fetchRedemptionMock.mockRejectedValue(new OperatorPoolUnavailableError('pool down'));
+    fetchRedemptionMock.mockRejectedValue(new CtxUnavailableError('pool down'));
     const out = await refetchOrderRedemption(ORDER_ID, NOW);
-    expect(out).toEqual({ kind: 'pool_unavailable' });
+    expect(out).toEqual({ kind: 'ctx_unavailable' });
     expect(dbState.updates).toHaveLength(0);
   });
 });

@@ -23,9 +23,8 @@ vi.mock('../../db/schema.js', () => ({
     state: 'orders.state',
     fulfilledAt: 'orders.fulfilled_at',
     faceValueMinor: 'orders.face_value_minor',
-    wholesaleMinor: 'orders.wholesale_minor',
     userCashbackMinor: 'orders.user_cashback_minor',
-    loopMarginMinor: 'orders.loop_margin_minor',
+    expectedCommissionMinor: 'orders.expected_commission_minor',
     userId: 'orders.user_id',
   },
 }));
@@ -86,9 +85,8 @@ describe('adminMerchantStatsHandler', () => {
         order_count: '3',
         unique_user_count: '2',
         face_value_minor: 15_000n,
-        wholesale_minor: '12000',
         user_cashback_minor: 1800,
-        loop_margin_minor: 1200n,
+        expected_commission_minor: '1200',
         last_fulfilled_at: new Date('2026-04-20T10:00:00Z'),
       },
       {
@@ -97,9 +95,8 @@ describe('adminMerchantStatsHandler', () => {
         order_count: 1,
         unique_user_count: 1,
         face_value_minor: '5000',
-        wholesale_minor: '4000',
         user_cashback_minor: '600',
-        loop_margin_minor: '400',
+        expected_commission_minor: '400',
         last_fulfilled_at: '2026-04-18T14:00:00Z',
       },
     ];
@@ -114,9 +111,8 @@ describe('adminMerchantStatsHandler', () => {
       orderCount: 3,
       uniqueUserCount: 2,
       faceValueMinor: '15000',
-      wholesaleMinor: '12000',
       userCashbackMinor: '1800',
-      loopMarginMinor: '1200',
+      expectedCommissionMinor: '1200',
       lastFulfilledAt: '2026-04-20T10:00:00.000Z',
     });
     expect(body.rows[1]!['uniqueUserCount']).toBe(1);
@@ -148,9 +144,8 @@ describe('adminMerchantStatsHandler', () => {
           currency: 'USD',
           order_count: 2,
           face_value_minor: '20000',
-          wholesale_minor: '16000',
           user_cashback_minor: '2400',
-          loop_margin_minor: '1600',
+          expected_commission_minor: '1600',
           last_fulfilled_at: new Date('2026-04-19T00:00:00Z'),
         },
       ],
@@ -169,8 +164,8 @@ describe('adminMerchantStatsHandler', () => {
     expect(res.status).toBe(500);
   });
 
-  // ADMIN-01 (2026-06-30 cold audit): wholesaleMinor/userCashbackMinor/
-  // loopMarginMinor are denominated in orders.chargeCurrency, not the
+  // ADMIN-01 (2026-06-30 cold audit): userCashbackMinor/
+  // expectedCommissionMinor are denominated in orders.chargeCurrency, not the
   // catalog orders.currency column. Both handlers used to GROUP BY the
   // wrong column, silently collapsing a merchant's orders across
   // different real-world currencies into one row.
@@ -195,9 +190,8 @@ describe('adminMerchantStatsHandler', () => {
           order_count: '5',
           unique_user_count: '3',
           face_value_minor: '50000',
-          wholesale_minor: '40000',
           user_cashback_minor: '2500',
-          loop_margin_minor: '7500',
+          expected_commission_minor: '7500',
           last_fulfilled_at: new Date('2026-04-20T10:00:00Z'),
         },
         {
@@ -206,9 +200,8 @@ describe('adminMerchantStatsHandler', () => {
           order_count: '2',
           unique_user_count: '2',
           face_value_minor: '20000',
-          wholesale_minor: '16000',
           user_cashback_minor: '1000',
-          loop_margin_minor: '3000',
+          expected_commission_minor: '3000',
           last_fulfilled_at: new Date('2026-04-18T00:00:00Z'),
         },
       ];

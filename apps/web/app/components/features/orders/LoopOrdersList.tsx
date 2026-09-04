@@ -63,12 +63,12 @@ export function LoopOrdersList({ enabled }: { enabled: boolean }): React.JSX.Ele
 
 function LoopOrderRow({ order }: { order: LoopOrderView }): React.JSX.Element {
   const { t } = useTranslation('orders');
-  // A4-026: pending_payment rows must surface the deposit address +
-  // memo + amount on every render of the orders list, even after a
-  // page refresh / app restart that wipes the in-memory create
-  // response. Auto-expand so the user doesn't have to know to click
-  // the row to recover their payment instructions.
-  const [expanded, setExpanded] = useState(order.state === 'pending_payment');
+  // A4-026: unpaid rows auto-expand so the user sees the awaiting-
+  // payment banner without knowing to click the row. The payment
+  // instructions themselves live on the merchant page's pay screen
+  // (rebuilt server-side from the detail read — ADR 052); the list
+  // read deliberately carries no payment payload.
+  const [expanded, setExpanded] = useState(order.state === 'unpaid');
   const { merchants } = useAllMerchants();
   const locale = useLocaleTag();
   const merchantName = merchants.find((m) => m.id === order.merchantId)?.name ?? order.merchantId;
@@ -100,12 +100,6 @@ function LoopOrderRow({ order }: { order: LoopOrderView }): React.JSX.Element {
   // the backend recorded zero (e.g. a margin-only merchant or a
   // pre-ADR-011 order) rather than printing "+0.00 cashback".
   const hasEarnedCashback = isFulfilled && order.userCashbackMinor !== '0';
-  // ADR 015 — flag orders paid with LOOP-asset cashback the user
-  // earned earlier. The "♻️ Recycled" pill sits next to the state
-  // pill so scanning the list makes it obvious which rows closed
-  // the flywheel loop. Always shown regardless of state — a failed
-  // or pending loop_asset order still demonstrates intent.
-  const isRecycled = order.paymentMethod === 'loop_asset';
 
   return (
     <li>
@@ -134,7 +128,6 @@ function LoopOrderRow({ order }: { order: LoopOrderView }): React.JSX.Element {
               </div>
             ) : null}
           </div>
-          {isRecycled ? <RecycledPill /> : null}
           <StatePill state={order.state} />
         </div>
       </button>
@@ -191,30 +184,10 @@ function StatePill({ state }: { state: LoopOrderView['state'] }): React.JSX.Elem
   );
 }
 
-/**
- * Inline "♻️ Recycled" pill for orders paid with LOOP-asset
- * cashback the user earned earlier. Semantic: "this purchase
- * closed the flywheel loop". Sits beside the state pill; green
- * regardless of order state — intent-based signal, not
- * outcome-based.
- */
-function RecycledPill(): React.JSX.Element {
-  const { t } = useTranslation('orders');
-  return (
-    <span
-      className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900/30 dark:text-green-300"
-      aria-label={t('loopList.recycledPill.ariaLabel')}
-      title={t('loopList.recycledPill.title')}
-    >
-      <span aria-hidden="true">♻️</span>
-      {t('loopList.recycledPill.label')}
-    </span>
-  );
-}
-
 function StateBanner({ order }: { order: LoopOrderView }): React.JSX.Element | null {
   const { t } = useTranslation('orders');
-  if (order.state === 'failed') {
+  const locale = useLocaleTag();
+  if (order.state === 'rejected' || order.state === 'refunded') {
     return (
       <div className="rounded-lg border border-red-200 dark:border-red-900/40 bg-red-50 dark:bg-red-900/20 p-2 text-xs text-red-700 dark:text-red-300">
         {order.failureReason ?? t('loopList.failedFallback')}
@@ -228,45 +201,23 @@ function StateBanner({ order }: { order: LoopOrderView }): React.JSX.Element | n
       </div>
     );
   }
-  // A4-026: render the deposit address + memo + amount + asset for
-  // pending_payment orders so a user who refreshed mid-purchase can
-  // resume by sending the same crypto to the same memo. The PurchaseContainer
-  // local state is gone after a refresh, but `GET /api/orders/loop` still
-  // exposes paymentMemo + stellarAddress + chargeMinor on the row.
-  if (order.state === 'pending_payment') {
-    return <PendingPaymentRecoveryPanel order={order} />;
+  // ADR 052: the list read carries no payment payload — the pay screen
+  // is rebuilt server-side on the merchant page (detail read). This
+  // banner just tells the user the order is still awaiting payment and
+  // what CTX is expecting.
+  if (order.state === 'unpaid') {
+    return (
+      <div className="rounded-lg border border-yellow-200 dark:border-yellow-900/40 bg-yellow-50 dark:bg-yellow-900/20 p-3 text-xs text-yellow-900 dark:text-yellow-100">
+        <p className="font-medium">
+          {t('loopList.pendingPayment', {
+            amount: formatMinorCurrency(order.chargeMinor, order.chargeCurrency, locale),
+            asset: order.paymentCryptoCurrency ?? '',
+          })}
+        </p>
+      </div>
+    );
   }
   return null;
-}
-
-function PendingPaymentRecoveryPanel({
-  order,
-}: {
-  order: LoopOrderView;
-}): React.JSX.Element | null {
-  const { t } = useTranslation('orders');
-  const locale = useLocaleTag();
-  if (order.stellarAddress === null || order.paymentMemo === null) return null;
-  const assetLabel =
-    order.paymentMethod === 'usdc'
-      ? 'USDC'
-      : order.paymentMethod === 'xlm'
-        ? 'XLM'
-        : order.paymentMethod === 'loop_asset'
-          ? `${order.chargeCurrency.toUpperCase()}LOOP`
-          : order.paymentMethod;
-  return (
-    <div className="rounded-lg border border-yellow-200 dark:border-yellow-900/40 bg-yellow-50 dark:bg-yellow-900/20 p-3 text-xs text-yellow-900 dark:text-yellow-100 space-y-2">
-      <p className="font-medium">
-        {t('loopList.pendingPayment', {
-          amount: formatMinorCurrency(order.chargeMinor, order.chargeCurrency, locale),
-          asset: assetLabel,
-        })}
-      </p>
-      <RedemptionField label={t('loopList.fields.address')} value={order.stellarAddress} />
-      <RedemptionField label={t('loopList.fields.memo')} value={order.paymentMemo} />
-    </div>
-  );
 }
 
 function RedemptionField({
@@ -333,13 +284,13 @@ function stateColour(state: LoopOrderView['state']): string {
   switch (state) {
     case 'fulfilled':
       return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300';
-    case 'failed':
+    case 'rejected':
+    case 'refunded':
       return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300';
     case 'expired':
       return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300';
-    case 'pending_payment':
+    case 'unpaid':
     case 'paid':
-    case 'procuring':
       return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300';
     default:
       return assertNever(state, 'OrderState');

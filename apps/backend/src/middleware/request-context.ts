@@ -1,7 +1,7 @@
 /**
  * AsyncLocalStorage request-context wrapper (A2-1305). Mounts
  * the per-request `requestId` into an ALS scope so any downstream
- * helper — `operatorFetch`, `CircuitBreaker.fetch`, handler-scope
+ * helper — `ctxFetch`, `CircuitBreaker.fetch`, handler-scope
  * code that doesn't pass `c` around — can read it and propagate
  * it onto outbound CTX fetches as `X-Request-Id`. CTX then logs
  * our id against theirs, letting ops ask "what happened to our

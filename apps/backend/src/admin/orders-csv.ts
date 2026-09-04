@@ -45,19 +45,13 @@ const HEADERS = [
   'face_value_minor',
   'charge_currency',
   'charge_minor',
-  'payment_method',
-  'wholesale_pct',
-  'user_cashback_pct',
-  'loop_margin_pct',
-  'wholesale_minor',
   'user_cashback_minor',
-  'loop_margin_minor',
+  'expected_commission_minor',
   'ctx_order_id',
-  'ctx_operator_id',
+  'ctx_payment_id',
+  'payment_crypto_currency',
   'failure_reason',
   'created_at',
-  'paid_at',
-  'procured_at',
   'fulfilled_at',
   'failed_at',
 ] as const;
@@ -75,19 +69,13 @@ interface Row {
   faceValueMinor: bigint;
   chargeCurrency: string;
   chargeMinor: bigint;
-  paymentMethod: string;
-  wholesalePct: string;
-  userCashbackPct: string;
-  loopMarginPct: string;
-  wholesaleMinor: bigint;
   userCashbackMinor: bigint;
-  loopMarginMinor: bigint;
+  expectedCommissionMinor: bigint | null;
   ctxOrderId: string | null;
-  ctxOperatorId: string | null;
+  ctxPaymentId: string | null;
+  paymentCryptoCurrency: string | null;
   failureReason: string | null;
   createdAt: Date;
-  paidAt: Date | null;
-  procuredAt: Date | null;
   fulfilledAt: Date | null;
   failedAt: Date | null;
 }
@@ -141,19 +129,13 @@ export async function adminOrdersCsvHandler(c: Context): Promise<Response> {
           r.faceValueMinor.toString(),
           r.chargeCurrency,
           r.chargeMinor.toString(),
-          r.paymentMethod,
-          r.wholesalePct,
-          r.userCashbackPct,
-          r.loopMarginPct,
-          r.wholesaleMinor.toString(),
           r.userCashbackMinor.toString(),
-          r.loopMarginMinor.toString(),
+          r.expectedCommissionMinor?.toString() ?? null,
           r.ctxOrderId,
-          r.ctxOperatorId,
+          r.ctxPaymentId,
+          r.paymentCryptoCurrency,
           r.failureReason,
           r.createdAt.toISOString(),
-          r.paidAt?.toISOString() ?? null,
-          r.procuredAt?.toISOString() ?? null,
           r.fulfilledAt?.toISOString() ?? null,
           r.failedAt?.toISOString() ?? null,
         ]),

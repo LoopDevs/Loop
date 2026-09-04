@@ -32,8 +32,6 @@ import { logger } from '../logger.js';
 const log = logger.child({ handler: 'admin-lookup' });
 
 /** generatePaymentMemo: 20 chars from the RFC-4648 base32 alphabet. */
-const PAYMENT_MEMO_RE = /^[A-Z2-7]{20}$/;
-/** Stellar ed25519 public key (account id) — G + 55 base32 chars. */
 const STELLAR_ADDRESS_RE = /^G[A-Z2-7]{55}$/;
 
 export async function adminLookupHandler(c: Context): Promise<Response> {
@@ -53,21 +51,6 @@ export async function adminLookupHandler(c: Context): Promise<Response> {
       }
       return c.json<AdminLookupResponse>({
         kind: 'order',
-        userId: order.userId,
-        orderId: order.id,
-      });
-    }
-
-    if (PAYMENT_MEMO_RE.test(q)) {
-      const [order] = await db
-        .select({ id: orders.id, userId: orders.userId })
-        .from(orders)
-        .where(eq(orders.paymentMemo, q));
-      if (order === undefined) {
-        return c.json({ code: 'NOT_FOUND', message: 'No order with that payment memo' }, 404);
-      }
-      return c.json<AdminLookupResponse>({
-        kind: 'payment_memo',
         userId: order.userId,
         orderId: order.id,
       });

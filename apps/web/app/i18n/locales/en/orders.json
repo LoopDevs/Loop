@@ -60,25 +60,18 @@
     "heading": "Your orders",
     "failedFallback": "Order failed.",
     "expired": "Order expired before payment arrived.",
-    "pendingPayment": "Awaiting payment. Send {{amount}} of {{asset}} to the address below with the memo, then this row will move to Paid.",
+    "pendingPayment": "Awaiting payment. Pay {{amount}} in {{asset}} from the merchant page to complete this order.",
     "openRedemptionLink": "Open redemption link",
     "cashbackCredited": "{{amount}} cashback credited.",
     "earnedCashback": "+{{amount}} cashback",
     "fields": {
       "code": "Code",
-      "pin": "PIN",
-      "address": "Address",
-      "memo": "Memo"
+      "pin": "PIN"
     },
     "copy": "Copy",
     "copied": "Copied",
     "copyAriaLabel": "Copy {{label}}",
-    "copiedAnnouncement": "{{label}} copied to clipboard.",
-    "recycledPill": {
-      "label": "Recycled",
-      "ariaLabel": "Paid with recycled cashback",
-      "title": "You paid for this order with LOOP-asset cashback you earned on earlier orders."
-    }
+    "copiedAnnouncement": "{{label}} copied to clipboard."
   },
   "summary": {
     "ariaLabel": "Orders summary",

@@ -1,11 +1,11 @@
 /**
- * `/admin/orders` — Loop-native orders drill-down (ADR 011 / 015).
+ * `/admin/orders` — Loop-native orders drill-down (ADR 011 / ADR 052).
  *
  * Fourth admin tab, alongside Cashback / Treasury / Payouts. Renders
- * a table of recent orders with the full cashback-split breakdown
- * and CTX procurement metadata so ops can triage stuck orders
- * (state=paid with no ctxOrderId is a procurement stall) and audit
- * how cashback is being split per merchant.
+ * a table of recent orders with the cashback discount + expected CTX
+ * commission and the CTX linkage (order / payment ids, payment
+ * currency) so ops can triage stalled rows and audit the ctx-interop
+ * economics per merchant.
  *
  * Filters: state enum + userId (optional) + Load more cursor on
  * createdAt. Keeps the table compact by using monospace for ids;
@@ -17,12 +17,7 @@ import { Link, useSearchParams } from 'react-router';
 import { ApiException, formatMinorCurrency } from '@loop/shared';
 import type { Route } from './+types/admin.orders';
 import { RequireStaff } from '~/components/features/admin/RequireAdmin';
-import {
-  listAdminOrders,
-  type AdminOrderState,
-  type AdminOrderView,
-  type AdminPaymentMethod,
-} from '~/services/admin';
+import { listAdminOrders, type AdminOrderState, type AdminOrderView } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { useStaffRole } from '~/hooks/use-staff-role';
 import { formatDateTime } from '~/i18n/format';
@@ -39,24 +34,22 @@ export function meta(): Route.MetaDescriptors {
 
 const STATES: ReadonlyArray<AdminOrderState | 'all'> = [
   'all',
-  'pending_payment',
+  'unpaid',
   'paid',
-  'procuring',
   'fulfilled',
-  'failed',
+  'rejected',
+  'refunded',
   'expired',
 ];
 
 const STATE_CLASSES: Record<AdminOrderState, string> = {
-  pending_payment: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
+  unpaid: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
   paid: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
-  procuring: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
   fulfilled: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
-  failed: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
+  rejected: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
+  refunded: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
   expired: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
 };
-
-const PAYMENT_METHODS: ReadonlyArray<AdminPaymentMethod> = ['xlm', 'usdc', 'credit', 'loop_asset'];
 
 const PAGE_SIZE = 50;
 
@@ -101,27 +94,6 @@ function AdminOrdersRouteInner(): React.JSX.Element {
     chargeCurrencyRaw !== null && ['USD', 'GBP', 'EUR'].includes(chargeCurrencyRaw)
       ? chargeCurrencyRaw
       : undefined;
-  const paymentMethodRaw = searchParams.get('paymentMethod');
-  // Mirror the backend enum — an unknown value silently drops to an
-  // unfiltered list rather than 400ing on a shared permalink that
-  // happens to have a typo.
-  const paymentMethodFilter: AdminPaymentMethod | undefined =
-    paymentMethodRaw !== null &&
-    (PAYMENT_METHODS as ReadonlyArray<string>).includes(paymentMethodRaw)
-      ? (paymentMethodRaw as AdminPaymentMethod)
-      : undefined;
-  const ctxOperatorIdRaw = searchParams.get('ctxOperatorId');
-  // Operator ids are free-form opaque strings (ADR 013). Mirror the
-  // backend shape check here so a pasted id with whitespace silently
-  // surfaces an unfiltered list instead of a 400 the user can't debug
-  // from the URL.
-  const ctxOperatorIdFilter =
-    ctxOperatorIdRaw !== null &&
-    ctxOperatorIdRaw.length > 0 &&
-    ctxOperatorIdRaw.length <= 128 &&
-    /^[A-Za-z0-9._-]+$/.test(ctxOperatorIdRaw)
-      ? ctxOperatorIdRaw
-      : undefined;
   const [stateFilter, setStateFilter] = useState<AdminOrderState | 'all'>('all');
   // Cursor list — each Load more pushes the last row's `createdAt`
   // so pages stay stable across refetches (offset pagination would
@@ -135,8 +107,9 @@ function AdminOrdersRouteInner(): React.JSX.Element {
         <div>
           <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Admin · Orders</h1>
           <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-            Loop-native orders across every user, newest first. Filter by state to triage stuck
-            rows; each row shows the ADR-015 cashback split + CTX procurement metadata.
+            Loop-native orders across every user, newest first. Filter by state to triage stalled
+            rows; each row shows the cashback discount, expected CTX commission, and the CTX
+            order/payment linkage (ADR 052).
           </p>
         </div>
         {/* ADR 037 §3: bulk CSV exports are admin-only — hidden
@@ -234,68 +207,6 @@ function AdminOrdersRouteInner(): React.JSX.Element {
         </div>
       ) : null}
 
-      {/* Active payment-method filter — sourced from `?paymentMethod=`.
-          Drill-in target from the treasury PaymentMethodShareCard
-          (ADR 010 / 015): the share card says "x% of fulfilled charge
-          came via loop_asset" and each rail deep-links here so ops
-          can see the underlying orders without a hand-crafted URL. */}
-      {paymentMethodFilter !== undefined ? (
-        <div
-          role="status"
-          className="flex items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200"
-        >
-          <span>
-            Paid with <code className="font-mono text-xs">{paymentMethodFilter}</code>
-          </span>
-          <button
-            type="button"
-            onClick={() => {
-              setSearchParams((prev) => {
-                const next = new URLSearchParams(prev);
-                next.delete('paymentMethod');
-                return next;
-              });
-              setCursors([undefined]);
-            }}
-            className="text-xs font-medium underline hover:no-underline"
-          >
-            Clear
-          </button>
-        </div>
-      ) : null}
-
-      {/* Active ctx-operator filter — sourced from `?ctxOperatorId=`.
-          Drill-in target from the treasury operator-pool list + the
-          row-level operator pill below. ADR-013 framing: an operator
-          id is which CTX service account carried this order, so the
-          per-operator slice is the natural "which operator is flaky"
-          question ops reaches for during an incident. */}
-      {ctxOperatorIdFilter !== undefined ? (
-        <div
-          role="status"
-          className="flex items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200"
-        >
-          <span>
-            Filtered to CTX operator{' '}
-            <code className="font-mono text-xs">{ctxOperatorIdFilter}</code>
-          </span>
-          <button
-            type="button"
-            onClick={() => {
-              setSearchParams((prev) => {
-                const next = new URLSearchParams(prev);
-                next.delete('ctxOperatorId');
-                return next;
-              });
-              setCursors([undefined]);
-            }}
-            className="text-xs font-medium underline hover:no-underline"
-          >
-            Clear
-          </button>
-        </div>
-      ) : null}
-
       <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-hidden">
         {cursors.map((cursor, idx) => (
           <OrdersPage
@@ -303,8 +214,6 @@ function AdminOrdersRouteInner(): React.JSX.Element {
             state={stateFilter}
             merchantId={merchantIdFilter}
             chargeCurrency={chargeCurrencyFilter}
-            paymentMethod={paymentMethodFilter}
-            ctxOperatorId={ctxOperatorIdFilter}
             cursor={cursor}
             isLastPage={idx === cursors.length - 1}
             onLoadMore={(nextCursor) => {
@@ -321,8 +230,6 @@ function OrdersPage({
   state,
   merchantId,
   chargeCurrency,
-  paymentMethod,
-  ctxOperatorId,
   cursor,
   isLastPage,
   onLoadMore,
@@ -330,8 +237,6 @@ function OrdersPage({
   state: AdminOrderState | 'all';
   merchantId: string | undefined;
   chargeCurrency: string | undefined;
-  paymentMethod: AdminPaymentMethod | undefined;
-  ctxOperatorId: string | undefined;
   cursor: string | undefined;
   isLastPage: boolean;
   onLoadMore: (nextCursor: string) => void;
@@ -342,8 +247,6 @@ function OrdersPage({
       state,
       merchantId ?? null,
       chargeCurrency ?? null,
-      paymentMethod ?? null,
-      ctxOperatorId ?? null,
       cursor ?? null,
       PAGE_SIZE,
     ],
@@ -353,8 +256,6 @@ function OrdersPage({
         ...(state !== 'all' ? { state } : {}),
         ...(merchantId !== undefined ? { merchantId } : {}),
         ...(chargeCurrency !== undefined ? { chargeCurrency } : {}),
-        ...(paymentMethod !== undefined ? { paymentMethod } : {}),
-        ...(ctxOperatorId !== undefined ? { ctxOperatorId } : {}),
         ...(cursor !== undefined ? { before: cursor } : {}),
       }),
     retry: shouldRetry,
@@ -421,7 +322,7 @@ function OrdersTableHeader(): React.JSX.Element {
   return (
     <div className="grid grid-cols-[minmax(0,1.5fr)_minmax(0,2fr)_minmax(0,1.5fr)_minmax(0,1.5fr)_minmax(0,1fr)] gap-3 px-5 py-2 bg-gray-50 dark:bg-gray-900/40 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-800">
       <div>Order</div>
-      <div>Split</div>
+      <div>Economics</div>
       <div>CTX</div>
       <div>User</div>
       <div className="text-end">State</div>
@@ -430,7 +331,7 @@ function OrdersTableHeader(): React.JSX.Element {
 }
 
 function OrderRow({ row }: { row: AdminOrderView }): React.JSX.Element {
-  const stateClass = STATE_CLASSES[row.state] ?? STATE_CLASSES.pending_payment;
+  const stateClass = STATE_CLASSES[row.state] ?? STATE_CLASSES.unpaid;
   return (
     <li className="grid grid-cols-[minmax(0,1.5fr)_minmax(0,2fr)_minmax(0,1.5fr)_minmax(0,1.5fr)_minmax(0,1fr)] gap-3 px-5 py-3 items-start border-b border-gray-100 dark:border-gray-900 last:border-0 text-sm">
       <div className="min-w-0">
@@ -451,24 +352,17 @@ function OrderRow({ row }: { row: AdminOrderView }): React.JSX.Element {
       </div>
       <div className="min-w-0 text-xs text-gray-700 dark:text-gray-300 space-y-0.5">
         <p>
-          <span className="text-gray-500">Wholesale</span>{' '}
-          <span className="font-mono">{row.wholesalePct}%</span>{' '}
-          <span className="text-gray-400">
-            ({formatMinor(row.wholesaleMinor, row.chargeCurrency)})
-          </span>
-        </p>
-        <p>
           <span className="text-gray-500">Cashback</span>{' '}
-          <span className="font-mono">{row.userCashbackPct}%</span>{' '}
-          <span className="text-gray-400">
-            ({formatMinor(row.userCashbackMinor, row.chargeCurrency)})
+          <span className="font-mono">
+            {formatMinor(row.userCashbackMinor, row.chargeCurrency)}
           </span>
         </p>
         <p>
-          <span className="text-gray-500">Margin</span>{' '}
-          <span className="font-mono">{row.loopMarginPct}%</span>{' '}
-          <span className="text-gray-400">
-            ({formatMinor(row.loopMarginMinor, row.chargeCurrency)})
+          <span className="text-gray-500">Commission</span>{' '}
+          <span className="font-mono">
+            {row.expectedCommissionMinor !== null
+              ? formatMinor(row.expectedCommissionMinor, row.chargeCurrency)
+              : '—'}
           </span>
         </p>
       </div>
@@ -476,21 +370,8 @@ function OrderRow({ row }: { row: AdminOrderView }): React.JSX.Element {
         <p className="font-mono truncate" title={row.ctxOrderId ?? ''}>
           {row.ctxOrderId !== null ? row.ctxOrderId.slice(0, 12) : '—'}
         </p>
-        <p
-          className="text-[11px] text-gray-500 dark:text-gray-400 truncate"
-          title={row.ctxOperatorId ?? ''}
-        >
-          {row.ctxOperatorId !== null ? (
-            <Link
-              to={`/admin/orders?ctxOperatorId=${encodeURIComponent(row.ctxOperatorId)}`}
-              className="text-blue-600 hover:underline dark:text-blue-400"
-              aria-label={`Show all orders carried by operator ${row.ctxOperatorId}`}
-            >
-              op {row.ctxOperatorId.slice(0, 10)}
-            </Link>
-          ) : (
-            'no operator'
-          )}
+        <p className="font-mono truncate text-gray-500" title={row.ctxPaymentId ?? ''}>
+          {row.ctxPaymentId !== null ? row.ctxPaymentId.slice(0, 12) : '—'}
         </p>
       </div>
       <div className="min-w-0">
@@ -500,31 +381,13 @@ function OrderRow({ row }: { row: AdminOrderView }): React.JSX.Element {
         >
           {row.userId.slice(0, 8)}
         </p>
-        {/* Payment rail — same visual language as the admin single-
-            order detail, stuck-orders triage, and user-facing
-            LoopOrdersList. Green "♻️" pill for loop_asset
-            (flywheel-closing), neutral grey for the other rails.
-            The pill Link-drills into the filtered orders list so
-            one click surfaces every order on that rail. */}
-        {row.paymentMethod === 'loop_asset' ? (
-          <Link
-            to={`/admin/orders?paymentMethod=${encodeURIComponent(row.paymentMethod)}`}
-            className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-green-100 px-1.5 py-0 text-[11px] font-medium text-green-800 hover:ring-1 hover:ring-green-300 dark:bg-green-900/30 dark:text-green-300 dark:hover:ring-green-700"
-            aria-label="Paid with recycled cashback"
-            title="The user paid for this order with LOOP-asset cashback they earned on earlier orders."
-          >
-            <span aria-hidden="true">♻️</span>
-            {row.paymentMethod}
-          </Link>
-        ) : (
-          <Link
-            to={`/admin/orders?paymentMethod=${encodeURIComponent(row.paymentMethod)}`}
-            className="mt-0.5 inline-block rounded-full bg-gray-100 px-1.5 py-0 text-[11px] font-medium text-gray-700 hover:ring-1 hover:ring-gray-300 dark:bg-gray-800 dark:text-gray-300 dark:hover:ring-gray-600"
-            aria-label={`Filter to ${row.paymentMethod} orders`}
-          >
-            {row.paymentMethod}
-          </Link>
-        )}
+        {/* Chain-qualified CTX payment currency the customer chose
+            (ADR 052). Null on legacy rows. */}
+        {row.paymentCryptoCurrency !== null ? (
+          <span className="mt-0.5 inline-block rounded-full bg-gray-100 px-1.5 py-0 text-[11px] font-medium text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+            {row.paymentCryptoCurrency}
+          </span>
+        ) : null}
       </div>
       <div className="text-end">
         <span

@@ -3,23 +3,23 @@ import { useQuery } from '@tanstack/react-query';
 import { ApiException } from '@loop/shared';
 import {
   getLoopOrder,
+  isLoopOrderFailure,
   isLoopOrderTerminal,
   loopOrderStateLabel,
   type CreateLoopOrderResponse,
+  type LoopOrderPaymentInstructions,
   type LoopOrderView,
 } from '~/services/orders-loop';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
-import { isNativePlatform } from '~/native/platform';
 import { safeRedeemHref, safePaymentUriHref } from '~/native/webview';
 import { formatMinorCurrency, useLocaleTag } from '~/i18n/format';
 import { copySensitive } from '~/native/clipboard';
-import { PayWithLoopBalance } from './PayWithLoopBalance';
 
 export interface LoopPaymentStepProps {
-  /** Result of `createLoopOrder` — the memo + deposit address we display to the user. */
+  /** Result of `createLoopOrder` — CTX's payment instructions we display to the user. */
   create: CreateLoopOrderResponse;
-  /** Called when the order reaches a terminal state (fulfilled / failed / expired). */
+  /** Called when the order reaches a terminal state (fulfilled / rejected / refunded / expired). */
   onTerminal?: ((order: LoopOrderView) => void) | undefined;
   /**
    * Called once if `GET /api/orders/loop/:id` settles into a
@@ -35,16 +35,17 @@ export interface LoopPaymentStepProps {
 }
 
 /**
- * Pay-and-wait step for a Loop-native order (ADR 010).
+ * Pay-and-wait step for a Loop-native order (ADR 052 — ctx is the
+ * payment processor).
  *
- * For XLM / USDC: shows the deposit address + memo with copy buttons
- * and a live state label ("Waiting for payment" → "Payment received" →
- * "Buying your gift card" → "Ready"). Polls `getLoopOrder` every 3s
- * until the order hits a terminal state.
- *
- * For `credit`: there's nothing for the user to send — the watcher
- * will flip it to paid on the next tick. We still poll so the UI
- * follows the state through to fulfilled.
+ * While `unpaid`: renders CTX's payment instructions — the fiat charge,
+ * the crypto amount + currency, the deposit address (copyable + QR),
+ * an "Open in wallet" deep-link when CTX supplied a payment URI for
+ * the chosen currency, and a countdown to the CTX payment-window
+ * expiry. Polls `getLoopOrder` every 3s; `paid` collapses to a
+ * "payment received, card on the way" spinner, `fulfilled` shows the
+ * redemption payload, and rejected/refunded/expired render the
+ * failure body.
  */
 export function LoopPaymentStep({
   create,
@@ -106,9 +107,13 @@ export function LoopPaymentStep({
     onOrderNotFound?.();
   }, [orderQuery.error, notifiedNotFound, onOrderNotFound]);
 
-  const stateLabel =
-    orderQuery.data !== undefined ? loopOrderStateLabel(orderQuery.data.state) : 'Creating order…';
+  // Poll data wins once present (it tracks CTX); until then the create
+  // response's snapshot drives the screen so the user isn't staring at
+  // a spinner while the first poll is in flight.
+  const state = orderQuery.data?.state ?? create.state;
+  const stateLabel = loopOrderStateLabel(state);
   const isFulfilled = orderQuery.data?.state === 'fulfilled';
+  const isFailure = isLoopOrderFailure(state);
 
   useEffect(() => {
     if (isFulfilled) redemptionRef.current?.focus();
@@ -122,72 +127,22 @@ export function LoopPaymentStep({
         </div>
         {/* A11Y-001 / CF-35: the state label updates via a 3s poll — wrap it
             in a polite live region so "Waiting for payment" → "Payment
-            received" → "Buying…" → "Ready" is announced to SR users. */}
+            received" → "Ready" is announced to SR users. */}
         <h2 aria-live="polite" className="text-2xl font-semibold text-gray-900 dark:text-white">
           {stateLabel}
         </h2>
       </header>
 
-      {/* ADR 030 Phase C: one-tap "Pay with Loop balance" above the
-          deposit instructions. Self-gating — renders nothing unless
-          the order is pending_payment, the wallet is activated, and a
-          matching LOOP-asset balance exists. On success it invalidates
-          the SAME ['loop-order', id] query this component polls, so
-          the state machine below is shared with the crypto path. */}
-      <PayWithLoopBalance create={create} order={orderQuery.data} />
-
       {isFulfilled ? (
         <div ref={redemptionRef} tabIndex={-1} role="status">
           <RedemptionBody order={orderQuery.data!} />
         </div>
-      ) : create.payment.method === 'credit' ? (
-        <CreditPaymentBody order={orderQuery.data} />
-      ) : // A2-1504 + 2026-05-05 mobile-first revision: the stellar-funded
-      // payload now carries `paymentUri` (SEP-7 deep-link) and
-      // `assetAmount` (live-oracle quote). On native platforms the UI
-      // collapses to a single "Open in wallet" button to keep the demo
-      // flow tight. On web, the existing copy-paste view stays — and a
-      // forthcoming Stellar Wallets Kit v2 connect-wallet flow can
-      // be layered on top (see `~/services/stellar-wallet.ts` stub +
-      // pending ADR for npm install).
-      isNativePlatform() ? (
-        <NativePaymentBody
-          paymentUri={create.payment.paymentUri}
-          assetAmount={create.payment.assetAmount}
-          assetLabel={
-            create.payment.method === 'loop_asset'
-              ? create.payment.assetCode
-              : create.payment.method.toUpperCase()
-          }
-          amountMinor={create.payment.amountMinor}
-          currency={create.payment.currency}
-          order={orderQuery.data}
-        />
+      ) : isFailure ? (
+        <FailureBody state={state} failureReason={orderQuery.data?.failureReason ?? null} />
+      ) : state === 'paid' ? (
+        <PaidBody />
       ) : (
-        <StellarPaymentBody
-          address={create.payment.stellarAddress}
-          memo={create.payment.memo}
-          method={create.payment.method}
-          amountMinor={create.payment.amountMinor}
-          currency={create.payment.currency}
-          assetAmount={create.payment.assetAmount}
-          paymentUri={create.payment.paymentUri}
-          assetLabel={
-            create.payment.method === 'loop_asset'
-              ? create.payment.assetCode
-              : create.payment.method.toUpperCase()
-          }
-          order={orderQuery.data}
-        />
-      )}
-
-      {orderQuery.data?.state === 'failed' && (
-        <div
-          role="alert"
-          className="rounded-lg border border-red-200 dark:border-red-900/40 bg-red-50 dark:bg-red-900/20 p-3 text-sm text-red-700 dark:text-red-300"
-        >
-          {orderQuery.data.failureReason ?? 'Order failed.'}
-        </div>
+        <CtxPaymentBody payment={create.payment} />
       )}
     </section>
   );
@@ -249,74 +204,110 @@ function RedemptionBody({ order }: { order: LoopOrderView }): React.JSX.Element 
       ) : null}
       {order.userCashbackMinor !== '0' ? (
         <p className="text-xs text-green-700 dark:text-green-300 text-center pt-2 border-t border-green-200 dark:border-green-900/40">
-          {formatMinorCurrency(order.userCashbackMinor, order.currency, locale)} cashback credited.
+          {formatMinorCurrency(order.userCashbackMinor, order.currency, locale)} cashback applied as
+          a discount.
         </p>
       ) : null}
     </div>
   );
 }
 
-function CreditPaymentBody({ order }: { order: LoopOrderView | undefined }): React.JSX.Element {
+/** `paid` — CTX confirmed the payment; the card is on its way. */
+function PaidBody(): React.JSX.Element {
   return (
     <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 text-center">
       <p className="text-sm text-gray-700 dark:text-gray-300">
-        Paying with your Loop credit balance — no action needed.
+        Thanks — your gift card is on the way.
       </p>
-      {order === undefined || !isLoopOrderTerminal(order.state) ? (
-        <div className="mt-4 flex justify-center">
-          <Spinner />
-        </div>
-      ) : null}
+      <div className="mt-4 flex justify-center">
+        <Spinner />
+      </div>
     </div>
   );
 }
 
-interface StellarPaymentBodyProps {
-  address: string;
-  memo: string;
-  /** Payment rail: native XLM, USDC trustline, or a LOOP-branded stablecoin. */
-  method: 'xlm' | 'usdc' | 'loop_asset';
-  amountMinor: string;
-  currency: string;
-  /** Asset-native amount (decimal string, 7 decimals) — what the user actually sends. */
-  assetAmount: string;
-  /** SEP-7 `web+stellar:pay?...` deep-link URI for "Open in wallet". */
-  paymentUri: string;
-  /**
-   * User-facing label for the rail. `XLM` / `USDC` for native methods,
-   * the `USDLOOP`/`GBPLOOP`/`EURLOOP` asset code for `loop_asset` so
-   * the user sees the exact asset their wallet needs to send.
-   */
-  assetLabel: string;
-  order: LoopOrderView | undefined;
+/** Terminal failure states: rejected / refunded / expired. */
+function FailureBody({
+  state,
+  failureReason,
+}: {
+  state: LoopOrderView['state'];
+  failureReason: string | null;
+}): React.JSX.Element {
+  return (
+    <div
+      role="alert"
+      className="rounded-lg border border-red-200 dark:border-red-900/40 bg-red-50 dark:bg-red-900/20 p-4 text-sm text-red-700 dark:text-red-300"
+    >
+      {failureReason ?? `Order ${state}.`}
+    </div>
+  );
 }
 
-function StellarPaymentBody({
-  address,
-  memo,
-  amountMinor,
-  currency,
-  assetAmount,
-  paymentUri,
-  assetLabel,
-  order,
-}: StellarPaymentBodyProps): React.JSX.Element {
+/**
+ * `unpaid` — CTX's payment instructions (ADR 052). The customer pays
+ * CTX directly: fiat charge, crypto amount + currency, deposit address
+ * with copy + QR, an "Open in wallet" deep-link when CTX supplied a
+ * payment URI for the chosen currency, and a countdown to the
+ * payment-window expiry (hidden when CTX didn't report one).
+ */
+function CtxPaymentBody({ payment }: { payment: LoopOrderPaymentInstructions }): React.JSX.Element {
   const locale = useLocaleTag();
-  const showSpinner = order === undefined || order.state === 'pending_payment';
-  // PAYMENTURI-UNGATED (XSS): `paymentUri` is server/upstream-supplied (see
-  // safePaymentUriHref). A `javascript:`/`data:` scheme dropped into this
-  // anchor would execute on tap inside the native WebView. Gate it to the
-  // SEP-7 allow-list; a rejected URI yields null and we render no live link
-  // — the address + memo copy path below still lets the user pay.
-  const paymentHref = safePaymentUriHref(paymentUri);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+
+  // PAYMENTURI-UNGATED (XSS): `paymentUrls` values are upstream-supplied
+  // (see safePaymentUriHref). A `javascript:`/`data:` scheme dropped into
+  // this anchor would execute on tap inside the native WebView. Gate it
+  // to the wallet-scheme allow-list; a rejected URI yields null and we
+  // render no live link — the address copy path below still lets the
+  // user pay.
+  const rawUri = payment.paymentUrls[payment.cryptoCurrency];
+  const paymentHref = rawUri !== undefined ? safePaymentUriHref(rawUri) : null;
+
+  // QR encodes the wallet URI when CTX supplied one (wallets prefill
+  // amount + destination from it) and falls back to the bare address.
+  const qrContent = paymentHref ?? payment.address;
+
+  useEffect(() => {
+    if (qrContent === null) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const QRCode = await import('qrcode');
+        const url = await QRCode.toDataURL(qrContent, { width: 200, margin: 1 });
+        if (!cancelled) setQrDataUrl(url);
+      } catch {
+        // QR code generation failed — address still shown as text
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [qrContent]);
+
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 space-y-3">
-        <Row label="You pay" value={formatMinorCurrency(amountMinor, currency, locale)} />
-        <Row label="Send" value={`${assetAmount} ${assetLabel}`} mono />
-        <Row label="To address" value={address} copyable mono />
-        <Row label="Memo (required)" value={memo} copyable mono />
+        <Row
+          label="You pay"
+          value={formatMinorCurrency(payment.amountMinor, payment.currency, locale)}
+        />
+        {payment.cryptoAmount !== null ? (
+          <Row label="Send" value={`${payment.cryptoAmount} ${payment.cryptoCurrency}`} mono />
+        ) : (
+          <Row label="Pay in" value={payment.cryptoCurrency} mono />
+        )}
+        {payment.address !== null ? (
+          <Row label="To address" value={payment.address} copyable mono />
+        ) : null}
       </div>
+
+      {qrDataUrl !== null ? (
+        <div className="flex justify-center">
+          <img src={qrDataUrl} alt="Payment QR code" className="rounded-lg" />
+        </div>
+      ) : null}
+
       {paymentHref !== null ? (
         <a
           href={paymentHref}
@@ -325,101 +316,70 @@ function StellarPaymentBody({
           Open in wallet
         </a>
       ) : null}
-      {/*
-        TODO(adr-pending): integrate Stellar Wallets Kit v2 here for an
-        in-app "Connect wallet" flow. Adding `@creit.tech/stellar-wallets-kit`
-        + `@stellar/stellar-sdk` to apps/web requires an ADR per
-        CLAUDE.md "new dependency" rule. Stub at
-        ~/services/stellar-wallet.ts. Until that lands, the SEP-7 URI
-        button above covers Freighter / xBull / any wallet that
-        registers `web+stellar:` — works for the demo, doesn't cover
-        users without an installed handler.
-      */}
+
       <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
-        Send from any Stellar wallet. Your order updates automatically once the payment confirms.
+        Send exactly this amount from any {payment.cryptoCurrency} wallet. Your order updates
+        automatically once the payment confirms.
       </p>
-      {showSpinner ? (
-        <div className="flex justify-center">
-          <Spinner />
-        </div>
-      ) : null}
+
+      <ExpiryCountdown expiresAt={payment.expiresAt} />
+
+      <div className="flex justify-center">
+        <Spinner />
+      </div>
     </div>
   );
 }
 
-interface NativePaymentBodyProps {
-  paymentUri: string;
-  assetAmount: string;
-  assetLabel: string;
-  amountMinor: string;
-  currency: string;
-  order: LoopOrderView | undefined;
-}
-
 /**
- * 2026-05-05: native-platform payment body. Drops the QR / address /
- * memo display in favour of a single "Open in wallet" button that
- * deep-links via SEP-7 — wallets installed on the device pick up
- * the `web+stellar:pay?...` scheme and pre-populate destination,
- * amount, asset, and memo. Cleaner demo flow; users don't have to
- * copy-paste anything.
+ * Countdown to CTX's payment-window expiry. Renders nothing when the
+ * server didn't report one (`expiresAt: null`) — a missing window is
+ * "no deadline to show", never a fabricated local one.
  *
- * The fiat charge + asset amount are still surfaced so the user
- * knows what they're committing to before tapping.
+ * WCAG 2.2.1 (Timing Adjustable) / A11Y-002: announced politely on a
+ * coarse cadence so SR users hear time running low without a
+ * per-second barrage.
  */
-function NativePaymentBody({
-  paymentUri,
-  assetAmount,
-  assetLabel,
-  amountMinor,
-  currency,
-  order,
-}: NativePaymentBodyProps): React.JSX.Element {
-  const locale = useLocaleTag();
-  const showSpinner = order === undefined || order.state === 'pending_payment';
-  // PAYMENTURI-UNGATED (XSS): same gate as the web body. On native this is
-  // the only payment affordance, so a rejected URI (javascript:/data:/…)
-  // collapses to a disabled state — never a live href that would execute
-  // on tap inside the WebView.
-  const paymentHref = safePaymentUriHref(paymentUri);
+function ExpiryCountdown({ expiresAt }: { expiresAt: string | null }): React.JSX.Element | null {
+  const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (expiresAt === null) return;
+    const expiryMs = Date.parse(expiresAt);
+    if (Number.isNaN(expiryMs)) return;
+    const tick = (): void => {
+      setSecondsLeft(Math.max(0, Math.floor((expiryMs - Date.now()) / 1000)));
+    };
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [expiresAt]);
+
+  if (expiresAt === null || secondsLeft === null) return null;
+
+  const expired = secondsLeft <= 0;
+  const mins = Math.floor(secondsLeft / 60);
+  const secs = secondsLeft % 60;
+  const timeLeft = `${mins}:${secs.toString().padStart(2, '0')}`;
+
+  const announcement = expired
+    ? 'Payment window expired.'
+    : secondsLeft <= 60
+      ? `Less than a minute left to pay: ${timeLeft} remaining.`
+      : secondsLeft % 60 === 0
+        ? `${mins} minutes left to pay.`
+        : '';
+
   return (
-    <div className="space-y-5">
-      <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 text-center space-y-1">
-        <div className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-          You pay
-        </div>
-        <div className="text-3xl font-semibold tabular-nums text-gray-900 dark:text-white">
-          {formatMinorCurrency(amountMinor, currency, locale)}
-        </div>
-        <div className="text-sm text-gray-600 dark:text-gray-400 tabular-nums">
-          ≈ {assetAmount} {assetLabel}
-        </div>
+    <div className="text-center">
+      <div aria-live="polite" className="sr-only">
+        {announcement}
       </div>
-      {paymentHref !== null ? (
-        <a
-          href={paymentHref}
-          className="block w-full rounded-lg bg-gray-900 hover:bg-gray-800 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-200 px-4 py-4 text-center text-base font-semibold text-white"
-        >
-          Open in wallet
-        </a>
-      ) : (
-        <div
-          role="alert"
-          className="block w-full rounded-lg bg-gray-200 dark:bg-gray-800 px-4 py-4 text-center text-base font-semibold text-gray-500 dark:text-gray-400"
-        >
-          Payment link unavailable
-        </div>
-      )}
-      <p className="text-xs text-gray-500 dark:text-gray-400 text-center px-4">
-        {paymentHref !== null
-          ? 'Tap to open your installed Stellar wallet. Your order updates automatically once the payment confirms.'
-          : "We couldn't prepare a secure wallet link for this order. Please contact support before sending any payment."}
+      <p
+        className={`text-sm font-medium ${expired ? 'text-red-500' : 'text-gray-500 dark:text-gray-400'}`}
+      >
+        {expired ? 'Payment window expired' : `Time remaining: ${timeLeft}`}
       </p>
-      {showSpinner ? (
-        <div className="flex justify-center">
-          <Spinner />
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -438,7 +398,7 @@ function Row({
   /**
    * When true the value is a redemption secret (gift-card code / PIN):
    * copy via `copySensitive` so the clipboard auto-clears after a short
-   * delay (FE-05). Non-sensitive rows (payment address / memo / amounts)
+   * delay (FE-05). Non-sensitive rows (payment address / amounts)
    * copy plainly and are deliberately left on the clipboard so the user
    * can paste them into their wallet.
    */
@@ -475,7 +435,7 @@ function Row({
         ) : null}
       </div>
       {/* UX-001 / CF-35: confirm copy to assistive tech — these values
-          (memo / code / PIN) are the ones most worth confirming. */}
+          (address / code / PIN) are the ones most worth confirming. */}
       {copyable === true ? (
         <span aria-live="polite" className="sr-only">
           {copied ? `${label} copied to clipboard.` : ''}

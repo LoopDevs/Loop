@@ -1,17 +1,15 @@
 import { Fragment, useMemo, useState } from 'react';
 import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ApiException, formatMinorCurrency } from '@loop/shared';
+import { ApiException } from '@loop/shared';
 import type { Route } from './+types/admin.cashback';
 import { useAllMerchants } from '~/hooks/use-merchants';
 import {
   cashbackConfigHistory,
   listCashbackConfigs,
-  listMerchantFlows,
   upsertCashbackConfig,
   type MerchantCashbackConfig,
   type MerchantCashbackConfigHistoryEntry,
-  type MerchantFlow,
 } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { AdminNav } from '~/components/features/admin/AdminNav';
@@ -21,7 +19,6 @@ import { ReasonDialog } from '~/components/features/admin/ReasonDialog';
 import { StepUpModal } from '~/components/features/admin/StepUpModal';
 import { useAdminStepUp } from '~/hooks/use-admin-step-up';
 import { MerchantStatsTable } from '~/components/features/admin/MerchantStatsTable';
-import { MerchantsFlywheelShareCard } from '~/components/features/admin/MerchantsFlywheelShareCard';
 import { Button } from '~/components/ui/Button';
 import { Spinner } from '~/components/ui/Spinner';
 import { formatDateTime } from '~/i18n/format';
@@ -32,16 +29,18 @@ export function meta(): Route.MetaDescriptors {
 }
 
 interface RowDraft {
-  wholesalePct: string;
   userCashbackPct: string;
-  loopMarginPct: string;
 }
 
 /**
- * `/admin/cashback` — admin-only surface for per-merchant cashback
- * splits (ADR 011). Renders every merchant from the public catalog
- * alongside its current config (if any); editing a row shows a Save
- * button that calls `/api/admin/merchant-cashback-configs/:id`.
+ * `/admin/cashback` — admin-only surface for the per-merchant user
+ * cashback share (ADR 011, reshaped by ADR 052). One percentage per
+ * merchant: the share of Loop's CTX margin handed to the customer
+ * (0 = Loop keeps the whole spread, 100 = all of it goes to the
+ * customer — delivered as CTX's native checkout discount). Renders
+ * every merchant from the public catalog alongside its current
+ * config (if any); editing a row shows a Save button that calls
+ * `/api/admin/merchant-cashback-configs/:id`.
  *
  * Access control: the backend rejects non-admin calls with 404, so
  * an accidental navigation shows an empty table + a "not authorised"
@@ -68,29 +67,6 @@ function AdminCashbackRouteInner(): React.JSX.Element {
     retry: shouldRetry,
     staleTime: 0,
   });
-
-  // Per-merchant fulfilled-order flow. Loaded in parallel with
-  // configs; the row join is best-effort so a 403 on this query
-  // (admin not authorised, or endpoint not deployed yet) doesn't
-  // block the configs list from rendering.
-  const flowsQuery = useQuery({
-    queryKey: ['admin-merchant-flows'],
-    queryFn: listMerchantFlows,
-    retry: shouldRetry,
-    staleTime: 30_000,
-  });
-  const flowsByMerchant = useMemo(() => {
-    const map = new Map<string, MerchantFlow[]>();
-    for (const f of flowsQuery.data?.flows ?? []) {
-      let bucket = map.get(f.merchantId);
-      if (bucket === undefined) {
-        bucket = [];
-        map.set(f.merchantId, bucket);
-      }
-      bucket.push(f);
-    }
-    return map;
-  }, [flowsQuery.data]);
 
   const [drafts, setDrafts] = useState<Record<string, RowDraft>>({});
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -122,24 +98,20 @@ function AdminCashbackRouteInner(): React.JSX.Element {
   const stepUp = useAdminStepUp();
   const saveMutation = useMutation({
     mutationFn: async (args: { merchantId: string; draft: RowDraft; reason: string }) => {
-      const wholesalePct = Number(args.draft.wholesalePct);
       const userCashbackPct = Number(args.draft.userCashbackPct);
-      const loopMarginPct = Number(args.draft.loopMarginPct);
       // ADR 028: step-up gated (sets future emission rates). The hook
       // opens <StepUpModal /> on STEP_UP_REQUIRED and retries once.
       return stepUp.runWithStepUp(
         () =>
           upsertCashbackConfig(args.merchantId, {
-            wholesalePct,
             userCashbackPct,
-            loopMarginPct,
             reason: args.reason,
           }),
-        // P2-07: no single money amount (three percentages), so echo the
-        // split being authorized + the target merchant rather than a
+        // P2-07: no single money amount (a percentage), so echo the
+        // share being authorized + the target merchant rather than a
         // blank confirmation.
         {
-          action: `Set cashback split — wholesale ${wholesalePct}% / user ${userCashbackPct}% / margin ${loopMarginPct}%`,
+          action: `Set user cashback — ${userCashbackPct}% of margin`,
           scope: 'cashback-config',
           destination: args.merchantId,
         },
@@ -185,9 +157,7 @@ function AdminCashbackRouteInner(): React.JSX.Element {
     const d = drafts[merchantId];
     if (d !== undefined) return d;
     return {
-      wholesalePct: cfg?.wholesalePct ?? '0.00',
       userCashbackPct: cfg?.userCashbackPct ?? '0.00',
-      loopMarginPct: cfg?.loopMarginPct ?? '0.00',
     };
   };
 
@@ -203,11 +173,7 @@ function AdminCashbackRouteInner(): React.JSX.Element {
   const isDirty = (cfg: MerchantCashbackConfig | undefined, merchantId: string): boolean => {
     const d = drafts[merchantId];
     if (d === undefined) return false;
-    return (
-      pctChanged(d.wholesalePct, cfg?.wholesalePct) ||
-      pctChanged(d.userCashbackPct, cfg?.userCashbackPct) ||
-      pctChanged(d.loopMarginPct, cfg?.loopMarginPct)
-    );
+    return pctChanged(d.userCashbackPct, cfg?.userCashbackPct);
   };
 
   return (
@@ -219,11 +185,11 @@ function AdminCashbackRouteInner(): React.JSX.Element {
         open={reasonTarget !== null}
         title={
           reasonTarget !== null
-            ? `Reason for updating ${reasonTarget.name}'s cashback split?`
+            ? `Reason for updating ${reasonTarget.name}'s user cashback?`
             : 'Reason'
         }
         description="2–500 characters. Logged in the cashback-config audit trail (ADR-011)."
-        confirmLabel="Save split"
+        confirmLabel="Save"
         onResolve={(reason) => {
           const target = reasonTarget;
           setReasonTarget(null);
@@ -240,9 +206,10 @@ function AdminCashbackRouteInner(): React.JSX.Element {
             Cashback configuration
           </h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            Three percentages per merchant. Must sum to at most the CTX discount for that merchant
-            (100% cap enforced). Edits apply to new orders; in-flight orders keep their pinned
-            split.
+            One percentage per merchant: the share of Loop&rsquo;s margin given to the customer as
+            an instant CTX checkout discount (0% = Loop keeps the whole spread, 100% = all of it
+            goes to the customer). Edits apply to new orders; in-flight orders keep their pinned
+            share.
           </p>
         </div>
         <div className="flex flex-col items-end gap-2 shrink-0">
@@ -275,9 +242,7 @@ function AdminCashbackRouteInner(): React.JSX.Element {
           <thead className="bg-gray-50 dark:bg-gray-900/40 text-start text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
             <tr>
               <th className="px-3 py-2">Merchant</th>
-              <th className="px-3 py-2">Wholesale %</th>
-              <th className="px-3 py-2">User cashback %</th>
-              <th className="px-3 py-2">Loop margin %</th>
+              <th className="px-3 py-2">User cashback (% of margin)</th>
               <th className="px-3 py-2">Last edit</th>
               <th className="px-3 py-2" />
             </tr>
@@ -288,41 +253,17 @@ function AdminCashbackRouteInner(): React.JSX.Element {
               const draft = getDraft(cfg, m.id);
               const dirty = isDirty(cfg, m.id);
               const saving = saveMutation.isPending && saveMutation.variables?.merchantId === m.id;
-              const flows = flowsByMerchant.get(m.id) ?? [];
               return (
                 <Fragment key={m.id}>
                   <tr className="border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-900/30">
                     <td className="px-3 py-2 font-medium text-gray-900 dark:text-white">
                       <div>{m.name}</div>
-                      {flows.length > 0 ? (
-                        <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] font-normal text-gray-500 dark:text-gray-400">
-                          {flows.map((f) => (
-                            <MerchantFlowSummary key={f.currency} flow={f} />
-                          ))}
-                        </div>
-                      ) : null}
-                    </td>
-                    <td className="px-3 py-2">
-                      <PctInput
-                        value={draft.wholesalePct}
-                        onChange={(v) =>
-                          setDrafts((d) => ({ ...d, [m.id]: { ...draft, wholesalePct: v } }))
-                        }
-                      />
                     </td>
                     <td className="px-3 py-2">
                       <PctInput
                         value={draft.userCashbackPct}
                         onChange={(v) =>
                           setDrafts((d) => ({ ...d, [m.id]: { ...draft, userCashbackPct: v } }))
-                        }
-                      />
-                    </td>
-                    <td className="px-3 py-2">
-                      <PctInput
-                        value={draft.loopMarginPct}
-                        onChange={(v) =>
-                          setDrafts((d) => ({ ...d, [m.id]: { ...draft, loopMarginPct: v } }))
                         }
                       />
                     </td>
@@ -379,9 +320,9 @@ function AdminCashbackRouteInner(): React.JSX.Element {
               Per-merchant stats (31d)
             </h2>
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              Fulfilled-order volume broken down by merchant, ranked by Loop margin (ADR 011/015).
-              Tuning a merchant's split? Watch the margin column here for impact — small % changes
-              on a high-volume merchant outweigh big tweaks on the long tail.
+              Fulfilled-order volume broken down by merchant (ADR 011 / 052). Tuning a
+              merchant&rsquo;s cashback share? Watch the commission column here for impact — small %
+              changes on a high-volume merchant outweigh big tweaks on the long tail.
             </p>
           </div>
           {/* Two exports — both live on this section since it's the
@@ -405,40 +346,6 @@ function AdminCashbackRouteInner(): React.JSX.Element {
         </header>
         <div className="px-6 py-5">
           <MerchantStatsTable />
-        </div>
-      </section>
-
-      {/* Per-merchant flywheel leaderboard (#602). Complement to the
-          stats table above: that table answers "which merchants
-          drive volume / cashback outlay / margin", this leaderboard
-          answers "which merchants see recycled cashback (LOOP-asset
-          paid orders)". The two together triangulate where the
-          flywheel is taking hold. Self-hides on empty/error —
-          first-order volume needs to land before the list is
-          meaningful. */}
-      <section className="rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
-        <header className="flex flex-wrap items-start justify-between gap-3 px-6 py-4 border-b border-gray-200 dark:border-gray-800">
-          <div>
-            <h2 className="text-base font-semibold text-gray-900 dark:text-white">
-              Flywheel leaderboard
-            </h2>
-            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              Merchants ranked by recycled-cashback order volume in the last 31 days. Each row
-              deep-links to the underlying order list.
-            </p>
-          </div>
-          {/* Tier-3 CSV export (#613). Finance-grade snapshot of the
-              ranking — matches the per-merchant stats CSV below
-              section-wise, so ops can pair them in the same
-              spreadsheet workbook. */}
-          <CsvDownloadButton
-            path="/api/admin/merchants/flywheel-share.csv"
-            filename={`merchants-flywheel-share-${new Date().toISOString().slice(0, 10)}.csv`}
-            label="Flywheel CSV"
-          />
-        </header>
-        <div className="px-6 py-5">
-          <MerchantsFlywheelShareCard />
         </div>
       </section>
     </div>
@@ -467,7 +374,7 @@ function HistoryDrawerRow({ merchantId }: { merchantId: string }): React.JSX.Ele
 
   return (
     <tr id={`history-${merchantId}`} className="bg-gray-50 dark:bg-gray-900/30">
-      <td colSpan={6} className="px-3 py-3">
+      <td colSpan={4} className="px-3 py-3">
         {query.isLoading ? (
           <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
             <Spinner /> Loading audit trail…
@@ -507,9 +414,7 @@ function HistoryTable({ rows }: { rows: MerchantCashbackConfigHistoryEntry[] }):
         <tr>
           <th className="pb-1 font-medium">Changed</th>
           <th className="pb-1 font-medium">By</th>
-          <th className="pb-1 font-medium">Wholesale</th>
           <th className="pb-1 font-medium">User cashback</th>
-          <th className="pb-1 font-medium">Loop margin</th>
           <th className="pb-1 font-medium">Active</th>
         </tr>
       </thead>
@@ -520,9 +425,7 @@ function HistoryTable({ rows }: { rows: MerchantCashbackConfigHistoryEntry[] }):
               {formatDateTime(row.changedAt, ADMIN_LOCALE, HISTORY_DATE_OPTIONS)}
             </td>
             <td className="py-1 pe-2 font-mono text-[11px]">{row.changedBy}</td>
-            <td className="py-1 pe-2">{row.wholesalePct}%</td>
             <td className="py-1 pe-2">{row.userCashbackPct}%</td>
-            <td className="py-1 pe-2">{row.loopMarginPct}%</td>
             <td className="py-1 pe-2">{row.active ? 'Yes' : 'No'}</td>
           </tr>
         ))}
@@ -549,23 +452,5 @@ function PctInput({
       onChange={(e) => onChange(e.target.value)}
       className="w-24 px-2 py-1 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-gray-900 dark:text-white"
     />
-  );
-}
-
-/**
- * One-line summary of a (merchant, currency) flow bucket. Rendered
- * under the merchant name on /admin/cashback so ops can eyeball the
- * actual supplier split beside each merchant's configured split.
- * Hidden when the merchant has no fulfilled orders yet.
- */
-function MerchantFlowSummary({ flow }: { flow: MerchantFlow }): React.JSX.Element {
-  return (
-    <span
-      title={`${flow.count} fulfilled ${flow.currency} orders — face ${formatMinorCurrency(flow.faceValueMinor, flow.currency)}`}
-    >
-      {flow.count} {flow.currency} · CTX {formatMinorCurrency(flow.wholesaleMinor, flow.currency)} ·
-      cashback {formatMinorCurrency(flow.userCashbackMinor, flow.currency)} · margin{' '}
-      {formatMinorCurrency(flow.loopMarginMinor, flow.currency)}
-    </span>
   );
 }

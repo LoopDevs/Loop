@@ -34,6 +34,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
  * fires as a real 23505, or that the REAL `assert_emission_conservation`
  * trigger accepts the mirror step's burn row — that's
  * `__tests__/integration/vault-redemptions.test.ts` (real postgres).
+ *
+ * ADR 052: the order-redeem spend path is RETIRED (ctx is the payment
+ * processor; no order is ever payable Loop-side). Redemption MECHANICS
+ * are therefore exercised through `sourceType='withdrawal'` rows (no
+ * order coupling — the mirror debit + burn audit row still apply, with
+ * `pending_payouts.order_id` null). The remaining `order_redeem`
+ * fixtures pin the fail-closed routing every legacy row now gets: the
+ * pre-debit payability guard can never pass (→ needs-refund), and even
+ * a forced guard-pass hits the retired-path invariant throw.
  */
 
 vi.mock('../../../logger.js', () => ({
@@ -204,11 +213,10 @@ const { state } = vi.hoisted(() => {
   const s = {
     redemptionRows: new Map<string, VaultRedemptionRowLike>(),
     hotFloatRows: new Map<string, HotFloatRowLike>(), // key: `${assetCode}:${network}`
-    // Money-review P2-3: the mirror step now reads `orders FOR UPDATE`
-    // and couples the debit to `state='pending_payment'`. Keyed by order
-    // id; a fresh `order_redeem` redemption auto-seeds a `pending_payment`
-    // order here (see `seedRow`) so the happy path stays payable, and a
-    // test that needs an expired/paid order overrides the state directly.
+    // Money-review P2-3: the mirror step reads `orders FOR UPDATE` and
+    // couples the debit to `state='pending_payment'`. Keyed by order id.
+    // ADR 052: nothing is auto-seeded here — the retired `order_redeem`
+    // tests seed the exact order state they exercise directly.
     orders: new Map<string, { state: string }>(), // key: order id
     // Money-review P1-B: ordering + lost-claim controls for the per-step
     // collect claim. `eventLog` records 'claim'/'transfer' so a test can
@@ -268,20 +276,18 @@ const { state } = vi.hoisted(() => {
         failedAt: row.failedAt ?? null,
       };
       s.redemptionRows.set(id, full);
-      // Auto-seed the mirror-step dependencies for an `order_redeem`
-      // redemption so the happy path settles without per-test ceremony:
-      // a payable (`pending_payment`) source order (P2-3) and a present
-      // `user_credits` mirror row (P2-4). Both default to existing/payable;
-      // tests that exercise the fail-closed branches override afterward
-      // (`state.orders.set(id, {state:'expired'})` / delete the credits key).
-      if (full.sourceType === 'order_redeem') {
-        if (!s.orders.has(full.sourceId)) s.orders.set(full.sourceId, { state: 'pending_payment' });
-        const currency = full.assetCode === 'LOOPUSD' ? 'USD' : 'EUR';
-        const creditsKey = `${full.userId}:${currency}`;
-        // Seed at 0n: the mock tracks the NET delta the mirror applies, so
-        // a 0n base keeps the existing `-valueMinor` balance assertions exact.
-        if (!s.userCreditsBalances.has(creditsKey)) s.userCreditsBalances.set(creditsKey, 0n);
-      }
+      // Auto-seed the mirror-step dependency EVERY source type needs: a
+      // present `user_credits` mirror row (P2-4 — the mirror debit applies
+      // to `withdrawal` rows too). A test exercising the missing-row branch
+      // deletes the credits key afterward. ADR 052: no source order is
+      // auto-seeded any more — `order_redeem` is retired, no order can be
+      // `pending_payment`, so a test exercising the order-coupled branches
+      // seeds `state.orders` explicitly with the state it needs.
+      const currency = full.assetCode === 'LOOPUSD' ? 'USD' : 'EUR';
+      const creditsKey = `${full.userId}:${currency}`;
+      // Seed at 0n: the mock tracks the NET delta the mirror applies, so
+      // a 0n base keeps the existing `-valueMinor` balance assertions exact.
+      if (!s.userCreditsBalances.has(creditsKey)) s.userCreditsBalances.set(creditsKey, 0n);
       return full;
     },
     seedFloat(
@@ -755,16 +761,6 @@ vi.mock('../../../db/users.js', () => ({
   getUserById: (...args: unknown[]) => userMocks.getUserById(...args),
 }));
 
-const { transitionsMocks } = vi.hoisted(() => ({
-  transitionsMocks: {
-    markOrderPaidViaVaultRedemption: vi.fn(),
-  },
-}));
-vi.mock('../../../orders/transitions.js', () => ({
-  markOrderPaidViaVaultRedemption: (...args: unknown[]) =>
-    transitionsMocks.markOrderPaidViaVaultRedemption(...args),
-}));
-
 import { getTableName, type Table } from 'drizzle-orm';
 import {
   vaultRedemptions,
@@ -838,17 +834,13 @@ beforeEach(() => {
     walletAddress: USER_WALLET,
     walletProvisioning: 'activated',
   }));
-  transitionsMocks.markOrderPaidViaVaultRedemption.mockReset();
-  transitionsMocks.markOrderPaidViaVaultRedemption.mockImplementation(
-    async (_tx: unknown, orderId: string) => ({ id: orderId, state: 'paid' }),
-  );
 });
 
 describe('claimVaultRedemption — idempotency claim', () => {
   it('creates a fresh pending row on first claim', async () => {
     const row = await claimVaultRedemption({
-      sourceType: 'order_redeem',
-      sourceId: 'order-1',
+      sourceType: 'withdrawal',
+      sourceId: '9f2c4b1e-8d3a-4f6b-a1c5-2e7d9b0f4a63',
       userId: USER_ID,
       assetCode: 'LOOPUSD',
       network: 'testnet',
@@ -856,14 +848,14 @@ describe('claimVaultRedemption — idempotency claim', () => {
       fromAddress: USER_WALLET,
     });
     expect(row.state).toBe('pending');
-    expect(row.sourceId).toBe('order-1');
+    expect(row.sourceId).toBe('9f2c4b1e-8d3a-4f6b-a1c5-2e7d9b0f4a63');
     expect(state.redemptionRows.size).toBe(1);
   });
 
   it('replay of the same (sourceType, sourceId) resolves to the SAME row — no second row created', async () => {
     const first = await claimVaultRedemption({
-      sourceType: 'order_redeem',
-      sourceId: 'order-1',
+      sourceType: 'withdrawal',
+      sourceId: 'b4e7a2c9-1f5d-4b8e-9a3c-6d0f2e8b7a41',
       userId: USER_ID,
       assetCode: 'LOOPUSD',
       network: 'testnet',
@@ -871,8 +863,8 @@ describe('claimVaultRedemption — idempotency claim', () => {
       fromAddress: USER_WALLET,
     });
     const second = await claimVaultRedemption({
-      sourceType: 'order_redeem',
-      sourceId: 'order-1',
+      sourceType: 'withdrawal',
+      sourceId: 'b4e7a2c9-1f5d-4b8e-9a3c-6d0f2e8b7a41',
       userId: USER_ID,
       assetCode: 'LOOPUSD',
       network: 'testnet',
@@ -890,8 +882,8 @@ describe('driveOneVaultRedemption — happy path FAST (hot float) redemption', (
     state.seedFloat('LOOPUSD', 'testnet', 10_000n, 0n);
 
     const row = await claimVaultRedemption({
-      sourceType: 'order_redeem',
-      sourceId: 'order-1',
+      sourceType: 'withdrawal',
+      sourceId: '3a8f1d6c-2b9e-4c7a-8f5d-0e1b4a9c6d28',
       userId: USER_ID,
       assetCode: 'LOOPUSD',
       network: 'testnet',
@@ -912,7 +904,9 @@ describe('driveOneVaultRedemption — happy path FAST (hot float) redemption', (
 
     // Mirror conserved: exactly a 500-minor debit, one spend row, one
     // burn audit row (the SAME primitive orders/transitions.ts already
-    // writes for classic-asset redemptions — ADR 036).
+    // writes for classic-asset redemptions — ADR 036). ADR 052: a
+    // `withdrawal` row has no source order, so `orderId` is null on the
+    // burn audit row and no order transition happens.
     expect(state.userCreditsBalances.get(`${USER_ID}:USD`)).toBe(-500n);
     expect(state.creditTransactionInserts).toHaveLength(1);
     expect(state.creditTransactionInserts[0]).toMatchObject({
@@ -920,12 +914,12 @@ describe('driveOneVaultRedemption — happy path FAST (hot float) redemption', (
       amountMinor: -500n,
       currency: 'USD',
       referenceType: 'order',
-      referenceId: 'order-1',
+      referenceId: '3a8f1d6c-2b9e-4c7a-8f5d-0e1b4a9c6d28',
     });
     expect(state.pendingPayoutInserts).toHaveLength(1);
     expect(state.pendingPayoutInserts[0]).toMatchObject({
       userId: USER_ID,
-      orderId: 'order-1',
+      orderId: null,
       kind: 'burn',
       assetCode: 'LOOPUSD',
       assetIssuer: SHARE_CONTRACT_ID,
@@ -933,13 +927,6 @@ describe('driveOneVaultRedemption — happy path FAST (hot float) redemption', (
       state: 'confirmed',
       txHash: 'collect-tx-1',
     });
-
-    // markOrderPaidViaVaultRedemption called exactly once, with this order's id.
-    expect(transitionsMocks.markOrderPaidViaVaultRedemption).toHaveBeenCalledTimes(1);
-    expect(transitionsMocks.markOrderPaidViaVaultRedemption).toHaveBeenCalledWith(
-      expect.anything(),
-      'order-1',
-    );
 
     // Float: balance decreased by EXACTLY valueMinor, pending shares
     // increased by EXACTLY sharesToRedeem — in the SAME atomic update
@@ -957,8 +944,8 @@ describe('driveOneVaultRedemption — happy path FAST (hot float) redemption', (
     state.seedFloat('LOOPUSD', 'testnet', 5_000n, 100n);
 
     const row = await claimVaultRedemption({
-      sourceType: 'order_redeem',
-      sourceId: 'order-8',
+      sourceType: 'withdrawal',
+      sourceId: 'd7c2e9a4-5b1f-4e8c-a6d3-9f0b2c7e1a85',
       userId: USER_ID,
       assetCode: 'LOOPUSD',
       network: 'testnet',
@@ -1002,8 +989,8 @@ describe('driveOneVaultRedemption — happy path SLOW (synchronous vault.withdra
     );
 
     const row = await claimVaultRedemption({
-      sourceType: 'order_redeem',
-      sourceId: 'order-2',
+      sourceType: 'withdrawal',
+      sourceId: '5e9b3f7a-0c4d-4a2e-b8f6-1d7c3a9e0b52',
       userId: USER_ID,
       assetCode: 'LOOPUSD',
       network: 'testnet',
@@ -1030,8 +1017,8 @@ describe('driveOneVaultRedemption — happy path SLOW (synchronous vault.withdra
 describe('driveOneVaultRedemption — replay / idempotency', () => {
   it('driving an already-settled row is a no-op (no second collect, payout, or mirror)', async () => {
     const row = state.seedRow({
-      sourceType: 'order_redeem',
-      sourceId: 'order-3',
+      sourceType: 'withdrawal',
+      sourceId: 'a1d4f8c2-7e3b-4d9f-8c0a-5b2e6f1d9c74',
       userId: USER_ID,
       valueMinor: 500n,
       fromAddress: USER_WALLET,
@@ -1052,7 +1039,6 @@ describe('driveOneVaultRedemption — replay / idempotency', () => {
     expect(vaultClientMocks.withdrawFromVault).not.toHaveBeenCalled();
     expect(state.creditTransactionInserts).toHaveLength(0);
     expect(state.pendingPayoutInserts).toHaveLength(0);
-    expect(transitionsMocks.markOrderPaidViaVaultRedemption).not.toHaveBeenCalled();
   });
 });
 
@@ -1066,8 +1052,8 @@ describe('driveOneVaultRedemption — resume behavior (CF-18 / crash recovery)',
   it('P1-A verify-on-resume: collect_tx_hash set + collected_at null re-invokes transferShares with priorTxHash; a deduped (already-landed) result advances to collected and settles with no second transfer', async () => {
     state.seedFloat('LOOPUSD', 'testnet', 10_000n, 0n);
     const row = state.seedRow({
-      sourceType: 'order_redeem',
-      sourceId: 'order-4',
+      sourceType: 'withdrawal',
+      sourceId: 'c6f0a3e8-9b2d-4f5c-a7e1-3d8b0c4f2a96',
       userId: USER_ID,
       valueMinor: 200n,
       fromAddress: USER_WALLET,
@@ -1103,8 +1089,8 @@ describe('driveOneVaultRedemption — resume behavior (CF-18 / crash recovery)',
   it('P1-A resubmit-on-resume: when the prior tx is NOT deduped (re-submitted), collected_at is set with the NEW hash', async () => {
     state.seedFloat('LOOPUSD', 'testnet', 10_000n, 0n);
     const row = state.seedRow({
-      sourceType: 'order_redeem',
-      sourceId: 'order-4b',
+      sourceType: 'withdrawal',
+      sourceId: 'e2a5c8f1-4d7b-4e0a-9c3f-6b1d8e5a2c07',
       userId: USER_ID,
       valueMinor: 200n,
       fromAddress: USER_WALLET,
@@ -1134,8 +1120,8 @@ describe('driveOneVaultRedemption — resume behavior (CF-18 / crash recovery)',
 
   it('a row already redeemed(fast) resumes at mirror only — no re-collect, no re-pay, float untouched', async () => {
     const row = state.seedRow({
-      sourceType: 'order_redeem',
-      sourceId: 'order-5',
+      sourceType: 'withdrawal',
+      sourceId: 'f8b1e4a7-2c5d-4b9e-8a0c-7f3d1e6b4a29',
       userId: USER_ID,
       valueMinor: 250n,
       fromAddress: USER_WALLET,
@@ -1157,7 +1143,6 @@ describe('driveOneVaultRedemption — resume behavior (CF-18 / crash recovery)',
 
     expect(state.creditTransactionInserts).toHaveLength(1);
     expect(state.pendingPayoutInserts).toHaveLength(1);
-    expect(transitionsMocks.markOrderPaidViaVaultRedemption).toHaveBeenCalledTimes(1);
     const final = state.redemptionRows.get(row.id)!;
     expect(final.state).toBe('settled');
   });
@@ -1174,8 +1159,8 @@ describe('collectSharesStep — P1-B per-step collect claim (double-collect excl
     });
 
     const row = await claimVaultRedemption({
-      sourceType: 'order_redeem',
-      sourceId: 'order-p1b',
+      sourceType: 'withdrawal',
+      sourceId: '1c4e7a0d-8f2b-4c6e-9d5a-0b3f8c1e7d40',
       userId: USER_ID,
       assetCode: 'LOOPUSD',
       network: 'testnet',
@@ -1199,8 +1184,8 @@ describe('collectSharesStep — P1-B per-step collect claim (double-collect excl
     // A collecting row whose per-step claim is lost — the guarded
     // collect_claimed_at UPDATE matches zero rows (simulated deterministically).
     const row = state.seedRow({
-      sourceType: 'order_redeem',
-      sourceId: 'order-p1b-lost',
+      sourceType: 'withdrawal',
+      sourceId: '7d0a3c6f-1e4b-4d8a-b2c9-5f8e0a3d6c17',
       userId: USER_ID,
       valueMinor: 500n,
       fromAddress: USER_WALLET,
@@ -1223,8 +1208,8 @@ describe('collectSharesStep — P1-B per-step collect claim (double-collect excl
   });
 });
 
-describe('mirrorStep — P2-3 order-payability coupling (expired → refund, no debit)', () => {
-  it('a redeemed row whose source order became non-payable (expired) with NO prior spend row → fails closed to refund-needed, NEVER debits', async () => {
+describe('mirrorStep — P2-3/ADR 052 order-payability coupling (order_redeem fails closed, no debit)', () => {
+  it('a redeemed order_redeem row with a non-payable (expired) source order and NO prior spend row → fails closed to refund-needed, NEVER debits (ADR 052: no order can be pending_payment, so EVERY un-mirrored order_redeem row lands here)', async () => {
     const row = state.seedRow({
       sourceType: 'order_redeem',
       sourceId: 'order-p23-expired',
@@ -1238,7 +1223,9 @@ describe('mirrorStep — P2-3 order-payability coupling (expired → refund, no 
       payoutPath: 'fast',
       redeemedAt: new Date(),
     });
-    // The source order expired before the mirror debit (e.g. sweepExpiredOrders).
+    // The source order is not payable at mirror time — under ADR 052 no
+    // order ever is (`pending_payment` no longer occurs), so this is the
+    // guaranteed disposition of a legacy `order_redeem` row.
     state.orders.set('order-p23-expired', { state: 'expired' });
 
     const outcome = await driveOneVaultRedemption(row as unknown as VaultRedemptionRow);
@@ -1248,7 +1235,6 @@ describe('mirrorStep — P2-3 order-payability coupling (expired → refund, no 
     expect(state.creditTransactionInserts).toHaveLength(0);
     expect(state.pendingPayoutInserts).toHaveLength(0);
     expect(state.userCreditsBalances.get(`${USER_ID}:USD`)).toBe(0n); // untouched
-    expect(transitionsMocks.markOrderPaidViaVaultRedemption).not.toHaveBeenCalled();
     const final = state.redemptionRows.get(row.id)!;
     expect(final.state).toBe('failed');
     expect(final.lastError).toMatch(/not payable|refund/i);
@@ -1286,18 +1272,51 @@ describe('mirrorStep — P2-3 order-payability coupling (expired → refund, no 
     expect(outcome).toBe('settled');
     // No SECOND debit and no refund/failure.
     expect(state.creditTransactionInserts).toHaveLength(1); // only the pre-existing one
-    expect(transitionsMocks.markOrderPaidViaVaultRedemption).not.toHaveBeenCalled();
     expect(discordMocks.notifyVaultRedemptionFailed).not.toHaveBeenCalled();
     const final = state.redemptionRows.get(row.id)!;
     expect(final.state).toBe('settled');
   });
 });
 
-describe('mirrorStep — P2-4 missing user_credits row fails closed (no silent desync debit)', () => {
-  it('a payable (pending_payment) order but NO user_credits mirror row → the txn rolls back, nothing persists, row is a step failure (not settled)', async () => {
+describe('mirrorStep — ADR 052: the retired order_redeem settle branch throws, never flips the order', () => {
+  it('even a forced guard-pass (order seeded pending_payment — unreachable in prod) hits the retired-path invariant: the txn ROLLS BACK (no debit, no burn) and the row records an ordinary step failure', async () => {
     const row = state.seedRow({
       sourceType: 'order_redeem',
-      sourceId: 'order-p24',
+      sourceId: 'order-adr052',
+      userId: USER_ID,
+      valueMinor: 500n,
+      fromAddress: USER_WALLET,
+      state: 'redeemed',
+      sharesToRedeem: 500_000n,
+      collectTxHash: 'collect-tx-adr052',
+      collectedAt: new Date(),
+      payoutPath: 'fast',
+      redeemedAt: new Date(),
+    });
+    // Force the pre-debit payability guard to PASS — a state prod can no
+    // longer produce — to pin the settle branch's own backstop.
+    state.orders.set('order-adr052', { state: 'pending_payment' });
+
+    const outcome = await driveOneVaultRedemption(row as unknown as VaultRedemptionRow);
+
+    // Non-terminal step failure, NOT settled — the whole mirror txn
+    // (debit + burn row) rolled back with the invariant throw.
+    expect(outcome).toBe('redeemed');
+    expect(state.creditTransactionInserts).toHaveLength(0);
+    expect(state.pendingPayoutInserts).toHaveLength(0);
+    expect(state.userCreditsBalances.get(`${USER_ID}:USD`)).toBe(0n); // untouched
+    const final = state.redemptionRows.get(row.id)!;
+    expect(final.state).toBe('redeemed');
+    expect(final.attempts).toBe(1);
+    expect(final.lastError).toMatch(/retired \(ADR 052\)/);
+  });
+});
+
+describe('mirrorStep — P2-4 missing user_credits row fails closed (no silent desync debit)', () => {
+  it('a withdrawal row with NO user_credits mirror row → the txn rolls back, nothing persists, row is a step failure (not settled)', async () => {
+    const row = state.seedRow({
+      sourceType: 'withdrawal',
+      sourceId: '4b7e0c3a-6d9f-4a1c-8e5b-2a0d7f4c9e63',
       userId: USER_ID,
       valueMinor: 500n,
       fromAddress: USER_WALLET,
@@ -1308,18 +1327,17 @@ describe('mirrorStep — P2-4 missing user_credits row fails closed (no silent d
       payoutPath: 'fast',
       redeemedAt: new Date(),
     });
-    // Order stays payable, but the mirror row is ABSENT — state corruption
-    // the mirror step must refuse to debit against.
+    // The mirror row is ABSENT — state corruption the mirror step must
+    // refuse to debit against.
     state.userCreditsBalances.delete(`${USER_ID}:USD`);
 
     const outcome = await driveOneVaultRedemption(row as unknown as VaultRedemptionRow);
 
-    // Non-terminal step failure, NOT settled — no debit, no burn, order not paid.
+    // Non-terminal step failure, NOT settled — no debit, no burn.
     expect(outcome).toBe('redeemed');
     expect(state.creditTransactionInserts).toHaveLength(0);
     expect(state.pendingPayoutInserts).toHaveLength(0);
     expect(state.userCreditsBalances.has(`${USER_ID}:USD`)).toBe(false);
-    expect(transitionsMocks.markOrderPaidViaVaultRedemption).not.toHaveBeenCalled();
     const final = state.redemptionRows.get(row.id)!;
     expect(final.state).toBe('redeemed');
     expect(final.attempts).toBe(1);
@@ -1338,8 +1356,8 @@ describe('collectSharesStep — P2-5 wallet-not-activated blocks collect', () =>
     }));
 
     const row = state.seedRow({
-      sourceType: 'order_redeem',
-      sourceId: 'order-p25',
+      sourceType: 'withdrawal',
+      sourceId: '0e3a6c9f-2b5d-4e7a-9c1f-8d4b0a6e3c85',
       userId: USER_ID,
       valueMinor: 500n,
       fromAddress: USER_WALLET,
@@ -1369,8 +1387,8 @@ describe('driveOneVaultRedemption — INV-V2 (catastrophic-slippage backstop sti
     );
 
     const row = await claimVaultRedemption({
-      sourceType: 'order_redeem',
-      sourceId: 'order-6',
+      sourceType: 'withdrawal',
+      sourceId: '8a1c4e7b-0d3f-4b6a-a9c2-5e8f1b4d7a30',
       userId: USER_ID,
       assetCode: 'LOOPUSD',
       network: 'testnet',
@@ -1395,8 +1413,8 @@ describe('driveOneVaultRedemption — atomic rollback on a missed payout CAS (P7
     state.seedFloat('LOOPUSD', 'testnet', 10_000n, 0n);
     const sharesToRedeem = 495_000n;
     const readyRow = state.seedRow({
-      sourceType: 'order_redeem',
-      sourceId: 'order-7',
+      sourceType: 'withdrawal',
+      sourceId: '2e5a8c1f-4b7d-4a0e-8f3c-9d6b2e0a5c74',
       userId: USER_ID,
       valueMinor: 500n,
       fromAddress: USER_WALLET,
@@ -1437,7 +1455,6 @@ describe('driveOneVaultRedemption — atomic rollback on a missed payout CAS (P7
     // No second mirror ran either.
     expect(state.creditTransactionInserts).toHaveLength(1);
     expect(state.pendingPayoutInserts).toHaveLength(1);
-    expect(transitionsMocks.markOrderPaidViaVaultRedemption).toHaveBeenCalledTimes(1);
     // transferShares/withdrawFromVault were never re-invoked on either pass.
     expect(vaultClientMocks.transferShares).not.toHaveBeenCalled();
     expect(vaultClientMocks.withdrawFromVault).not.toHaveBeenCalled();
@@ -1459,8 +1476,8 @@ describe('computeSharesToRedeem — MNY-06: no user-side buffer, capped at the h
     vaultClientMocks.getShareBalance.mockResolvedValue(baseShares * 10n);
 
     const row = await claimVaultRedemption({
-      sourceType: 'order_redeem',
-      sourceId: 'order-11',
+      sourceType: 'withdrawal',
+      sourceId: '6c9e2a5d-8f1b-4c4e-b7a0-3d0f6c9e2b58',
       userId: USER_ID,
       assetCode: 'LOOPUSD',
       network: 'testnet',
@@ -1497,8 +1514,8 @@ describe('computeSharesToRedeem — MNY-06: no user-side buffer, capped at the h
     });
 
     const row = await claimVaultRedemption({
-      sourceType: 'order_redeem',
-      sourceId: 'order-full',
+      sourceType: 'withdrawal',
+      sourceId: 'a4d7f0b3-6e9c-4d2f-8b5a-1c8e4a7d0f36',
       userId: USER_ID,
       assetCode: 'LOOPUSD',
       network: 'testnet',
@@ -1532,8 +1549,8 @@ describe('computeSharesToRedeem — MNY-06: no user-side buffer, capped at the h
     vaultClientMocks.getShareBalance.mockResolvedValue(held);
 
     const row = await claimVaultRedemption({
-      sourceType: 'order_redeem',
-      sourceId: 'order-cap',
+      sourceType: 'withdrawal',
+      sourceId: 'e0b3d6a9-2f5c-4e8b-a1d4-7c0a3e6b9d52',
       userId: USER_ID,
       assetCode: 'LOOPUSD',
       network: 'testnet',
@@ -1568,8 +1585,8 @@ describe('payoutStep — MNY-06: float absorbs the slow-path delta in BOTH direc
     );
 
     const row = await claimVaultRedemption({
-      sourceType: 'order_redeem',
-      sourceId: 'order-adv',
+      sourceType: 'withdrawal',
+      sourceId: '9c2f5b8e-1a4d-4f7c-8e0b-6d3a9f2c5e81',
       userId: USER_ID,
       assetCode: 'LOOPUSD',
       network: 'testnet',
@@ -1594,8 +1611,8 @@ describe('driveOneVaultRedemption — terminal failure + Discord paging', () => 
     vaultClientMocks.transferShares.mockRejectedValue(new Error('persistent collect failure'));
 
     let row: VaultRedemptionRow = await claimVaultRedemption({
-      sourceType: 'order_redeem',
-      sourceId: 'order-12',
+      sourceType: 'withdrawal',
+      sourceId: '5a8d1f4b-7c0e-4a3d-9f6c-2b5e8a1d4f70',
       userId: USER_ID,
       assetCode: 'LOOPUSD',
       network: 'testnet',
@@ -1620,7 +1637,10 @@ describe('driveOneVaultRedemption — terminal failure + Discord paging', () => 
     expect(final.failedAt).not.toBeNull();
     expect(discordMocks.notifyVaultRedemptionFailed).toHaveBeenCalledTimes(1);
     expect(discordMocks.notifyVaultRedemptionFailed).toHaveBeenCalledWith(
-      expect.objectContaining({ sourceId: 'order-12', attempts: VAULT_REDEMPTION_MAX_ATTEMPTS }),
+      expect.objectContaining({
+        sourceId: '5a8d1f4b-7c0e-4a3d-9f6c-2b5e8a1d4f70',
+        attempts: VAULT_REDEMPTION_MAX_ATTEMPTS,
+      }),
     );
   });
 });
@@ -1629,8 +1649,8 @@ describe('driveOneVaultRedemption — gated off', () => {
   it("returns 'no_vault' and touches nothing when no active vault is registered", async () => {
     registryMocks.getActiveVault.mockResolvedValue(null);
     const row = await claimVaultRedemption({
-      sourceType: 'order_redeem',
-      sourceId: 'order-10',
+      sourceType: 'withdrawal',
+      sourceId: 'b7e0a3d6-9c2f-4b5e-8a1d-4f7c0b3e6a92',
       userId: USER_ID,
       assetCode: 'LOOPUSD',
       network: 'testnet',
@@ -1652,8 +1672,8 @@ describe('driveVaultRedemptionToCompletion', () => {
     state.seedFloat('LOOPUSD', 'testnet', 10_000n, 0n);
 
     const row = await claimVaultRedemption({
-      sourceType: 'order_redeem',
-      sourceId: 'order-9',
+      sourceType: 'withdrawal',
+      sourceId: '3f6b9e2c-5a8d-4f1b-a4e7-0c3d6f9b2e50',
       userId: USER_ID,
       assetCode: 'LOOPUSD',
       network: 'testnet',
@@ -1669,8 +1689,8 @@ describe('runVaultRedemptionSweepTick', () => {
   it('does nothing when vaultsEnabled() is false, even with queued rows', async () => {
     registryMocks.vaultsEnabled.mockReturnValue(false);
     state.seedRow({
-      sourceType: 'order_redeem',
-      sourceId: 'order-a',
+      sourceType: 'withdrawal',
+      sourceId: 'd0a3f6c9-2e5b-4d8a-b1f4-7a0c3d6f9b21',
       userId: USER_ID,
       valueMinor: 500n,
       fromAddress: USER_WALLET,
@@ -1689,8 +1709,8 @@ describe('runVaultRedemptionSweepTick', () => {
 
     // Row A: fresh pending — will fully settle via the fast path.
     const rowA = state.seedRow({
-      sourceType: 'order_redeem',
-      sourceId: 'order-a',
+      sourceType: 'withdrawal',
+      sourceId: '1a4d7f0c-3b6e-4a9d-8c2f-5e8b1a4d7f03',
       userId: USER_ID,
       valueMinor: 500n,
       fromAddress: USER_WALLET,
@@ -1699,8 +1719,8 @@ describe('runVaultRedemptionSweepTick', () => {
     });
     // Row B: already collecting + ready to pay — resumes straight to settled.
     state.seedRow({
-      sourceType: 'order_redeem',
-      sourceId: 'order-b',
+      sourceType: 'withdrawal',
+      sourceId: '7c0f3a6d-9e2b-4c5f-a8d1-4b7e0c3f6a95',
       userId: USER_ID,
       valueMinor: 200n,
       fromAddress: USER_WALLET,
@@ -1719,8 +1739,8 @@ describe('runVaultRedemptionSweepTick', () => {
     const STROOPS_PER_MINOR = 100_000n;
     const failShares = (failValueMinor * STROOPS_PER_MINOR * 1_000_000n) / 1_000_000n;
     state.seedRow({
-      sourceType: 'order_redeem',
-      sourceId: 'order-c',
+      sourceType: 'withdrawal',
+      sourceId: 'c2e5b8d1-4f7a-4e0c-9b3d-6a9c2f5b8e14',
       userId: USER_ID,
       valueMinor: failValueMinor,
       fromAddress: USER_WALLET,
@@ -1743,7 +1763,9 @@ describe('runVaultRedemptionSweepTick', () => {
     expect(result.errors).toBe(0);
 
     expect(state.redemptionRows.get(rowA.id)?.state).toBe('settled');
-    const rowCFinal = [...state.redemptionRows.values()].find((r) => r.sourceId === 'order-c')!;
+    const rowCFinal = [...state.redemptionRows.values()].find(
+      (r) => r.sourceId === 'c2e5b8d1-4f7a-4e0c-9b3d-6a9c2f5b8e14',
+    )!;
     expect(rowCFinal.state).toBe('failed');
     expect(rowCFinal.attempts).toBe(VAULT_REDEMPTION_MAX_ATTEMPTS);
   });
@@ -1788,8 +1810,8 @@ describe('isVaultRedemptionNeedsRefund', () => {
 describe('inferVaultRedemptionResumeState', () => {
   it('resumes at redeemed when redeemedAt is set (only the mirror is outstanding)', () => {
     const row = state.seedRow({
-      sourceType: 'order_redeem',
-      sourceId: 'order-1',
+      sourceType: 'withdrawal',
+      sourceId: 'f1e4b7a0-3c6d-4f9b-8e2a-5d8f1c4e7b09',
       userId: USER_ID,
       state: 'failed',
       collectTxHash: 'c1',
@@ -1802,8 +1824,8 @@ describe('inferVaultRedemptionResumeState', () => {
 
   it('resumes at collecting when redeemedAt is not set, even if a collect landed', () => {
     const row = state.seedRow({
-      sourceType: 'order_redeem',
-      sourceId: 'order-1',
+      sourceType: 'withdrawal',
+      sourceId: 'a7d0c3f6-9b2e-4a5d-8f1c-4e7b0a3d6f92',
       userId: USER_ID,
       state: 'failed',
       collectTxHash: 'c1',
@@ -1817,8 +1839,8 @@ describe('inferVaultRedemptionResumeState', () => {
 
   it('resumes at collecting when nothing landed at all', () => {
     const row = state.seedRow({
-      sourceType: 'order_redeem',
-      sourceId: 'order-1',
+      sourceType: 'withdrawal',
+      sourceId: '3d6f9c2e-5b8a-4d1f-a4c7-0e3b6d9f2c85',
       userId: USER_ID,
       state: 'failed',
     });
@@ -1830,7 +1852,11 @@ describe('inferVaultRedemptionResumeState', () => {
 
 describe('getVaultRedemptionById', () => {
   it('returns the row for a known id, null for an unknown one', async () => {
-    const row = state.seedRow({ sourceType: 'order_redeem', sourceId: 'order-1', userId: USER_ID });
+    const row = state.seedRow({
+      sourceType: 'withdrawal',
+      sourceId: '9b2e5c8f-1d4a-4b7e-8c0f-3a6d9b2e5c18',
+      userId: USER_ID,
+    });
     expect(await getVaultRedemptionById(row.id)).toMatchObject({ id: row.id });
     expect(await getVaultRedemptionById('nonexistent-id')).toBeNull();
   });
@@ -1844,8 +1870,8 @@ describe('reclaimFailedVaultRedemptionForRedrive', () => {
 
   it('not_failed when the row is not currently failed', async () => {
     const row = state.seedRow({
-      sourceType: 'order_redeem',
-      sourceId: 'order-1',
+      sourceType: 'withdrawal',
+      sourceId: '5f8b1e4d-7a0c-4f3b-9e6a-2c5f8b1e4d70',
       userId: USER_ID,
       state: 'collecting',
     });
@@ -1877,8 +1903,8 @@ describe('reclaimFailedVaultRedemptionForRedrive', () => {
 
   it('reclaims a failed-after-collect row to collecting, resetting attempts/lastError/failedAt/collectClaimedAt', async () => {
     const row = state.seedRow({
-      sourceType: 'order_redeem',
-      sourceId: 'order-1',
+      sourceType: 'withdrawal',
+      sourceId: 'e4a7d0b3-6c9f-4e2a-8b5d-1f4e7a0d3b96',
       userId: USER_ID,
       state: 'failed',
       collectTxHash: 'c1',
@@ -1903,8 +1929,8 @@ describe('reclaimFailedVaultRedemptionForRedrive', () => {
 
   it('reclaims a failed-after-payout row to redeemed (never back to collecting)', async () => {
     const row = state.seedRow({
-      sourceType: 'order_redeem',
-      sourceId: 'order-1',
+      sourceType: 'withdrawal',
+      sourceId: '0c3f6a9d-2e5b-4c8f-a1d4-7b0c3f6a9d21',
       userId: USER_ID,
       state: 'failed',
       collectTxHash: 'c1',
@@ -1923,8 +1949,8 @@ describe('reclaimFailedVaultRedemptionForRedrive', () => {
   it('driving a reclaimed failed-after-collect row resumes at payout and does NOT re-collect (end-to-end through the real drive function)', async () => {
     state.seedFloat('LOOPUSD', 'testnet', 10_000n, 0n);
     const row = state.seedRow({
-      sourceType: 'order_redeem',
-      sourceId: 'order-1',
+      sourceType: 'withdrawal',
+      sourceId: '8e1b4d7a-0f3c-4e6b-9a2d-5c8e1b4d7a03',
       userId: USER_ID,
       valueMinor: 500n,
       state: 'failed',

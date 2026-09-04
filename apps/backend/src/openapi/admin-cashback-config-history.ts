@@ -42,9 +42,7 @@ export function registerAdminCashbackConfigHistoryOpenApi(
     z.object({
       id: z.string().uuid(),
       merchantId: z.string(),
-      wholesalePct: CashbackPctString,
       userCashbackPct: CashbackPctString,
-      loopMarginPct: CashbackPctString,
       active: z.boolean(),
       changedBy: z.string().openapi({
         description: 'Admin user id that triggered the prior-row snapshot.',

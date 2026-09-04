@@ -9,14 +9,11 @@
  *
  *  - `UserMeView.homeCurrency` was `string` on the backend and
  *    `'USD' | 'GBP' | 'EUR'` on the web. Here it's `HomeCurrency`.
- *  - The `loop_asset` recycling path could land with typed `string`
- *    payment-method fields; here they key off `OrderPaymentMethod`.
  *
  * Integer columns serialise as strings (BigInt-safe). Timestamps are
  * ISO-8601.
  */
 import type { HomeCurrency, LoopAssetCode } from './loop-asset.js';
-import type { OrderPaymentMethod, OrderState } from './order-state.js';
 import type { CreditTransactionType } from './credit-transaction-type.js';
 import type { PayoutState } from './payout-state.js';
 import type { StaffRole } from './admin-staff.js';
@@ -229,19 +226,4 @@ export interface UserFlywheelStats {
   totalFulfilledCount: number;
   /** SUM(charge_minor) over every fulfilled order in `home_currency`. */
   totalFulfilledChargeMinor: string;
-}
-
-/** One bucket of the caller's rail mix (orders × method). */
-export interface UserPaymentMethodBucket {
-  orderCount: number;
-  /** SUM(charge_minor) for this (state, method) bucket. bigint-as-string. */
-  chargeMinor: string;
-}
-
-/** `GET /api/users/me/payment-method-share` */
-export interface UserPaymentMethodShareResponse {
-  currency: HomeCurrency;
-  state: OrderState;
-  totalOrders: number;
-  byMethod: Record<OrderPaymentMethod, UserPaymentMethodBucket>;
 }

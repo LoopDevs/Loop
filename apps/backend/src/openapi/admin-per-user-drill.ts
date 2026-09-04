@@ -34,62 +34,6 @@ export function registerAdminPerUserDrillOpenApi(
   registry: OpenAPIRegistry,
   errorResponse: ReturnType<OpenAPIRegistry['register']>,
 ): void {
-  // ─── Admin per-user drill metrics (ADR 009/015/022) ────────────────────────
-  //
-  // Per-user axis of the triplet pattern — recovers content from the
-  // auto-closed #670 (its stacked base branch was deleted during cascade
-  // merge) plus ships the batch 4 CSV siblings and the fleet payouts pair
-  // in one coherent PR.
-
-  const AdminUserFlywheelStats = registry.register(
-    'AdminUserFlywheelStats',
-    z.object({
-      userId: z.string().uuid(),
-      currency: z.string().length(3).openapi({
-        description:
-          "Target user's home_currency — both numerator and denominator share it so the ratio has a coherent denomination.",
-      }),
-      recycledOrderCount: z.number().int(),
-      recycledChargeMinor: z.string().openapi({ description: 'bigint-as-string.' }),
-      totalFulfilledCount: z.number().int(),
-      totalFulfilledChargeMinor: z.string().openapi({ description: 'bigint-as-string.' }),
-    }),
-  );
-
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/users/{userId}/flywheel-stats',
-    summary: 'Per-user recycled-vs-total scalar (ADR 015).',
-    description:
-      "Admin-scoped mirror of /api/users/me/flywheel-stats. 404 on unknown userId (distinguishes 'user not in DB' from 'user with no fulfilled orders' which returns zeroed counts). Home-currency-locked.",
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: { params: z.object({ userId: z.string().uuid() }) },
-    responses: {
-      200: {
-        description: 'Per-user flywheel scalar',
-        content: { 'application/json': { schema: AdminUserFlywheelStats } },
-      },
-      400: {
-        description: 'Malformed userId',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      404: {
-        description: 'User not found',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (120/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: { description: 'DB error', content: { 'application/json': { schema: errorResponse } } },
-    },
-  });
-
   const AdminUserCashbackMonthlyEntry = registry.register(
     'AdminUserCashbackMonthlyEntry',
     z.object({
@@ -131,76 +75,6 @@ export function registerAdminPerUserDrillOpenApi(
       },
       404: {
         description: 'User not found',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (120/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: { description: 'DB error', content: { 'application/json': { schema: errorResponse } } },
-    },
-  });
-
-  // Inline shape — `PaymentMethodBucketShape` was previously
-  // declared once for both the per-merchant and per-user drill
-  // sections. The per-merchant slice now lives in
-  // ./admin-per-merchant-drill.ts with its own copy; this declaration
-  // is the per-user-side replica so per-user can stand alone here.
-  // Both copies must be byte-identical or the spec will drift.
-  const PaymentMethodBucketShape = z.object({
-    orderCount: z.number().int(),
-    chargeMinor: z.string().openapi({
-      description: 'SUM(charge_minor) for this (state, method) bucket. bigint-as-string.',
-    }),
-  });
-
-  const UserPaymentMethodShareResponse = registry.register(
-    'UserPaymentMethodShareResponse',
-    z.object({
-      userId: z.string().uuid(),
-      state: z.enum(['pending_payment', 'paid', 'procuring', 'fulfilled', 'failed', 'expired']),
-      totalOrders: z.number().int(),
-      byMethod: z.object({
-        xlm: PaymentMethodBucketShape,
-        usdc: PaymentMethodBucketShape,
-        credit: PaymentMethodBucketShape,
-        loop_asset: PaymentMethodBucketShape,
-      }),
-    }),
-  );
-
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/users/{userId}/payment-method-share',
-    summary: 'Per-user rail mix (ADR 010/015).',
-    description:
-      'Admin-scoped per-user sibling of the per-merchant payment-method-share (#668). Default ?state=fulfilled. Zero-filled byMethod. Support-triage: "does this user only pay with LOOP asset?" vs "never touched it?".',
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      params: z.object({ userId: z.string().uuid() }),
-      query: z.object({
-        state: z
-          .enum(['pending_payment', 'paid', 'procuring', 'fulfilled', 'failed', 'expired'])
-          .optional(),
-      }),
-    },
-    responses: {
-      200: {
-        description: 'Per-user rail mix',
-        content: { 'application/json': { schema: UserPaymentMethodShareResponse } },
-      },
-      400: {
-        description: 'Malformed userId or invalid ?state',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      404: {
-        description:
-          'Not found — also returned to authenticated non-admin callers: requireAdmin masks the admin surface as 404 by design (see src/auth/require-admin.ts).',
         content: { 'application/json': { schema: errorResponse } },
       },
       429: {

@@ -18,37 +18,31 @@ import {
 import { sql } from 'drizzle-orm';
 
 /**
- * Per-merchant cashback split (ADR 011). The three percentages are
- * applied to each order's face value; at order creation we pin the
- * resulting minor-unit amounts onto the order row so a later admin
- * edit doesn't retroactively rewrite completed orders.
- *
- * CHECK ensures wholesale + user + margin ≤ 100. Usually they'll
- * equal the CTX discount %, but we don't hard-enforce equality so
- * we can briefly be "under-captured" if CTX's discount changes
- * between catalog sync and the admin update.
+ * Per-merchant user-cashback share (ADR 011, reshaped by ADR 052).
+ * Single knob: the share of Loop's CTX margin handed to the
+ * customer. 0 = Loop keeps the whole spread, 100 = all of it goes
+ * to the customer. Delivered as CTX's native user discount at
+ * checkout — on admin save (and on the hourly catalog-sweep
+ * reconcile) Loop pushes `userDiscountBasisPoints =
+ * floor(operatorDiscountBp × pct / 100)` to CTX via
+ * `PUT /merchant-links`, so the customer simply pays less.
+ * Per-order minor amounts are pinned onto the order row from CTX's
+ * card snapshot, so a later admin edit doesn't retroactively
+ * rewrite completed orders.
  */
 export const merchantCashbackConfigs = pgTable(
   'merchant_cashback_configs',
   {
     merchantId: text('merchant_id').primaryKey(),
-    wholesalePct: numeric('wholesale_pct', { precision: 5, scale: 2 }).notNull(),
     userCashbackPct: numeric('user_cashback_pct', { precision: 5, scale: 2 }).notNull(),
-    loopMarginPct: numeric('loop_margin_pct', { precision: 5, scale: 2 }).notNull(),
     active: boolean('active').notNull().default(true),
     updatedBy: text('updated_by').notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     check(
-      'merchant_cashback_configs_sum',
-      sql`${t.wholesalePct} + ${t.userCashbackPct} + ${t.loopMarginPct} <= 100`,
-    ),
-    check(
-      'merchant_cashback_configs_non_negative',
-      sql`
-        ${t.wholesalePct} >= 0 AND ${t.userCashbackPct} >= 0 AND ${t.loopMarginPct} >= 0
-      `,
+      'merchant_cashback_configs_pct_range',
+      sql`${t.userCashbackPct} >= 0 AND ${t.userCashbackPct} <= 100`,
     ),
   ],
 );
@@ -79,9 +73,7 @@ export const merchantCashbackConfigHistory = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     merchantId: text('merchant_id').notNull(),
-    wholesalePct: numeric('wholesale_pct', { precision: 5, scale: 2 }).notNull(),
     userCashbackPct: numeric('user_cashback_pct', { precision: 5, scale: 2 }).notNull(),
-    loopMarginPct: numeric('loop_margin_pct', { precision: 5, scale: 2 }).notNull(),
     active: boolean('active').notNull(),
     changedBy: text('changed_by').notNull(),
     changedAt: timestamp('changed_at', { withTimezone: true }).notNull().defaultNow(),

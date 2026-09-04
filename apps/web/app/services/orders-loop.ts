@@ -1,38 +1,38 @@
 /**
- * Loop-native order service (ADR 010).
+ * Loop-native order service (ADR 010 / ADR 052).
  *
  * Thin wrappers around `POST /api/orders/loop` and `GET /api/orders/loop/:id`.
  * The backend is BigInt-safe: integer columns come back as strings so we
  * don't lose precision here; the UI is responsible for parsing to
  * BigInt when it needs to do arithmetic.
  *
- * A2-1504: wire contracts live in `@loop/shared` (ADR 019) — this
- * module re-exports under the historical web-side names so existing
- * imports (`CreateLoopOrderBody`, `LoopOrderView`, `LoopOrderState`,
- * `LoopOrderPaymentMethod`) don't need to fan out a rename across 10+
- * components and tests in the same PR.
+ * ADR 052: ctx is the payment processor. The create call relays CTX's
+ * own payment instructions (`LoopOrderPaymentInstructions`) and the
+ * order thereafter mirrors CTX's `displayStatus` — see the shared wire
+ * contract in `@loop/shared/loop-orders.ts` (ADR 019). This module
+ * re-exports under the historical web-side names so existing imports
+ * (`CreateLoopOrderBody`, `LoopOrderView`, `LoopOrderState`) don't need
+ * to fan out a rename across 10+ components and tests in the same PR.
  */
 import type {
   CreateLoopOrderRequest,
   CreateLoopOrderResponse,
   LoopOrderListResponse,
+  LoopOrderPaymentInstructions,
   LoopOrderView,
   OrderState,
-  OrderPaymentMethod,
 } from '@loop/shared';
 import { authenticatedRequest } from './api-client';
 
 export type LoopOrderState = OrderState;
-export type LoopOrderPaymentMethod = OrderPaymentMethod;
 export type CreateLoopOrderBody = CreateLoopOrderRequest;
-export type { CreateLoopOrderResponse, LoopOrderView };
+export type { CreateLoopOrderResponse, LoopOrderPaymentInstructions, LoopOrderView };
 
 /**
  * A2-2003: stamps every `POST /api/orders/loop` with a fresh
  * `Idempotency-Key`. The backend dedups against (user_id, key) so a
  * double-clicked submit, a retried fetch, or a network-flap retransmit
- * all collapse onto a single order row + (for credit-funded orders) a
- * single ledger debit.
+ * all collapse onto a single order row + a single CTX card create.
  *
  * Generates a UUID v4 — 36 chars sits well inside the 16-128 server
  * window, the entropy is far past anything a client double-click can
@@ -47,7 +47,8 @@ function freshOrderIdempotencyKey(): string {
 }
 
 /**
- * POST /api/orders/loop — creates a Loop-native order in `pending_payment`.
+ * POST /api/orders/loop — creates a Loop-native order in `unpaid` and
+ * relays CTX's payment instructions for the chosen `cryptoCurrency`.
  *
  * Pass `idempotencyKey` if the caller has already minted one (e.g. the
  * payment-screen state survived a soft remount and we want to retry
@@ -94,16 +95,16 @@ export async function listLoopOrders(
 /** Convenience: state labels for UI display. */
 export function loopOrderStateLabel(state: LoopOrderState): string {
   switch (state) {
-    case 'pending_payment':
+    case 'unpaid':
       return 'Waiting for payment';
     case 'paid':
       return 'Payment received';
-    case 'procuring':
-      return 'Buying your gift card';
     case 'fulfilled':
       return 'Ready';
-    case 'failed':
-      return 'Failed';
+    case 'rejected':
+      return 'Rejected';
+    case 'refunded':
+      return 'Refunded';
     case 'expired':
       return 'Expired';
   }
@@ -111,5 +112,12 @@ export function loopOrderStateLabel(state: LoopOrderState): string {
 
 /** States where the UI should keep polling. */
 export function isLoopOrderTerminal(state: LoopOrderState): boolean {
-  return state === 'fulfilled' || state === 'failed' || state === 'expired';
+  return (
+    state === 'fulfilled' || state === 'rejected' || state === 'refunded' || state === 'expired'
+  );
+}
+
+/** Terminal-and-unhappy: the order will never fulfil. */
+export function isLoopOrderFailure(state: LoopOrderState): boolean {
+  return state === 'rejected' || state === 'refunded' || state === 'expired';
 }

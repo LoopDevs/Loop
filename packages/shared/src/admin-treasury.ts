@@ -47,31 +47,19 @@ export interface TreasuryHolding {
   stroops: string | null;
 }
 
-export interface OperatorFloatTreasuryState {
-  state: 'ok' | 'drift' | 'unclassified' | 'needs_baseline' | 'error' | 'unknown';
-  expectedBalanceStroops: string | null;
-  actualBalanceStroops: string | null;
-  deltaStroops: string | null;
-  thresholdStroops: string | null;
-  unclassifiedCount: number;
-  checkedAt: string | null;
-  error: string | null;
-}
-
 /**
- * Per charge-currency economics of fulfilled orders (ADR 015 — ADR 010
- * gift-card procurement flow). Sums — in the key's currency — how much
- * Loop paid CTX (`wholesaleMinor`), credited users (`userCashbackMinor`),
- * kept (`loopMarginMinor`), and the face value paid to the merchant
- * (`faceValueMinor`). All amounts are bigint-string minor units;
+ * Per charge-currency economics of fulfilled orders (ADR 052 — ctx is
+ * the payment processor). Sums — in the key's currency — the face
+ * value, the cashback CTX applied as a checkout discount
+ * (`userCashbackMinor`), and the commission Loop expects CTX to
+ * accrue (`expectedCommissionMinor`). Bigint-string minor units;
  * `count` is the number of fulfilled orders in the bucket.
  */
 export interface TreasuryOrderFlow {
   count: string;
   faceValueMinor: string;
-  wholesaleMinor: string;
   userCashbackMinor: string;
-  loopMarginMinor: string;
+  expectedCommissionMinor: string;
 }
 
 /**
@@ -89,11 +77,6 @@ export interface TreasurySnapshot {
     USDC: TreasuryHolding;
     XLM: TreasuryHolding;
   };
-  /** R3-1 — operator/deposit wallet conservation from active baselines. */
-  operatorFloat: {
-    xlm: OperatorFloatTreasuryState;
-    usdc: OperatorFloatTreasuryState;
-  };
   /**
    * ADR 015 — outbound Stellar cashback payouts at each state.
    * Admin UI renders this as a health card: any non-zero `failed`
@@ -108,10 +91,10 @@ export interface TreasurySnapshot {
    * credited users, what it kept).
    */
   orderFlows: Record<string, TreasuryOrderFlow>;
-  /** CTX operator pool snapshot — ADR 013. */
-  operatorPool: {
-    size: number;
-    operators: Array<{ id: string; state: string }>;
+  /** CTX upstream credential + circuit-breaker snapshot — ADR 051. */
+  ctxApi: {
+    configured: boolean;
+    state: string;
   };
 }
 

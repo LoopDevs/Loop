@@ -11,7 +11,6 @@
  *
  * Routes:
  *   - GET  /api/admin/orders                    (list)
- *   - GET  /api/admin/merchant-flows
  *   - GET  /api/admin/discord/config
  *   - GET  /api/admin/users/search              (literal — must register before /users/:userId in user-cluster)
  *   - GET  /api/admin/user-credits.csv
@@ -39,7 +38,6 @@ import type { Hono } from 'hono';
 import { rateLimit } from '../middleware/rate-limit.js';
 import { requireStaff } from '../auth/require-staff.js';
 import { adminListOrdersHandler } from '../admin/orders.js';
-import { adminMerchantFlowsHandler } from '../admin/merchant-flows.js';
 import { adminDiscordConfigHandler } from '../admin/discord-config.js';
 import { adminUserSearchHandler } from '../admin/user-search.js';
 import { adminUserCreditsCsvHandler } from '../admin/user-credits-csv.js';
@@ -61,19 +59,11 @@ import { adminDiscordTestHandler } from '../admin/discord-test.js';
 export function mountAdminOpsTailRoutes(app: Hono): void {
   // Loop-native orders drill-down (ADR 011 / 015). Paginated, filterable
   // by state and userId. Ops uses this to triage stuck orders + audit
-  // the cashback split + correlate with operator-pool health.
+  // the cashback split.
   app.get(
     '/api/admin/orders',
     rateLimit('GET /api/admin/orders', 60, 60_000),
     adminListOrdersHandler,
-  );
-  // Per-merchant fulfilled-order flow aggregate (ADR 011 / 015). Feeds
-  // the per-row "actual split" display on /admin/cashback next to each
-  // merchant's configured split.
-  app.get(
-    '/api/admin/merchant-flows',
-    rateLimit('GET /api/admin/merchant-flows', 60, 60_000),
-    adminMerchantFlowsHandler,
   );
   // Webhook configuration status — read-only companion to the ping
   // endpoint. Admin panel polls this to render a "configured"/"missing"

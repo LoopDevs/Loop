@@ -1,18 +1,17 @@
 /**
- * Loop-native order wire shapes (ADR 010 / ADR 013 / ADR 015).
+ * Loop order wire shapes (ADR 052).
  *
  * `POST /api/orders/loop` + `GET /api/orders/loop/:id` + `GET /api/orders/loop`.
  * These live in @loop/shared because both `apps/web` and `apps/backend`
- * need the exact same wire contract — A2-1504 flagged the drift where
- * web's `LoopOrderView` was missing `chargeMinor`/`chargeCurrency` (the
- * ADR-015 home-currency split) and `CreateLoopOrderResponse` was missing
- * the `loop_asset` payment variant. Both sides now import from here.
+ * need the exact same wire contract (A2-1504). Both sides import from
+ * here.
  *
- * Integer columns serialise as strings (BigInt-safe). Timestamps are
- * ISO-8601.
+ * ctx is the payment processor: the create response relays CTX's own
+ * payment instructions (address / payment URIs / crypto amount) and
+ * the order thereafter mirrors CTX's `displayStatus`. Integer columns
+ * serialise as strings (BigInt-safe). Timestamps are ISO-8601.
  */
-import type { OrderPaymentMethod, OrderState } from './order-state.js';
-import type { LoopAssetCode } from './loop-asset.js';
+import type { OrderState } from './order-state.js';
 
 /**
  * Request body for `POST /api/orders/loop`.
@@ -20,82 +19,61 @@ import type { LoopAssetCode } from './loop-asset.js';
  * - `amountMinor` is the gift-card face value in the catalog currency's
  *   minor units. Accepted as either number or numeric string — the
  *   backend transforms both to `bigint`.
- * - `paymentMethod` accepts the full `ORDER_PAYMENT_METHODS` union,
- *   including `loop_asset` (recycled LOOP-branded stablecoin, ADR 015).
+ * - `cryptoCurrency` is the chain-qualified CTX payment currency the
+ *   customer chose (e.g. `XLM`, `DASH`, `ETH.USDT`), validated against
+ *   the server's `LOOP_CTX_PAYMENT_CURRENCIES` allowlist.
  */
 export interface CreateLoopOrderRequest {
   merchantId: string;
   amountMinor: number | string;
   /** ISO 4217 3-letter code. Backend uppercases. */
   currency: string;
-  paymentMethod: OrderPaymentMethod;
+  cryptoCurrency: string;
 }
 
 /**
- * Response for `POST /api/orders/loop`.
- *
- * Discriminated union on `payment.method`:
- * - `xlm` / `usdc`: on-chain deposit. Client shows stellar address + memo.
- * - `loop_asset`: recycled LOOP-branded stablecoin. Same address + memo
- *   as `xlm`/`usdc`, plus `assetCode` + `assetIssuer` the client sends
- *   alongside the payment.
- * - `credit`: off-chain credit-ledger debit. No on-chain fields.
- *
- * On-chain variants additionally carry:
- * - `assetAmount` — the amount the user must send in the asset's native
- *   units (decimal string, 7 decimals max). For USDC, this is the
- *   chargeMinor converted via the USDC FX feed; for XLM, via the XLM
- *   price oracle; for `loop_asset`, 1:1 with chargeMinor (LOOP-asset is
- *   1:1 fiat-backed). Computed at order creation; oracle re-validation
- *   happens at watcher tick (slight rate movement during in-flight
- *   payment is absorbed by the watcher's tolerance).
- * - `paymentUri` — SEP-7 `web+stellar:pay?...` URI deep-linking into
- *   any installed Stellar wallet. Mobile clients render a single
- *   "Open in wallet" button using this; web clients use the
- *   address+memo+amount fields directly for copy-paste.
+ * CTX's payment instructions for an unpaid order, relayed verbatim
+ * from the gift-card create / payment read. The customer pays CTX
+ * directly — Loop never receives these funds.
  */
+export interface LoopOrderPaymentInstructions {
+  /** CTX payment row id backing the card. */
+  ctxPaymentId: string | null;
+  /** Chain-qualified currency the customer chose to pay in. */
+  cryptoCurrency: string;
+  /** Amount to send in the crypto currency's major units (decimal string). */
+  cryptoAmount: string | null;
+  /** Single deposit address, when CTX derived exactly one for the currency. */
+  address: string | null;
+  /**
+   * Per-currency payment URIs from CTX (BIP70 `dash:?r=`, SEP-7
+   * `web+stellar:pay?...`, `ethereum:`, `solana:`, ...). Keyed by
+   * currency string; may be empty for address-only chains (DOGE, XRD).
+   */
+  paymentUrls: Record<string, string>;
+  /** What the customer pays CTX (face value minus cashback discount). */
+  amountMinor: string;
+  currency: string;
+  /** CTX payment-window expiry. Null when the payment read was unavailable. */
+  expiresAt: string | null;
+}
+
+/** Response for `POST /api/orders/loop`. */
 export interface CreateLoopOrderResponse {
   orderId: string;
-  payment:
-    | {
-        method: 'xlm' | 'usdc';
-        stellarAddress: string;
-        memo: string;
-        amountMinor: string;
-        currency: string;
-        /** Amount in asset native units (decimal string, e.g. "240.5000000" XLM or "24.0000000" USDC). */
-        assetAmount: string;
-        /** SEP-7 `web+stellar:pay?...` deep-link URI. */
-        paymentUri: string;
-      }
-    | {
-        method: 'loop_asset';
-        stellarAddress: string;
-        memo: string;
-        amountMinor: string;
-        currency: string;
-        assetCode: LoopAssetCode;
-        assetIssuer: string;
-        /** Amount in asset native units (decimal string, 7 decimals). 1:1 with chargeMinor. */
-        assetAmount: string;
-        /** SEP-7 `web+stellar:pay?...` deep-link URI. */
-        paymentUri: string;
-      }
-    | {
-        method: 'credit';
-        amountMinor: string;
-        currency: string;
-      };
+  state: OrderState;
+  payment: LoopOrderPaymentInstructions;
 }
 
 /**
  * Read-side view returned by `GET /api/orders/loop` + `GET /api/orders/loop/:id`.
  *
  * `faceValueMinor` / `currency` is what the gift card is worth in the
- * catalog currency; `chargeMinor` / `chargeCurrency` is what the user
- * paid in their home currency. For pre-ADR-015 orders the two are
- * identical — clients that don't care about home-currency splits can
- * keep reading `faceValueMinor` + `currency`.
+ * catalog currency; `chargeMinor` / `chargeCurrency` is what the
+ * customer pays CTX (face minus the cashback discount). `payment` is
+ * populated ONLY for a still-`unpaid` order on the detail read — the
+ * pay screen is fully server-rebuildable from this response, never
+ * from client-persisted storage.
  */
 export interface LoopOrderView {
   id: string;
@@ -105,49 +83,18 @@ export interface LoopOrderView {
   currency: string;
   chargeMinor: string;
   chargeCurrency: string;
-  /**
-   * The rail the user funded the order on. Includes `loop_asset`
-   * (ADR 015 recycled-cashback path) so the UI can render the
-   * "Recycled" badge — `LoopOrdersList.tsx` keys off this value.
-   */
-  paymentMethod: OrderPaymentMethod;
-  paymentMemo: string | null;
-  stellarAddress: string | null;
-  /**
-   * Server-derived payment-guidance fields (Q6-4b hardening) — the amount
-   * + SEP-7 deep-link a client needs to render the pay screen, re-quoted
-   * from server-authoritative `chargeMinor`/`chargeCurrency`/`paymentMethod`
-   * + env issuers on read (the same derivation the idempotent-POST replay
-   * uses). Populated by `GET /api/orders/loop/:id` ONLY for a non-terminal,
-   * on-chain (xlm/usdc/loop_asset) order whose asset-amount + address could
-   * be resolved; null otherwise — for credit-funded orders (no on-chain
-   * payment), for terminal orders (nothing left to pay), in the list
-   * endpoint (which never renders pay instructions), and when the oracle /
-   * issuer config is unavailable at read time. Re-quoting on read is correct:
-   * it yields the CURRENT required guidance for a still-pending order, and
-   * the deposit watcher re-validates sufficiency at settlement regardless.
-   *
-   * These make the restore-on-remount path (`use-loop-order-restore.ts`)
-   * server-authoritative: the client rebuilds the pay screen ENTIRELY from
-   * this response, never from client-persisted storage, so no
-   * payment-directing field can be tampered via sessionStorage/Keychain.
-   */
-  /** Asset-native amount to send (decimal string, 7 decimals). Null when not derivable/applicable. */
-  assetAmount: string | null;
-  /** SEP-7 `web+stellar:pay?...` deep-link. Null when not derivable/applicable. */
-  paymentUri: string | null;
-  /** LOOP-asset code for `loop_asset` orders (USDLOOP/GBPLOOP/EURLOOP); null for xlm/usdc/credit. */
-  assetCode: string | null;
-  /** LOOP-asset issuer for `loop_asset` orders; null for xlm/usdc/credit. */
-  assetIssuer: string | null;
+  /** Cashback CTX applied as a checkout discount (minor units of `currency`). */
   userCashbackMinor: string;
   ctxOrderId: string | null;
+  /** Chain-qualified CTX payment currency chosen at create. Null on legacy rows. */
+  paymentCryptoCurrency: string | null;
+  /** CTX payment instructions; non-null only while `unpaid` on the detail read. */
+  payment: LoopOrderPaymentInstructions | null;
   redeemCode: string | null;
   redeemPin: string | null;
   redeemUrl: string | null;
   failureReason: string | null;
   createdAt: string;
-  paidAt: string | null;
   fulfilledAt: string | null;
   failedAt: string | null;
 }
@@ -155,21 +102,4 @@ export interface LoopOrderView {
 /** Response for `GET /api/orders/loop`. */
 export interface LoopOrderListResponse {
   orders: LoopOrderView[];
-}
-
-/**
- * `POST /api/orders/loop/:id/redeem` 200 response (ADR 030 C3 /
- * ADR 036 token redemption). `state` is the order's state after the
- * redemption payment was submitted; clients keep polling
- * `GET /api/orders/loop/:id` exactly as they do for the crypto
- * deposit path — the deposit watcher remains the authoritative state
- * machine.
- *
- * Error contract: 400 `{ code: 'INSUFFICIENT_BALANCE' }` when the
- * up-front Horizon read says the matching LOOP-asset balance doesn't
- * cover the charge; 503 when the wallet provider / Horizon is
- * unavailable.
- */
-export interface RedeemLoopOrderResponse {
-  state: string;
 }

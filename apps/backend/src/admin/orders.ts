@@ -1,12 +1,11 @@
 /**
  * Admin orders drill-down (ADR 011 / 015).
  *
- * `GET /api/admin/orders` — paginated list of Loop-native orders
- * across every user, with the full ADR-015 cashback-split breakdown
- * + CTX procurement record. Ops uses this to:
- *   - triage stuck orders (state=paid without a ctxOrderId)
- *   - audit how cashback is being split (wholesale / user / margin)
- *   - correlate procurement with operator-pool health (ctxOperatorId)
+ * `GET /api/admin/orders` — paginated list of Loop orders across
+ * every user, with the ADR-052 economics (cashback discount +
+ * expected commission) and the CTX identifiers. Ops uses this to:
+ *   - audit the CTX-side record (ctxOrderId / ctxPaymentId)
+ *   - spot mirrors that stopped moving (state vs createdAt)
  *
  * The user-facing `/api/orders/loop/*` endpoints are scoped to the
  * caller; this one deliberately isn't — admins need to see across
@@ -15,7 +14,7 @@
  */
 import type { Context } from 'hono';
 import { and, eq, lt, sql } from 'drizzle-orm';
-import { ORDER_PAYMENT_METHODS, ORDER_STATES, type OrderState } from '@loop/shared';
+import { ORDER_STATES, type OrderState } from '@loop/shared';
 import { db } from '../db/client.js';
 import { orders } from '../db/schema.js';
 import { logger } from '../logger.js';
@@ -44,25 +43,19 @@ export interface AdminOrderView {
   currency: string;
   /** Face-value minor units (pence / cents), bigint-string. */
   faceValueMinor: string;
-  /** ISO currency the user was charged in (home region). */
+  /** What the customer pays CTX (face minus cashback discount). */
   chargeCurrency: string;
   chargeMinor: string;
-  paymentMethod: 'xlm' | 'usdc' | 'credit' | 'loop_asset';
-  /** Pinned cashback split (ADR 011): numeric(5,2) as string. */
-  wholesalePct: string;
-  userCashbackPct: string;
-  loopMarginPct: string;
-  /** Minor-unit shares computed at creation time (ADR 015). */
-  wholesaleMinor: string;
+  /** Cashback CTX applied as a checkout discount (ADR 052). */
   userCashbackMinor: string;
-  loopMarginMinor: string;
-  /** CTX-side procurement record. Null until state ≥ procuring. */
+  /** Commission Loop expects CTX to accrue; null until read-back lands. */
+  expectedCommissionMinor: string | null;
   ctxOrderId: string | null;
-  ctxOperatorId: string | null;
+  ctxPaymentId: string | null;
+  /** Chain-qualified CTX payment currency the customer chose. */
+  paymentCryptoCurrency: string | null;
   failureReason: string | null;
   createdAt: string;
-  paidAt: string | null;
-  procuredAt: string | null;
   fulfilledAt: string | null;
   failedAt: string | null;
 }
@@ -81,19 +74,13 @@ export function rowToView(row: typeof orders.$inferSelect): AdminOrderView {
     faceValueMinor: row.faceValueMinor.toString(),
     chargeCurrency: row.chargeCurrency,
     chargeMinor: row.chargeMinor.toString(),
-    paymentMethod: row.paymentMethod as AdminOrderView['paymentMethod'],
-    wholesalePct: row.wholesalePct,
-    userCashbackPct: row.userCashbackPct,
-    loopMarginPct: row.loopMarginPct,
-    wholesaleMinor: row.wholesaleMinor.toString(),
     userCashbackMinor: row.userCashbackMinor.toString(),
-    loopMarginMinor: row.loopMarginMinor.toString(),
+    expectedCommissionMinor: row.expectedCommissionMinor?.toString() ?? null,
     ctxOrderId: row.ctxOrderId,
-    ctxOperatorId: row.ctxOperatorId,
+    ctxPaymentId: row.ctxPaymentId,
+    paymentCryptoCurrency: row.paymentCryptoCurrency,
     failureReason: row.failureReason,
     createdAt: row.createdAt.toISOString(),
-    paidAt: row.paidAt?.toISOString() ?? null,
-    procuredAt: row.procuredAt?.toISOString() ?? null,
     fulfilledAt: row.fulfilledAt?.toISOString() ?? null,
     failedAt: row.failedAt?.toISOString() ?? null,
   };
@@ -140,47 +127,14 @@ export async function adminListOrdersHandler(c: Context): Promise<Response> {
     return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId is malformed' }, 400);
   }
 
-  // `orders.charge_currency` is CHAR(3) with a CHECK pinning it to
-  // USD / GBP / EUR (the home currencies today). Reject anything else
-  // up front so the pg round-trip never sees an impossible value.
+  // `orders.charge_currency` is CHAR(3); accept a plain uppercase
+  // ISO code so the pg round-trip never sees an impossible value.
   const chargeCurrencyRaw = c.req.query('chargeCurrency');
-  if (chargeCurrencyRaw !== undefined && !['USD', 'GBP', 'EUR'].includes(chargeCurrencyRaw)) {
+  if (chargeCurrencyRaw !== undefined && !/^[A-Z]{3}$/.test(chargeCurrencyRaw)) {
     return c.json(
-      { code: 'VALIDATION_ERROR', message: 'chargeCurrency must be USD, GBP, or EUR' },
+      { code: 'VALIDATION_ERROR', message: 'chargeCurrency must be a 3-letter ISO code' },
       400,
     );
-  }
-
-  // `orders.payment_method` has a CHECK constraint pinning it to the
-  // ORDER_PAYMENT_METHODS enum. Enum-validate up front so the query
-  // never issues a cast that would 500 on an unknown value — and so
-  // the filter is symmetric with /api/admin/orders/payment-method-share,
-  // which is the natural upstream drill-down into this list.
-  const paymentMethodRaw = c.req.query('paymentMethod');
-  if (
-    paymentMethodRaw !== undefined &&
-    !(ORDER_PAYMENT_METHODS as ReadonlyArray<string>).includes(paymentMethodRaw)
-  ) {
-    return c.json(
-      {
-        code: 'VALIDATION_ERROR',
-        message: `paymentMethod must be one of: ${ORDER_PAYMENT_METHODS.join(', ')}`,
-      },
-      400,
-    );
-  }
-
-  // `orders.ctx_operator_id` is a free-form text column (operator ids
-  // are opaque strings configured in CTX_OPERATOR_POOL — ADR 013).
-  // Enforce shape-only checks: non-empty, length ≤ 128, safe id chars.
-  const ctxOperatorIdRaw = c.req.query('ctxOperatorId');
-  if (
-    ctxOperatorIdRaw !== undefined &&
-    (ctxOperatorIdRaw.length === 0 ||
-      ctxOperatorIdRaw.length > 128 ||
-      !/^[A-Za-z0-9._-]+$/.test(ctxOperatorIdRaw))
-  ) {
-    return c.json({ code: 'VALIDATION_ERROR', message: 'ctxOperatorId is malformed' }, 400);
   }
 
   const limitRaw = c.req.query('limit');
@@ -207,8 +161,6 @@ export async function adminListOrdersHandler(c: Context): Promise<Response> {
     if (merchantIdRaw !== undefined) conditions.push(eq(orders.merchantId, merchantIdRaw));
     if (chargeCurrencyRaw !== undefined)
       conditions.push(eq(orders.chargeCurrency, chargeCurrencyRaw));
-    if (paymentMethodRaw !== undefined) conditions.push(eq(orders.paymentMethod, paymentMethodRaw));
-    if (ctxOperatorIdRaw !== undefined) conditions.push(eq(orders.ctxOperatorId, ctxOperatorIdRaw));
     if (before !== undefined) conditions.push(lt(orders.createdAt, before));
     const where = conditions.length === 0 ? undefined : and(...conditions);
     const q = db.select().from(orders);

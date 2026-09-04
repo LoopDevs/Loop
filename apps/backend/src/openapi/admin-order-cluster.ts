@@ -31,8 +31,6 @@
 import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 import { registerAdminOrderClusterDrillsOpenApi } from './admin-order-cluster-drills.js';
-import { registerAdminOrderRedriveOpenApi } from './admin-order-redrive.js';
-import { registerAdminOrderRefundOpenApi } from './admin-order-refund.js';
 
 /**
  * Registers the order-cluster paths + their locally-scoped
@@ -43,7 +41,6 @@ export function registerAdminOrderClusterOpenApi(
   registry: OpenAPIRegistry,
   errorResponse: ReturnType<OpenAPIRegistry['register']>,
   adminPayoutView: ReturnType<OpenAPIRegistry['register']>,
-  adminWriteAudit: ReturnType<OpenAPIRegistry['register']>,
 ): void {
   const AdminPayoutView = adminPayoutView;
 
@@ -106,71 +103,6 @@ export function registerAdminOrderClusterOpenApi(
     },
   });
 
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/orders/payment-method-share',
-    summary: 'Payment-method share across orders (ADR 010 / 015).',
-    description:
-      "The cashback-flywheel metric. Single GROUP BY over `orders.payment_method`, zero-filled across every `ORDER_PAYMENT_METHODS` value so a method with no rows still renders as `{ orderCount: 0, chargeMinor: '0' }`. Default `?state=fulfilled` so in-flight orders don't skew the mix while users are still on the checkout page; pass any other `OrderState` to track a different bucket. `totalOrders` is echoed so the UI can render shares without re-summing. A rising `loop_asset` share is the signal ADR 015's cashback-recycle flywheel is working.",
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      query: z.object({
-        state: z
-          .enum(['pending_payment', 'paid', 'procuring', 'fulfilled', 'failed', 'expired'])
-          .optional(),
-      }),
-    },
-    responses: {
-      200: {
-        description: 'Payment-method share snapshot',
-        content: {
-          'application/json': {
-            schema: z.object({
-              state: z.enum([
-                'pending_payment',
-                'paid',
-                'procuring',
-                'fulfilled',
-                'failed',
-                'expired',
-              ]),
-              totalOrders: z.number().int().min(0),
-              byMethod: z.record(
-                z.enum(['xlm', 'usdc', 'credit', 'loop_asset']),
-                z.object({
-                  orderCount: z.number().int().min(0),
-                  chargeMinor: z.string(),
-                }),
-              ),
-            }),
-          },
-        },
-      },
-      400: {
-        description: 'Invalid state',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      404: {
-        description:
-          'Not found — also returned to authenticated non-admin callers: requireAdmin masks the admin surface as 404 by design (see src/auth/require-admin.ts).',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (60/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: {
-        description: 'Internal error computing the share',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
-
   // The two per-order drills live in
   // `./admin-order-cluster-drills.ts` along with the
   // `AdminOrderView` schema. `adminPayoutView` is threaded through
@@ -182,10 +114,8 @@ export function registerAdminOrderClusterOpenApi(
   // (`./admin-order-redrive.ts`) — same split as the payouts-cluster
   // read/write files. `adminWriteAudit` is threaded through for the
   // `{ result, audit }` envelope.
-  registerAdminOrderRedriveOpenApi(registry, errorResponse, adminWriteAudit);
 
   // A5-4: the order-bound refund write (incl. fulfilled-order-via-
   // attestation) lives in its own file (`./admin-order-refund.ts`) —
   // same split as the redrive write above.
-  registerAdminOrderRefundOpenApi(registry, errorResponse, adminWriteAudit);
 }

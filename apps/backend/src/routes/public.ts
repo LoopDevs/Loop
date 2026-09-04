@@ -24,7 +24,6 @@ import type { Hono } from 'hono';
 import { rateLimit } from '../middleware/rate-limit.js';
 import { publicCashbackStatsHandler } from '../public/cashback-stats.js';
 import { publicCashbackPreviewHandler } from '../public/cashback-preview.js';
-import { publicFlywheelStatsHandler } from '../public/flywheel-stats.js';
 import { publicGeoHandler } from '../public/geo.js';
 import { publicLoopAssetsHandler } from '../public/loop-assets.js';
 import { publicMerchantHandler } from '../public/merchant.js';
@@ -91,17 +90,6 @@ export function mountPublicRoutes(app: Hono): void {
     '/api/public/loop-assets',
     rateLimit('GET /api/public/loop-assets', 60, 60_000),
     publicLoopAssetsHandler,
-  );
-
-  // Marketing flywheel scalar — % of fulfilled orders in the last
-  // 30 days paid via LOOP-asset cashback. Complement to
-  // /api/public/cashback-stats (emission) with the recycle side
-  // of the story. Never-500; 300s cache on happy path, 60s on
-  // fallback.
-  app.get(
-    '/api/public/flywheel-stats',
-    rateLimit('GET /api/public/flywheel-stats', 60, 60_000),
-    publicFlywheelStatsHandler,
   );
 
   // First-party, cookieless RUM intake (ADR 048). Folds Core Web

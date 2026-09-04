@@ -4,7 +4,6 @@ import { formatMinorCurrency } from '@loop/shared';
 import { getTreasuryCreditFlow, type TreasuryCreditFlowDay } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
-import { shortDay } from './PaymentMethodActivityChart';
 
 /**
  * CSS-only per-day ledger-delta chart over the last N days for one
@@ -235,4 +234,36 @@ function DayRow({
       </span>
     </li>
   );
+}
+
+/**
+ * `"2026-04-22"` → `"Apr 22"`. Keeps the chart labels compact so a
+ * 30-row list doesn't bloat horizontally. Defensive parse — returns
+ * the raw string if the format doesn't match the expected shape.
+ * Lived in `PaymentMethodActivityChart` until that card retired
+ * with ADR 052; exported for the payout-activity chart on
+ * `/admin/assets/:assetCode`.
+ */
+export function shortDay(ymd: string): string {
+  const parts = ymd.split('-');
+  if (parts.length !== 3) return ymd;
+  const [, m, d] = parts;
+  if (m === undefined || d === undefined) return ymd;
+  const mn = Number(m);
+  if (!Number.isFinite(mn) || mn < 1 || mn > 12) return ymd;
+  const names = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+  return `${names[mn - 1] ?? m} ${Number(d)}`;
 }

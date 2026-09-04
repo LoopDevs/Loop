@@ -10,7 +10,6 @@ import {
   getPublicMerchant,
   getPublicCashbackPreview,
   getPublicLoopAssets,
-  getPublicFlywheelStats,
 } from '../public-stats';
 import { apiRequest } from '../api-client';
 
@@ -122,18 +121,5 @@ describe('getPublicLoopAssets', () => {
     mockApiRequest.mockResolvedValue({ assets: [] });
     await getPublicLoopAssets();
     expect(mockApiRequest).toHaveBeenCalledWith('/api/public/loop-assets');
-  });
-});
-
-describe('getPublicFlywheelStats', () => {
-  it('GETs /api/public/flywheel-stats', async () => {
-    mockApiRequest.mockResolvedValue({
-      windowDays: 30,
-      fulfilledOrders: 0,
-      recycledOrders: 0,
-      pctRecycled: '0.0',
-    });
-    await getPublicFlywheelStats();
-    expect(mockApiRequest).toHaveBeenCalledWith('/api/public/flywheel-stats');
   });
 });

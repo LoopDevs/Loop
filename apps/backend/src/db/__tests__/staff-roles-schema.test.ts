@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, expectTypeOf } from 'vitest';
 import { getTableConfig } from 'drizzle-orm/pg-core';
-import { orders, staffRoles, users } from '../schema.js';
+import { staffRoles, users } from '../schema.js';
 
 type StaffRoleRow = typeof staffRoles.$inferSelect;
 type StaffRoleInsert = typeof staffRoles.$inferInsert;
@@ -51,13 +51,6 @@ describe('staff_roles table (ADR 037 / migration 0042)', () => {
 });
 
 describe('ADR 037 reverse-lookup indexes (migration 0042)', () => {
-  it('orders declares the partial payment-memo index', () => {
-    const idx = getTableConfig(orders).indexes.find((i) => i.config.name === 'orders_payment_memo');
-    expect(idx).toBeDefined();
-    expect(idx?.config.unique).toBe(false);
-    expect(idx?.config.where).toBeDefined();
-  });
-
   it('users declares the partial stellar-address index', () => {
     const idx = getTableConfig(users).indexes.find(
       (i) => i.config.name === 'users_stellar_address',

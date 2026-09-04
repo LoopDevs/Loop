@@ -5,7 +5,6 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
 
 import type * as OrdersLoopModule from '~/services/orders-loop';
-import type * as PlatformModule from '~/native/platform';
 const getLoopOrderMock = vi.fn();
 vi.mock('~/services/orders-loop', async () => {
   const actual = await vi.importActual<typeof OrdersLoopModule>('~/services/orders-loop');
@@ -15,20 +14,12 @@ vi.mock('~/services/orders-loop', async () => {
   };
 });
 
-// PAYMENTURI-UNGATED: the native body (single "Open in wallet" deep-link)
-// only renders when isNativePlatform() is true. Drive it from a mutable flag
-// that defaults to false so every existing test keeps the web variant.
-let mockNativePlatform = false;
-vi.mock('~/native/platform', async () => {
-  const actual = await vi.importActual<typeof PlatformModule>('~/native/platform');
-  return {
-    ...actual,
-    isNativePlatform: () => mockNativePlatform,
-  };
-});
-
 import { LoopPaymentStep } from '../LoopPaymentStep';
-import type { CreateLoopOrderResponse, LoopOrderView } from '~/services/orders-loop';
+import type {
+  CreateLoopOrderResponse,
+  LoopOrderPaymentInstructions,
+  LoopOrderView,
+} from '~/services/orders-loop';
 
 function wrap(ui: React.ReactElement): React.JSX.Element {
   const qc = new QueryClient({
@@ -41,35 +32,32 @@ function wrap(ui: React.ReactElement): React.JSX.Element {
   );
 }
 
-function mkStellarCreate(
-  overrides: Partial<CreateLoopOrderResponse['payment']> = {},
-): CreateLoopOrderResponse {
+const ADDRESS = 'GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW';
+const XLM_URI = `web+stellar:pay?destination=${ADDRESS}&amount=10.0000000`;
+
+function mkPayment(
+  overrides: Partial<LoopOrderPaymentInstructions> = {},
+): LoopOrderPaymentInstructions {
   return {
-    orderId: '12345678-aaaa-bbbb-cccc-000000000000',
-    payment: {
-      method: 'usdc',
-      stellarAddress: 'GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW',
-      memo: 'MEMO-ABCDEFGHIJKLMN',
-      amountMinor: '1000',
-      currency: 'USD',
-      // 2026-05-05: response now carries the live-oracle quote +
-      // SEP-7 deep-link URI; tests build a fake one here.
-      assetAmount: '10.0000000',
-      paymentUri:
-        'web+stellar:pay?destination=GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW&amount=10.0000000&memo=MEMO-ABCDEFGHIJKLMN&memo_type=MEMO_TEXT&asset_code=USDC',
-      ...overrides,
-    } as CreateLoopOrderResponse['payment'],
+    ctxPaymentId: 'pay-1',
+    cryptoCurrency: 'XLM',
+    cryptoAmount: '10.0000000',
+    address: ADDRESS,
+    paymentUrls: { XLM: XLM_URI },
+    amountMinor: '1000',
+    currency: 'USD',
+    expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
+    ...overrides,
   };
 }
 
-function mkCreditCreate(): CreateLoopOrderResponse {
+function mkCreate(
+  paymentOverrides: Partial<LoopOrderPaymentInstructions> = {},
+): CreateLoopOrderResponse {
   return {
     orderId: '12345678-aaaa-bbbb-cccc-000000000000',
-    payment: {
-      method: 'credit',
-      amountMinor: '1000',
-      currency: 'USD',
-    },
+    state: 'unpaid',
+    payment: mkPayment(paymentOverrides),
   };
 }
 
@@ -77,26 +65,20 @@ function mkOrder(overrides: Partial<LoopOrderView> = {}): LoopOrderView {
   return {
     id: '12345678-aaaa-bbbb-cccc-000000000000',
     merchantId: 'm1',
-    state: 'pending_payment',
+    state: 'unpaid',
     faceValueMinor: '1000',
     currency: 'USD',
     chargeMinor: '1000',
     chargeCurrency: 'USD',
-    paymentMethod: 'usdc',
-    paymentMemo: 'MEMO-ABCDEFGHIJKLMN',
-    stellarAddress: 'GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW',
-    assetAmount: null,
-    paymentUri: null,
-    assetCode: null,
-    assetIssuer: null,
     userCashbackMinor: '50',
     ctxOrderId: null,
+    paymentCryptoCurrency: 'XLM',
+    payment: mkPayment(),
     redeemCode: null,
     redeemPin: null,
     redeemUrl: null,
     failureReason: null,
     createdAt: new Date().toISOString(),
-    paidAt: null,
     fulfilledAt: null,
     failedAt: null,
     ...overrides,
@@ -105,50 +87,103 @@ function mkOrder(overrides: Partial<LoopOrderView> = {}): LoopOrderView {
 
 beforeEach(() => {
   getLoopOrderMock.mockReset();
-  mockNativePlatform = false;
 });
 afterEach(cleanup);
 
-describe('LoopPaymentStep — stellar (xlm/usdc)', () => {
-  it('renders the deposit address, memo, fiat charge, and asset amount', async () => {
+describe('LoopPaymentStep — unpaid (ctx payment instructions)', () => {
+  it('renders the fiat charge, crypto amount + currency, and deposit address', async () => {
     getLoopOrderMock.mockResolvedValue(mkOrder());
-    render(wrap(<LoopPaymentStep create={mkStellarCreate()} />));
+    render(wrap(<LoopPaymentStep create={mkCreate()} />));
     await waitFor(() => screen.getByText(/Waiting for payment/i));
     expect(screen.getByText(/GABCDEFGHIJKLMNOPQRSTUVWXYZ234567/)).toBeDefined();
-    expect(screen.getByText('MEMO-ABCDEFGHIJKLMN')).toBeDefined();
-    // Web variant shows fiat ("$10.00") + asset-native amount ("10.0000000 USDC")
-    // on separate rows alongside the SEP-7 "Open in wallet" anchor.
     expect(screen.getByText(/\$10\.00/)).toBeDefined();
-    expect(screen.getByText(/10\.0000000 USDC/)).toBeDefined();
+    expect(screen.getByText(/10\.0000000 XLM/)).toBeDefined();
     expect(screen.getByRole('link', { name: /Open in wallet/i })).toBeDefined();
   });
 
-  it('updates the state label as the order transitions', async () => {
-    getLoopOrderMock.mockResolvedValue(
-      mkOrder({ state: 'paid', paidAt: new Date().toISOString() }),
-    );
-    render(wrap(<LoopPaymentStep create={mkStellarCreate()} />));
-    await waitFor(() => screen.getByText(/Payment received/i));
+  it('shows a countdown to the payment-window expiry', async () => {
+    getLoopOrderMock.mockResolvedValue(mkOrder());
+    render(wrap(<LoopPaymentStep create={mkCreate()} />));
+    await waitFor(() => screen.getByText(/Time remaining/i));
   });
 
-  it('shows the failure reason on a failed order', async () => {
+  it('hides the countdown when the server reported no expiry', async () => {
+    getLoopOrderMock.mockResolvedValue(mkOrder());
+    render(wrap(<LoopPaymentStep create={mkCreate({ expiresAt: null })} />));
+    await waitFor(() => screen.getByText(/Waiting for payment/i));
+    expect(screen.queryByText(/Time remaining/i)).toBeNull();
+  });
+
+  it('shows "Payment window expired" once the expiry passes', async () => {
+    getLoopOrderMock.mockResolvedValue(mkOrder());
+    render(
+      wrap(
+        <LoopPaymentStep
+          create={mkCreate({ expiresAt: new Date(Date.now() - 1000).toISOString() })}
+        />,
+      ),
+    );
+    // Rendered twice: the visible countdown line + the sr-only announcement.
+    await waitFor(() =>
+      expect(screen.getAllByText(/Payment window expired/i).length).toBeGreaterThan(0),
+    );
+  });
+
+  it('omits the "Open in wallet" link when no payment URI exists for the currency', async () => {
+    getLoopOrderMock.mockResolvedValue(mkOrder());
+    render(wrap(<LoopPaymentStep create={mkCreate({ paymentUrls: {} })} />));
+    await waitFor(() => screen.getByText(/GABCDEFGHIJKLMNOPQRSTUVWXYZ234567/));
+    expect(screen.queryByRole('link', { name: /Open in wallet/i })).toBeNull();
+  });
+
+  it('renders address-only instructions when cryptoAmount is null', async () => {
+    getLoopOrderMock.mockResolvedValue(mkOrder());
+    render(
+      wrap(<LoopPaymentStep create={mkCreate({ cryptoAmount: null, cryptoCurrency: 'DOGE' })} />),
+    );
+    await waitFor(() => screen.getByText('DOGE'));
+    expect(screen.getByText(/GABCDEFGHIJKLMNOPQRSTUVWXYZ234567/)).toBeDefined();
+  });
+
+  it('updates the state label as the order transitions to paid', async () => {
+    getLoopOrderMock.mockResolvedValue(mkOrder({ state: 'paid', payment: null }));
+    render(wrap(<LoopPaymentStep create={mkCreate()} />));
+    await waitFor(() => screen.getByRole('heading', { name: /Payment received/i }));
+    expect(screen.getByText(/on the way/i)).toBeDefined();
+  });
+
+  it('shows the failure reason on a rejected order', async () => {
     getLoopOrderMock.mockResolvedValue(
       mkOrder({
-        state: 'failed',
+        state: 'rejected',
+        payment: null,
         failureReason: 'CTX returned 500',
         failedAt: new Date().toISOString(),
       }),
     );
-    render(wrap(<LoopPaymentStep create={mkStellarCreate()} />));
+    render(wrap(<LoopPaymentStep create={mkCreate()} />));
     await waitFor(() => screen.getByText('CTX returned 500'));
+  });
+
+  it('shows a generic failure body on refunded / expired without a reason', async () => {
+    getLoopOrderMock.mockResolvedValue(
+      mkOrder({ state: 'refunded', payment: null, failedAt: new Date().toISOString() }),
+    );
+    render(wrap(<LoopPaymentStep create={mkCreate()} />));
+    await waitFor(() => screen.getByText(/Order refunded/i));
   });
 
   it('calls onTerminal exactly once when the state becomes terminal', async () => {
     const spy = vi.fn();
     getLoopOrderMock.mockResolvedValue(
-      mkOrder({ state: 'fulfilled', ctxOrderId: 'ctx-abc', fulfilledAt: new Date().toISOString() }),
+      mkOrder({
+        state: 'fulfilled',
+        payment: null,
+        ctxOrderId: 'ctx-abc',
+        fulfilledAt: new Date().toISOString(),
+      }),
     );
-    render(wrap(<LoopPaymentStep create={mkStellarCreate()} onTerminal={spy} />));
+    render(wrap(<LoopPaymentStep create={mkCreate()} onTerminal={spy} />));
     await waitFor(() => expect(spy).toHaveBeenCalledOnce());
     expect((spy.mock.calls[0]![0] as LoopOrderView).ctxOrderId).toBe('ctx-abc');
   });
@@ -157,7 +192,7 @@ describe('LoopPaymentStep — stellar (xlm/usdc)', () => {
     const writeText = vi.fn();
     Object.assign(navigator, { clipboard: { writeText } });
     getLoopOrderMock.mockResolvedValue(mkOrder());
-    render(wrap(<LoopPaymentStep create={mkStellarCreate()} />));
+    render(wrap(<LoopPaymentStep create={mkCreate()} />));
     await waitFor(() => screen.getAllByRole('button', { name: /Copy/i }));
     const buttons = screen.getAllByRole('button', { name: /Copy/i });
     await act(async () => {
@@ -167,73 +202,50 @@ describe('LoopPaymentStep — stellar (xlm/usdc)', () => {
   });
 });
 
-// PAYMENTURI-UNGATED (XSS): `paymentUri` is a server/upstream-supplied field
-// on the create-order response — Loop builds it via buildSep7PayUri, but it
-// can also be threaded straight through from CTX's `paymentUrls`. Dropped
-// into an `<a href>` unvalidated, a `javascript:`/`data:` scheme executes on
-// tap — with app privileges inside the Capacitor native WebView. The scheme
-// must be gated so a dangerous URI never becomes a live href, while a
-// legitimate SEP-7 `web+stellar:` URI passes through.
-describe('LoopPaymentStep — paymentUri XSS gate', () => {
-  const LEGIT_URI =
-    'web+stellar:pay?destination=GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW&amount=10.0000000&memo=MEMO-ABCDEFGHIJKLMN';
+// PAYMENTURI-UNGATED (XSS): the wallet URI comes from CTX's upstream
+// `paymentUrls` map. Dropped into an `<a href>` unvalidated, a
+// `javascript:`/`data:` scheme executes on tap — with app privileges inside
+// the Capacitor native WebView. The scheme must be gated so a dangerous URI
+// never becomes a live href, while a legitimate wallet URI passes through.
+describe('LoopPaymentStep — payment URI XSS gate', () => {
   const MALICIOUS: Array<[string, string]> = [
     ['javascript:', 'javascript:alert(document.cookie)'],
     ['data:', 'data:text/html,<script>alert(1)</script>'],
     ['vbscript:', 'vbscript:msgbox(1)'],
   ];
 
-  describe('web (stellar) body', () => {
-    it('passes a legitimate web+stellar: paymentUri through to the href', async () => {
-      getLoopOrderMock.mockResolvedValue(mkOrder());
-      render(wrap(<LoopPaymentStep create={mkStellarCreate({ paymentUri: LEGIT_URI })} />));
-      const link = await waitFor(() => screen.getByRole('link', { name: /Open in wallet/i }));
-      expect(link.getAttribute('href')).toBe(LEGIT_URI);
-    });
-
-    it.each(MALICIOUS)(
-      'does NOT render a %s paymentUri as a live href',
-      async (_scheme, paymentUri) => {
-        getLoopOrderMock.mockResolvedValue(mkOrder());
-        render(wrap(<LoopPaymentStep create={mkStellarCreate({ paymentUri })} />));
-        // The address/memo copy path still renders (the user can still pay),
-        // but the dangerous URI is dropped — no "Open in wallet" anchor.
-        await waitFor(() => screen.getByText(/GABCDEFGHIJKLMNOPQRSTUVWXYZ234567/));
-        expect(screen.queryByRole('link', { name: /Open in wallet/i })).toBeNull();
-        // Belt-and-braces: the raw payload never reaches any href attribute.
-        for (const anchor of document.querySelectorAll('a')) {
-          expect(anchor.getAttribute('href')).not.toBe(paymentUri);
-        }
-      },
-    );
+  it('passes a legitimate web+stellar: URI through to the href', async () => {
+    getLoopOrderMock.mockResolvedValue(mkOrder());
+    render(wrap(<LoopPaymentStep create={mkCreate()} />));
+    const link = await waitFor(() => screen.getByRole('link', { name: /Open in wallet/i }));
+    expect(link.getAttribute('href')).toBe(XLM_URI);
   });
 
-  describe('native body', () => {
-    beforeEach(() => {
-      mockNativePlatform = true;
-    });
-
-    it('passes a legitimate web+stellar: paymentUri through to the href', async () => {
-      getLoopOrderMock.mockResolvedValue(mkOrder());
-      render(wrap(<LoopPaymentStep create={mkStellarCreate({ paymentUri: LEGIT_URI })} />));
-      const link = await waitFor(() => screen.getByRole('link', { name: /Open in wallet/i }));
-      expect(link.getAttribute('href')).toBe(LEGIT_URI);
-    });
-
-    it.each(MALICIOUS)(
-      'collapses a %s paymentUri to a disabled state, never a live href',
-      async (_scheme, paymentUri) => {
-        getLoopOrderMock.mockResolvedValue(mkOrder());
-        render(wrap(<LoopPaymentStep create={mkStellarCreate({ paymentUri })} />));
-        // Native body has no copy path — the dangerous URI collapses to a
-        // disabled "Payment link unavailable" state, not a clickable anchor.
-        await waitFor(() => screen.getByText(/Payment link unavailable/i));
-        expect(screen.queryByRole('link', { name: /Open in wallet/i })).toBeNull();
-        for (const anchor of document.querySelectorAll('a')) {
-          expect(anchor.getAttribute('href')).not.toBe(paymentUri);
-        }
-      },
+  it('passes a legitimate BIP21-style dash: URI through to the href', async () => {
+    const DASH_URI = 'dash:XekiLaxnqpFb2m4NQAEcsKutZcZgcyfo6W?amount=0.5';
+    getLoopOrderMock.mockResolvedValue(mkOrder());
+    render(
+      wrap(
+        <LoopPaymentStep
+          create={mkCreate({ cryptoCurrency: 'DASH', paymentUrls: { DASH: DASH_URI } })}
+        />,
+      ),
     );
+    const link = await waitFor(() => screen.getByRole('link', { name: /Open in wallet/i }));
+    expect(link.getAttribute('href')).toBe(DASH_URI);
+  });
+
+  it.each(MALICIOUS)('does NOT render a %s URI as a live href', async (_scheme, uri) => {
+    getLoopOrderMock.mockResolvedValue(mkOrder());
+    render(wrap(<LoopPaymentStep create={mkCreate({ paymentUrls: { XLM: uri } })} />));
+    // The address copy path still renders (the user can still pay),
+    // but the dangerous URI is dropped — no "Open in wallet" anchor.
+    await waitFor(() => screen.getByText(/GABCDEFGHIJKLMNOPQRSTUVWXYZ234567/));
+    expect(screen.queryByRole('link', { name: /Open in wallet/i })).toBeNull();
+    // Belt-and-braces: the raw payload never reaches any href attribute.
+    for (const anchor of document.querySelectorAll('a')) {
+      expect(anchor.getAttribute('href')).not.toBe(uri);
+    }
   });
 });
 
@@ -242,13 +254,14 @@ describe('LoopPaymentStep — fulfilled redemption', () => {
     getLoopOrderMock.mockResolvedValue(
       mkOrder({
         state: 'fulfilled',
+        payment: null,
         redeemCode: 'CARD-123-XYZ',
         redeemPin: '4242',
         ctxOrderId: 'ctx-abc',
         fulfilledAt: new Date().toISOString(),
       }),
     );
-    render(wrap(<LoopPaymentStep create={mkStellarCreate()} />));
+    render(wrap(<LoopPaymentStep create={mkCreate()} />));
     await waitFor(() => screen.getByText('CARD-123-XYZ'));
     expect(screen.getByText('4242')).toBeDefined();
     // Two copy buttons (code + PIN)
@@ -259,6 +272,7 @@ describe('LoopPaymentStep — fulfilled redemption', () => {
     getLoopOrderMock.mockResolvedValue(
       mkOrder({
         state: 'fulfilled',
+        payment: null,
         redeemCode: null,
         redeemPin: null,
         redeemUrl: 'https://redeem.example.com/abc',
@@ -266,7 +280,7 @@ describe('LoopPaymentStep — fulfilled redemption', () => {
         fulfilledAt: new Date().toISOString(),
       }),
     );
-    render(wrap(<LoopPaymentStep create={mkStellarCreate()} />));
+    render(wrap(<LoopPaymentStep create={mkCreate()} />));
     const link = await waitFor(() => screen.getByRole('link', { name: /Open redemption link/i }));
     expect(link.getAttribute('href')).toBe('https://redeem.example.com/abc');
     expect(link.getAttribute('rel')).toMatch(/noopener/);
@@ -284,6 +298,7 @@ describe('LoopPaymentStep — fulfilled redemption', () => {
     getLoopOrderMock.mockResolvedValue(
       mkOrder({
         state: 'fulfilled',
+        payment: null,
         redeemCode: null,
         redeemPin: null,
         redeemUrl,
@@ -291,7 +306,7 @@ describe('LoopPaymentStep — fulfilled redemption', () => {
         fulfilledAt: new Date().toISOString(),
       }),
     );
-    render(wrap(<LoopPaymentStep create={mkStellarCreate()} />));
+    render(wrap(<LoopPaymentStep create={mkCreate()} />));
     // The fulfilled panel renders (fallback banner) but NO redemption
     // anchor — the dangerous scheme is dropped, not passed through.
     await waitFor(() => screen.getByText(/still coming through/i));
@@ -306,6 +321,7 @@ describe('LoopPaymentStep — fulfilled redemption', () => {
     getLoopOrderMock.mockResolvedValue(
       mkOrder({
         state: 'fulfilled',
+        payment: null,
         redeemCode: null,
         redeemPin: null,
         redeemUrl: null,
@@ -313,14 +329,15 @@ describe('LoopPaymentStep — fulfilled redemption', () => {
         fulfilledAt: new Date().toISOString(),
       }),
     );
-    render(wrap(<LoopPaymentStep create={mkStellarCreate()} />));
+    render(wrap(<LoopPaymentStep create={mkCreate()} />));
     await waitFor(() => screen.getByText(/still coming through/i));
   });
 
-  it('surfaces the cashback credited line when userCashbackMinor > 0', async () => {
+  it('surfaces the cashback discount line when userCashbackMinor > 0', async () => {
     getLoopOrderMock.mockResolvedValue(
       mkOrder({
         state: 'fulfilled',
+        payment: null,
         redeemCode: 'CODE',
         userCashbackMinor: '500', // $5.00
         currency: 'USD',
@@ -328,7 +345,7 @@ describe('LoopPaymentStep — fulfilled redemption', () => {
         fulfilledAt: new Date().toISOString(),
       }),
     );
-    render(wrap(<LoopPaymentStep create={mkStellarCreate()} />));
+    render(wrap(<LoopPaymentStep create={mkCreate()} />));
     await waitFor(() => screen.getByText(/\$5\.00 cashback/i));
   });
 
@@ -336,54 +353,28 @@ describe('LoopPaymentStep — fulfilled redemption', () => {
     getLoopOrderMock.mockResolvedValue(
       mkOrder({
         state: 'fulfilled',
+        payment: null,
         redeemCode: 'CODE',
         userCashbackMinor: '0',
         ctxOrderId: 'ctx-abc',
         fulfilledAt: new Date().toISOString(),
       }),
     );
-    render(wrap(<LoopPaymentStep create={mkStellarCreate()} />));
+    render(wrap(<LoopPaymentStep create={mkCreate()} />));
     await waitFor(() => screen.getByText('CODE'));
-    expect(screen.queryByText(/cashback credited/i)).toBeNull();
-  });
-});
-
-describe('LoopPaymentStep — credit', () => {
-  it('shows a "no action needed" body and spinner while in flight', async () => {
-    getLoopOrderMock.mockResolvedValue(
-      mkOrder({ state: 'paid', paymentMethod: 'credit', paymentMemo: null, stellarAddress: null }),
-    );
-    render(wrap(<LoopPaymentStep create={mkCreditCreate()} />));
-    await waitFor(() => screen.getByText(/Loop credit balance/i));
-    await waitFor(() => screen.getByText(/Payment received/i));
-  });
-
-  it('stops polling once the order is terminal and fires onTerminal', async () => {
-    const spy = vi.fn();
-    getLoopOrderMock.mockResolvedValue(
-      mkOrder({
-        state: 'fulfilled',
-        paymentMethod: 'credit',
-        paymentMemo: null,
-        stellarAddress: null,
-        ctxOrderId: 'ctx-xyz',
-        fulfilledAt: new Date().toISOString(),
-      }),
-    );
-    render(wrap(<LoopPaymentStep create={mkCreditCreate()} onTerminal={spy} />));
-    await waitFor(() => expect(spy).toHaveBeenCalledOnce());
+    expect(screen.queryByText(/cashback/i)).toBeNull();
   });
 });
 
 // FE-05 (round 2): the fulfilled RedemptionBody renders the gift-card CODE
 // and PIN as copyable Rows — this IS the fulfilled-redemption view for the
-// Loop-native flow (ADR-010 keeps it visible over PurchaseComplete), so the
-// user copies their secret from here on a primary path. Copying a redemption
-// secret must route through `copySensitive` so the clipboard auto-clears
-// after ~60s. The deposit address / memo Rows are NOT secrets and must stay
-// on the clipboard. We drive the REAL clipboard module (copySensitive is not
-// mocked) under fake timers and assert the auto-clear (an empty-string write)
-// fires for the code/PIN Row but never for the address / memo Row.
+// Loop-native flow, so the user copies their secret from here on a primary
+// path. Copying a redemption secret must route through `copySensitive` so
+// the clipboard auto-clears after ~60s. The deposit address Row is NOT a
+// secret and must stay on the clipboard. We drive the REAL clipboard module
+// (copySensitive is not mocked) under fake timers and assert the auto-clear
+// (an empty-string write) fires for the code/PIN Row but never for the
+// address Row.
 describe('LoopPaymentStep — FE-05 sensitive copy auto-clear', () => {
   const CLEAR_MS = 60_000;
   let writeText: ReturnType<typeof vi.fn>;
@@ -425,13 +416,14 @@ describe('LoopPaymentStep — FE-05 sensitive copy auto-clear', () => {
     getLoopOrderMock.mockResolvedValue(
       mkOrder({
         state: 'fulfilled',
+        payment: null,
         redeemCode: 'CARD-123-XYZ',
         redeemPin: null,
         ctxOrderId: 'ctx-abc',
         fulfilledAt: new Date().toISOString(),
       }),
     );
-    render(wrap(<LoopPaymentStep create={mkStellarCreate()} />));
+    render(wrap(<LoopPaymentStep create={mkCreate()} />));
     await settle();
     const copyBtn = screen.getByRole('button', { name: /Copy gift card code/i });
     await act(async () => {
@@ -443,8 +435,7 @@ describe('LoopPaymentStep — FE-05 sensitive copy auto-clear', () => {
       await vi.advanceTimersByTimeAsync(CLEAR_MS - 1);
     });
     expect(wasCleared()).toBe(false);
-    // Once the auto-clear delay elapses the secret is wiped. This assertion
-    // is RED against the pre-fix Row (plain writeText, no scheduled clear).
+    // Once the auto-clear delay elapses the secret is wiped.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1);
     });
@@ -455,13 +446,14 @@ describe('LoopPaymentStep — FE-05 sensitive copy auto-clear', () => {
     getLoopOrderMock.mockResolvedValue(
       mkOrder({
         state: 'fulfilled',
+        payment: null,
         redeemCode: null,
         redeemPin: '4242',
         ctxOrderId: 'ctx-abc',
         fulfilledAt: new Date().toISOString(),
       }),
     );
-    render(wrap(<LoopPaymentStep create={mkStellarCreate()} />));
+    render(wrap(<LoopPaymentStep create={mkCreate()} />));
     await settle();
     const copyBtn = screen.getByRole('button', { name: /Copy pin/i });
     await act(async () => {
@@ -474,20 +466,18 @@ describe('LoopPaymentStep — FE-05 sensitive copy auto-clear', () => {
     expect(wasCleared()).toBe(true);
   });
 
-  it('does NOT schedule an auto-clear for the deposit address / memo Rows (they must persist)', async () => {
-    // pending_payment → StellarPaymentBody renders the deposit address + memo
-    // as copyable, NON-sensitive Rows. A user pastes these into their wallet,
-    // so wiping them after 60s would break the payment flow — they stay put.
-    getLoopOrderMock.mockResolvedValue(mkOrder({ state: 'pending_payment' }));
-    render(wrap(<LoopPaymentStep create={mkStellarCreate()} />));
+  it('does NOT schedule an auto-clear for the deposit address Row (it must persist)', async () => {
+    // unpaid → CtxPaymentBody renders the deposit address as a copyable,
+    // NON-sensitive Row. A user pastes it into their wallet, so wiping it
+    // after 60s would break the payment flow — it stays put.
+    getLoopOrderMock.mockResolvedValue(mkOrder({ state: 'unpaid' }));
+    render(wrap(<LoopPaymentStep create={mkCreate()} />));
     await settle();
     const copyAddress = screen.getByRole('button', { name: /Copy to address/i });
     await act(async () => {
       fireEvent.click(copyAddress);
     });
-    expect(writeText).toHaveBeenCalledWith(
-      'GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW',
-    );
+    expect(writeText).toHaveBeenCalledWith(ADDRESS);
     // Long past any sensitive-clear delay: nothing is cleared. (This is the
     // control — it passes both pre-fix and post-fix.)
     await act(async () => {

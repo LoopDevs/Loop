@@ -38,7 +38,7 @@
  * threaded through the payout transaction alongside the row's own state
  * transition. Only the Soroban wire layer
  * (`credits/vaults/vault-client.js`) and Privy (`wallet/provider.js`)
- * are mocked; `db`, `vault_hot_float`, `vault_redemptions`, `orders`,
+ * are mocked; `db`, `vault_hot_float`, `vault_redemptions`,
  * `user_credits`, `credit_transactions`, and every CHECK/trigger are
  * REAL postgres. Gated on LOOP_E2E_DB=1.
  */
@@ -109,7 +109,7 @@ vi.mock('../../discord.js', async (importActual) => {
 });
 
 import { db } from '../../db/client.js';
-import { users, orders, loopVaults, vaultRedemptions, vaultHotFloat } from '../../db/schema.js';
+import { users, loopVaults, vaultRedemptions, vaultHotFloat } from '../../db/schema.js';
 import { findOrCreateUserByEmail } from '../../db/users.js';
 import {
   ensureMigrated,
@@ -142,31 +142,6 @@ async function seedUser(): Promise<{ id: string; walletAddress: string }> {
     })
     .where(eq(users.id, user.id));
   return { id: user.id, walletAddress };
-}
-
-async function seedOrder(userId: string, chargeMinor: bigint): Promise<string> {
-  const merchantId = crypto.randomUUID();
-  const [order] = await db
-    .insert(orders)
-    .values({
-      userId,
-      merchantId,
-      faceValueMinor: chargeMinor,
-      currency: 'USD',
-      chargeMinor,
-      chargeCurrency: 'USD',
-      paymentMethod: 'loop_asset',
-      paymentMemo: `test-memo-${crypto.randomUUID()}`,
-      wholesalePct: '70.00',
-      userCashbackPct: '5.00',
-      loopMarginPct: '25.00',
-      wholesaleMinor: (chargeMinor * 70n) / 100n,
-      userCashbackMinor: (chargeMinor * 5n) / 100n,
-      loopMarginMinor: (chargeMinor * 25n) / 100n,
-      state: 'pending_payment',
-    })
-    .returning({ id: orders.id });
-  return order!.id;
 }
 
 async function seedVault(): Promise<void> {
@@ -206,15 +181,14 @@ async function runOneSlowRedemption(
   proceedsStroops: bigint,
   seq: number,
 ): Promise<{ balanceMinor: bigint; carryStroops: bigint }> {
-  const orderId = await seedOrder(user.id, valueMinor);
   vaultClientState.withdrawResult = {
     txHash: `withdraw-dust-${seq}`,
     amountsOut: [proceedsStroops],
   };
 
   const row = await claimVaultRedemption({
-    sourceType: 'order_redeem',
-    sourceId: orderId,
+    sourceType: 'withdrawal',
+    sourceId: crypto.randomUUID(),
     userId: user.id,
     assetCode: 'LOOPUSD',
     network: 'testnet',

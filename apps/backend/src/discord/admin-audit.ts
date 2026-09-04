@@ -148,9 +148,7 @@ export function notifyAdminBulkRead(args: {
  * + next state into a single `notifyCashbackConfigChanged` post.
  */
 export interface CashbackConfigSnapshot {
-  wholesalePct: string;
   userCashbackPct: string;
-  loopMarginPct: string;
   active: boolean;
 }
 
@@ -206,9 +204,7 @@ export function notifyCashbackConfigChanged(args: {
 
 function fmtConfigLine(s: CashbackConfigSnapshot): string {
   const body =
-    `wholesale ${escapeMarkdown(s.wholesalePct)}%` +
-    ` · cashback ${escapeMarkdown(s.userCashbackPct)}%` +
-    ` · margin ${escapeMarkdown(s.loopMarginPct)}%` +
+    `user cashback ${escapeMarkdown(s.userCashbackPct)}% of margin` +
     ` · ${s.active ? 'active' : 'inactive'}`;
   return truncate(body, FIELD_VALUE_MAX);
 }

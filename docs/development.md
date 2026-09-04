@@ -97,12 +97,6 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # CTX_CLIENT_ID_IOS=loopios
 # CTX_CLIENT_ID_ANDROID=loopandroid
 
-# CTX operator-account pool (ADR 013). JSON array of service accounts
-# used as CTX-side customers when fulfilling Loop-native orders. At
-# least one entry must have `id` + `bearer`. Absent → Loop-native
-# order fulfillment is blocked (merchant browse still works).
-# CTX_OPERATOR_POOL=[{"id":"primary","bearer":"eyJ..."},{"id":"backup-1","bearer":"eyJ..."}]
-
 # ── Merchant sync (ADR 021) ──────────────────────────────────────────
 # A2-1922: comma-separated CTX merchant IDs filtered out of the catalog
 # at sync time — Loop's operator deny-list. Denied IDs never reach the
@@ -305,13 +299,8 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # Phase 1 user proposition. UI-side equivalent of the backend Phase 2
 # gates (LOOP_WORKERS_ENABLED / LOOP_AUTH_NATIVE_ENABLED /
 # INTEREST_APY_BASIS_POINTS — keep those off in a Phase 1 deploy too).
-# AUDIT-2 finding B (2026-07 hardening): also STRUCTURALLY gates the
-# loop_asset spend surface server-side — POST /api/orders/loop
-# (create) and POST /api/orders/loop/:id/redeem (redemption,
-# fail-closed even for pre-existing orders) both 400
-# LOOP_ASSET_UNAVAILABLE_PHASE_1 while this flag is true. Admin
-# emission (credits/emissions.ts) is deliberately not gated — see
-# AGENTS.md.
+# (The loop_asset spend surface this flag also structurally gated died
+# with the ADR 052 money-in rip — orders are paid at CTX now.)
 # Flip back to false to launch cashback — server-side only, no app store
 # resubmission. Default false.
 # LOOP_PHASE_1_ONLY=true
@@ -392,19 +381,6 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # bad URL fails parseEnv at boot rather than the first live call.
 # LOOP_STELLAR_HORIZON_URL=https://horizon.stellar.org
 
-# Price / FX feed overrides (A2-1812). XLM-in-home-currency + fiat FX
-# oracles — keep on the CoinGecko / Frankfurter defaults in production
-# unless a deployment has its own pinned oracle. Response shape must
-# match CoinGecko + Frankfurter formats respectively.
-# LOOP_XLM_PRICE_FEED_URL=https://api.coingecko.com/api/v3/simple/price?ids=stellar&vs_currencies=usd,gbp,eur
-# LOOP_FX_FEED_URL=https://api.frankfurter.app/latest?from=USD&to=GBP,EUR
-
-# Procurement USDC-floor (ADR 015). Stroops (7 decimals; 10^7 = 1 USDC).
-# When the operator account's USDC balance dips below this many stroops,
-# procurement pays CTX in XLM instead — unblocks fulfillment during ops
-# top-ups. Absent → fallback disabled, procurement always pays USDC.
-# LOOP_STELLAR_USDC_FLOOR_STROOPS=50000000000   # 5,000 USDC
-
 # Payout signing (ADR 016). Operator secret signs outbound LOOP-asset
 # payments from the operator account to user wallets. Never logged
 # (pino redaction). Absent → the payout worker is inert; pending_payouts
@@ -458,24 +434,15 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # LOOP_WORKERS_ENABLED AND LOOP_VAULTS_ENABLED.
 # LOOP_VAULT_APY_SNAPSHOT_INTERVAL_HOURS=24
 
-# Hardening A6: auto-refund late deposits (those landing after the
-# order expired). Default false → admin-triggered refunds only
-# (POST /api/admin/deposits/:paymentId/refund, admin + step-up). true →
-# the skip-sweep auto-refunds them to the sender. Read live.
-# LOOP_DEPOSIT_REFUND_AUTO=false
-
-# Per-worker cadences. Watcher runs every 10s (deposit latency),
-# procurement every 5s (user-blocking once an order is paid). Payout
-# interval matches Stellar ledger-close cadence.
-# LOOP_PAYMENT_WATCHER_INTERVAL_SECONDS=10
-# LOOP_PROCUREMENT_INTERVAL_SECONDS=5
+# Per-worker cadences. Payout interval matches Stellar ledger-close
+# cadence.
 # LOOP_PAYOUT_WORKER_INTERVAL_SECONDS=30
 # LOOP_PAYOUT_MAX_ATTEMPTS=5                   # bounded retry
 
-# R3-5 CTX settlement sanity band. Before paying CTX, procurement
-# refuses a SEP-7 payment amount above this many basis points of the
-# expected wholesale XLM quote. Default 12500 = 125%.
-# LOOP_CTX_PAYMENT_MAX_BPS_OF_EXPECTED=12500
+# ADR 052: CTX payment-currency allowlist for POST /api/orders/loop
+# (chain-qualified codes, comma-separated). Default XLM. Surfaced to
+# clients via GET /api/config → ctxPaymentCurrencies.
+# LOOP_CTX_PAYMENT_CURRENCIES=XLM
 
 # A2-1921 fee-bump strategy. Attempt N pays BASE * MULTIPLIER^(N-1),
 # capped at CAP, so congested-network submits drain instead of going
@@ -534,31 +501,6 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # advisory lock; runs under LOOP_WORKERS_ENABLED.
 # LOOP_LEDGER_INVARIANT_INTERVAL_HOURS=24
 
-# R3-1 operator XLM/USDC float reconciliation (production-readiness
-# pass, 2026-07-10). Historical conservation check over the real
-# deposit/operator Stellar wallet — the one automated reconciliation
-# INV-1 (mirror=ledger) and INV-4 (on-chain-LOOP-vs-mirror) don't cover,
-# since neither watches the wallet every real deposit dollar actually
-# flows through. Fails CLOSED to a `needs_baseline` state (and pages
-# Discord, same at-least-once cadence as drift) until an operator
-# creates a baseline via the audited, step-up-gated
-# `POST /api/admin/operator-float/baselines` — with no active baseline
-# the indexer never touches Horizon at all, so a fresh production
-# deploy cannot accidentally re-scan the account's entire payment
-# history. Once a baseline exists, its Horizon cursor columns are
-# DB-enforced NOT NULL + non-empty (migration 0057) for the same
-# reason: an omitted `cursor` query param walks Horizon from genesis
-# instead of the baseline's anchor point. XLM's threshold defaults
-# wider than USDC's to absorb Stellar tx fees the model doesn't count
-# (~100-200 stroops per operator-submitted tx); USDC pays no on-chain
-# fee so its default stays exact. Operator runbook (how to compute +
-# set the real production baseline, the manual-movement memo/linkage
-# policy, and drift-page triage): docs/runbooks/operator-float-drift.md.
-# Runs under LOOP_WORKERS_ENABLED.
-# LOOP_OPERATOR_FLOAT_RECONCILIATION_INTERVAL_HOURS=24
-# LOOP_OPERATOR_FLOAT_XLM_THRESHOLD_STROOPS=10000000    # 1 XLM
-# LOOP_OPERATOR_FLOAT_USDC_THRESHOLD_STROOPS=1          # 1 stroop (exact)
-
 # ── Embedded wallet (ADR 030) ────────────────────────────────────────
 # Provider-agnostic embedded-wallet layer. '' (default) → OFF:
 # getWalletProvider() returns null and no vendor code path is
@@ -567,7 +509,7 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # required — parseEnv refuses to boot otherwise. Phase C flows:
 # signup-time wallet provisioning + activation sweeper (under
 # LOOP_WORKERS_ENABLED), payout targeting to the activated wallet,
-# POST /api/orders/loop/:id/redeem, GET /api/me/wallet.
+# GET /api/me/wallet.
 # LOOP_WALLET_PROVIDER=
 # PRIVY_APP_ID=your-privy-app-id
 # PRIVY_APP_SECRET=your-privy-app-secret   # never logged (pino redaction)
@@ -576,9 +518,8 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # Set any to `true` and the matching surface returns 503
 # SUBSYSTEM_DISABLED on the next request — no redeploy. Runbook:
 # docs/runbooks/kill-switch.md. All default false.
-# LOOP_KILL_ORDERS=false         # POST /api/orders + /api/orders/loop (combined)
-# LOOP_KILL_ORDERS_LEGACY=false  # POST /api/orders only; unset → falls back to LOOP_KILL_ORDERS
-# LOOP_KILL_ORDERS_LOOP=false    # POST /api/orders/loop only; unset → falls back to LOOP_KILL_ORDERS
+# LOOP_KILL_ORDERS=false         # POST /api/orders/loop
+# LOOP_KILL_ORDERS_LOOP=false    # same path; overrides LOOP_KILL_ORDERS when set
 # LOOP_KILL_AUTH=false           # request/verify-otp + social (refresh/logout stay open)
 # LOOP_KILL_EMISSIONS=false      # admin emission (ADR 036, ex-withdrawal) + compensation endpoints
 ```

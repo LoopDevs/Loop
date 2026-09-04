@@ -18,7 +18,6 @@
 import type { Hono } from 'hono';
 import { rateLimit } from '../middleware/rate-limit.js';
 import { requireStaff } from '../auth/require-staff.js';
-import { adminStuckOrdersHandler } from '../admin/stuck-orders.js';
 import { adminStuckPayoutsHandler } from '../admin/stuck-payouts.js';
 import { adminCashbackActivityHandler } from '../admin/cashback-activity.js';
 import { adminCashbackActivityCsvHandler } from '../admin/cashback-activity-csv.js';
@@ -32,14 +31,6 @@ import { adminCashbackRealizationDailyCsvHandler } from '../admin/cashback-reali
  * stack is in place.
  */
 export function mountAdminDashboardRoutes(app: Hono): void {
-  // Stuck-orders triage. Dashboard pings this every 30-60s — higher
-  // rate limit because the admin UI polls it on a loop to surface
-  // an SLO red-flag card.
-  app.get(
-    '/api/admin/stuck-orders',
-    rateLimit('GET /api/admin/stuck-orders', 120, 60_000),
-    adminStuckOrdersHandler,
-  );
   // Stuck-payouts triage — pending_payouts rows in pending/submitted
   // past the SLO threshold (ADR 015/016). Same 120/min polling budget
   // as stuck-orders since both feed the same dashboard card and often
@@ -57,18 +48,16 @@ export function mountAdminDashboardRoutes(app: Hono): void {
     rateLimit('GET /api/admin/cashback-activity', 60, 60_000),
     adminCashbackActivityHandler,
   );
+  // Daily realization time-series — per-(day, currency) earned +
+  // spent + recycledBps. Drift-over-time companion to the single-point
+  // realization surface above; powers the sparkline on /admin landing.
   // Cashback realization rate — per-currency earned vs spent vs
-  // outstanding, plus a fleet-wide aggregate row. The flywheel-health
-  // KPI: high realization = users recycling cashback into new orders
-  // rather than hoarding or withdrawing (ADR 009/015).
+  // outstanding, plus a fleet-wide aggregate row (ADR 009/015).
   app.get(
     '/api/admin/cashback-realization',
     rateLimit('GET /api/admin/cashback-realization', 60, 60_000),
     adminCashbackRealizationHandler,
   );
-  // Daily realization time-series — per-(day, currency) earned +
-  // spent + recycledBps. Drift-over-time companion to the single-point
-  // realization surface above; powers the sparkline on /admin landing.
   app.get(
     '/api/admin/cashback-realization/daily',
     rateLimit('GET /api/admin/cashback-realization/daily', 60, 60_000),

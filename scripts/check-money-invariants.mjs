@@ -283,10 +283,6 @@ const REQUIRED_INDEXES = [
     mustInclude: ["kind = 'burn'"],
   },
   {
-    name: 'ctx_settlements_order_unique',
-    inv: 'INV-7 (CTX is paid at most once per order)',
-  },
-  {
     name: 'interest_mint_snapshots_user_asset_period_unique',
     inv: 'INV-9 sibling (one on-chain interest mint per user/asset/UTC-day, ADR 031/036 Phase D)',
   },
@@ -317,15 +313,8 @@ const REQUIRED_CHECKS = [
   },
   {
     name: 'orders_state_known',
-    inv: 'INV-6 (every paid order reaches a user-whole terminal state — state machine is closed)',
-    mustInclude: [
-      "'pending_payment'",
-      "'paid'",
-      "'procuring'",
-      "'fulfilled'",
-      "'failed'",
-      "'expired'",
-    ],
+    inv: 'INV-6 (the order mirror is a closed state machine — ADR 052)',
+    mustInclude: ["'unpaid'", "'paid'", "'fulfilled'", "'rejected'", "'refunded'", "'expired'"],
   },
   {
     name: 'pending_payouts_interest_mint_asset_pinned',

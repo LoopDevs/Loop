@@ -40,7 +40,6 @@ vi.mock('~/components/features/orders/OrdersSummaryHeader', () => ({
 vi.mock('~/components/features/cashback/CashbackEarningsHeadline', () => ({
   CashbackEarningsHeadline: () => null,
 }));
-vi.mock('~/components/features/cashback/FlywheelChip', () => ({ FlywheelChip: () => null }));
 
 import OrdersRoute from '../orders';
 

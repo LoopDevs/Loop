@@ -50,10 +50,8 @@
  * - **Stuck triage (2)** — stuck orders, stuck payouts.
  * - **Cashback realization + activity + monthly (~8)** — fleet-
  *   wide cashback metrics + finance CSVs (ADR 009 / 015).
- * - **Supplier spend + operator stats + mix-axis (~10)** —
- *   ADR 013 / 022 mix-axis matrix: per-merchant operator-mix,
- *   per-operator merchant-mix, per-user operator-mix, plus
- *   per-operator activity / supplier-spend / latency.
+ * - **Supplier spend (3)** — fleet supplier-spend snapshot +
+ *   activity + the CTX commission proxy (ADR 015 / ctx-interop).
  * - **Merchant fleet stats + flywheel + per-merchant drill (~12)**
  *   — fleet stats + CSV, flywheel-share leaderboard + CSV,
  *   per-merchant flywheel-stats / cashback-summary / payment-
@@ -96,7 +94,7 @@ import { rateLimit } from '../middleware/rate-limit.js';
 import { adminStepUpHandler } from '../admin/step-up-handler.js';
 import { mountAdminDashboardRoutes } from './admin-dashboard.js';
 import { mountAdminFleetMonthlyRoutes } from './admin-fleet-monthly.js';
-import { mountAdminOperatorRoutes } from './admin-operator.js';
+import { mountAdminSupplierSpendRoutes } from './admin-supplier-spend.js';
 import { mountAdminOpsTailRoutes } from './admin-ops-tail.js';
 import { mountAdminOrderDrillRoutes } from './admin-order-drill.js';
 import { mountAdminPayoutsRoutes } from './admin-payouts.js';
@@ -269,9 +267,9 @@ export function mountAdminRoutes(app: Hono): void {
 
   // Fleet-monthly + finance-CSV — cashback-monthly +
   // payouts-monthly + payouts-activity (+ .csv) + supplier-spend
-  // activity.csv + operators-snapshot.csv + treasury credit-flow
-  // .csv. Lifted into ./admin-fleet-monthly.ts (mirrors openapi #1165
-  // for the JSON; CSV companions travel alongside their siblings).
+  // activity.csv + treasury credit-flow .csv. Lifted into
+  // ./admin-fleet-monthly.ts (mirrors openapi #1165 for the JSON;
+  // CSV companions travel alongside their siblings).
   mountAdminFleetMonthlyRoutes(app);
 
   // (ADR 011/013/015/018/022). Lifted into ./admin-per-merchant.ts.
@@ -279,10 +277,9 @@ export function mountAdminRoutes(app: Hono): void {
   // /:merchantId/* family.
   mountAdminPerMerchantRoutes(app);
 
-  // per-operator supplier-spend / activity / merchant-mix, fleet
-  // operator-stats + operators/latency. Lifted into ./admin-operator.ts
-  // (mirrors openapi #1172 + #1173).
-  mountAdminOperatorRoutes(app);
+  // supplier-spend snapshot + activity + ctx-commission. Lifted into
+  // ./admin-supplier-spend.ts (mirrors openapi #1173).
+  mountAdminSupplierSpendRoutes(app);
 
   // (ADR 009/015/022). Lifted into ./admin-user-cluster.ts (mirrors
   // openapi #1176 + the per-user-drill axes from #1168 / #1171).

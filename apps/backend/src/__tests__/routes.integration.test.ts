@@ -115,19 +115,31 @@ vi.mock('../circuit-breaker.js', async () => {
       this.name = 'CircuitOpenError';
     }
   }
+  const passThroughFetch = async (
+    ...args: Parameters<typeof globalThis.fetch>
+  ): Promise<Response> => {
+    const response = await globalThis.fetch(...args);
+    const ctxId = response.headers.get('X-Request-Id') ?? response.headers.get('X-Correlation-Id');
+    if (ctxId !== null && ctxId.length > 0) {
+      setCtxResponseRequestId(ctxId);
+    }
+    return response;
+  };
   return {
     CircuitOpenError,
     getAllCircuitStates: () => ({}),
+    // ADR 051: ctx/api-fetch.ts builds its upstream breaker via
+    // createCircuitBreaker — mirror the pass-through shape so
+    // /health's getCtxApiHealth() read works in the integration app.
+    createCircuitBreaker: () => ({
+      fetch: passThroughFetch,
+      getState: () => 'closed' as const,
+      isAvailable: () => true,
+      reset: () => {},
+      forceOpen: () => {},
+    }),
     getUpstreamCircuit: () => ({
-      fetch: async (...args: Parameters<typeof globalThis.fetch>): Promise<Response> => {
-        const response = await globalThis.fetch(...args);
-        const ctxId =
-          response.headers.get('X-Request-Id') ?? response.headers.get('X-Correlation-Id');
-        if (ctxId !== null && ctxId.length > 0) {
-          setCtxResponseRequestId(ctxId);
-        }
-        return response;
-      },
+      fetch: passThroughFetch,
       getState: () => 'closed' as const,
       reset: () => {},
     }),

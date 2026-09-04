@@ -142,7 +142,7 @@ describe('adminRefetchRedemptionHandler', () => {
     const cases: Array<[Record<string, unknown>, number, string]> = [
       [{ kind: 'order_not_found' }, 404, 'NOT_FOUND'],
       [{ kind: 'not_eligible', reason: 'already_present' }, 409, 'REDEMPTION_NOT_REFETCHABLE'],
-      [{ kind: 'pool_unavailable' }, 503, 'SERVICE_UNAVAILABLE'],
+      [{ kind: 'ctx_unavailable' }, 503, 'SERVICE_UNAVAILABLE'],
     ];
     for (const [outcome, status, code] of cases) {
       state.outcome = outcome;

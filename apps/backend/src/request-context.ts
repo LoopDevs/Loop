@@ -3,7 +3,7 @@
  *
  * Hono's `requestId()` middleware stores the ID in `c.get('requestId')`,
  * which is reachable only where a handler has `c` in scope. But outbound
- * fetches happen inside helpers (`operatorFetch`, `CircuitBreaker.fetch`)
+ * fetches happen inside helpers (`ctxFetch`, `CircuitBreaker.fetch`)
  * that don't see the Hono context, so there was no way to thread the
  * request ID onto the outbound headers — CTX could not correlate our
  * request with theirs when we asked "what happened to our order xyz?"

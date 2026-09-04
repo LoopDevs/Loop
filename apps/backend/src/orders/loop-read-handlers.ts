@@ -1,23 +1,20 @@
 /**
- * Loop-native order read handlers — `GET /api/orders/loop/:id`
- * + `GET /api/orders/loop` (ADR 010).
+ * Loop order read handlers — `GET /api/orders/loop/:id`
+ * + `GET /api/orders/loop` (ADR 052).
  *
- * Lifted out of `apps/backend/src/orders/loop-handler.ts`. Two
- * caller-scoped reads that share the `orderToView` shaper:
+ * Two caller-scoped reads over the local mirror:
  *
  *   - `loopGetOrderHandler` — owner-scoped single-order detail.
- *     404 on non-owner reads to avoid leaking existence.
+ *     404 on non-owner reads to avoid leaking existence. For a
+ *     still-`unpaid` order, overlays live CTX payment instructions
+ *     (operator-scope card + payment reads) so the pay screen is
+ *     fully server-rebuildable — nothing payment-directing is ever
+ *     trusted from client-persisted storage (Q6-4b lineage).
  *   - `loopListOrdersHandler` — owner-scoped paginated list,
- *     newest-first, `?limit=` clamped 1-100, `?before=<iso>` for
- *     descending pagination.
+ *     newest-first, `?limit=` clamped 1-100, `?before=<iso>`.
  *
  * Both gate on `LOOP_AUTH_NATIVE_ENABLED` (404 when off) and
- * require an `auth.kind === \'loop\'` bearer (401 otherwise).
- *
- * The `orderToView` BigInt-safe shaper lives here because the two
- * read handlers are its only consumers — the create handler in
- * `./loop-handler.ts` returns its own create-time response shape
- * via `replayOrderResponse`, not through `orderToView`.
+ * require an `auth.kind === 'loop'` bearer (401 otherwise).
  */
 import type { Context } from 'hono';
 import { and, desc, eq, lt } from 'drizzle-orm';
@@ -26,22 +23,18 @@ import { orders } from '../db/schema.js';
 import { env } from '../env.js';
 import { logger } from '../logger.js';
 import type { LoopAuthContext } from '../auth/handler.js';
-import { type OrderPaymentMethod } from '../db/schema.js';
-import { type LoopOrderView as SharedLoopOrderView } from '@loop/shared';
+import type { LoopOrderView, OrderState } from '@loop/shared';
 import { decryptRedeemField, RedeemDecryptError } from './redeem-crypto.js';
-import { deriveLoopPaymentInstructions } from './loop-payment-instructions.js';
-
-/**
- * Terminal states carry no live payment guidance (nothing left to pay).
- * Q6-4b: `loopGetOrderHandler` skips the oracle re-quote for these — both
- * a cost saving on the polled-to-fulfillment hot path and the correct
- * semantics (a fulfilled/failed/expired order has no pay screen to resume).
- */
-function isTerminalOrderState(state: string): boolean {
-  return state === 'fulfilled' || state === 'failed' || state === 'expired';
-}
+import {
+  fetchCtxCardAsOperator,
+  fetchCtxPayment,
+  paymentInstructionsFromCard,
+} from './ctx-order.js';
+import type { Order } from './repo.js';
 
 const log = logger.child({ area: 'loop-order-reads' });
+
+export type { LoopOrderView };
 
 /**
  * CF-25 / X-PRIV-03: decrypt a stored redeem secret for the owner-
@@ -69,95 +62,33 @@ function readRedeemField(
 }
 
 /**
- * A2-1504: wire view type is now canonical in `@loop/shared`
- * (`LoopOrderView`). Re-export under the historical name to keep
- * the handler's public surface stable.
- *
- * The shared view also widens `paymentMethod` to include `loop_asset`
- * — the DB column holds it and the UI reads it
- * (`LoopOrdersList.tsx:84`), so the prior local cast to
- * `'xlm' | 'usdc' | 'credit'` was a silent narrowing.
+ * Shapes a DB `orders` row into the BigInt-safe wire view. `payment`
+ * starts null — the detail read overlays live CTX instructions for
+ * unpaid rows.
  */
-export type LoopOrderView = SharedLoopOrderView;
-
-/**
- * Shapes a DB `orders` row into the BigInt-safe wire view. Shared by
- * the single-get and list handlers so their response shapes match.
- */
-function orderToView(row: {
-  id: string;
-  merchantId: string;
-  state: string;
-  faceValueMinor: bigint;
-  currency: string;
-  chargeMinor: bigint;
-  chargeCurrency: string;
-  paymentMethod: string;
-  paymentMemo: string | null;
-  userCashbackMinor: bigint;
-  ctxOrderId: string | null;
-  redeemCode: string | null;
-  redeemPin: string | null;
-  redeemUrl: string | null;
-  failureReason: string | null;
-  createdAt: Date;
-  paidAt: Date | null;
-  fulfilledAt: Date | null;
-  failedAt: Date | null;
-}): LoopOrderView {
+export function orderToView(row: Order): LoopOrderView {
   return {
     id: row.id,
     merchantId: row.merchantId,
-    // DB CHECK constraint `orders_state_known` (ADR 010) is the
-    // runtime gate; the cast here tells TS that what comes out of
-    // the column is one of the `OrderState` variants.
-    state: row.state as SharedLoopOrderView['state'],
+    state: row.state as OrderState,
     faceValueMinor: row.faceValueMinor.toString(),
     currency: row.currency,
     chargeMinor: row.chargeMinor.toString(),
     chargeCurrency: row.chargeCurrency,
-    // DB CHECK constraint `orders_payment_method_known` pins the
-    // column to `ORDER_PAYMENT_METHODS`. A2-1504 widened this from
-    // `'xlm' | 'usdc' | 'credit'` because `loop_asset` rows do reach
-    // this path (recycled cashback — ADR 015) and the UI keys off it.
-    paymentMethod: row.paymentMethod as OrderPaymentMethod,
-    paymentMemo: row.paymentMemo,
-    stellarAddress:
-      row.paymentMethod === 'credit' ? null : (env.LOOP_STELLAR_DEPOSIT_ADDRESS ?? null),
-    // Q6-4b: server-derived payment-guidance fields. Default null here;
-    // `loopGetOrderHandler` overlays them for a single, non-terminal,
-    // on-chain order (see below). The list handler leaves them null — it
-    // never renders pay instructions, and re-quoting the oracle per row
-    // would be wasteful.
-    assetAmount: null,
-    paymentUri: null,
-    assetCode: null,
-    assetIssuer: null,
     userCashbackMinor: row.userCashbackMinor.toString(),
     ctxOrderId: row.ctxOrderId,
-    // CF-25 / X-PRIV-03: code + PIN are envelope-encrypted at rest;
-    // decrypt for the owner here. Legacy plaintext passes through.
+    paymentCryptoCurrency: row.paymentCryptoCurrency,
+    payment: null,
     redeemCode: readRedeemField(row.id, 'code', row.redeemCode),
     redeemPin: readRedeemField(row.id, 'pin', row.redeemPin),
     redeemUrl: row.redeemUrl,
     failureReason: row.failureReason,
     createdAt: row.createdAt.toISOString(),
-    paidAt: row.paidAt?.toISOString() ?? null,
     fulfilledAt: row.fulfilledAt?.toISOString() ?? null,
     failedAt: row.failedAt?.toISOString() ?? null,
   };
 }
 
-/**
- * GET /api/orders/loop/:id
- *
- * Returns the Loop-native order the caller owns. 404 on non-owner
- * reads to avoid leaking existence — the order belongs to exactly
- * one Loop user, keyed on the JWT `sub`.
- *
- * Response shape is BigInt-safe — all integer columns serialise as
- * strings. Timestamps are ISO-8601.
- */
 export async function loopGetOrderHandler(c: Context): Promise<Response> {
   if (!env.LOOP_AUTH_NATIVE_ENABLED) {
     return c.json({ code: 'NOT_FOUND', message: 'Not found' }, 404);
@@ -180,46 +111,25 @@ export async function loopGetOrderHandler(c: Context): Promise<Response> {
 
   const view = orderToView(row);
 
-  // Q6-4b: server-authoritative payment guidance. For a non-terminal,
-  // on-chain order, re-derive the asset amount + SEP-7 deep-link from the
-  // server-authoritative order row (the SAME derivation the idempotent-POST
-  // replay uses — deriveLoopPaymentInstructions) and overlay them onto the
-  // view. This is what lets the client's remount-restore path
-  // (use-loop-order-restore.ts) rebuild the pay screen ENTIRELY from this
-  // response instead of from client-persisted storage — so no
-  // payment-directing field (address, memo, amount, asset, paymentUri) is
-  // ever trusted from sessionStorage/Keychain.
-  //
-  // Skipped for terminal orders (nothing to pay) and credit orders (no
-  // on-chain payment). A derivation failure (oracle down / issuer unset)
-  // leaves the fields null — the order view still returns fine; the client
-  // just can't resume the pay screen until config/oracle recovers.
-  if (!isTerminalOrderState(row.state) && row.paymentMethod !== 'credit') {
-    const derived = await deriveLoopPaymentInstructions(row);
-    if (derived.ok && derived.payment.method !== 'credit') {
-      view.assetAmount = derived.payment.assetAmount;
-      view.paymentUri = derived.payment.paymentUri;
-      if (derived.payment.method === 'loop_asset') {
-        view.assetCode = derived.payment.assetCode;
-        view.assetIssuer = derived.payment.assetIssuer;
-      }
+  if (row.state === 'unpaid' && row.ctxOrderId !== null) {
+    try {
+      const card = await fetchCtxCardAsOperator(row.ctxOrderId);
+      const paymentId = card.paymentId ?? row.ctxPaymentId;
+      const payment =
+        paymentId !== null && paymentId !== undefined ? await fetchCtxPayment(paymentId) : null;
+      view.payment = paymentInstructionsFromCard(card, payment, {
+        cryptoCurrency: row.paymentCryptoCurrency ?? '',
+        amountMinor: row.chargeMinor,
+        currency: row.chargeCurrency,
+      });
+    } catch (err) {
+      log.warn({ orderId: row.id, err }, 'Live CTX payment read failed — view served without it');
     }
   }
 
   return c.json(view);
 }
 
-/**
- * GET /api/orders/loop
- *
- * Owner-scoped list of the caller's Loop-native orders, newest first.
- * Supports `?limit=<n>` (1–100, default 50). Pagination by
- * `?before=<iso>` — the list is descending by `created_at`, so a
- * client paging backwards passes the last row's createdAt.
- *
- * Returns `{ orders: LoopOrderView[] }`. An empty list is a valid
- * response (fresh accounts / no Loop-native orders yet).
- */
 export async function loopListOrdersHandler(c: Context): Promise<Response> {
   if (!env.LOOP_AUTH_NATIVE_ENABLED) {
     return c.json({ code: 'NOT_FOUND', message: 'Not found' }, 404);
@@ -231,8 +141,6 @@ export async function loopListOrdersHandler(c: Context): Promise<Response> {
 
   const limitRaw = c.req.query('limit');
   const parsedLimit = Number.parseInt(limitRaw ?? '50', 10);
-  // Unparseable input → default (50); a parseable 0 or negative
-  // clamps to the floor (1); >100 clamps to the ceiling.
   const limit = Math.min(Math.max(Number.isNaN(parsedLimit) ? 50 : parsedLimit, 1), 100);
   const before = c.req.query('before');
   const beforeDate = typeof before === 'string' && before.length > 0 ? new Date(before) : null;
@@ -248,9 +156,7 @@ export async function loopListOrdersHandler(c: Context): Promise<Response> {
     .from(orders)
     .where(
       beforeDate !== null
-        ? // A2-1610: typed `lt()` — postgres-js can't bind a Date
-          // through the raw sql interpolator. See `audit-tail-csv.ts`.
-          and(eq(orders.userId, auth.userId), lt(orders.createdAt, beforeDate))
+        ? and(eq(orders.userId, auth.userId), lt(orders.createdAt, beforeDate))
         : eq(orders.userId, auth.userId),
     )
     .orderBy(desc(orders.createdAt))

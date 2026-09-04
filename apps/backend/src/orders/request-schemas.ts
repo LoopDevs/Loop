@@ -1,27 +1,18 @@
 /**
- * A2-803 (orders slice): single source of truth for the
- * CTX-proxy `POST /api/orders` request-body shape that both the
- * runtime handler (`./handler.ts`) and the OpenAPI registration
- * (`../openapi/orders.ts`) used to declare independently.
+ * A2-803 / D1 (orders slice): single source of truth for the
+ * `POST /api/orders/loop` request-body shape that both the runtime
+ * handler (`./loop-handler.ts`) and the OpenAPI registration
+ * (`../openapi/orders-loop.ts`) consume. The spec component is
+ * REGISTERED FROM this exact schema, so the two cannot drift —
+ * `src/__tests__/openapi-derivation.test.ts` pins the key parity.
  *
- * Before this module both files declared the same `CreateOrderBody`
- * zod object verbatim — the openapi version's own description even
- * called it out: "matching the runtime CreateOrderBody schema in
- * apps/backend/src/orders/handler.ts". A future tweak (a tighter
- * amount cap, an extra field) had to land in two places to stay
- * consistent.
+ * (The pre-ADR-052 `CreateOrderBody` for the retired CTX-proxy
+ * `POST /api/orders` lived here under the same contract; it died
+ * with the legacy create path.)
  *
- * Pure zod, no `.openapi()` annotations — same posture as
- * `../auth/request-schemas.ts`. The openapi factory can layer
- * field-level metadata onto the imported schema at registration
- * time if needed; the shared definition stays runtime-friendly
- * (no dependency on `extendZodWithOpenApi(z)` having been called
- * first).
- *
- * Promotion to `@loop/shared` (so the web client can also depend
- * on the same canonical zod) is a separate Phase-2 lift —
- * `@loop/shared` is currently type-only and would need a `zod`
- * dep first.
+ * The transforms are runtime-side conveniences (BigInt coercion,
+ * uppercase normalisation); zod-to-openapi documents the INPUT side
+ * of a transform, which is exactly what the wire contract is.
  */
 import { z } from 'zod';
 import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
@@ -30,22 +21,41 @@ import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
 // schema's prototype. It's idempotent and only mutates the prototype
 // — calling it from this module ensures the schema below carries
 // `.openapi` even when this module loads before the openapi entry
-// point's own `extendZodWithOpenApi(z)` call (the registration in
-// `../openapi.ts` runs `extendZodWithOpenApi` AFTER importing this
-// file via the orders openapi factory, so the schema-creation here
-// would otherwise predate the extension).
+// point's own `extendZodWithOpenApi(z)` call.
 extendZodWithOpenApi(z);
 
 /**
- * Body schema for `POST /api/orders` (CTX-proxy create).
+ * Body schema for `POST /api/orders/loop` (ADR 052 ctx-backed create).
  *
- * `.finite().positive()` are implied by `.min(0.01).max(10_000)` —
- * Number ranges exclude Infinity / NaN once `.min` is set. The
- * `.multipleOf(0.01)` guard enforces cents-precision so we never
- * send IEEE-754 garbage (`0.1 + 0.2 = 0.30000000000000004`) to
- * upstream.
+ * `amountMinor` accepts number OR digit-string so BigInt face values
+ * survive JSON (JS numbers lose integer precision past 2^53); both
+ * arms coerce to `bigint` for the handler.
  */
-export const CreateOrderBody = z.object({
-  merchantId: z.string().min(1).max(128),
-  amount: z.number().min(0.01).max(10_000).multipleOf(0.01),
+export const LoopCreateOrderBody = z.object({
+  merchantId: z.string().min(1),
+  amountMinor: z
+    .union([z.number().int().positive(), z.string().regex(/^\d+$/)])
+    .transform((v) => BigInt(v))
+    .refine((v) => v > 0n, { message: 'amountMinor must be positive' })
+    .openapi({
+      description:
+        'Gift-card face value in the catalog currency, minor units. Number OR digit-string so BigInt values survive the wire.',
+    }),
+  currency: z
+    .string()
+    .length(3)
+    .transform((v) => v.toUpperCase())
+    .openapi({
+      description:
+        'Gift-card catalog currency — ISO 4217 three-letter code, uppercase. One of the home currencies (USD/GBP/EUR) or an ADR-035 extended display market (AED/INR/SAR/AUD/MXN).',
+    }),
+  cryptoCurrency: z
+    .string()
+    .min(1)
+    .max(32)
+    .transform((v) => v.toUpperCase())
+    .openapi({
+      description:
+        'Chain-qualified CTX payment currency the customer chose (e.g. XLM, DASH, ETH.USDT). Validated against the server allowlist (`GET /api/config` → ctxPaymentCurrencies).',
+    }),
 });

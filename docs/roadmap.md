@@ -207,8 +207,7 @@ That work is code-complete on the original ADR 015 surface; the new ADR 030 + 03
 - [x] ~~Social login — Google + Apple~~ — ADR 014; shipped via
       `/api/auth/social/google` and `/api/auth/social/apple`.
 - [x] ~~Loop-owned OTP auth~~ — ADR 013; backend mints its own
-      JWTs against the CTX operator pool when
-      `LOOP_AUTH_NATIVE_ENABLED=true`.
+      JWTs when `LOOP_AUTH_NATIVE_ENABLED=true`.
 - [x] ~~Login gate — require auth before any purchase~~ — `PurchaseContainer` renders the inline email/OTP flow when the store has no access token.
 - [x] ~~Session persistence across app restarts (refresh token flow)~~ — `use-session-restore` hook restores on mount by pulling the refresh token from secure storage (Keychain on iOS, EncryptedSharedPreferences on Android, sessionStorage on web) and calling `tryRefresh`. Audits A-008 / A-020 / A-024 and ADR-006 cover the storage and recovery paths.
 

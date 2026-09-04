@@ -24,11 +24,8 @@ import { describe, expect, it } from 'vitest';
 import type { z } from 'zod';
 
 import { VerifyOtpUpstreamResponse, RefreshUpstreamResponse } from '../auth/handler.js';
-import {
-  CreateOrderUpstreamResponse,
-  GetOrderUpstreamResponse,
-  ListOrdersUpstreamResponse,
-} from '../orders/handler.js';
+import { CreateOrderUpstreamResponse } from '../orders/handler-shared.js';
+import { CtxGiftCardSchema } from '../orders/ctx-order.js';
 import { UpstreamMerchantSchema, UpstreamListResponseSchema } from '../merchants/sync.js';
 
 const FIXTURE_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '__fixtures__', 'ctx');
@@ -71,13 +68,8 @@ const CASES: ContractCase[] = [
   },
   {
     fixture: 'get-order-response.json',
-    schema: GetOrderUpstreamResponse,
+    schema: CtxGiftCardSchema,
     surface: 'GET /gift-cards/:id',
-  },
-  {
-    fixture: 'list-orders-response.json',
-    schema: ListOrdersUpstreamResponse,
-    surface: 'GET /gift-cards',
   },
 ];
 

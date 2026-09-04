@@ -32,7 +32,6 @@ import {
 import { adminPayoutsCsvHandler } from '../admin/payouts-csv.js';
 import { adminPayoutCompensationHandler } from '../admin/payout-compensation.js';
 import { adminPayoutsByAssetHandler } from '../admin/payouts-by-asset.js';
-import { adminSettlementLagHandler } from '../admin/settlement-lag.js';
 
 /**
  * Mounts the `/api/admin/payouts*` routes on the supplied Hono
@@ -57,21 +56,6 @@ export function mountAdminPayoutsRoutes(app: Hono): void {
     '/api/admin/payouts-by-asset',
     rateLimit('GET /api/admin/payouts-by-asset', 60, 60_000),
     adminPayoutsByAssetHandler,
-  );
-  // A4-075: literal routes BEFORE parameter siblings, otherwise
-  // Hono's TrieRouter resolves `/api/admin/payouts/settlement-lag`
-  // against the `:id` pattern with `id='settlement-lag'`, calling
-  // adminGetPayoutHandler (uuid validation rejects). The literal
-  // settlement-lag handler must register before `/:id`.
-  // Settlement-lag SLA — p50/p95/max seconds from pending_payouts row
-  // insert to on-chain confirmation, windowed. One row per LOOP asset
-  // plus a fleet-wide aggregate (`assetCode: null`). The SLA signal
-  // operators watch alongside drift: if payouts are taking hours, the
-  // drift number will grow regardless of minting health.
-  app.get(
-    '/api/admin/payouts/settlement-lag',
-    rateLimit('GET /api/admin/payouts/settlement-lag', 60, 60_000),
-    adminSettlementLagHandler,
   );
   // GET /api/admin/payouts/:id — single-row drill-down (permalink for
   // an ops ticket / incident note). Higher rate limit than the list

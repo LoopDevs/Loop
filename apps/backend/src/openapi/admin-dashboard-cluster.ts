@@ -49,10 +49,10 @@ export function registerAdminDashboardClusterOpenApi(
       merchantId: z.string(),
       currency: z.string().length(3),
       orderCount: z.number().int().min(0),
+      uniqueUserCount: z.number().int().min(0),
       faceValueMinor: z.string(),
-      wholesaleMinor: z.string(),
       userCashbackMinor: z.string(),
-      loopMarginMinor: z.string(),
+      expectedCommissionMinor: z.string(),
       lastFulfilledAt: z.string().datetime(),
     }),
   );
@@ -154,7 +154,7 @@ export function registerAdminDashboardClusterOpenApi(
     path: '/api/admin/merchant-stats',
     summary: 'Per-merchant cashback stats (ADR 011 / 015).',
     description:
-      "Groups fulfilled orders in the window by (merchant, currency). Each row carries order count, face-value total, wholesale cost, user cashback, loop margin, and the most-recent fulfilled timestamp. Sorted by `user_cashback_minor` descending — highest-cashback merchants surface first. Default window 31 days, capped at 366. Distinct from `/api/admin/supplier-spend`, which groups by currency only; this one is the 'which merchants drive the business' view.",
+      "Groups fulfilled orders in the window by (merchant, chargeCurrency). Each row carries order count, unique-user count, face-value total, user cashback (the CTX checkout discount), expected CTX commission, and the most-recent fulfilled timestamp. Sorted by `user_cashback_minor` descending — highest-cashback merchants surface first. Default window 31 days, capped at 366. The 'which merchants drive the business' view (ADR 052).",
     tags: ['Admin'],
     security: [{ bearerAuth: [] }],
     request: {

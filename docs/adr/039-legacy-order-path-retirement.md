@@ -1,6 +1,6 @@
 # ADR 039 — Legacy CTX-proxy order path retirement
 
-**Status:** Proposed (retirement criteria; no deletion yet)
+**Status:** Executed by ADR 052 (2026-08-28) — the legacy CTX-proxy create (`POST /api/orders`) and its kill switch are deleted; the legacy read handlers survive for historical rows.
 **Relates to:** ADR 010 (principal switch), ADR 013 (Loop-owned auth)
 
 ## Context

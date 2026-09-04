@@ -45,9 +45,9 @@ interface SnapshotLike {
   liabilities: Record<string, { outstandingMinor: string; issuer: string | null }>;
   assets: Record<string, { stroops: string | null }>;
   payouts: Record<string, string>;
-  operatorPool: {
-    size: number;
-    operators: Array<{ id: string; state: string }>;
+  ctxApi: {
+    configured: boolean;
+    state: string;
   };
 }
 
@@ -95,12 +95,9 @@ export async function adminTreasurySnapshotCsvHandler(c: Context): Promise<Respo
       lines.push(csvRow(['payout_state', state, count]));
     }
 
-    // operator-pool
-    lines.push(csvRow(['operator_pool_size', '', String(snapshot.operatorPool.size)]));
-    const operators = [...snapshot.operatorPool.operators].sort((a, b) => a.id.localeCompare(b.id));
-    for (const op of operators) {
-      lines.push(csvRow(['operator', op.id, op.state]));
-    }
+    // ctx upstream
+    lines.push(csvRow(['ctx_api_configured', '', String(snapshot.ctxApi.configured)]));
+    lines.push(csvRow(['ctx_api_state', '', snapshot.ctxApi.state]));
 
     const body = lines.join('\r\n') + '\r\n';
     const today = new Date().toISOString().slice(0, 10);

@@ -31,30 +31,6 @@ export {
   getAdminConfigsHistory,
 } from './admin-cashback-config';
 
-// A2-1165 (slice 13): payment-method-share trio (fleet + per-
-// merchant + per-user, ADR 023 mix-axis pattern) moved to
-// `./admin-payment-method-share.ts`. Inline shapes moved with the
-// functions — no other consumers. The barrel re-export below
-// covers all three reads + 5 type re-exports.
-//
-// A2-1166: `AdminOrderState` + `AdminOrderState` used to be two
-// hand-maintained copies of the same six-literal union in this file.
-// Both were identical to `OrderState` from `@loop/shared`. The
-// extracted slice imports `OrderState` directly; the type export
-// at the bottom of this file still re-exports it under the
-// `AdminOrderState` name for external consumers (`UserOrdersTable`,
-// the admin orders route).
-export {
-  type PaymentMethodShareBucket,
-  type AdminPaymentMethod,
-  type PaymentMethodShareResponse,
-  type AdminMerchantPaymentMethodShareResponse,
-  type AdminUserPaymentMethodShareResponse,
-  getPaymentMethodShare,
-  getAdminMerchantPaymentMethodShare,
-  getAdminUserPaymentMethodShare,
-} from './admin-payment-method-share';
-
 // A2-1165 (slice 4): treasury surface extracted to
 // `./admin-treasury.ts`. Type definitions remain canonical in
 // `@loop/shared/admin-treasury.ts` (per A2-1506). Re-export here
@@ -95,16 +71,6 @@ export {
   getAssetDriftState,
 } from './admin-assets';
 
-// A2-1165 (slice 27): settlement-lag read moved to
-// `./admin-settlement-lag.ts`. Type definitions remain canonical
-// in `@loop/shared/admin-settlement-lag.ts` (per A2-1506).
-// Re-export keeps `SettlementLagCard.tsx` + paired test untouched.
-export {
-  type SettlementLagResponse,
-  type SettlementLagRow,
-  getSettlementLag,
-} from './admin-settlement-lag';
-
 // A2-1165 (slice 5): cashback-realization surface (snapshot + daily)
 // extracted to `./admin-cashback-realization.ts`. Type definitions
 // remain canonical in `@loop/shared/admin-cashback-realization.ts`
@@ -126,74 +92,6 @@ export {
 // `routes/admin.users.tsx`, etc.) untouched.
 export { downloadAdminCsv } from './admin-csv';
 
-// A2-1165 (slice 6): supplier-spend surface (snapshot + activity
-// time-series) extracted to `./admin-supplier-spend.ts`. Type
-// definitions remain canonical in
-// `@loop/shared/admin-supplier-spend.ts` (per A2-1506). Re-export
-// keeps SupplierSpendCard.tsx, SupplierSpendActivityCard.tsx, and
-// `routes/admin.supplier-spend.tsx` untouched.
-export {
-  type SupplierSpendRow,
-  type SupplierSpendResponse,
-  type SupplierSpendActivityDay,
-  type SupplierSpendActivityResponse,
-  getSupplierSpend,
-  getSupplierSpendActivity,
-} from './admin-supplier-spend';
-
-// A2-1165 (slice 8): operator-stats + operator-latency moved to
-// `./admin-operator-stats.ts`. Type definitions remain canonical
-// in `@loop/shared/admin-operator-stats.ts` (per A2-1506). The
-// barrel re-export at the operator-latency anchor below covers
-// both reads + 4 type re-exports.
-
-// A2-1165 (slice 7): operator mix-axis matrix (ADR 023) extracted
-// to `./admin-operator-mixes.ts`. Type definitions remain canonical
-// in `@loop/shared/admin-operator-mixes.ts` (per A2-1506). Re-
-// export keeps the merchant / operator / user drill pages and
-// their paired tests untouched.
-export {
-  type MerchantOperatorMixResponse,
-  type MerchantOperatorMixRow,
-  type OperatorMerchantMixResponse,
-  type OperatorMerchantMixRow,
-  type UserOperatorMixResponse,
-  type UserOperatorMixRow,
-  getMerchantOperatorMix,
-  getOperatorMerchantMix,
-  getUserOperatorMix,
-} from './admin-operator-mixes';
-
-// A2-1165 (slice 8): the operator-stats + operator-latency surface
-// (paired ADR 013 fleet-of-CTX-operators reads) lives in
-// `./admin-operator-stats.ts`. Re-export keeps OperatorStatsCard,
-// OperatorLatencyCard, routes/admin.operators.tsx, and paired
-// tests untouched.
-export {
-  type OperatorStatsResponse,
-  type OperatorStatsRow,
-  type OperatorLatencyResponse,
-  type OperatorLatencyRow,
-  getOperatorStats,
-  getOperatorLatency,
-} from './admin-operator-stats';
-
-// A2-1165 (slice 9): per-operator drill (`/operators/:id/supplier-
-// spend` + `/operators/:id/activity`) extracted to
-// `./admin-operator-drill.ts`. The `OperatorSupplierSpendResponse`
-// / `OperatorActivityDay` / `OperatorActivityResponse` shapes were
-// inline here and moved with the functions — they have no other
-// consumers, so promoting them to `@loop/shared` would just add
-// indirection. Re-export keeps the per-operator drill page +
-// paired tests untouched.
-export {
-  type OperatorSupplierSpendResponse,
-  type OperatorActivityDay,
-  type OperatorActivityResponse,
-  getOperatorSupplierSpend,
-  getOperatorActivity,
-} from './admin-operator-drill';
-
 // A2-1165 (slice 2): admin audit-tail types + read extracted to
 // `./admin-audit.ts`. Re-export keeps existing consumers
 // (AdminAuditTail.tsx, routes/admin.audit.tsx, both paired tests)
@@ -204,38 +102,25 @@ export {
   getAdminAuditTail,
 } from './admin-audit';
 
-// A2-1165 (slice 10): per-merchant fleet stats + merchants-flywheel-
-// share moved to `./admin-merchant-stats.ts` (ADR 011 / 015). The
-// inline `MerchantStatsRow` / `MerchantStatsResponse` /
-// `MerchantFlywheelShareRow` / `MerchantsFlywheelShareResponse`
-// shapes moved with the functions — no other consumers, so
-// promoting them to `@loop/shared` would just add indirection.
-// Re-export keeps `MerchantStatsCard.tsx`,
-// `MerchantsFlywheelShareCard.tsx`, `routes/admin.merchants.tsx`
-// and their paired tests untouched.
+// A2-1165 (slice 10): per-merchant fleet stats moved to
+// `./admin-merchant-stats.ts` (ADR 011 / ADR 052). The inline
+// `MerchantStatsRow` / `MerchantStatsResponse` shapes moved with
+// the function — no other consumers, so promoting them to
+// `@loop/shared` would just add indirection. Re-export keeps
+// `MerchantStatsCard.tsx`, `routes/admin.merchants.tsx` and their
+// paired tests untouched.
 export {
   type MerchantStatsRow,
   type MerchantStatsResponse,
-  type MerchantFlywheelShareRow,
-  type MerchantsFlywheelShareResponse,
   getMerchantStats,
-  getAdminMerchantsFlywheelShare,
 } from './admin-merchant-stats';
 
-// A2-1165 (slice 11): stuck-orders + stuck-payouts (the two
-// safety-critical alerting cards on the admin dashboard) moved to
-// `./admin-stuck.ts` (ADR 011 / 013 / 015 / 016). Inline shapes
-// moved with the functions — no other consumers. Re-export keeps
-// `StuckOrdersCard.tsx`, `StuckPayoutsCard.tsx`, `routes/admin.
-// dashboard.tsx` and their paired tests untouched.
-export {
-  type StuckOrderRow,
-  type StuckOrdersResponse,
-  type StuckPayoutRow,
-  type StuckPayoutsResponse,
-  getStuckOrders,
-  getStuckPayouts,
-} from './admin-stuck';
+// A2-1165 (slice 11): stuck-payouts (safety-critical alerting card
+// on the admin dashboard) moved to `./admin-stuck.ts`
+// (ADR 015 / 016). Inline shapes moved with the function — no
+// other consumers. Re-export keeps `StuckPayoutsCard.tsx` and its
+// paired test untouched.
+export { type StuckPayoutRow, type StuckPayoutsResponse, getStuckPayouts } from './admin-stuck';
 
 // A2-1165 (slice 12): orders/cashback/payouts activity time-series
 // moved to `./admin-activity.ts`. Inline shapes moved with the
@@ -338,20 +223,16 @@ export {
   getAdminUserByEmail,
 } from './admin-users-list';
 
-// A2-1165 (slice 19): fleet-level user-activity leaderboards
-// (top-by-pending-payout + recycling-activity) moved to
+// A2-1165 (slice 19): fleet-level user-activity leaderboard
+// (top-by-pending-payout) moved to
 // `./admin-user-fleet-activity.ts`. Inline shapes moved with
-// the functions — no other consumers. Re-export keeps
-// `TopUsersByPendingPayoutCard.tsx`,
-// `UsersRecyclingActivityCard.tsx`, the treasury route + paired
+// the function — no other consumers. Re-export keeps
+// `TopUsersByPendingPayoutCard.tsx`, the treasury route + paired
 // tests untouched.
 export {
   type TopUserByPendingPayoutEntry,
   type TopUsersByPendingPayoutResponse,
-  type UserRecyclingActivityRow,
-  type UsersRecyclingActivityResponse,
   getTopUsersByPendingPayout,
-  getAdminUsersRecyclingActivity,
 } from './admin-user-fleet-activity';
 
 // A2-1165 (slice 26): resyncMerchants writer (the 4th and final
@@ -373,37 +254,27 @@ export {
 } from './admin-discord';
 
 // A2-1165 (slice 14): per-user drill surface (credits + cashback-
-// summary + flywheel-stats) moved to `./admin-user-drill.ts`
-// (ADR 009 / 015). Inline shapes moved with the functions — no
-// other consumers. Re-export keeps the user-detail page + paired
-// tests untouched.
+// summary) moved to `./admin-user-drill.ts` (ADR 009 / 015).
+// Inline shapes moved with the functions — no other consumers.
+// Re-export keeps the user-detail page + paired tests untouched.
 export {
   type AdminUserCreditRow,
   type AdminUserCreditsResponse,
   type AdminUserCashbackSummary,
-  type AdminUserFlywheelStats,
   getAdminUserCredits,
   getAdminUserCashbackSummary,
-  getAdminUserFlywheelStats,
 } from './admin-user-drill';
 
-// A2-1165 (slice 15): per-merchant drill surface (flywheel-stats
-// + cashback-summary) moved to `./admin-merchant-drill.ts`,
-// sibling of the per-user drill from slice 14. Inline shapes
-// moved with the functions — no other consumers. Re-export keeps
-// the merchant-detail page + paired tests untouched.
+// A2-1165 (slice 15): per-merchant drill surface (cashback-summary)
+// moved to `./admin-merchant-drill.ts`, sibling of the per-user
+// drill from slice 14. Inline shapes moved with the functions — no
+// other consumers. Re-export keeps the merchant-detail page +
+// paired tests untouched.
 export {
-  type AdminMerchantFlywheelStats,
   type AdminMerchantCashbackCurrencyBucket,
   type AdminMerchantCashbackSummary,
-  getAdminMerchantFlywheelStats,
   getAdminMerchantCashbackSummary,
 } from './admin-merchant-drill';
-
-// A2-1165 (slice 13): per-merchant + per-user payment-method-
-// share also moved to `./admin-payment-method-share.ts`,
-// consolidated with the fleet read so the rail-mix mix-axis lives
-// in one file. The barrel re-export at the top covers all three.
 
 // A2-1165 (slice 17): cashback-monthly + payouts-monthly time-
 // series quartet (fleet + per-user + per-merchant cashback +
@@ -426,35 +297,21 @@ export {
   getAdminMerchantCashbackMonthly,
 } from './admin-monthly';
 
-// A2-1165 (slice 18): merchant activity drill (flywheel-activity
-// time-series + top-earners ranking) moved to
-// `./admin-merchant-activity.ts`. Companion to the scalar
-// `admin-merchant-drill.ts` from slice 15. Inline shapes moved
-// with the functions — no other consumers. Re-export keeps
-// `MerchantFlywheelActivityChart.tsx`,
-// `MerchantTopEarnersTable.tsx`, the merchant-drill route +
+// A2-1165 (slice 18): merchant activity drill (top-earners
+// ranking) moved to `./admin-merchant-activity.ts`. Companion to
+// the scalar `admin-merchant-drill.ts` from slice 15. Inline
+// shapes moved with the functions — no other consumers. Re-export
+// keeps `MerchantTopEarnersTable.tsx`, the merchant-drill route +
 // paired tests untouched.
 export {
-  type MerchantFlywheelActivityDay,
-  type AdminMerchantFlywheelActivityResponse,
   type MerchantTopEarnerRow,
   type AdminMerchantTopEarnersResponse,
-  getAdminMerchantFlywheelActivity,
   getAdminMerchantTopEarners,
 } from './admin-merchant-activity';
 
-// A2-1165 (slice 21): payment-method-activity time-series chart
-// + per-user cashback-by-merchant support-triage drill moved to
-// their respective sibling modules. Both inline shapes moved
-// with the functions. Re-exports keep
-// `PaymentMethodActivityChart.tsx`,
-// `UserCashbackByMerchantCard.tsx`, and paired tests untouched.
-export {
-  type PaymentMethodActivityDay,
-  type AdminPaymentMethodActivityResponse,
-  getAdminPaymentMethodActivity,
-} from './admin-payment-method-activity';
-
+// A2-1165 (slice 21): per-user cashback-by-merchant support-triage
+// drill lives in its own sibling module. Re-export keeps
+// `UserCashbackByMerchantCard.tsx` and paired tests untouched.
 export {
   type AdminUserCashbackByMerchantRow,
   type AdminUserCashbackByMerchantResponse,
@@ -489,30 +346,21 @@ export { type HomeCurrencySetResult, setUserHomeCurrency } from './admin-user-ho
 // A2-1165 (slice 24): admin orders surface lives in
 // `./admin-orders.ts`. Re-export keeps `AdminOrdersTable.tsx`,
 // `UserOrdersTable.tsx`, `routes/admin.orders.tsx`, paired
-// tests untouched. `redriveOrder` (A5-1) is the newest addition —
-// same slice, since it's the order-detail page's write action.
+// tests untouched.
 export {
   type AdminOrderState,
   type AdminOrderView,
   getAdminOrder,
   listAdminOrders,
-  redriveOrder,
-  refundOrder,
 } from './admin-orders';
 
-// A2-1165 (slice 26): merchant-flows lifetime cashback table
-// moved to `./admin-merchant-flows.ts`. Re-export keeps
-// `routes/admin.cashback.tsx` and paired tests untouched.
-export { type MerchantFlow, listMerchantFlows } from './admin-merchant-flows';
-
-// ADR 037 (staff roles + support dashboard): five new slices.
+// ADR 037 (staff roles + support dashboard): the remaining slices.
 // Wire shapes live in `@loop/shared` (`admin-staff.ts` for role
-// management, `admin-support-ops.ts` for the watcher-skip browser /
-// wallet card / reverse lookup / redemption re-fetch) because the
-// backend emits the same contracts — the shared-type-parity gate
-// holds both sides to one definition.
+// management, `admin-support-ops.ts` for the wallet card / reverse
+// lookup / redemption re-fetch) because the backend emits the same
+// contracts — the shared-type-parity gate holds both sides to one
+// definition.
 export { listAdminStaff, setStaffRole, revokeStaffRole } from './admin-staff';
-export { listWatcherSkips, getWatcherSkip, reopenWatcherSkip } from './admin-watcher-skips';
 export { getAdminUserWallet, reprovisionAdminUserWallet } from './admin-user-wallet';
 export { refetchOrderRedemption } from './admin-order-redemption';
 export { adminLookup } from './admin-lookup';

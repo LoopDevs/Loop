@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, expectTypeOf } from 'vitest';
 import { getTableConfig } from 'drizzle-orm/pg-core';
-import { fraudSignals, orders, FRAUD_SIGNAL_TYPES } from '../schema.js';
+import { fraudSignals, FRAUD_SIGNAL_TYPES } from '../schema.js';
 
 type FraudSignalRow = typeof fraudSignals.$inferSelect;
 type FraudSignalInsert = typeof fraudSignals.$inferInsert;
@@ -79,16 +79,5 @@ describe('fraud_signals table (ADR 045 / migration 0059)', () => {
       userId: '11111111-1111-1111-1111-111111111111',
     };
     expectTypeOf(insert).toMatchTypeOf<FraudSignalInsert>();
-  });
-});
-
-describe('orders_payment_source_account expression index (ADR 045 / migration 0059)', () => {
-  it('orders declares the partial payment-source-account index', () => {
-    const idx = getTableConfig(orders).indexes.find(
-      (i) => i.config.name === 'orders_payment_source_account',
-    );
-    expect(idx).toBeDefined();
-    expect(idx?.config.unique).toBe(false);
-    expect(idx?.config.where).toBeDefined();
   });
 });

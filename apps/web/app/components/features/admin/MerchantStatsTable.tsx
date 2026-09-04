@@ -23,8 +23,8 @@ function fmtRelative(iso: string): string {
 /**
  * Per-merchant stats table for /admin/cashback. Sits below the
  * cashback-config editor so an admin tuning a merchant's split can
- * see the volume/margin impact on the same page. Ranked by Loop
- * margin descending — the most lucrative merchants rise to the top.
+ * see the volume/cashback impact on the same page. Ranked by user
+ * cashback descending — the highest-outlay merchants rise to the top.
  */
 export function MerchantStatsTable(): React.JSX.Element {
   const query = useQuery({
@@ -66,9 +66,8 @@ export function MerchantStatsTable(): React.JSX.Element {
               'Orders',
               'Users',
               'Face value',
-              'Wholesale (ours)',
               'Cashback (theirs)',
-              'Loop margin',
+              'Expected commission',
               'Last fulfilled',
             ].map((h) => (
               <th
@@ -114,13 +113,10 @@ export function MerchantStatsTable(): React.JSX.Element {
                 {fmtMinor(r.faceValueMinor, r.currency)}
               </td>
               <td className="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-300">
-                {fmtMinor(r.wholesaleMinor, r.currency)}
-              </td>
-              <td className="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-300">
                 {fmtMinor(r.userCashbackMinor, r.currency)}
               </td>
               <td className="px-3 py-2 tabular-nums font-medium text-gray-900 dark:text-white">
-                {fmtMinor(r.loopMarginMinor, r.currency)}
+                {fmtMinor(r.expectedCommissionMinor, r.currency)}
               </td>
               <td className="px-3 py-2 whitespace-nowrap text-xs text-gray-500 dark:text-gray-400">
                 {fmtRelative(r.lastFulfilledAt)}

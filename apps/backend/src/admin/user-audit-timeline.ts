@@ -333,8 +333,6 @@ export async function adminUserAuditTimelineHandler(c: Context): Promise<Respons
               merchantId: orders.merchantId,
               failureReason: orders.failureReason,
               createdAt: orders.createdAt,
-              paidAt: orders.paidAt,
-              procuredAt: orders.procuredAt,
               fulfilledAt: orders.fulfilledAt,
               failedAt: orders.failedAt,
             })
@@ -461,8 +459,6 @@ export async function adminUserAuditTimelineHandler(c: Context): Promise<Respons
         chargeMinor: r.chargeMinor.toString(),
         failureReason: r.failureReason,
         createdAt: iso(r.createdAt),
-        paidAt: r.paidAt !== null ? iso(r.paidAt) : null,
-        procuredAt: r.procuredAt !== null ? iso(r.procuredAt) : null,
         fulfilledAt: r.fulfilledAt !== null ? iso(r.fulfilledAt) : null,
         failedAt: r.failedAt !== null ? iso(r.failedAt) : null,
       },

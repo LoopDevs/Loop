@@ -48,10 +48,16 @@ export const UpstreamMerchantSchema = z
     // when present.
     status: z.string().max(32).optional(),
     // Operator-scoped rows only: this operator's merchant link. CTX
-    // includes `userDiscountBasisPoints` only when the link overrides
-    // the merchant default.
+    // includes the discount fields only when the link overrides the
+    // merchant default (operator discounts are system-set on Loop's
+    // links, so `operatorDiscountBasisPoints` is present in
+    // practice). `id` is the link row's own id — the bulk
+    // `PUT /merchant-links` update key for the ADR 052 cashback
+    // push.
     link: z
       .object({
+        id: z.string().optional(),
+        operatorDiscountBasisPoints: z.number().optional(),
         userDiscountBasisPoints: z.number().optional(),
       })
       .passthrough()

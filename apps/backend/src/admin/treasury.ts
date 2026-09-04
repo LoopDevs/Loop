@@ -35,13 +35,12 @@ import type {
 } from '@loop/shared';
 import { db } from '../db/client.js';
 import { userCredits, creditTransactions } from '../db/schema.js';
-import { getOperatorHealth, operatorPoolSize } from '../ctx/operator-pool.js';
+import { getCtxApiHealth } from '../ctx/api-fetch.js';
 import {
   buildPayoutCounts,
   buildOrderFlows,
   buildAssets,
   buildLiabilities,
-  buildOperatorFloat,
 } from './treasury-builders.js';
 
 // A2-1506: treasury shapes moved to `@loop/shared/admin-treasury.ts`
@@ -88,20 +87,15 @@ export async function treasuryHandler(c: Context): Promise<Response> {
   const assets = await buildAssets();
   const payouts = await buildPayoutCounts();
   const orderFlows = await buildOrderFlows();
-  const operatorFloat = await buildOperatorFloat();
 
   const snapshot: TreasurySnapshot = {
     outstanding,
     totals,
     liabilities,
     assets,
-    operatorFloat,
     payouts,
     orderFlows,
-    operatorPool: {
-      size: operatorPoolSize(),
-      operators: getOperatorHealth(),
-    },
+    ctxApi: getCtxApiHealth(),
   };
 
   return c.json(snapshot);

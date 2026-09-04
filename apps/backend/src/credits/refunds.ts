@@ -21,18 +21,13 @@
  * back to a different state (cancelled, refunded) is a separate
  * support-mediated action.
  */
-import { and, eq, gte, inArray, like, or, sql } from 'drizzle-orm';
+import { and, eq, gte, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { creditTransactions, orders, paymentWatcherSkips, userCredits } from '../db/schema.js';
+import { creditTransactions, orders, userCredits } from '../db/schema.js';
 import { isUniqueViolation } from '../db/errors.js';
 import { env } from '../env.js';
 import { adjustmentCapLockKey, DailyAdjustmentLimitError } from './adjustments.js';
 import { assertRailNotHalted, killSwitchService } from '../rail-kill-switches/index.js';
-import {
-  refundDeposit,
-  type RefundResult as DepositRefundResult,
-} from '../payments/deposit-refund.js';
-import { HorizonPaymentSchema, type HorizonPayment } from '../payments/horizon.js';
 
 /**
  * CF-06: advisory-lock scope for the refund daily-cap bucket. Refund
@@ -121,39 +116,7 @@ async function enforceDailyRefundCap(
         gte(creditTransactions.createdAt, dayStart),
       ),
     );
-  // Rail 2: on-chain-rail refund magnitude — orders whose paying deposit
-  // was refunded on-chain today, counted at their fiat charge. Matched
-  // on payment_id = the order's paying deposit id so late/duplicate
-  // deposit refunds (which are not a refund OF the order) are excluded.
-  const [onChainRow] = await tx
-    .select({
-      usedMinor: sql<string>`COALESCE(SUM(${orders.chargeMinor})::text, '0')`,
-    })
-    .from(orders)
-    .innerJoin(
-      paymentWatcherSkips,
-      eq(paymentWatcherSkips.paymentId, orders.paymentReceivedHorizonId),
-    )
-    .where(
-      and(
-        eq(orders.chargeCurrency, currency),
-        gte(paymentWatcherSkips.updatedAt, dayStart),
-        or(
-          // In-progress / landed on-chain refund of the paying deposit.
-          inArray(paymentWatcherSkips.status, ['refunding', 'refunded']),
-          // The under-lock intent state (see doc) — an `abandoned` skip
-          // still carrying the auto-refund prefix. Counting it is what
-          // makes the on-chain rail serialise like the credit rail; a
-          // released (definitively-failed) refund loses the prefix and
-          // drops out, so budget is not consumed for value never moved.
-          and(
-            eq(paymentWatcherSkips.status, 'abandoned'),
-            like(paymentWatcherSkips.lastError, `${AUTO_REFUND_SYSTEM_ACTOR}:%`),
-          ),
-        ),
-      ),
-    );
-  const used = BigInt(creditRow?.usedMinor ?? '0') + BigInt(onChainRow?.usedMinor ?? '0');
+  const used = BigInt(creditRow?.usedMinor ?? '0');
   if (used + attemptMinor > capMinor) {
     throw new DailyAdjustmentLimitError(currency, dayStart, used, capMinor, attemptMinor);
   }
@@ -200,15 +163,6 @@ export interface RefundResult {
   createdAt: Date;
 }
 
-export interface OnChainOrderAutoRefundResult {
-  kind: 'onchain_refund';
-  orderId: string;
-  paymentId: string;
-  refund: Extract<DepositRefundResult, { kind: 'refunded' | 'already_refunded' }>;
-}
-
-export type OrderAutoRefundResult = RefundResult | OnChainOrderAutoRefundResult;
-
 /**
  * CF-20: synthetic actor id stamped on the `reason` of an automatic
  * (non-admin) order refund. The `credit_transactions` row does not
@@ -218,202 +172,6 @@ export type OrderAutoRefundResult = RefundResult | OnChainOrderAutoRefundResult;
  * issued is the reason prefix. Keep it greppable.
  */
 export const AUTO_REFUND_SYSTEM_ACTOR = 'system:auto-refund';
-
-/**
- * CF-20 (x-flows F1-1, v-orders P2-02): automatic order refund issued
- * by the procurement worker when an order fails AFTER Loop has already
- * paid CTX (operator XLM/USDC spent) and the user has already paid
- * Loop. Without this the user is left debited with no gift card and
- * `applyAdminRefund` (admin-only) is the sole recovery, which needs a
- * human to notice the silent `log.error`.
- *
- * Reuses the same validated, idempotent transaction as the admin
- * refund — the partial unique index on
- * `(type='refund', reference_type='order', reference_id)` (migration
- * 0013) makes a second call for the same order a no-op
- * (`RefundAlreadyIssuedError`). The amount is derived from the order's
- * own `chargeMinor` / `chargeCurrency` so the worker can't over-refund
- * or refund the wrong currency: the under-the-row-lock order read
- * inside `applyAdminRefund` is the authority.
- *
- * Returns the `RefundResult` on success. Surfaces
- * `RefundAlreadyIssuedError` (already refunded — caller treats as a
- * safe no-op) and `RefundOrderInvalidError` (the order doesn't exist /
- * mismatches — caller logs; should not happen for a real failed order)
- * to the caller; both are non-fatal at the worker level.
- */
-export async function applyOrderAutoRefund(args: {
-  userId: string;
-  currency: string;
-  amountMinor: bigint;
-  orderId: string;
-  paymentMethod?: 'xlm' | 'usdc' | 'credit' | 'loop_asset' | string;
-  paymentMemo?: string | null;
-  paymentReceivedHorizonId?: string | null;
-  paymentReceivedPayment?: unknown | null;
-  /** Free-text suffix appended after the system-actor prefix. */
-  reason: string;
-}): Promise<OrderAutoRefundResult> {
-  if (args.paymentMethod === 'xlm' || args.paymentMethod === 'usdc') {
-    return applyOnChainOrderAutoRefund(args);
-  }
-
-  if (args.paymentMethod === 'loop_asset') {
-    throw new Error(
-      'loop_asset order auto-refund requires coordinated mirror re-credit + on-chain re-mint; manual money-review refund required',
-    );
-  }
-
-  return applyAdminRefund({
-    userId: args.userId,
-    currency: args.currency,
-    amountMinor: args.amountMinor,
-    orderId: args.orderId,
-    // No human actor — the worker is the actor. The order-row lock +
-    // amount/currency/ownership fences inside applyAdminRefund still
-    // apply, so this is exactly as safe as an operator-issued refund.
-    adminUserId: AUTO_REFUND_SYSTEM_ACTOR,
-    reason: `${AUTO_REFUND_SYSTEM_ACTOR}: ${args.reason}`,
-  });
-}
-
-async function applyOnChainOrderAutoRefund(args: {
-  orderId: string;
-  /** Order charge currency — the fleet-wide daily refund cap bucket. */
-  currency: string;
-  /** Order charge in minor units — what this refund counts against the cap. */
-  amountMinor: bigint;
-  paymentMemo?: string | null;
-  paymentReceivedHorizonId?: string | null;
-  paymentReceivedPayment?: unknown | null;
-  reason: string;
-}): Promise<OnChainOrderAutoRefundResult> {
-  // DELIBERATE fail-closed for the migration-transition cohort (money
-  // review 2026-07-08): orders paid BEFORE migrations 0050/0051 carry
-  // no payment snapshot, so their failed-order refund cannot go
-  // on-chain. They land in the caller's generic catch → refunded=false
-  // → ops page → manual `applyAdminRefund` (which INV-8-excludes a
-  // later on-chain double). The alternative — silently falling back to
-  // a mirror credit — is the exact wrong-asset drift R3-2 exists to
-  // stop. Bounded population: only orders in flight at deploy time.
-  if (args.paymentReceivedHorizonId === null || args.paymentReceivedHorizonId === undefined) {
-    throw new Error(
-      'on-chain auto-refund cannot run without payment_received_horizon_id (pre-0050 order — refund manually via applyAdminRefund)',
-    );
-  }
-  if (args.paymentReceivedPayment === null || args.paymentReceivedPayment === undefined) {
-    throw new Error(
-      'on-chain auto-refund cannot run without payment_received_payment (pre-0051 order — refund manually via applyAdminRefund)',
-    );
-  }
-
-  const parsed = HorizonPaymentSchema.safeParse(args.paymentReceivedPayment);
-  if (!parsed.success) {
-    throw new Error('on-chain auto-refund payment snapshot failed schema validation');
-  }
-  const payment = parsed.data;
-  if (payment.id !== args.paymentReceivedHorizonId) {
-    throw new Error('on-chain auto-refund payment snapshot id does not match order identity');
-  }
-
-  // INV-8 cross-check (money review 2026-07-08): the on-chain branch
-  // does not write a `credit_transactions` refund row, so migration
-  // 0013's one-refund-per-order partial unique index cannot see it.
-  // Re-establish the exclusion here: under the SAME order-row lock
-  // `applyAdminRefund` takes, refuse to send funds on-chain when a
-  // mirror-credit refund already exists for this order, and record the
-  // refundable-deposit skip row inside the same transaction so the two
-  // refund exits serialise on the order row — whichever commits first
-  // wins and the loser converges to a no-op / typed error. The third
-  // writer (`refundDeposit`, reachable directly via the A6 admin
-  // endpoint) carries the same guard inside its claim transaction.
-  await db.transaction(async (tx) => {
-    const [orderRow] = await tx
-      .select({ id: orders.id })
-      .from(orders)
-      .where(eq(orders.id, args.orderId))
-      .for('update');
-    if (orderRow === undefined) {
-      throw new RefundOrderInvalidError('order_not_found', `Order ${args.orderId} does not exist`);
-    }
-    const [creditRefund] = await tx
-      .select({ id: creditTransactions.id })
-      .from(creditTransactions)
-      .where(
-        and(
-          eq(creditTransactions.type, 'refund'),
-          eq(creditTransactions.referenceType, 'order'),
-          eq(creditTransactions.referenceId, args.orderId),
-        ),
-      );
-    if (creditRefund !== undefined) {
-      throw new RefundAlreadyIssuedError(args.orderId);
-    }
-    // MNY-11-onchainrail: gate the on-chain rail on the SAME fleet-wide
-    // daily refund cap the credit rail enforces. The on-chain refund
-    // returns the order's paying deposit to its sender and writes no
-    // credit_transactions row, so before this it slipped the cap
-    // entirely — a burst of failed on-chain orders could refund
-    // unbounded value per day. Runs under the order-row lock taken
-    // above (so the loser of a duplicate serialises first) and then the
-    // shared refund advisory lock, so both rails count against and are
-    // gated by one budget. Refuses BEFORE any refundable-deposit skip
-    // row is recorded, so nothing is queued for on-chain send.
-    await enforceDailyRefundCap(tx, args.currency, args.amountMinor);
-    await recordFailedOrderRefundableDeposit(tx, {
-      orderId: args.orderId,
-      memo: args.paymentMemo ?? payment.transaction?.memo ?? '',
-      payment,
-      detail: `${AUTO_REFUND_SYSTEM_ACTOR}: ${args.reason}`,
-    });
-  });
-
-  const refund = await refundDeposit(payment.id);
-  if (refund.kind !== 'refunded' && refund.kind !== 'already_refunded') {
-    throw new Error(`on-chain auto-refund did not complete: ${refund.kind}`);
-  }
-  return {
-    kind: 'onchain_refund',
-    orderId: args.orderId,
-    paymentId: payment.id,
-    refund,
-  };
-}
-
-async function recordFailedOrderRefundableDeposit(
-  tx: Pick<typeof db, 'insert'>,
-  args: {
-    orderId: string;
-    memo: string;
-    payment: HorizonPayment;
-    detail: string;
-  },
-): Promise<void> {
-  await tx
-    .insert(paymentWatcherSkips)
-    .values({
-      paymentId: args.payment.id,
-      memo: args.memo,
-      orderId: args.orderId,
-      reason: 'order_gone',
-      payment: args.payment,
-      status: 'abandoned',
-      lastError: args.detail.slice(0, 500),
-    })
-    .onConflictDoUpdate({
-      target: paymentWatcherSkips.paymentId,
-      set: {
-        memo: args.memo,
-        orderId: args.orderId,
-        reason: 'order_gone',
-        payment: args.payment,
-        status: 'abandoned',
-        lastError: args.detail.slice(0, 500),
-        updatedAt: sql`NOW()`,
-      },
-      setWhere: sql`${paymentWatcherSkips.status} IN ('pending', 'resolved', 'abandoned')`,
-    });
-}
 
 export async function applyAdminRefund(args: {
   userId: string;
@@ -456,7 +214,6 @@ export async function applyAdminRefund(args: {
           orderUserId: orders.userId,
           chargeMinor: orders.chargeMinor,
           chargeCurrency: orders.chargeCurrency,
-          paymentReceivedHorizonId: orders.paymentReceivedHorizonId,
         })
         .from(orders)
         .where(eq(orders.id, args.orderId))
@@ -516,42 +273,6 @@ export async function applyAdminRefund(args: {
 
       const priorBalance = existing?.balanceMinor ?? 0n;
       const newBalance = priorBalance + args.amountMinor;
-
-      // INV-8 cross-check (money review 2026-07-08): refuse a
-      // mirror-credit refund when the order's own paying deposit has
-      // already been returned (or is being returned) on-chain through
-      // `refundDeposit()` — that path writes no credit_transactions
-      // row, so the partial unique index alone cannot exclude it. Runs
-      // under the order-row lock, which every on-chain refund writer
-      // also takes, so the two exits serialise. Duplicate-deposit skip
-      // rows (T0-1b — a *second* deposit against a genuinely paid
-      // order, paymentId ≠ the persisted paying id) do not block:
-      // returning an extraneous deposit to its sender is not a refund
-      // of the order. A null paying id (legacy/expired order) blocks on
-      // any refunded deposit for the order — fail closed when we
-      // cannot distinguish.
-      const payingId = order.paymentReceivedHorizonId ?? null;
-      // Match by order binding OR by the paying deposit's own payment
-      // id — the latter catches skip rows recorded with orderId=null
-      // (e.g. processing_error rows) that still ARE this order's
-      // deposit.
-      const onChainRefunds = await tx
-        .select({ paymentId: paymentWatcherSkips.paymentId })
-        .from(paymentWatcherSkips)
-        .where(
-          and(
-            payingId === null
-              ? eq(paymentWatcherSkips.orderId, args.orderId)
-              : or(
-                  eq(paymentWatcherSkips.orderId, args.orderId),
-                  eq(paymentWatcherSkips.paymentId, payingId),
-                ),
-            inArray(paymentWatcherSkips.status, ['refunding', 'refunded']),
-          ),
-        );
-      if (onChainRefunds.some((r) => payingId === null || r.paymentId === payingId)) {
-        throw new RefundAlreadyIssuedError(args.orderId);
-      }
 
       const [row] = await tx
         .insert(creditTransactions)

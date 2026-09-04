@@ -36,7 +36,6 @@ import { adminLookupHandler } from '../lookup.js';
 
 const ORDER_ID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 const USER_ID = '11111111-1111-1111-1111-111111111111';
-const MEMO = 'ABCDEFGHIJKLMNOPQRST'; // 20 base32 chars
 const ADDRESS = `G${'A'.repeat(55)}`;
 
 function makeCtx(q: string | undefined): Context {
@@ -75,12 +74,6 @@ describe('adminLookupHandler', () => {
   it('uuid with no order → 404', async () => {
     state.results = [[]];
     expect((await adminLookupHandler(makeCtx(ORDER_ID))).status).toBe(404);
-  });
-
-  it('20-char base32 → payment-memo lookup', async () => {
-    state.results = [[{ id: ORDER_ID, userId: USER_ID }]];
-    const res = await adminLookupHandler(makeCtx(MEMO));
-    expect(await res.json()).toEqual({ kind: 'payment_memo', userId: USER_ID, orderId: ORDER_ID });
   });
 
   it('stellar address → wallet_address first', async () => {

@@ -11,6 +11,7 @@
  */
 import type { Context } from 'hono';
 import { env } from '../env.js';
+import { ctxPaymentCurrencies } from '../orders/loop-handler.js';
 
 /**
  * Per-LOOP-asset config snapshot (ADR 015). Surfaces whether the
@@ -36,6 +37,12 @@ export interface AppConfig {
   loopAuthNativeEnabled: boolean;
   /** ADR 010: the order workers are running and Loop-native orders can be placed. */
   loopOrdersEnabled: boolean;
+  /**
+   * ADR 052 — chain-qualified CTX payment currencies the customer can
+   * choose at checkout (`LOOP_CTX_PAYMENT_CURRENCIES`, default `XLM`).
+   * `POST /api/orders/loop` validates `cryptoCurrency` against this list.
+   */
+  ctxPaymentCurrencies: string[];
   /**
    * Tranche 1 (MVP) launch gate. When true, the web client hides
    * every Phase 2+ surface — cashback navbar links, /settings/wallet,
@@ -98,13 +105,16 @@ function assetConfig(issuer: string | undefined): LoopAssetConfig {
 export function configHandler(c: Context): Response {
   const body: AppConfig = {
     loopAuthNativeEnabled: env.LOOP_AUTH_NATIVE_ENABLED,
-    // `LOOP_WORKERS_ENABLED` controls the watcher + procurement workers.
-    // Without workers the client can still create a loop order, but it
-    // would sit in pending_payment forever — gate the UI on both.
+    // ADR 052: ctx is the payment processor — orders only need the
+    // operator API creds (the CTX create + status mirror transport).
+    // `LOOP_WORKERS_ENABLED` still gates the mirror sweep, so the UI
+    // stays off when nothing would reconcile missed events.
     loopOrdersEnabled:
       env.LOOP_AUTH_NATIVE_ENABLED &&
       env.LOOP_WORKERS_ENABLED &&
-      env.LOOP_STELLAR_DEPOSIT_ADDRESS !== undefined,
+      env.GIFT_CARD_API_KEY !== undefined &&
+      env.GIFT_CARD_API_SECRET !== undefined,
+    ctxPaymentCurrencies: ctxPaymentCurrencies(),
     phase1Only: env.LOOP_PHASE_1_ONLY,
     loopAssets: {
       USDLOOP: assetConfig(env.LOOP_STELLAR_USDLOOP_ISSUER),

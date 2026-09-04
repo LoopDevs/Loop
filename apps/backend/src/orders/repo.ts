@@ -1,58 +1,23 @@
 /**
- * Loop-order repository (ADR 010).
+ * Loop-order repository (ADR 052).
  *
- * Owns writes against the `orders` table. The key invariant: when an
- * order is created the three cashback percentages are SNAPSHOTTED
- * from `merchant_cashback_configs` into the order row. A later admin
- * edit of the merchant's config does not rewrite this order.
- *
- * Derived minor-unit amounts (wholesale / user cashback / Loop margin)
- * are computed on creation from the pinned pcts × face value, also
- * stored on the row, so the eventual ledger write on fulfillment
- * (ADR 009) reads numbers that can't silently drift.
- *
- * Integer-arithmetic only: face value is already minor units; we
- * multiply by the percentage × 100 (two decimals → hundredths-of-a-
- * percent as an int) and divide, flooring.
- *
- * A4-018: rounding-residual policy. `cashback-split.ts` computes
- * `userCashbackMinor` (floor) and `loopMarginMinor` (floor) from
- * the configured percentages, then derives
- * `wholesaleMinor = faceValue - userCashback - loopMargin`. So
- * the residual after both floors lands in `wholesaleMinor` —
- * what Loop pays CTX. Loop's margin is exact; the user's cashback
- * is exact-floored; Loop "absorbs" the 0–3 minor-unit residual on
- * the wholesale side. This is the conservative direction (the
- * user is never short, Loop never over-quotes its own margin).
- * The on-chain settlement to CTX is the one that runs slightly
- * higher — operationally a non-issue at single-order granularity.
+ * Owns writes against the `orders` table — a local mirror of a CTX
+ * gift card plus Loop's commission log for it. The create handler
+ * inserts the row first (its uuid becomes the CTX
+ * `operatorReference`), calls CTX, then records the CTX identifiers;
+ * everything downstream (ws maintainer, mirror sweep) keys on either
+ * the row id or `ctx_order_id`.
  */
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { env } from '../env.js';
-import { orders, type OrderPaymentMethod } from '../db/schema.js';
-import { computeCashbackSplit, generatePaymentMemo } from './cashback-split.js';
-import { InsufficientCreditError } from './repo-errors.js';
-import { insertCreditOrderTxn } from './repo-credit-order.js';
+import { orders } from '../db/schema.js';
 
 export type Order = typeof orders.$inferSelect;
-
-// `InsufficientCreditError` lives in `./repo-errors.ts` so both this
-// file and the credit-order txn helper can share a single instance
-// without a circular import. Re-exported here so existing import
-// sites (handlers + tests) keep resolving.
-export { InsufficientCreditError } from './repo-errors.js';
-
-// Cashback-split derivation + payment-memo generation lives in
-// `./cashback-split.ts`. Re-exported here so existing import sites
-// (orders/handler.ts + tests) keep working without re-targeting.
-export { type CashbackSplit, computeCashbackSplit, generatePaymentMemo } from './cashback-split.js';
 
 // A2-2003 idempotency primitives (error type + pre-write lookup +
 // post-insert conflict resolver) live in `./repo-idempotency.ts`.
 // Re-exported here so the existing import paths used by
-// loop-handler.ts and the test suite keep resolving. Imported back
-// for use inside `createOrder`'s catch arm below.
+// loop-handler.ts and the test suite keep resolving.
 import {
   IdempotentOrderConflictError,
   findOrderByIdempotencyKey,
@@ -65,17 +30,8 @@ export interface CreateOrderArgs {
   merchantId: string;
   faceValueMinor: bigint;
   currency: string;
-  paymentMethod: OrderPaymentMethod;
-  /**
-   * What the user was charged, in their home currency at order
-   * creation (ADR 015). Defaults to `{ faceValueMinor, currency }`
-   * — correct when the user's home currency matches the gift-card
-   * currency, which is every order until the FX-pin slice lands.
-   */
-  chargeMinor?: bigint;
-  chargeCurrency?: string;
-  /** Override for tests; production leaves this undefined and the repo generates it. */
-  paymentMemo?: string;
+  /** Chain-qualified CTX payment currency the customer chose. */
+  paymentCryptoCurrency: string;
   /**
    * A2-2003: optional client-supplied idempotency key. When set, the
    * row carries it and the (user_id, key) partial unique index in
@@ -87,179 +43,113 @@ export interface CreateOrderArgs {
 }
 
 /**
- * Writes a new order row. For on-chain payment methods the row lands
- * in `pending_payment` awaiting a watcher-observed deposit. For
- * credit-funded orders (A2-601 fix) this function additionally debits
- * the user's `user_credits` balance and transitions the order to
- * `paid` inside the same transaction — so a caller who observes a
- * returned order is guaranteed either:
- *
- *   - `state='pending_payment'` with no ledger side-effect (on-chain
- *     orders, awaiting external payment), or
- *   - `state='paid'` with a matching `type='spend'` ledger row and a
- *     debited balance (credit orders, fully settled).
- *
- * There is no intermediate state where the order is created but the
- * credit isn't yet debited, which means procurement can treat every
- * `paid` credit order the same as a `paid` on-chain order.
- *
- * If the user's live balance (re-read `FOR UPDATE` inside the txn)
- * is below `chargeMinor`, the function throws
- * `InsufficientCreditError` and the txn rolls back — no order row
- * is persisted. This in-txn re-read is the sole balance guard on the
- * credit path (there is no handler pre-check ahead of it): serialising
- * every debit through the row lock means a concurrent admin
- * adjustment or credit order can't oversell the balance.
- *
- * Payment memo is generated for on-chain methods (xlm / usdc) and
- * left null for `credit` — a balance debit doesn't cross the chain.
+ * Writes a new mirror row in `unpaid` with the charge provisionally
+ * pinned to the face value — the CTX create + operator read-back
+ * then overwrite `charge_minor` / `user_cashback_minor` /
+ * `expected_commission_minor` with CTX's actual numbers via
+ * {@link recordCtxCreate} + {@link recordOrderEconomics}.
  */
 export async function createOrder(args: CreateOrderArgs): Promise<Order> {
-  // ADR 015 — pin the split in the user's home-currency terms
-  // (chargeMinor), so user_cashback_minor + loop_margin_minor land
-  // in the currency the ledger + balance are denominated in. The
-  // `wholesale_minor` field becomes an accounting approximation of
-  // what Loop pays CTX, derived at the same FX rate (via
-  // chargeMinor) — actual CTX settlement uses the catalog-currency
-  // face value at procurement time.
-  const requestedChargeMinor = args.chargeMinor ?? args.faceValueMinor;
-  const chargeCurrency = args.chargeCurrency ?? args.currency;
-  const split = await computeCashbackSplit({
-    merchantId: args.merchantId,
-    faceValueMinor: requestedChargeMinor,
-  });
-
-  // Tranche 1 (MVP) discount mode. When `LOOP_PHASE_1_ONLY=true`,
-  // the cashback portion of the configured split is applied as
-  // an INSTANT DISCOUNT at order-creation time rather than emitted
-  // as a post-purchase Stellar payout. Math:
-  //
-  //   - Pre-discount charge = requestedChargeMinor
-  //   - Discount delivered  = split.userCashbackMinor
-  //   - User actually pays  = requestedChargeMinor − discount
-  //   - userCashbackMinor stored = 0 (nothing to emit later)
-  //   - wholesaleMinor + loopMarginMinor unchanged (Loop still pays
-  //     CTX the same wholesale; Loop's margin is the same)
-  //
-  // Fulfillment.ts already gates `pending_payouts` insertion on
-  // `userCashbackMinor > 0n`, so zeroing it here also turns off the
-  // on-chain emission for free. Discount badges on merchant cards
-  // (the Tranche 1 user proposition) are driven by
-  // `merchant_cashback_configs.user_cashback_pct` and stay accurate
-  // because the pct itself isn't changing — only the delivery
-  // channel is.
-  //
-  // Tranche 2 flips `LOOP_PHASE_1_ONLY=false` and the cashback
-  // becomes a Stellar payout again. No schema change.
-  const tranche1Discount = env.LOOP_PHASE_1_ONLY ? split.userCashbackMinor : 0n;
-  const chargeMinor = requestedChargeMinor - tranche1Discount;
-  const userCashbackMinorOnRow = env.LOOP_PHASE_1_ONLY ? 0n : split.userCashbackMinor;
-  const userCashbackPctOnRow = env.LOOP_PHASE_1_ONLY ? '0.00' : split.userCashbackPct;
-
-  const paymentMemo =
-    args.paymentMemo ?? (args.paymentMethod === 'credit' ? null : generatePaymentMemo());
-
   const baseValues = {
     userId: args.userId,
     merchantId: args.merchantId,
     faceValueMinor: args.faceValueMinor,
     currency: args.currency,
-    chargeMinor,
-    chargeCurrency,
-    paymentMethod: args.paymentMethod,
-    paymentMemo,
-    wholesalePct: split.wholesalePct,
-    userCashbackPct: userCashbackPctOnRow,
-    loopMarginPct: split.loopMarginPct,
-    wholesaleMinor: split.wholesaleMinor,
-    userCashbackMinor: userCashbackMinorOnRow,
-    loopMarginMinor: split.loopMarginMinor,
-    idempotencyKey: args.idempotencyKey ?? null,
+    chargeMinor: args.faceValueMinor,
+    chargeCurrency: args.currency,
+    userCashbackMinor: 0n,
+    paymentCryptoCurrency: args.paymentCryptoCurrency,
+    state: 'unpaid' as const,
+    ...(args.idempotencyKey !== undefined ? { idempotencyKey: args.idempotencyKey } : {}),
   };
-
-  // For credit-funded orders, do the insert + debit + state flip all
-  // in one txn. Everything else (on-chain) just inserts and returns
-  // pending_payment.
-  if (args.paymentMethod !== 'credit') {
-    try {
-      const [row] = await db.insert(orders).values(baseValues).returning();
-      if (row === undefined) {
-        throw new Error('createOrder: no row returned');
-      }
-      return row;
-    } catch (err) {
-      // A2-2003: a concurrent caller raced us to the same
-      // (userId, idempotencyKey) pair. Re-fetch the prior order so
-      // the handler can replay its response.
-      const conflict = await maybeFetchIdempotentConflict(args, err);
-      if (conflict !== null) throw new IdempotentOrderConflictError(conflict);
-      throw err;
-    }
-  }
-
   try {
-    return await insertCreditOrderTxn({ ...baseValues, paymentMethod: 'credit', paymentMemo });
+    const rows = await db.insert(orders).values(baseValues).returning();
+    const row = rows[0];
+    if (row === undefined) throw new Error('order insert returned no row');
+    return row;
   } catch (err) {
-    if (err instanceof InsufficientCreditError) throw err;
-    // A2-2003: a concurrent caller raced us to the same
-    // (userId, idempotencyKey) pair. The whole txn rolled back, so
-    // no debit / order row landed for this attempt. Re-fetch the
-    // prior order and surface as IdempotentOrderConflictError so the
-    // handler can replay its response.
-    const conflict = await maybeFetchIdempotentConflict(args, err);
+    const conflict = await maybeFetchIdempotentConflict(
+      {
+        userId: args.userId,
+        ...(args.idempotencyKey !== undefined ? { idempotencyKey: args.idempotencyKey } : {}),
+      },
+      err,
+    );
     if (conflict !== null) throw new IdempotentOrderConflictError(conflict);
     throw err;
   }
 }
 
-/**
- * Looks up the unique `pending_payment` order for a given payment
- * memo. Used by the payment watcher to route an incoming on-chain
- * deposit to the order it funds.
- *
- * Returns null when no matching live order exists — either the
- * memo is unknown (wrong tx, replayed scan) or the order has
- * already transitioned to `paid` or past. Both cases are no-ops
- * for the watcher.
- */
-export async function findPendingOrderByMemo(memo: string): Promise<Order | null> {
-  const row = await db.query.orders.findFirst({
-    where: and(eq(orders.paymentMemo, memo), eq(orders.state, 'pending_payment')),
-  });
-  return row ?? null;
+/** Records the CTX identifiers returned by the gift-card create. */
+export async function recordCtxCreate(
+  orderId: string,
+  fields: {
+    ctxOrderId: string;
+    ctxPaymentId: string | null;
+    chargeMinor: bigint | null;
+    chargeCurrency: string | null;
+  },
+): Promise<void> {
+  await db
+    .update(orders)
+    .set({
+      ctxOrderId: fields.ctxOrderId,
+      ...(fields.ctxPaymentId !== null ? { ctxPaymentId: fields.ctxPaymentId } : {}),
+      ...(fields.chargeMinor !== null ? { chargeMinor: fields.chargeMinor } : {}),
+      ...(fields.chargeCurrency !== null ? { chargeCurrency: fields.chargeCurrency } : {}),
+    })
+    .where(eq(orders.id, orderId));
 }
 
 /**
- * Looks up the order for a memo in ANY state (T0-1). Used by the
- * watcher only after {@link findPendingOrderByMemo} returns null, to
- * read the order's state: a deposit whose order has `expired` unpaid is
- * a genuine stranded late deposit (recorded so the A6 refund path can
- * reach it); a memo matching no order — or an order that was PAID —
- * stays a counted no-op (see the watcher's `unmatched` arm for why
- * paid-order deposits are deliberately NOT auto-recorded).
- *
- * State + `id` are what matter here — the A6 refund pays the deposit's
- * on-chain *sender*, not the order, so a (near-impossible) memo
- * collision returning a different order can't misdirect funds.
+ * Records the per-order economics from the operator read-back. Only
+ * non-null values are written — a failed read-back leaves the row
+ * for the mirror sweep to retry, never zeroes it.
  */
-export async function findAnyOrderByMemo(memo: string): Promise<Order | null> {
-  const row = await db.query.orders.findFirst({
-    where: eq(orders.paymentMemo, memo),
-  });
-  return row ?? null;
+export async function recordOrderEconomics(
+  orderId: string,
+  fields: { userCashbackMinor: bigint | null; expectedCommissionMinor: bigint | null },
+): Promise<void> {
+  const set: Record<string, bigint> = {};
+  if (fields.userCashbackMinor !== null) set['userCashbackMinor'] = fields.userCashbackMinor;
+  if (fields.expectedCommissionMinor !== null) {
+    set['expectedCommissionMinor'] = fields.expectedCommissionMinor;
+  }
+  if (Object.keys(set).length === 0) return;
+  await db.update(orders).set(set).where(eq(orders.id, orderId));
 }
 
-/**
- * Looks up a single order by id, in any state. A5-1: shared read used
- * by the admin order re-drive handler (`admin/order-redrive.ts`) for
- * both its initial state check and its post-procurement re-fetch —
- * kept here rather than inlined so it isn't a third copy of the
- * `adminGetOrderHandler` select (admin/orders.ts already has one; this
- * is the repo-layer equivalent for non-admin-view callers).
- */
 export async function getOrderById(orderId: string): Promise<Order | null> {
   const row = await db.query.orders.findFirst({
     where: eq(orders.id, orderId),
+  });
+  return row ?? null;
+}
+
+/** Mirror lookup for giftcard ws events — keyed on the CTX card id. */
+export async function getOrderByCtxOrderId(ctxOrderId: string): Promise<Order | null> {
+  const row = await db.query.orders.findFirst({
+    where: eq(orders.ctxOrderId, ctxOrderId),
+  });
+  return row ?? null;
+}
+
+/**
+ * Non-terminal rows for the mirror sweep, oldest-first. `unpaid`
+ * rows are polled for payment expiry + missed paid events; `paid`
+ * rows for missed fulfilment events.
+ */
+export async function listOpenMirrorOrders(limit: number): Promise<Order[]> {
+  return db.query.orders.findMany({
+    where: inArray(orders.state, ['unpaid', 'paid']),
+    orderBy: (t, { asc }) => [asc(t.createdAt)],
+    limit,
+  });
+}
+
+export async function findOwnedOrder(userId: string, orderId: string): Promise<Order | null> {
+  const row = await db.query.orders.findFirst({
+    where: and(eq(orders.id, orderId), eq(orders.userId, userId)),
   });
   return row ?? null;
 }

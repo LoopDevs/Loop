@@ -259,17 +259,8 @@ async function seed(): Promise<SeededState> {
       currency: 'USD',
       chargeMinor: 5000n,
       chargeCurrency: 'USD',
-      // `credit` payment method skips the memo coherence CHECK
-      // (orders_payment_memo_coherence — non-credit methods require a
-      // payment_memo for the watcher to match deposits). Refund tests
-      // bind to the order's id, not its payment method.
-      paymentMethod: 'credit',
-      wholesalePct: '70.00',
-      userCashbackPct: '5.00',
-      loopMarginPct: '25.00',
-      wholesaleMinor: 3500n,
+      paymentCryptoCurrency: 'XLM',
       userCashbackMinor: 250n,
-      loopMarginMinor: 1250n,
       state: 'fulfilled',
     })
     .returning();
@@ -2389,19 +2380,14 @@ describeIf('routes/admin.ts — admin-read audit middleware (A2-2008)', () => {
   // a high-value smoke gate because the failure mode for the
   // surfaced bugs is "every call 500s in production".
   it.each([
-    ['/api/admin/supplier-spend'],
-    ['/api/admin/operator-stats'],
     ['/api/admin/top-users'],
-    ['/api/admin/operators/latency'],
     ['/api/admin/treasury'],
     ['/api/admin/payouts'],
-    ['/api/admin/stuck-orders'],
     ['/api/admin/stuck-payouts'],
     ['/api/admin/cashback-activity'],
     ['/api/admin/cashback-monthly'],
     ['/api/admin/cashback-realization'],
     ['/api/admin/merchant-cashback-configs'],
-    ['/api/admin/merchant-flows'],
     ['/api/admin/merchant-stats'],
     ['/api/admin/payouts-monthly'],
     ['/api/admin/payouts-activity'],

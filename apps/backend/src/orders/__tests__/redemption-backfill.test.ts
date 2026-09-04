@@ -23,24 +23,24 @@ vi.mock('../../discord.js', () => ({
   notifyRedemptionBackfillExhausted: (args: unknown) => notifyExhaustedMock(args),
 }));
 
-vi.mock('../../ctx/operator-pool.js', () => {
-  class OperatorPoolUnavailableError extends Error {
+vi.mock('../../ctx/api-fetch.js', () => {
+  class CtxUnavailableError extends Error {
     constructor(message: string) {
       super(message);
-      this.name = 'OperatorPoolUnavailableError';
+      this.name = 'CtxUnavailableError';
     }
   }
   // CF-12: backfill now also aborts (without burning attempts) on a
   // CTX rate-limit; the module imports this error for the instanceof.
-  class OperatorRateLimitedError extends Error {
+  class CtxRateLimitedError extends Error {
     readonly retryAfterMs: number | null;
     constructor(message: string, retryAfterMs: number | null = null) {
       super(message);
-      this.name = 'OperatorRateLimitedError';
+      this.name = 'CtxRateLimitedError';
       this.retryAfterMs = retryAfterMs;
     }
   }
-  return { OperatorPoolUnavailableError, OperatorRateLimitedError };
+  return { CtxUnavailableError, CtxRateLimitedError };
 });
 
 // db mock — select chain resolves the stashed candidate rows; update
@@ -96,7 +96,7 @@ vi.mock('../../db/client.js', () => ({
   },
 }));
 
-import { OperatorPoolUnavailableError, OperatorRateLimitedError } from '../../ctx/operator-pool.js';
+import { CtxUnavailableError, CtxRateLimitedError } from '../../ctx/api-fetch.js';
 import {
   runRedemptionBackfillTick,
   redemptionBackfillDelayMs,
@@ -238,9 +238,9 @@ describe('runRedemptionBackfillTick', () => {
 
   it('aborts the tick on pool-wide operator outage without burning attempts', async () => {
     dbState.rows = [makeRow({ id: 'order-1' }), makeRow({ id: 'order-2', ctxOrderId: 'ctx-2' })];
-    fetchRedemptionMock.mockRejectedValueOnce(new OperatorPoolUnavailableError('pool down'));
+    fetchRedemptionMock.mockRejectedValueOnce(new CtxUnavailableError('pool down'));
     const r = await runRedemptionBackfillTick({ now: NOW });
-    expect(r.abortedPoolUnavailable).toBe(true);
+    expect(r.abortedCtxUnavailable).toBe(true);
     // First row aborted the loop — second row never fetched, no
     // attempts consumed for either.
     expect(fetchRedemptionMock).toHaveBeenCalledTimes(1);
@@ -250,11 +250,11 @@ describe('runRedemptionBackfillTick', () => {
 
   it('CF-12: aborts the tick on a CTX rate-limit (429) without burning attempts', async () => {
     dbState.rows = [makeRow({ id: 'order-1' }), makeRow({ id: 'order-2', ctxOrderId: 'ctx-2' })];
-    fetchRedemptionMock.mockRejectedValueOnce(new OperatorRateLimitedError('rate limited', 5000));
+    fetchRedemptionMock.mockRejectedValueOnce(new CtxRateLimitedError('rate limited', 5000));
     const r = await runRedemptionBackfillTick({ now: NOW });
     // A 429 is our-side back-pressure, not evidence CTX has no payload —
     // abort like a pool outage so neither row burns a retry.
-    expect(r.abortedPoolUnavailable).toBe(true);
+    expect(r.abortedCtxUnavailable).toBe(true);
     expect(fetchRedemptionMock).toHaveBeenCalledTimes(1);
     expect(dbState.updates).toHaveLength(0);
   });
@@ -283,7 +283,7 @@ describe('runRedemptionBackfillTick', () => {
       stillEmpty: 0,
       exhausted: 0,
       errors: 0,
-      abortedPoolUnavailable: false,
+      abortedCtxUnavailable: false,
       skippedLocked: false,
     });
     expect(fetchRedemptionMock).not.toHaveBeenCalled();
@@ -307,7 +307,7 @@ describe('runRedemptionBackfillTick', () => {
         stillEmpty: 0,
         exhausted: 0,
         errors: 0,
-        abortedPoolUnavailable: false,
+        abortedCtxUnavailable: false,
         skippedLocked: false,
       });
       expect(fetchRedemptionMock).not.toHaveBeenCalled();
@@ -327,7 +327,7 @@ describe('runRedemptionBackfillTick', () => {
       stillEmpty: 0,
       exhausted: 0,
       errors: 0,
-      abortedPoolUnavailable: false,
+      abortedCtxUnavailable: false,
       skippedLocked: true,
     });
     expect(fetchRedemptionMock).not.toHaveBeenCalled();

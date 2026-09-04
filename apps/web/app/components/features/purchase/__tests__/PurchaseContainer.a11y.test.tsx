@@ -16,10 +16,8 @@ expect.extend(toHaveNoViolations);
 
 afterEach(cleanup);
 
-const { authState, walletState, userMock } = vi.hoisted(() => ({
+const { authState } = vi.hoisted(() => ({
   authState: { email: null as string | null, accessToken: null as string | null },
-  walletState: { isActivated: false },
-  userMock: { getMyCredits: vi.fn() },
 }));
 
 vi.mock('~/stores/auth.store', () => ({
@@ -30,30 +28,18 @@ vi.mock('~/stores/auth.store', () => ({
 vi.mock('~/stores/purchase.store', () => ({
   usePurchaseStore: () => ({
     merchantId: null,
-    step: 'amount',
-    giftCardCode: null,
-    giftCardPin: null,
-    barcodeImageUrl: null,
-    redeemUrl: null,
-    redeemChallengeCode: null,
-    redeemScripts: [],
-    paymentAddress: null,
-    xlmAmount: null,
-    orderId: null,
-    expiresAt: null,
-    memo: null,
-    amount: null,
-    error: null,
+    merchantName: null,
     reset: vi.fn(),
     startPurchase: vi.fn(),
-    setAmount: vi.fn(),
-    setOrderCreated: vi.fn(),
   }),
 }));
 
-vi.mock('~/services/user', () => ({ getMyCredits: () => userMock.getMyCredits() }));
-vi.mock('~/services/orders', () => ({ createOrder: vi.fn() }));
-vi.mock('~/services/orders-loop', () => ({ createLoopOrder: vi.fn() }));
+vi.mock('~/services/orders-loop', () => ({
+  createLoopOrder: vi.fn(),
+  isLoopOrderFailure: vi.fn(() => false),
+  isLoopOrderTerminal: vi.fn(() => false),
+  getLoopOrder: vi.fn(),
+}));
 vi.mock('~/services/auth', () => ({ requestOtp: vi.fn(), verifyOtp: vi.fn() }));
 vi.mock('~/hooks/query-retry', () => ({ shouldRetry: () => false }));
 vi.mock('~/native/haptics', () => ({
@@ -63,22 +49,12 @@ vi.mock('~/native/haptics', () => ({
 
 vi.mock('~/hooks/use-app-config', () => ({
   useAppConfig: () => ({
-    config: { loopOrdersEnabled: true, phase1Only: false },
+    config: { loopOrdersEnabled: true, phase1Only: false, ctxPaymentCurrencies: ['XLM'] },
     isLoading: false,
   }),
 }));
 vi.mock('~/hooks/use-merchants', () => ({
   useMerchantCashbackRate: () => ({ userCashbackPct: null }),
-}));
-vi.mock('~/hooks/use-wallet', () => ({
-  WALLET_QUERY_KEY: ['me', 'wallet'],
-  useWallet: () => ({
-    wallet: undefined,
-    isActivated: walletState.isActivated,
-    balanceFor: () => '0',
-    isLoading: false,
-    isError: false,
-  }),
 }));
 vi.mock('~/hooks/use-auth', () => ({
   useAuth: () => ({ isAuthenticated: authState.accessToken !== null }),

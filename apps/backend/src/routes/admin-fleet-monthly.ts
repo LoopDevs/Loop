@@ -2,7 +2,7 @@
  * `/api/admin/*` fleet-monthly + finance-CSV route mounts
  * (ADR 009 / 011 / 013 / 015 / 016 / 018).
  *
- * Lifted out of `apps/backend/src/routes/admin.ts`. Seven routes
+ * Lifted out of `apps/backend/src/routes/admin.ts`. Six routes
  * that finance / ops use at month-end to reconcile the
  * minted-vs-settled liability story:
  *
@@ -11,11 +11,10 @@
  *   - GET /api/admin/payouts-activity                   (sparkline)
  *   - GET /api/admin/payouts-activity.csv               (Tier-3)
  *   - GET /api/admin/supplier-spend/activity.csv        (Tier-3)
- *   - GET /api/admin/operators-snapshot.csv             (Tier-3)
  *   - GET /api/admin/treasury/credit-flow.csv           (Tier-3)
  *
  * Mirrors the openapi/admin-fleet-monthly.ts split (#1165) for the
- * three JSON aggregates; the four Tier-3 CSV companions live next
+ * three JSON aggregates; the three Tier-3 CSV companions live next
  * to their JSON siblings on the routes side because the contiguous
  * mount block keeps the literal-suffix ordering simpler than
  * splitting between two files.
@@ -32,8 +31,6 @@ import { adminCashbackMonthlyHandler } from '../admin/cashback-monthly.js';
 import { adminPayoutsMonthlyHandler } from '../admin/payouts-monthly.js';
 import { adminPayoutsActivityHandler } from '../admin/payouts-activity.js';
 import { adminPayoutsActivityCsvHandler } from '../admin/payouts-activity-csv.js';
-import { adminSupplierSpendActivityCsvHandler } from '../admin/supplier-spend-activity-csv.js';
-import { adminOperatorsSnapshotCsvHandler } from '../admin/operators-snapshot-csv.js';
 import { adminTreasuryCreditFlowCsvHandler } from '../admin/treasury-credit-flow-csv.js';
 
 /**
@@ -81,27 +78,6 @@ export function mountAdminFleetMonthlyRoutes(app: Hono): void {
     rateLimit('GET /api/admin/payouts-activity.csv', 10, 60_000),
     requireStaff('admin'),
     adminPayoutsActivityCsvHandler,
-  );
-  // Tier-3 CSV export of supplier-spend activity (ADR 013/015/018) —
-  // finance runs this at month-end to reconcile CTX's invoice: the
-  // wholesale_minor column per (day, currency) should tie to CTX's
-  // line items. Pairs with cashback-activity.csv (what we minted)
-  // and payouts-activity.csv (what we settled).
-  app.get(
-    '/api/admin/supplier-spend/activity.csv',
-    rateLimit('GET /api/admin/supplier-spend/activity.csv', 10, 60_000),
-    requireStaff('admin'),
-    adminSupplierSpendActivityCsvHandler,
-  );
-  // Tier-3 CSV of the fleet operator snapshot (ADR 013 / 018 / 022)
-  // — joins operator-stats + operator-latency into one row per
-  // operator. Handed to CTX relationship owners for quarterly
-  // review meetings (SLA + volume + success rate on one sheet).
-  app.get(
-    '/api/admin/operators-snapshot.csv',
-    rateLimit('GET /api/admin/operators-snapshot.csv', 10, 60_000),
-    requireStaff('admin'),
-    adminOperatorsSnapshotCsvHandler,
   );
   // Tier-3 CSV of the credit-flow time series (ADR 009 / 015 / 018).
   // Completes the finance-CSV quartet: cashback-activity (minted) +

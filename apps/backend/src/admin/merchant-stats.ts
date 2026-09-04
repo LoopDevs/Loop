@@ -7,7 +7,7 @@
  * this one groups by merchant so ops can see:
  *   - which merchants drive the most volume (orderCount)
  *   - which merchants drive the most cashback outlay (userCashbackMinor)
- *   - which merchants deliver the best margin (loopMarginMinor)
+ *   - which merchants deliver the best commission (expectedCommissionMinor)
  *
  * Directly feeds the "which merchants to prioritise with CTX for
  * better wholesale rates" decision.
@@ -39,9 +39,8 @@ export interface MerchantStatsRow {
    */
   uniqueUserCount: number;
   faceValueMinor: string;
-  wholesaleMinor: string;
+  expectedCommissionMinor: string;
   userCashbackMinor: string;
-  loopMarginMinor: string;
   /**
    * Most-recent fulfilled order for this merchant in the window. ISO-8601.
    * Useful signal for "merchant with strong history but no recent volume".
@@ -76,9 +75,8 @@ interface AggRow {
   order_count: string | number;
   unique_user_count: string | number;
   face_value_minor: string | number | bigint;
-  wholesale_minor: string | number | bigint;
+  expected_commission_minor: string | number | bigint;
   user_cashback_minor: string | number | bigint;
-  loop_margin_minor: string | number | bigint;
   last_fulfilled_at: Date | string;
 }
 
@@ -136,9 +134,8 @@ export async function adminMerchantStatsHandler(c: Context): Promise<Response> {
         COUNT(*)::bigint      AS order_count,
         COUNT(DISTINCT ${orders.userId})::bigint AS unique_user_count,
         COALESCE(SUM(${orders.faceValueMinor}), 0)::bigint    AS face_value_minor,
-        COALESCE(SUM(${orders.wholesaleMinor}), 0)::bigint    AS wholesale_minor,
+        COALESCE(SUM(${orders.expectedCommissionMinor}), 0)::bigint AS expected_commission_minor,
         COALESCE(SUM(${orders.userCashbackMinor}), 0)::bigint AS user_cashback_minor,
-        COALESCE(SUM(${orders.loopMarginMinor}), 0)::bigint   AS loop_margin_minor,
         MAX(${orders.fulfilledAt}) AS last_fulfilled_at
       FROM ${orders}
       WHERE ${orders.state} = 'fulfilled'
@@ -162,9 +159,8 @@ export async function adminMerchantStatsHandler(c: Context): Promise<Response> {
         orderCount: toNumber(r.order_count),
         uniqueUserCount: toNumber(r.unique_user_count),
         faceValueMinor: toStringBigint(r.face_value_minor),
-        wholesaleMinor: toStringBigint(r.wholesale_minor),
+        expectedCommissionMinor: toStringBigint(r.expected_commission_minor),
         userCashbackMinor: toStringBigint(r.user_cashback_minor),
-        loopMarginMinor: toStringBigint(r.loop_margin_minor),
         lastFulfilledAt: toIso(r.last_fulfilled_at),
       })),
     };

@@ -181,7 +181,7 @@ critical_files=(
   "apps/backend/src/discord.ts"
   "apps/backend/src/openapi.ts"
   "apps/backend/src/auth/handler.ts"
-  "apps/backend/src/orders/handler.ts"
+  "apps/backend/src/orders/loop-handler.ts"
   "apps/backend/src/merchants/sync.ts"
   "apps/backend/src/merchants/handler.ts"
   "apps/backend/src/clustering/algorithm.ts"

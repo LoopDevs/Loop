@@ -96,6 +96,22 @@ export async function requireAuth(c: Context, next: () => Promise<void>): Promis
     return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
   }
 
+  // Forward X-Client-Id if present — CTX uses this to determine entity
+  // context. Only honor values from the server-side allowlist (audit A-036);
+  // an untrusted or unknown value is dropped rather than forwarded, which
+  // makes the downstream handler fall back to the default CTX client
+  // binding rather than a client-supplied one. This runs BEFORE the
+  // auth-path fork below: both the Loop-native JWT path (which returns
+  // early on success) and the CTX pass-through path need `clientId` —
+  // handlers that attribute proxied CTX traffic (`ctxActAsHeaders`)
+  // read it regardless of which token kind authenticated the request.
+  const clientId = c.req.header('X-Client-Id');
+  if (clientId !== undefined && allowedClientIds().has(clientId)) {
+    c.set('clientId', clientId);
+  } else if (clientId !== undefined) {
+    log.warn({ clientId }, 'Rejected untrusted X-Client-Id value on authenticated request');
+  }
+
   // Try Loop-signed JWT first — cheap in-process verify, no network.
   // If the signing key isn't configured we can't accept Loop tokens,
   // so the CTX pass-through is the only remaining path.
@@ -157,18 +173,6 @@ export async function requireAuth(c: Context, next: () => Promise<void>): Promis
   const ctxAuth: LoopAuthContext = { kind: 'ctx', bearerToken: token };
   c.set('auth', ctxAuth);
   c.set('bearerToken', token);
-
-  // Forward X-Client-Id if present — CTX uses this to determine entity
-  // context. Only honor values from the server-side allowlist (audit A-036);
-  // an untrusted or unknown value is dropped rather than forwarded, which
-  // makes the downstream handler fall back to the default CTX client
-  // binding rather than a client-supplied one.
-  const clientId = c.req.header('X-Client-Id');
-  if (clientId !== undefined && allowedClientIds().has(clientId)) {
-    c.set('clientId', clientId);
-  } else if (clientId !== undefined) {
-    log.warn({ clientId }, 'Rejected untrusted X-Client-Id value on authenticated request');
-  }
 
   await next();
 }

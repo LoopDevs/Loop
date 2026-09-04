@@ -526,6 +526,34 @@
       "when": 1780190500000,
       "tag": "0074_payout_tx_hashes",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1780190600000,
+      "tag": "0075_drop_ctx_operator_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1780190700000,
+      "tag": "0076_ctx_money_in",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1780277100000,
+      "tag": "0077_single_field_cashback",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1780277400000,
+      "tag": "0078_burn_shape_withdrawal",
+      "breakpoints": true
     }
   ]
 }

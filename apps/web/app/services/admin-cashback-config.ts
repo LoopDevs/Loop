@@ -1,13 +1,15 @@
 /**
  * A2-1165 (slice 20): admin cashback-config surface extracted
  * from `services/admin.ts`. Four endpoints around the per-
- * merchant cashback-split config (ADR 011 / 017). The split is
- * the central knob the admin panel exists to turn:
- * `wholesale_pct + user_cashback_pct + loop_margin_pct = 100`.
+ * merchant cashback config (ADR 011 / 017, reshaped by ADR 052).
+ * Single knob: `user_cashback_pct` — the share of Loop's CTX
+ * margin handed to the customer (0 = Loop keeps the whole spread,
+ * 100 = all of it goes to the customer). The backend delivers it
+ * as CTX's native checkout discount via `PUT /merchant-links`.
  *
  * - `GET /api/admin/merchant-cashback-configs` — fleet list.
  * - `PUT /api/admin/merchant-cashback-configs/:merchantId` —
- *   ADR 017 admin write. Caller supplies the split + a 2..500
+ *   ADR 017 admin write. Caller supplies the pct + a 2..500
  *   char reason; the service generates a per-click
  *   `Idempotency-Key` so a double-submit of the form can't
  *   apply the edit twice. Response is the `{ result, audit }`
@@ -36,9 +38,7 @@ import { authenticatedRequest } from './api-client';
 
 export interface MerchantCashbackConfig {
   merchantId: string;
-  wholesalePct: string;
   userCashbackPct: string;
-  loopMarginPct: string;
   active: boolean;
   updatedBy: string;
   updatedAt: string;
@@ -47,9 +47,7 @@ export interface MerchantCashbackConfig {
 export interface MerchantCashbackConfigHistoryEntry {
   id: string;
   merchantId: string;
-  wholesalePct: string;
   userCashbackPct: string;
-  loopMarginPct: string;
   active: boolean;
   changedBy: string;
   changedAt: string;
@@ -65,9 +63,7 @@ export interface AdminConfigHistoryEntry {
   id: string;
   merchantId: string;
   merchantName: string;
-  wholesalePct: string;
   userCashbackPct: string;
-  loopMarginPct: string;
   active: boolean;
   changedBy: string;
   changedAt: string;
@@ -95,9 +91,7 @@ export async function listCashbackConfigs(): Promise<{ configs: MerchantCashback
 export async function upsertCashbackConfig(
   merchantId: string,
   body: {
-    wholesalePct: number;
     userCashbackPct: number;
-    loopMarginPct: number;
     active?: boolean;
     reason: string;
   },

@@ -116,9 +116,8 @@ describe('auth flow integration', () => {
     // Seed state we expect logout to clear.
     useAuthStore.getState().setSession('user@test.com', 'at-1', 'rt-1');
     usePurchaseStore.getState().startPurchase('m-1', 'Target');
-    usePurchaseStore.getState().setAmount(25);
     expect(usePurchaseStore.getState().merchantId).toBe('m-1');
-    expect(usePurchaseStore.getState().amount).toBe(25);
+    expect(usePurchaseStore.getState().merchantName).toBe('Target');
 
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     queryClient.setQueryData(['me'], { email: 'user@test.com' });
@@ -137,7 +136,7 @@ describe('auth flow integration', () => {
     expect(useAuthStore.getState().accessToken).toBeNull();
     // Purchase store reset to initial shape.
     expect(usePurchaseStore.getState().merchantId).toBeNull();
-    expect(usePurchaseStore.getState().amount).toBeNull();
+    expect(usePurchaseStore.getState().merchantName).toBeNull();
     // Query cache wiped — prior user's /me data must be gone.
     expect(queryClient.getQueryData(['me'])).toBeUndefined();
   });

@@ -58,9 +58,6 @@ import {
   notifyOrderFulfilled,
   notifyHealthChange,
   notifyCircuitBreaker,
-  notifyCashbackRecycled,
-  notifyFirstCashbackRecycled,
-  notifyCashbackCredited,
   notifyPayoutFailed,
   notifyCtxSchemaDrift,
   __resetCircuitNotifyDedupForTests,
@@ -89,27 +86,45 @@ function lastBody(): { embeds: Array<Record<string, unknown>> } {
 describe('notifyOrderCreated', () => {
   it('skips silently when no webhook is configured', async () => {
     mockEnv.DISCORD_WEBHOOK_ORDERS = '';
-    notifyOrderCreated('o1', 'Acme', 25, 'USD', '100.5');
+    notifyOrderCreated({
+      orderId: 'o1',
+      merchantName: 'Acme',
+      faceValueMinor: 2500n,
+      currency: 'USD',
+      cryptoCurrency: 'XLM',
+    });
     await new Promise((r) => setTimeout(r, 10));
     expect(mockFetch).not.toHaveBeenCalled();
     mockEnv.DISCORD_WEBHOOK_ORDERS = 'https://discord.test/orders-hook';
   });
 
   it('sends an embed with formatted amount and XLM', async () => {
-    notifyOrderCreated('order-xyz', 'Acme Corp', 25, 'USD', '100.50000');
+    notifyOrderCreated({
+      orderId: 'order-xyz',
+      merchantName: 'Acme Corp',
+      faceValueMinor: 2500n,
+      currency: 'USD',
+      cryptoCurrency: 'XLM',
+    });
     await new Promise((r) => setTimeout(r, 10));
     expect(mockFetch).toHaveBeenCalledTimes(1);
     const body = lastBody();
     const embed = body.embeds[0] as { fields: Array<{ name: string; value: string }> };
     const byName = Object.fromEntries(embed.fields.map((f) => [f.name, f.value]));
     expect(byName.Amount).toBe('$25.00 USD');
-    expect(byName.XLM).toBe('100.50000');
+    expect(byName['Pays CTX in']).toBe('XLM');
     expect(byName.Merchant).toBe('Acme Corp');
     expect(byName['Order ID']).toBe('`order-xyz`');
   });
 
   it('escapes markdown in merchant name to prevent embed formatting breakage', async () => {
-    notifyOrderCreated('o1', 'Evil`Name*With_Markdown', 10, 'USD', '1');
+    notifyOrderCreated({
+      orderId: 'o1',
+      merchantName: 'Evil`Name*With_Markdown',
+      faceValueMinor: 1000n,
+      currency: 'USD',
+      cryptoCurrency: 'XLM',
+    });
     await new Promise((r) => setTimeout(r, 10));
     const body = lastBody();
     const embed = body.embeds[0] as { fields: Array<{ name: string; value: string }> };
@@ -118,7 +133,13 @@ describe('notifyOrderCreated', () => {
   });
 
   it('A2-2004: neutralises Discord link-construction syntax in merchant name', async () => {
-    notifyOrderCreated('o1', '[Click](https://evil.com)', 10, 'USD', '1');
+    notifyOrderCreated({
+      orderId: 'o1',
+      merchantName: '[Click](https://evil.com)',
+      faceValueMinor: 1000n,
+      currency: 'USD',
+      cryptoCurrency: 'XLM',
+    });
     await new Promise((r) => setTimeout(r, 10));
     const body = lastBody();
     const embed = body.embeds[0] as { fields: Array<{ name: string; value: string }> };
@@ -127,7 +148,13 @@ describe('notifyOrderCreated', () => {
   });
 
   it('A2-2004: strips bidi RTL override + zero-width chars before escaping', async () => {
-    notifyOrderCreated('o1', 'Acme\u202Ereverse\u200B', 10, 'USD', '1');
+    notifyOrderCreated({
+      orderId: 'o1',
+      merchantName: 'Acme\u202Ereverse\u200B',
+      faceValueMinor: 1000n,
+      currency: 'USD',
+      cryptoCurrency: 'XLM',
+    });
     await new Promise((r) => setTimeout(r, 10));
     const body = lastBody();
     const embed = body.embeds[0] as { fields: Array<{ name: string; value: string }> };
@@ -139,7 +166,13 @@ describe('notifyOrderCreated', () => {
 
   it('truncates excessively long field values (>1024 chars)', async () => {
     const longName = 'a'.repeat(2000);
-    notifyOrderCreated('o1', longName, 10, 'USD', '1');
+    notifyOrderCreated({
+      orderId: 'o1',
+      merchantName: longName,
+      faceValueMinor: 1000n,
+      currency: 'USD',
+      cryptoCurrency: 'XLM',
+    });
     await new Promise((r) => setTimeout(r, 10));
     const body = lastBody();
     const embed = body.embeds[0] as { fields: Array<{ name: string; value: string }> };
@@ -151,7 +184,12 @@ describe('notifyOrderCreated', () => {
 
 describe('notifyOrderFulfilled', () => {
   it('formats EUR amounts with the euro symbol, not a dollar sign', async () => {
-    notifyOrderFulfilled('o1', 'Acme', 25, 'EUR', 'barcode');
+    notifyOrderFulfilled({
+      orderId: 'o1',
+      merchantId: 'Acme',
+      faceValueMinor: 2500n,
+      currency: 'EUR',
+    });
     await new Promise((r) => setTimeout(r, 10));
     const body = lastBody();
     const embed = body.embeds[0] as { fields: Array<{ name: string; value: string }> };
@@ -160,7 +198,12 @@ describe('notifyOrderFulfilled', () => {
   });
 
   it('A2-1522: Intl-backed symbol for currencies beyond the launch four (NOK → kr25.00 NOK)', async () => {
-    notifyOrderFulfilled('o1', 'Acme', 25, 'NOK', 'barcode');
+    notifyOrderFulfilled({
+      orderId: 'o1',
+      merchantId: 'Acme',
+      faceValueMinor: 2500n,
+      currency: 'NOK',
+    });
     await new Promise((r) => setTimeout(r, 10));
     const body = lastBody();
     const embed = body.embeds[0] as { fields: Array<{ name: string; value: string }> };
@@ -172,7 +215,12 @@ describe('notifyOrderFulfilled', () => {
   });
 
   it('A2-1522: falls back to code-only for truly invalid currency codes', async () => {
-    notifyOrderFulfilled('o1', 'Acme', 25, 'ZZZ', 'barcode');
+    notifyOrderFulfilled({
+      orderId: 'o1',
+      merchantId: 'Acme',
+      faceValueMinor: 2500n,
+      currency: 'ZZZ',
+    });
     await new Promise((r) => setTimeout(r, 10));
     const body = lastBody();
     const embed = body.embeds[0] as { fields: Array<{ name: string; value: string }> };
@@ -182,155 +230,6 @@ describe('notifyOrderFulfilled', () => {
     // the fallback (no symbol found) or symbol === code is fine —
     // the point is the method doesn't throw.
     expect(amount?.value).toMatch(/^(25\.00 ZZZ|ZZZ25\.00 ZZZ)$/);
-  });
-});
-
-describe('notifyCashbackRecycled', () => {
-  it('posts to the orders webhook with merchant / amount / asset / order id', async () => {
-    notifyCashbackRecycled({
-      orderId: 'o-123',
-      merchantName: 'Acme',
-      amount: 25,
-      currency: 'GBP',
-      assetCode: 'GBPLOOP',
-    });
-    await new Promise((r) => setTimeout(r, 10));
-    expect(mockFetch).toHaveBeenCalledTimes(1);
-    const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('https://discord.test/orders-hook');
-    const body = JSON.parse(init.body as string) as { embeds: Array<Record<string, unknown>> };
-    const embed = body.embeds[0] as {
-      title: string;
-      fields: Array<{ name: string; value: string }>;
-    };
-    expect(embed.title).toBe('♻️ Cashback Recycled');
-    expect(embed.fields.find((f) => f.name === 'Merchant')?.value).toBe('Acme');
-    expect(embed.fields.find((f) => f.name === 'Amount')?.value).toBe('£25.00 GBP');
-    expect(embed.fields.find((f) => f.name === 'Asset')?.value).toBe('GBPLOOP');
-    expect(embed.fields.find((f) => f.name === 'Order ID')?.value).toBe('`o-123`');
-  });
-
-  it('skips silently when the orders webhook is not configured', async () => {
-    mockEnv.DISCORD_WEBHOOK_ORDERS = '';
-    notifyCashbackRecycled({
-      orderId: 'o-1',
-      merchantName: 'Acme',
-      amount: 10,
-      currency: 'USD',
-      assetCode: 'USDLOOP',
-    });
-    await new Promise((r) => setTimeout(r, 10));
-    expect(mockFetch).not.toHaveBeenCalled();
-  });
-});
-
-describe('notifyFirstCashbackRecycled', () => {
-  it('posts the milestone embed with tail-8 ids (A2-1313)', async () => {
-    notifyFirstCashbackRecycled({
-      orderId: 'o-55555555',
-      userId: 'u-12345678',
-      merchantName: 'Starbucks',
-      amount: 15,
-      currency: 'GBP',
-      assetCode: 'GBPLOOP',
-    });
-    await new Promise((r) => setTimeout(r, 10));
-    expect(mockFetch).toHaveBeenCalledTimes(1);
-    const body = lastBody();
-    const embed = body.embeds[0] as {
-      title: string;
-      description: string;
-      fields: Array<{ name: string; value: string }>;
-    };
-    expect(embed.title).toBe('🎉 First Cashback Recycled');
-    expect(embed.description).toMatch(/graduated/i);
-    // A2-1313: tail-8 only; no full uuid, no email anywhere in the
-    // serialised embed.
-    expect(embed.fields.find((f) => f.name === 'User')?.value).toBe('`12345678`');
-    expect(embed.fields.find((f) => f.name === 'Merchant')?.value).toBe('Starbucks');
-    expect(embed.fields.find((f) => f.name === 'Amount')?.value).toBe('£15.00 GBP');
-    expect(embed.fields.find((f) => f.name === 'Asset')?.value).toBe('GBPLOOP');
-    expect(embed.fields.find((f) => f.name === 'Order')?.value).toBe('`55555555`');
-    const serialised = JSON.stringify(body);
-    expect(serialised).not.toContain('u-12345678');
-    expect(serialised).not.toContain('o-55555555');
-    expect(serialised).not.toMatch(/@/);
-  });
-
-  it('skips silently when the orders webhook is not configured', async () => {
-    mockEnv.DISCORD_WEBHOOK_ORDERS = '';
-    notifyFirstCashbackRecycled({
-      orderId: 'o-1',
-      userId: 'u-1',
-      merchantName: 'Acme',
-      amount: 10,
-      currency: 'USD',
-      assetCode: 'USDLOOP',
-    });
-    await new Promise((r) => setTimeout(r, 10));
-    expect(mockFetch).not.toHaveBeenCalled();
-  });
-});
-
-describe('notifyCashbackCredited', () => {
-  it('formats GBP cashback with £ and a two-decimal tail', async () => {
-    notifyCashbackCredited({
-      orderId: 'order-uuid',
-      merchantName: 'Tesco',
-      amountMinor: '250',
-      currency: 'GBP',
-      userId: '12345678-abcd',
-    });
-    await new Promise((r) => setTimeout(r, 10));
-    const body = lastBody();
-    const embed = body.embeds[0] as { fields: Array<{ name: string; value: string }> };
-    const amount = embed.fields.find((f) => f.name === 'Amount');
-    expect(amount?.value).toBe('£2.50 GBP');
-  });
-
-  it('formats large USD amounts with comma separators and keeps bigint precision', async () => {
-    notifyCashbackCredited({
-      orderId: 'o2',
-      merchantName: 'Amazon',
-      amountMinor: '1234567',
-      currency: 'USD',
-      userId: 'abcd1234-efgh',
-    });
-    await new Promise((r) => setTimeout(r, 10));
-    const body = lastBody();
-    const embed = body.embeds[0] as { fields: Array<{ name: string; value: string }> };
-    const amount = embed.fields.find((f) => f.name === 'Amount');
-    expect(amount?.value).toBe('$12,345.67 USD');
-  });
-
-  it('A2-1522: Intl picks the NOK symbol — no hardcoded 4-currency map drift', async () => {
-    notifyCashbackCredited({
-      orderId: 'o3',
-      merchantName: 'Acme',
-      amountMinor: '500',
-      currency: 'NOK',
-      userId: 'abc',
-    });
-    await new Promise((r) => setTimeout(r, 10));
-    const body = lastBody();
-    const embed = body.embeds[0] as { fields: Array<{ name: string; value: string }> };
-    const amount = embed.fields.find((f) => f.name === 'Amount');
-    expect(amount?.value).toMatch(/^[Kk]r5\.00 NOK$/);
-  });
-
-  it('truncates the user id so full UUIDs never hit Discord', async () => {
-    notifyCashbackCredited({
-      orderId: 'o4',
-      merchantName: 'Acme',
-      amountMinor: '100',
-      currency: 'USD',
-      userId: 'aaaaaaaa-bbbb-4ccc-9ddd-eeeeeeeeeeee',
-    });
-    await new Promise((r) => setTimeout(r, 10));
-    const body = lastBody();
-    const embed = body.embeds[0] as { fields: Array<{ name: string; value: string }> };
-    const user = embed.fields.find((f) => f.name === 'User');
-    expect(user?.value).toBe('`aaaaaaaa…`');
   });
 });
 
@@ -441,7 +340,13 @@ describe('notifyHealthChange', () => {
 
 describe('mention injection defense', () => {
   it('sets allowed_mentions.parse=[] so upstream names cannot ping @everyone', async () => {
-    notifyOrderCreated('o1', '@everyone nice try', 25, 'USD', '1');
+    notifyOrderCreated({
+      orderId: 'o1',
+      merchantName: '@everyone nice try',
+      faceValueMinor: 2500n,
+      currency: 'USD',
+      cryptoCurrency: 'XLM',
+    });
     await new Promise((r) => setTimeout(r, 10));
     const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
     const payload = JSON.parse(init.body as string) as Record<string, unknown>;
@@ -460,7 +365,13 @@ describe('mention injection defense', () => {
 describe('sendWebhook error handling', () => {
   it('logs a warning with response body when Discord returns non-success', async () => {
     mockFetch.mockResolvedValueOnce(new Response('bad payload', { status: 400 }));
-    notifyOrderCreated('o1', 'Acme', 25, 'USD', '1');
+    notifyOrderCreated({
+      orderId: 'o1',
+      merchantName: 'Acme',
+      faceValueMinor: 2500n,
+      currency: 'USD',
+      cryptoCurrency: 'XLM',
+    });
     await new Promise((r) => setTimeout(r, 10));
     expect(mockLog.warn).toHaveBeenCalledWith(
       expect.objectContaining({ status: 400, body: 'bad payload' }),
@@ -470,7 +381,13 @@ describe('sendWebhook error handling', () => {
 
   it('logs a warning when fetch rejects (network/timeout)', async () => {
     mockFetch.mockRejectedValueOnce(new Error('timeout'));
-    notifyOrderCreated('o1', 'Acme', 25, 'USD', '1');
+    notifyOrderCreated({
+      orderId: 'o1',
+      merchantName: 'Acme',
+      faceValueMinor: 2500n,
+      currency: 'USD',
+      cryptoCurrency: 'XLM',
+    });
     await new Promise((r) => setTimeout(r, 10));
     expect(mockLog.warn).toHaveBeenCalledWith(
       expect.objectContaining({ err: expect.any(Error) }),
@@ -481,7 +398,15 @@ describe('sendWebhook error handling', () => {
   it('does not throw from notify functions even when fetch rejects', async () => {
     mockFetch.mockRejectedValueOnce(new Error('boom'));
     // This must not throw — callers are sync `void sendWebhook(...)`.
-    expect(() => notifyOrderCreated('o1', 'm', 1, 'USD', '1')).not.toThrow();
+    expect(() =>
+      notifyOrderCreated({
+        orderId: 'o1',
+        merchantName: 'm',
+        faceValueMinor: 100n,
+        currency: 'USD',
+        cryptoCurrency: 'XLM',
+      }),
+    ).not.toThrow();
   });
 });
 

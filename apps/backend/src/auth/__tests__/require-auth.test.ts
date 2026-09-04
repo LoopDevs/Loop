@@ -224,4 +224,28 @@ describe('requireAuth', () => {
     await requireAuth(fake.ctx, vi.fn().mockResolvedValue(undefined));
     expect(fake.store.get('clientId')).toBeUndefined();
   });
+
+  it('honours an allowlisted X-Client-Id on the Loop-native JWT path', async () => {
+    // Regression guard: the Loop-token branch returns early on success,
+    // so the client-id forwarding must run BEFORE the auth-path fork —
+    // otherwise every loop-native session reaches handlers that require
+    // attribution (POST /api/orders/loop) with clientId undefined.
+    mockTokenVersion = 0;
+    const { token } = signLoopToken({
+      sub: 'user-uuid',
+      email: 'a@b.com',
+      typ: 'access',
+      ttlSeconds: 300,
+      tv: 0,
+    });
+    const fake = makeCtx({
+      Authorization: `Bearer ${token}`,
+      'X-Client-Id': 'loopweb',
+    });
+    const next = vi.fn().mockResolvedValue(undefined);
+    await requireAuth(fake.ctx, next);
+    expect(next).toHaveBeenCalledOnce();
+    expect((fake.store.get('auth') as LoopAuthContext).kind).toBe('loop');
+    expect(fake.store.get('clientId')).toBe('loopweb');
+  });
 });

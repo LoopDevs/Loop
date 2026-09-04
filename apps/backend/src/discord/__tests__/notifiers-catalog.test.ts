@@ -42,17 +42,4 @@ describe('DISCORD_NOTIFIERS covers every notifier that actually fires (AGT-06)',
   it.each(firedNotifiers)('catalog lists %s', (name) => {
     expect(cataloged.has(name)).toBe(true);
   });
-
-  it('lists the deposit-skip notifiers that fire via a direct monitoring.js import', () => {
-    for (const name of [
-      'notifyDepositSkipRecorded',
-      'notifyUnrecognizedDepositRecorded',
-      'notifyDepositSkipAbandoned',
-    ] as const) {
-      // They are genuinely exported (they really fire) — not guessed
-      // names — and they must be in the catalog.
-      expect(monitoring[name]).toBeTypeOf('function');
-      expect(cataloged.has(name)).toBe(true);
-    }
-  });
 });

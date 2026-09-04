@@ -33,12 +33,12 @@ vi.mock('../procurement-redemption.js', () => ({
 
 vi.mock('../../discord.js', () => ({ notifyRedemptionBackfillExhausted: vi.fn() }));
 
-vi.mock('../../ctx/operator-pool.js', () => {
-  class OperatorPoolUnavailableError extends Error {}
-  class OperatorRateLimitedError extends Error {
+vi.mock('../../ctx/api-fetch.js', () => {
+  class CtxUnavailableError extends Error {}
+  class CtxRateLimitedError extends Error {
     readonly retryAfterMs: number | null = null;
   }
-  return { OperatorPoolUnavailableError, OperatorRateLimitedError };
+  return { CtxUnavailableError, CtxRateLimitedError };
 });
 
 const { dbMock, dbState } = vi.hoisted(() => {

@@ -443,14 +443,10 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # docs/ux-pass-2026-07-09.md — apps/web/app/components/features/onboarding/Onboarding.tsx's
 # `getOnboardingCopy()`). UI-side equivalent of the backend Phase 2 gates
 # (LOOP_WORKERS_ENABLED / LOOP_AUTH_NATIVE_ENABLED / INTEREST_APY_BASIS_POINTS).
-# AUDIT-2 finding B (2026-07 hardening): also STRUCTURALLY, server-side
-# gates the loop_asset spend surface — POST /api/orders/loop (create,
-# paymentMethod=loop_asset) and POST /api/orders/loop/:id/redeem
-# (redemption, fail-closed even for orders created before the gate
-# existed) both 400 LOOP_ASSET_UNAVAILABLE_PHASE_1 while this flag is
-# true. Admin emission (credits/emissions.ts) is deliberately NOT
-# gated — it's a privileged step-up admin write that may legitimately
-# run in Phase 1; closing the spend surface is what matters.
+# (The loop_asset spend surface this flag also structurally gated died
+# with ADR 052 — orders are paid at CTX now.) Admin emission
+# (credits/emissions.ts) is deliberately NOT gated — it's a privileged
+# step-up admin write that may legitimately run in Phase 1.
 # Flip back to false to launch cashback — server-side only. Default false.
 # LOOP_PHASE_1_ONLY=true
 
@@ -548,10 +544,10 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # pre-ADR-044. Never logged. See docs/adr/044-payout-throughput.md.
 # LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS=<S...>,<S...>
 
-# R3-5 CTX settlement sanity band. Before paying CTX, procurement
-# refuses a SEP-7 payment amount above this many basis points of the
-# expected wholesale XLM quote. Default 12500 = 125%.
-# LOOP_CTX_PAYMENT_MAX_BPS_OF_EXPECTED=12500
+# ADR 052: CTX payment-currency allowlist for POST /api/orders/loop
+# (chain-qualified codes, comma-separated). Default XLM. Surfaced via
+# GET /api/config → ctxPaymentCurrencies.
+# LOOP_CTX_PAYMENT_CURRENCIES=XLM
 
 # ADR 045 (B-3): Phase-1 fraud/abuse velocity limits on order creation
 # (POST /api/orders/loop), per-USER — distinct from the per-IP rate
@@ -563,13 +559,6 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # LOOP_ORDER_VELOCITY_MAX_PER_WINDOW=20
 # LOOP_ORDER_VELOCITY_WINDOW_HOURS=24
 # LOOP_ORDER_VELOCITY_MAX_VALUE_MINOR=500000
-
-# Hardening A6: auto-refund late deposits (deposits landing after their
-# order expired). Default false → refunds are admin-triggered via
-# POST /api/admin/deposits/:paymentId/refund (admin + step-up). true →
-# the skip-sweep also auto-refunds them to the sender (same
-# refundDeposit() path). Read live (no redeploy to flip).
-# LOOP_DEPOSIT_REFUND_AUTO=false
 
 # CF-26 / X-PRIV-07/08: auth-row retention purge sweep. Runs under
 # LOOP_WORKERS_ENABLED; DELETE-only sweep of expired/consumed OTP rows
@@ -583,19 +572,6 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # sum anywhere. Daily default; single-flighted across machines; runs
 # under LOOP_WORKERS_ENABLED.
 # LOOP_LEDGER_INVARIANT_INTERVAL_HOURS=24
-
-# R3-1: operator XLM/USDC float reconciliation — historical conservation
-# check over the deposit/operator wallet from an operator-created
-# baseline (POST /api/admin/operator-float/baselines, admin + step-up).
-# Fails closed to `needs_baseline` (and pages) with no active baseline —
-# it never re-scans Horizon from genesis. XLM gets a wider default
-# tolerance to absorb Stellar tx fees (~100-200 stroops/tx, uncounted by
-# the model); USDC pays no fee so its default stays exact. Operator
-# runbook (baseline setup + memo policy + drift triage):
-# docs/runbooks/operator-float-drift.md. Runs under LOOP_WORKERS_ENABLED.
-# LOOP_OPERATOR_FLOAT_RECONCILIATION_INTERVAL_HOURS=24
-# LOOP_OPERATOR_FLOAT_XLM_THRESHOLD_STROOPS=10000000    # 1 XLM
-# LOOP_OPERATOR_FLOAT_USDC_THRESHOLD_STROOPS=1          # 1 stroop (exact)
 
 # ADR 030: provider-agnostic embedded-wallet layer. '' (default)
 # → OFF: getWalletProvider() returns null. 'privy' → Privy REST adapter
@@ -618,12 +594,9 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # LOOP_STELLAR_GBPLOOP_ISSUER_SECRET=<S...>   — never logged (and USDLOOP/EURLOOP)
 
 # A2-1907 runtime kill switches (read live from process.env, no
-# redeploy). Combined orders switch plus per-path overrides — a set
-# per-path var wins for its path; unset falls back to the combined.
-# Runbook: docs/runbooks/kill-switch.md.
-# LOOP_KILL_ORDERS=false          — POST /api/orders + /api/orders/loop
-# LOOP_KILL_ORDERS_LEGACY=false   — POST /api/orders only
-# LOOP_KILL_ORDERS_LOOP=false     — POST /api/orders/loop only
+# redeploy). Runbook: docs/runbooks/kill-switch.md.
+# LOOP_KILL_ORDERS=false          — POST /api/orders/loop
+# LOOP_KILL_ORDERS_LOOP=false     — same path; overrides when set
 # LOOP_KILL_AUTH=false
 # LOOP_KILL_EMISSIONS=false
 

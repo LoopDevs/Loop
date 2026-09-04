@@ -6,8 +6,7 @@
  *   - notifyInterestPoolLow / notifyInterestPoolRecovered (paired,
  *     dedup'd per asset)
  *   - notifyPegBreakOnFulfillment (cross-currency divergence)
- *   - notifyUsdcBelowFloor
- *   - notifyOperatorPoolExhausted
+ *   - notifyCtxCredentialInvalid
  *
  * Goal: pin embed shape so a future refactor can't silently rename
  * a field, drop a redaction, or flip a color without CI catching it.
@@ -67,20 +66,14 @@ import {
   notifyInterestPoolLow,
   notifyInterestPoolRecovered,
   notifyPegBreakOnFulfillment,
-  notifyUsdcBelowFloor,
-  notifyOperatorPoolExhausted,
-  notifyOperatorCredentialExpired,
-  notifyOperatorFloatDrift,
-  notifyUnrecognizedDepositRecorded,
-  __resetOperatorCredentialDedupForTests,
-  __resetUnrecognizedDepositDedupForTests,
+  notifyCtxCredentialInvalid,
+  __resetCtxCredentialDedupForTests,
 } from '../monitoring.js';
 
 beforeEach(() => {
   sendWebhookMock.mockReset();
   sendWebhookMock.mockResolvedValue(true);
-  __resetOperatorCredentialDedupForTests();
-  __resetUnrecognizedDepositDedupForTests();
+  __resetCtxCredentialDedupForTests();
 });
 
 interface Embed {
@@ -230,151 +223,19 @@ describe('notifyPegBreakOnFulfillment', () => {
   });
 });
 
-describe('notifyUsdcBelowFloor', () => {
-  it('embeds balance + floor + account in the field set', () => {
-    notifyUsdcBelowFloor({
-      balanceStroops: '5000000',
-      floorStroops: '10000000',
-      account: 'GAACCOUNT',
-    });
+describe('notifyCtxCredentialInvalid (CF-13 / ADR 051)', () => {
+  it('emits red naming the rejected API key + breaker forced OPEN', () => {
+    notifyCtxCredentialInvalid();
     const e = lastEmbed();
-    expect(e.title).toBe('🟡 USDC Reserve Below Floor');
-    expect(e.fields!.find((f) => f.name === 'Balance (stroops)')!.value).toBe('5000000');
-    expect(e.fields!.find((f) => f.name === 'Floor (stroops)')!.value).toBe('10000000');
-    expect(e.description).toContain('GAACCOUNT');
-  });
-});
-
-describe('notifyOperatorPoolExhausted', () => {
-  it('emits red with pool size + last error', () => {
-    notifyOperatorPoolExhausted({ poolSize: 3, reason: 'all 3 operators tripped' });
-    const e = lastEmbed();
-    expect(e.title).toBe('🔴 CTX Operator Pool Exhausted');
+    expect(e.title).toBe('🔴 CTX API Key Rejected (401)');
     expect(e.color).toBe(0xe74c3c);
-    expect(e.fields!.find((f) => f.name === 'Pool size')!.value).toBe('3');
-    expect(e.fields!.find((f) => f.name === 'Last error')!.value).toContain('all 3 operators');
-  });
-});
-
-describe('notifyOperatorFloatDrift (NTF-16 — scrubs the caught exception)', () => {
-  // On the `state: 'error'` path `args.error` is a caught exception's
-  // raw message. It must NOT reach the monitoring channel verbatim: a
-  // thrown message can carry a bearer token / Stellar secret / email /
-  // URL, and it should be scrubbed the same way `sendWebhook` scrubs
-  // upstream error bodies.
-  const errorSummary = {
-    asset: 'xlm' as const,
-    account: 'GABCDEFGHIJKLMNOP',
-    baselineId: 'baseline-1',
-    expectedBalanceStroops: null,
-    actualBalanceStroops: null,
-    deltaStroops: null,
-    thresholdStroops: 1000n,
-    unclassifiedCount: 0,
-    indexedMovementCount: 0,
-    state: 'error' as const,
-    error: null as string | null,
-  };
-
-  it('redacts a token-shaped secret in the exception message instead of embedding it raw', () => {
-    // 40-char opaque token — the shape scrubUpstreamBody redacts.
-    const token = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef01234567';
-    notifyOperatorFloatDrift({
-      ...errorSummary,
-      error: `Horizon request failed: bearer ${token} rejected (ECONNRESET)`,
-    });
-    const e = lastEmbed();
-    expect(e.title).toBe('🔴 Operator Float Reconciliation — check failed');
-    // The raw secret never reaches the channel...
-    expect(e.description).not.toContain(token);
-    // ...it is replaced with a tagged redaction marker.
-    expect(e.description).toContain('REDACTED');
+    expect(e.description).toContain('GIFT_CARD_API_KEY');
+    expect(e.description).toContain('forced OPEN');
   });
 
-  it('still renders the human triage copy (not a raw error) on a drift run with no exception', () => {
-    notifyOperatorFloatDrift({ ...errorSummary, state: 'drift', error: null });
-    expect(lastEmbed().description).toContain('does not reconcile from its active baseline');
-  });
-});
-
-describe('notifyOperatorCredentialExpired (CF-13)', () => {
-  it('emits red with operator id + pool size + failed-over flag', () => {
-    notifyOperatorCredentialExpired({ operatorId: 'op-primary', poolSize: 2, failedOver: true });
-    const e = lastEmbed();
-    expect(e.title).toBe('🔴 CTX Operator Credential Expired (401)');
-    expect(e.color).toBe(0xe74c3c);
-    expect(e.fields!.find((f) => f.name === 'Operator')!.value).toContain('op-primary');
-    expect(e.fields!.find((f) => f.name === 'Pool size')!.value).toBe('2');
-    expect(e.fields!.find((f) => f.name === 'Failed over')!.value).toBe('yes');
-    expect(e.description).toContain('healthy sibling');
-  });
-
-  it('says procurement is blocked when no sibling failover was possible', () => {
-    notifyOperatorCredentialExpired({ operatorId: 'op-only', poolSize: 1, failedOver: false });
-    const e = lastEmbed();
-    expect(e.fields!.find((f) => f.name === 'Failed over')!.value).toBe('no');
-    expect(e.description).toContain('procurement is blocked');
-  });
-
-  it('dedups per-operator within the 10-minute window', () => {
-    notifyOperatorCredentialExpired({ operatorId: 'op-a', poolSize: 2, failedOver: true });
-    notifyOperatorCredentialExpired({ operatorId: 'op-a', poolSize: 2, failedOver: true });
+  it('dedups within the 10-minute window', () => {
+    notifyCtxCredentialInvalid();
+    notifyCtxCredentialInvalid();
     expect(sendWebhookMock).toHaveBeenCalledTimes(1);
-    // A different operator is a distinct dedup key — fires independently.
-    notifyOperatorCredentialExpired({ operatorId: 'op-b', poolSize: 2, failedOver: true });
-    expect(sendWebhookMock).toHaveBeenCalledTimes(2);
-  });
-});
-
-describe('notifyUnrecognizedDepositRecorded (AUDIT-2 finding C — flood-resistant page)', () => {
-  it('emits an orange, count-bearing page on the first (leading-edge) record', () => {
-    notifyUnrecognizedDepositRecorded({ paymentId: '12345678901234', detail: 'op X asset EURC' });
-    expect(sendWebhookMock).toHaveBeenCalledTimes(1);
-    const e = lastEmbed();
-    expect(e.title).toContain('Unrecognized inbound deposit');
-    expect(e.color).toBe(0xe67e22);
-    expect(e.fields!.find((f) => f.name === 'Recorded since last alert')!.value).toBe('1');
-    // Only the last-8 of the Horizon op id is echoed (no full-id leak).
-    expect(e.fields!.find((f) => f.name === 'Latest payment')!.value).toContain('01234');
-  });
-
-  it('a burst of 100 recordings in one window pages at most ONCE (anti-flood dedup)', () => {
-    // The threat: the deposit address is public, so an attacker can pack
-    // ~100 dust ops into one ~1¢ tx. Before the throttle each would fire a
-    // page on the SHARED monitoring channel and drown real alerts past
-    // Discord's rate limit. Assert the whole burst collapses to one page.
-    for (let i = 0; i < 100; i++) {
-      notifyUnrecognizedDepositRecorded({ paymentId: `op-${i}`, detail: null });
-    }
-    expect(sendWebhookMock).toHaveBeenCalledTimes(1);
-  });
-
-  it('pages again after the window elapses, rolling up the suppressed count', () => {
-    vi.useFakeTimers();
-    try {
-      // Realistic epoch base so the first (idle-channel) record fires
-      // promptly — a genuine lone stranded deposit must still page fast.
-      vi.setSystemTime(1_700_000_000_000);
-      __resetUnrecognizedDepositDedupForTests();
-
-      notifyUnrecognizedDepositRecorded({ paymentId: 'a', detail: null }); // fires (count 1)
-      notifyUnrecognizedDepositRecorded({ paymentId: 'b', detail: null }); // held
-      notifyUnrecognizedDepositRecorded({ paymentId: 'c', detail: null }); // held
-      expect(sendWebhookMock).toHaveBeenCalledTimes(1);
-      expect(lastEmbed().fields!.find((f) => f.name === 'Recorded since last alert')!.value).toBe(
-        '1',
-      );
-
-      // Advance past the ~15-min window; the next record pages again and
-      // carries the two held + itself = 3.
-      vi.advanceTimersByTime(15 * 60 * 1000 + 1);
-      notifyUnrecognizedDepositRecorded({ paymentId: 'd', detail: null });
-      expect(sendWebhookMock).toHaveBeenCalledTimes(2);
-      expect(lastEmbed().fields!.find((f) => f.name === 'Recorded since last alert')!.value).toBe(
-        '3',
-      );
-    } finally {
-      vi.useRealTimers();
-    }
   });
 });

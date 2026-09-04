@@ -6,7 +6,7 @@ vi.mock('~/services/api-client', () => ({
   authenticatedRequest: vi.fn(),
 }));
 
-import { createOrder, fetchOrders, fetchOrder } from '../orders';
+import { fetchOrders, fetchOrder } from '../orders';
 import { authenticatedRequest } from '../api-client';
 
 const mockAuthRequest = vi.mocked(authenticatedRequest);
@@ -14,24 +14,6 @@ const mockAuthRequest = vi.mocked(authenticatedRequest);
 describe('orders service', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-  });
-
-  describe('createOrder', () => {
-    it('sends POST with order request body', async () => {
-      mockAuthRequest.mockResolvedValue({ orderId: 'o-1' });
-      await createOrder({ merchantId: 'm-1', amount: 25 });
-      expect(mockAuthRequest).toHaveBeenCalledWith('/api/orders', {
-        method: 'POST',
-        body: { merchantId: 'm-1', amount: 25 },
-      });
-    });
-
-    it('returns the created order response', async () => {
-      const response = { orderId: 'o-1', paymentUri: 'stellar:...' };
-      mockAuthRequest.mockResolvedValue(response);
-      const result = await createOrder({ merchantId: 'm-1', amount: 50 });
-      expect(result).toEqual(response);
-    });
   });
 
   describe('fetchOrders', () => {

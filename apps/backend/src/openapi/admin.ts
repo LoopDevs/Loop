@@ -40,8 +40,6 @@ import { registerAdminDashboardClusterOpenApi } from './admin-dashboard-cluster.
 import { registerAdminFleetMonthlyOpenApi } from './admin-fleet-monthly.js';
 import { registerAdminMiscReadsOpenApi } from './admin-misc-reads.js';
 import { registerAdminOpsTailOpenApi } from './admin-ops-tail.js';
-import { registerAdminOperatorFleetOpenApi } from './admin-operator-fleet.js';
-import { registerAdminOperatorMixOpenApi } from './admin-operator-mix.js';
 import { registerAdminOrderClusterOpenApi } from './admin-order-cluster.js';
 import { registerAdminVaultRecoveryOpenApi } from './admin-vault-recovery.js';
 import { registerAdminPayoutsClusterOpenApi } from './admin-payouts-cluster.js';
@@ -301,55 +299,15 @@ export function registerAdminOpenApi(
 
   // ─── Admin — supplier spend (ADR 013 / 015) ────────────────────────────────
 
-  const AdminSupplierSpendRow = registry.register(
-    'AdminSupplierSpendRow',
-    z.object({
-      currency: z.string().length(3),
-      count: z.number().int().min(0),
-      faceValueMinor: z.string(),
-      wholesaleMinor: z.string(),
-      userCashbackMinor: z.string(),
-      loopMarginMinor: z.string(),
-      marginBps: z.number().int().nonnegative().max(10_000).openapi({
-        description: 'loopMargin / faceValue × 10 000. Clamped [0, 10 000].',
-      }),
-    }),
-  );
-
-  // ─── Admin supplier-spend & treasury credit-flow (ADR 009/013/015) ──────────
+  // ─── Admin treasury credit-flow (ADR 009/015) ───────────────────────────────
   //
-  // The "treasury-velocity triplet" — supplier spend, supplier-spend
-  // activity, treasury credit-flow — lives in ./admin-supplier-spend.ts.
-  // Locally-scoped schemas (AdminSupplierSpendResponse,
-  // AdminSupplierSpendActivityDay/Response,
-  // AdminTreasuryCreditFlowDay/Response) travel with the slice.
-  // `AdminSupplierSpendRow` stays here because it is shared with
-  // ./admin-operator-fleet.ts and is threaded into both slices as a
-  // parameter.
-  registerAdminSupplierSpendOpenApi(registry, errorResponse, AdminSupplierSpendRow);
+  // Lives in ./admin-supplier-spend.ts (historical name; the
+  // supplier-spend paths were retired under ADR 052).
+  registerAdminSupplierSpendOpenApi(registry, errorResponse);
 
   // CTX operator-commission proxy (ctx-interop) — registered right
   // after supplier-spend, its reconciliation counterpart.
   registerAdminCtxCommissionOpenApi(registry, errorResponse);
-
-  //
-  // The three X × operator endpoints (merchants/{id}/operator-mix,
-  // operators/{id}/merchant-mix, users/{id}/operator-mix) plus
-  // their six locally-scoped schemas live in
-  // ./admin-operator-mix.ts. Only `errorResponse` crosses the
-  // slice boundary.
-  registerAdminOperatorMixOpenApi(registry, errorResponse);
-
-  // ─── Admin operator-fleet (ADR 013/015/022) ─────────────────────────────────
-  //
-  // Operator-stats / operator-latency / per-operator supplier-spend
-  // / per-operator activity — the four paths backing the
-  // /admin/operators dashboard. Lifted into ./admin-operator-fleet.ts;
-  // the five locally-scoped schemas travel with it. Threaded deps:
-  // shared `errorResponse` plus the upstream `AdminSupplierSpendRow`
-  // (also reused by the fleet supplier-spend section, so passed in
-  // by reference rather than re-declared).
-  registerAdminOperatorFleetOpenApi(registry, errorResponse, AdminSupplierSpendRow);
 
   // ─── Admin user cluster (ADR 009/015/022) ───────────────────────────────────
   //
@@ -370,7 +328,7 @@ export function registerAdminOpenApi(
   // `AdminPayoutView` schema stays here because it has multiple call
   // sites; `AdminWriteAudit` too (the redrive write's envelope);
   // both threaded as parameters to the slice.
-  registerAdminOrderClusterOpenApi(registry, errorResponse, AdminPayoutView, AdminWriteAudit);
+  registerAdminOrderClusterOpenApi(registry, errorResponse, AdminPayoutView);
 
   // ─── Admin — vault recovery (ADR 031 V7) ────────────────────────────────────
   //

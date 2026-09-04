@@ -17,8 +17,7 @@ const { dbMock, state } = vi.hoisted(() => {
   return { dbMock: m, state: { results } };
 });
 
-const operatorHealthMock = vi.fn();
-const operatorSizeMock = vi.fn();
+const ctxApiHealthMock = vi.fn();
 
 vi.mock('../../db/client.js', () => ({ db: dbMock }));
 vi.mock('../../db/schema.js', () => ({
@@ -38,9 +37,8 @@ vi.mock('../../db/schema.js', () => ({
     state: 'state',
     chargeCurrency: 'chargeCurrency',
     faceValueMinor: 'faceValueMinor',
-    wholesaleMinor: 'wholesaleMinor',
     userCashbackMinor: 'userCashbackMinor',
-    loopMarginMinor: 'loopMarginMinor',
+    expectedCommissionMinor: 'expectedCommissionMinor',
   },
   HOME_CURRENCIES: ['USD', 'GBP', 'EUR'] as const,
   PAYOUT_STATES: ['pending', 'submitted', 'confirmed', 'failed'] as const,
@@ -54,9 +52,8 @@ vi.mock('../../credits/payout-asset.js', () => ({
     issuer: null,
   }),
 }));
-vi.mock('../../ctx/operator-pool.js', () => ({
-  getOperatorHealth: () => operatorHealthMock(),
-  operatorPoolSize: () => operatorSizeMock(),
+vi.mock('../../ctx/api-fetch.js', () => ({
+  getCtxApiHealth: () => ctxApiHealthMock(),
 }));
 
 // Env + Horizon balance reader — each test controls what the admin
@@ -109,8 +106,7 @@ function makeCtx(): { ctx: Context } {
 
 beforeEach(() => {
   state.results.length = 0;
-  operatorHealthMock.mockReset();
-  operatorSizeMock.mockReset();
+  ctxApiHealthMock.mockReset();
   envState.LOOP_STELLAR_DEPOSIT_ADDRESS = undefined;
   envState.LOOP_STELLAR_USDC_ISSUER = undefined;
   balancesState.snapshot = null;
@@ -120,8 +116,7 @@ beforeEach(() => {
       (fn as unknown as { mockClear: () => void }).mockClear();
     }
   }
-  operatorHealthMock.mockReturnValue([]);
-  operatorSizeMock.mockReturnValue(0);
+  ctxApiHealthMock.mockReturnValue({ configured: false, state: 'closed' });
 });
 
 describe('treasuryHandler', () => {
@@ -134,35 +129,12 @@ describe('treasuryHandler', () => {
       outstanding: Record<string, string>;
       totals: Record<string, Record<string, string>>;
       orderFlows: Record<string, unknown>;
-      operatorPool: { size: number; operators: unknown[] };
-      operatorFloat: unknown;
+      ctxApi: { configured: boolean; state: string };
     };
     expect(body.outstanding).toEqual({});
     expect(body.totals).toEqual({});
     expect(body.orderFlows).toEqual({});
-    expect(body.operatorPool).toEqual({ size: 0, operators: [] });
-    expect(body.operatorFloat).toEqual({
-      xlm: {
-        state: 'unknown',
-        expectedBalanceStroops: null,
-        actualBalanceStroops: null,
-        deltaStroops: null,
-        thresholdStroops: null,
-        unclassifiedCount: 0,
-        checkedAt: null,
-        error: null,
-      },
-      usdc: {
-        state: 'unknown',
-        expectedBalanceStroops: null,
-        actualBalanceStroops: null,
-        deltaStroops: null,
-        thresholdStroops: null,
-        unclassifiedCount: 0,
-        checkedAt: null,
-        error: null,
-      },
-    });
+    expect(body.ctxApi).toEqual({ configured: false, state: 'closed' });
   });
 
   it('shapes outstanding balances per currency', async () => {
@@ -347,17 +319,15 @@ describe('treasuryHandler', () => {
           currency: 'GBP',
           count: '12',
           faceValue: '120000',
-          wholesale: '96000',
           userCashback: '6000',
-          loopMargin: '18000',
+          expectedCommission: '18000',
         },
         {
           currency: 'USD',
           count: '4',
           faceValue: '50000',
-          wholesale: '40000',
           userCashback: '2500',
-          loopMargin: '7500',
+          expectedCommission: '7500',
         },
       ],
     );
@@ -369,9 +339,8 @@ describe('treasuryHandler', () => {
         {
           count: string;
           faceValueMinor: string;
-          wholesaleMinor: string;
           userCashbackMinor: string;
-          loopMarginMinor: string;
+          expectedCommissionMinor: string;
         }
       >;
     };
@@ -379,34 +348,24 @@ describe('treasuryHandler', () => {
       GBP: {
         count: '12',
         faceValueMinor: '120000',
-        wholesaleMinor: '96000',
         userCashbackMinor: '6000',
-        loopMarginMinor: '18000',
+        expectedCommissionMinor: '18000',
       },
       USD: {
         count: '4',
         faceValueMinor: '50000',
-        wholesaleMinor: '40000',
         userCashbackMinor: '2500',
-        loopMarginMinor: '7500',
+        expectedCommissionMinor: '7500',
       },
     });
   });
 
-  it('includes the operator-pool snapshot', async () => {
+  it('includes the CTX upstream snapshot', async () => {
     state.results.push([], [], []);
-    operatorSizeMock.mockReturnValue(2);
-    operatorHealthMock.mockReturnValue([
-      { id: 'primary', state: 'closed' },
-      { id: 'backup-1', state: 'open' },
-    ]);
+    ctxApiHealthMock.mockReturnValue({ configured: true, state: 'open' });
     const { ctx } = makeCtx();
     const res = await treasuryHandler(ctx);
-    const body = (await res.json()) as { operatorPool: { size: number; operators: unknown[] } };
-    expect(body.operatorPool.size).toBe(2);
-    expect(body.operatorPool.operators).toEqual([
-      { id: 'primary', state: 'closed' },
-      { id: 'backup-1', state: 'open' },
-    ]);
+    const body = (await res.json()) as { ctxApi: { configured: boolean; state: string } };
+    expect(body.ctxApi).toEqual({ configured: true, state: 'open' });
   });
 });

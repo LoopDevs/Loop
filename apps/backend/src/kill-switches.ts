@@ -6,8 +6,7 @@
  * rate-limit, leaked admin token, etc.) needs the surface gated *now*
  * and the next-deploy cycle is too slow.
  *
- *   - `orders-legacy` → blocks `POST /api/orders` (legacy CTX-proxy path).
- *   - `orders-loop`   → blocks `POST /api/orders/loop` (loop-native path).
+ *   - `orders-loop`   → blocks `POST /api/orders/loop`.
  *   - `auth`          → blocks `POST /api/auth/request-otp`, `verify-otp`,
  *                       `social/google`, `social/apple`. Refresh +
  *                       logout intentionally remain open so existing
@@ -23,16 +22,9 @@
  *
  * Reset by setting `false` (or unsetting).
  *
- * **Per-path order switches (comprehensive-audit 2026-06-11, P10):**
- * the two order paths resolve with precedence — `orders-legacy` reads
- * `LOOP_KILL_ORDERS_LEGACY` first, `orders-loop` reads
- * `LOOP_KILL_ORDERS_LOOP` first; whichever per-path var is UNSET
- * falls back to the combined `LOOP_KILL_ORDERS`. Fully backward
- * compatible: an operator who only sets `LOOP_KILL_ORDERS=true`
- * still blacks out both paths, while a per-path var (even an
- * explicit `false`) overrides the combined switch for that path —
- * e.g. `LOOP_KILL_ORDERS=true` + `LOOP_KILL_ORDERS_LOOP=false`
- * gates the legacy path only.
+ * **Per-path order switch (comprehensive-audit 2026-06-11, P10):**
+ * `orders-loop` reads `LOOP_KILL_ORDERS_LOOP` first; when UNSET it
+ * falls back to the combined `LOOP_KILL_ORDERS`.
  *
  * **A4-047:** parsing is now strict. Recognised truthy values
  * (`true`/`1`/`yes`/`on`) engage the kill; recognised falsy
@@ -57,7 +49,7 @@ import { logger } from './logger.js';
 const TRUTHY = new Set(['true', '1', 'yes', 'on']);
 const FALSY = new Set(['false', '0', 'no', 'off', '']);
 
-export type KillSwitch = 'orders-legacy' | 'orders-loop' | 'auth' | 'emissions';
+export type KillSwitch = 'orders-loop' | 'auth' | 'emissions';
 
 /**
  * Env keys per subsystem, in precedence order: the first key that is
@@ -65,7 +57,6 @@ export type KillSwitch = 'orders-legacy' | 'orders-loop' | 'auth' | 'emissions';
  * unset-fallback chain.
  */
 const ENV_KEYS: Record<KillSwitch, readonly string[]> = {
-  'orders-legacy': ['LOOP_KILL_ORDERS_LEGACY', 'LOOP_KILL_ORDERS'],
   'orders-loop': ['LOOP_KILL_ORDERS_LOOP', 'LOOP_KILL_ORDERS'],
   auth: ['LOOP_KILL_AUTH'],
   // Pre-ADR-036 this was `withdrawals` / `LOOP_KILL_WITHDRAWALS` —

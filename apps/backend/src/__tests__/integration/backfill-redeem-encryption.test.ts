@@ -54,17 +54,11 @@ async function seedOrder(args: {
       currency: 'USD',
       chargeMinor: 2500n,
       chargeCurrency: 'USD',
-      paymentMethod: 'credit', // skips the payment_memo coherence CHECK
-      wholesalePct: '70.00',
-      userCashbackPct: '5.00',
-      loopMarginPct: '25.00',
-      wholesaleMinor: 1750n,
+      paymentCryptoCurrency: 'XLM',
       userCashbackMinor: 125n,
-      loopMarginMinor: 625n,
       state: 'fulfilled',
       redeemCode: args.redeemCode,
       redeemPin: args.redeemPin,
-      paidAt: new Date(),
     })
     .returning({ id: orders.id });
   if (row === undefined) throw new Error('seed: orders insert returned no row');
