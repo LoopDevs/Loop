@@ -15,6 +15,12 @@
 if (!process.env['GIFT_CARD_API_BASE_URL']) {
   process.env['GIFT_CARD_API_BASE_URL'] = 'https://placeholder-for-tests.local';
 }
+if (!process.env['GIFT_CARD_API_KEY']) {
+  process.env['GIFT_CARD_API_KEY'] = 'placeholder-api-key';
+}
+if (!process.env['GIFT_CARD_API_SECRET']) {
+  process.env['GIFT_CARD_API_SECRET'] = 'placeholder-api-secret';
+}
 if (!process.env['DATABASE_URL']) {
   // Valid postgres URL shape — satisfies the zod `.url()` + protocol
   // check in `env.ts`. No test actually opens a connection to this

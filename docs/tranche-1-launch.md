@@ -47,7 +47,7 @@ User-hidden (gated behind `LOOP_PHASE_1_ONLY=true`):
 Inert at the backend level (independent flags, all default off):
 
 - Loop-native auth (`LOOP_AUTH_NATIVE_ENABLED=false`) — `/api/auth/*` proxies to CTX, no Loop-issued JWTs
-- Loop-native orders (`LOOP_AUTH_NATIVE_ENABLED && LOOP_WORKERS_ENABLED && LOOP_STELLAR_DEPOSIT_ADDRESS`) — all required, all unset → `loopOrdersEnabled=false`
+- Loop-native orders (`LOOP_AUTH_NATIVE_ENABLED`) — unset → `loopOrdersEnabled=false`
 - Payment watcher / procurement worker / payout worker / asset-drift watcher → not started
 - Interest accrual (`INTEREST_APY_BASIS_POINTS=0`) → scheduler off
 - LOOP-asset issuance — issuer env vars unset, drift watcher silent
@@ -72,7 +72,6 @@ LOOP_PHASE_1_ONLY=true
 # merchant of record; users pay Loop's deposit address; Loop's
 # procurement worker pays CTX in XLM)
 LOOP_AUTH_NATIVE_ENABLED=true
-LOOP_WORKERS_ENABLED=true
 LOOP_JWT_SIGNING_KEY=                         # 48+ random bytes; openssl rand -base64 48
 LOOP_STELLAR_DEPOSIT_ADDRESS=G…               # Loop treasury account (where users send XLM/USDC)
 LOOP_STELLAR_OPERATOR_SECRET=S…               # Operator signing key (pays CTX from treasury)
@@ -162,7 +161,6 @@ Set secrets via:
 flyctl secrets set -a loopfinance-api \
   LOOP_PHASE_1_ONLY=true \
   LOOP_AUTH_NATIVE_ENABLED=true \
-  LOOP_WORKERS_ENABLED=true \
   LOOP_JWT_SIGNING_KEY="$(openssl rand -base64 48)" \
   LOOP_STELLAR_DEPOSIT_ADDRESS=G… \
   LOOP_STELLAR_OPERATOR_SECRET=S… \

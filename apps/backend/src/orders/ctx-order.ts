@@ -14,7 +14,6 @@
  * so the conversion is a fixed ×100.
  */
 import { z } from 'zod';
-import { env } from '../env.js';
 import { logger } from '../logger.js';
 import { ctxFetch } from '../ctx/api-fetch.js';
 import { upstreamUrl } from '../upstream.js';
@@ -192,7 +191,6 @@ export function __resetProfitShareCacheForTests(): void {
 
 async function operatorCompany(): Promise<CtxOperatorCompany | null> {
   if (cachedCompany !== null) return cachedCompany;
-  if (env.GIFT_CARD_API_KEY === undefined || env.GIFT_CARD_API_SECRET === undefined) return null;
   try {
     const res = await ctxFetch(upstreamUrl('/me'), {
       method: 'GET',

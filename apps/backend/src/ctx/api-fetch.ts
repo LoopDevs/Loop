@@ -101,12 +101,12 @@ export interface CtxApiCredentials {
 }
 
 /**
- * The configured API-key credentials, or `null` when unset. Used by
- * call sites (CTX SSE stream) that can't route through `ctxFetch`
- * because the transport isn't a single substitutable `fetch` call.
+ * The operator API-key credentials. Always present — the env schema
+ * requires them at boot. Used by call sites (CTX SSE stream) that
+ * can't route through `ctxFetch` because the transport isn't a single
+ * substitutable `fetch` call.
  */
-export function ctxApiCredentials(): CtxApiCredentials | null {
-  if (env.GIFT_CARD_API_KEY === undefined || env.GIFT_CARD_API_SECRET === undefined) return null;
+export function ctxApiCredentials(): CtxApiCredentials {
   return {
     apiKey: env.GIFT_CARD_API_KEY,
     apiSecret: env.GIFT_CARD_API_SECRET,
@@ -117,10 +117,12 @@ export function ctxApiCredentials(): CtxApiCredentials | null {
 /**
  * Snapshot of the upstream credential + breaker state — for `/health`
  * and the admin treasury snapshot (ADR 013's observability bullet,
- * collapsed to a single upstream under ADR 051).
+ * collapsed to a single upstream under ADR 051). `configured` is
+ * always true now that the env schema requires the credentials; the
+ * field survives for response-shape stability.
  */
 export function getCtxApiHealth(): { configured: boolean; state: string } {
-  return { configured: ctxApiCredentials() !== null, state: getBreaker().getState() };
+  return { configured: true, state: getBreaker().getState() };
 }
 
 /**
@@ -152,11 +154,6 @@ async function drainBody(res: Response): Promise<void> {
  */
 export async function ctxFetch(url: string | URL, init?: RequestInit): Promise<Response> {
   const creds = ctxApiCredentials();
-  if (creds === null) {
-    throw new CtxUnavailableError(
-      'CTX API credentials are not configured (GIFT_CARD_API_KEY unset)',
-    );
-  }
 
   const signal: AbortSignal | undefined =
     init?.signal ?? AbortSignal.timeout(CTX_FETCH_DEFAULT_TIMEOUT_MS);

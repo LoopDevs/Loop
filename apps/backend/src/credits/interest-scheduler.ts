@@ -9,15 +9,10 @@
  * primitive has thorough test coverage — but `user_credits` rows
  * never gain interest because nothing ticks.
  *
- * This module is the tick. Gated TWO ways:
- *
- *   1. `LOOP_WORKERS_ENABLED` (the same umbrella flag the payout
- *      worker + payment watcher sit behind) — off by default
- *      outside production.
- *   2. `INTEREST_APY_BASIS_POINTS > 0` — zero disables accrual even
- *      with the umbrella flag on. Matches ADR 009's "feature-flagged
- *      off until counsel confirms the framing in each target market"
- *      stance.
+ * This module is the tick, gated on
+ * `INTEREST_APY_BASIS_POINTS > 0` — zero (the default) disables
+ * accrual entirely. Matches ADR 009's "feature-flagged off until
+ * counsel confirms the framing in each target market" stance.
  *
  * Period cursor is the UTC calendar date as `YYYY-MM-DD`. Two ticks
  * inside the same UTC day are a no-op per user+currency thanks to

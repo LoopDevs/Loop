@@ -109,11 +109,11 @@ export const authEnvFields = {
   // Phase 1 launch gate. When true, the public + onboarding surfaces
   // hide every Phase 2 cashback / wallet / LOOP-asset element so the
   // app reads as a pure XLM-via-CTX gift-card store. The Phase 2
-  // backend code paths (workers, payout submit, asset-drift watcher,
-  // interest accrual) are independently gated on
-  // LOOP_WORKERS_ENABLED / LOOP_AUTH_NATIVE_ENABLED /
-  // INTEREST_APY_BASIS_POINTS — those should also be off in a Phase 1
-  // deployment. This flag is the *UI-side* equivalent: hides
+  // backend code paths (payout submit, asset-drift watcher,
+  // interest accrual) are independently gated on their own config
+  // (Stellar secrets / LOOP_AUTH_NATIVE_ENABLED /
+  // INTEREST_APY_BASIS_POINTS) — those should also be off in a
+  // Phase 1 deployment. This flag is the *UI-side* equivalent: hides
   // /cashback, /settings/wallet, /settings/cashback, the navbar
   // links, the cashback rate badges on merchant cards, the
   // currency picker + wallet-intro onboarding screens, and any
@@ -214,7 +214,7 @@ export const authEnvFields = {
 
   // ADR 031 / ADR 036 Phase D: nightly on-chain interest mints.
   // When true (and at least one issuer SECRET above is configured,
-  // and INTEREST_APY_BASIS_POINTS > 0, and LOOP_WORKERS_ENABLED),
+  // and INTEREST_APY_BASIS_POINTS > 0),
   // the interest-mint worker replaces the legacy off-chain-only
   // accrual scheduler: each UTC day it snapshots activated-wallet
   // LOOP balances from Horizon, credits the `user_credits` mirror

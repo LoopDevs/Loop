@@ -19,10 +19,11 @@
  * authoritative `GET /gift-cards/:id` for the codes.
  *
  * Same lifecycle discipline as `merchants/ws-maintainer.ts`:
- * operator creds required, undici WebSocket with auth headers on the
- * upgrade, exponential reconnect (1s → 60s, ±25% jitter), and the
- * mirror sweep (`orders/ctx-mirror-sweep.ts`) as the missed-event
- * safety net — the ws has no replay.
+ * undici WebSocket with the operator auth headers on the upgrade
+ * (the env schema guarantees the creds at boot), exponential
+ * reconnect (1s → 60s, ±25% jitter), and the mirror sweep
+ * (`orders/ctx-mirror-sweep.ts`) as the missed-event safety net —
+ * the ws has no replay.
  */
 import { z } from 'zod';
 import { env } from '../env.js';
@@ -70,10 +71,6 @@ export function getGiftcardWsStatus(): GiftcardWsStatus {
 }
 
 export function startGiftcardWs(): void {
-  if (env.GIFT_CARD_API_KEY === undefined || env.GIFT_CARD_API_SECRET === undefined) {
-    log.info('CTX ws giftcard maintenance disabled — operator API creds not configured');
-    return;
-  }
   stopped = false;
   connect();
 }
@@ -110,8 +107,8 @@ function connect(): void {
   try {
     ws = new WebSocket(wsUrl(), {
       headers: {
-        'X-Api-Key': env.GIFT_CARD_API_KEY ?? '',
-        'X-Api-Secret': env.GIFT_CARD_API_SECRET ?? '',
+        'X-Api-Key': env.GIFT_CARD_API_KEY,
+        'X-Api-Secret': env.GIFT_CARD_API_SECRET,
       },
     } as unknown as string[]);
   } catch (err) {

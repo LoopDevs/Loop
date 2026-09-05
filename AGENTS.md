@@ -442,7 +442,7 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # cashback/bank-transfer framing to discount framing (U-2 / UX-01,
 # docs/ux-pass-2026-07-09.md — apps/web/app/components/features/onboarding/Onboarding.tsx's
 # `getOnboardingCopy()`). UI-side equivalent of the backend Phase 2 gates
-# (LOOP_WORKERS_ENABLED / LOOP_AUTH_NATIVE_ENABLED / INTEREST_APY_BASIS_POINTS).
+# (Stellar secrets/issuers / LOOP_AUTH_NATIVE_ENABLED / INTEREST_APY_BASIS_POINTS).
 # (The loop_asset spend surface this flag also structurally gated died
 # with ADR 052 — orders are paid at CTX now.) Admin emission
 # (credits/emissions.ts) is deliberately NOT gated — it's a privileged
@@ -467,10 +467,9 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # NODE_ENV=development
 # LOG_LEVEL=info                      — trace|debug|info|warn|error|fatal|silent
 
-# A2-207: payout submit worker (ADR 016). Default off outside production
-# so a dev-mode backend doesn't submit Stellar transactions; set true in
-# production + Fly staging after LOOP_STELLAR_OPERATOR_SECRET is wired.
-# LOOP_WORKERS_ENABLED=true
+# A2-207: payout submit worker (ADR 016). Starts whenever
+# LOOP_STELLAR_OPERATOR_SECRET is configured — a dev-mode backend
+# without the secret never submits Stellar transactions.
 
 # ADR 031 §Detailed design D9: vault-subsystem master switch for the
 # LOOPUSD/LOOPEUR DeFindex-vault path. V1 = schema + read layer; V2
@@ -482,11 +481,9 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # every vault function checks it first regardless of table contents,
 # and fulfillment.ts's fork additionally requires !LOOP_PHASE_1_ONLY.
 # Default false: an empty registry table + this flag off is
-# byte-identical to pre-migration. Boot fails unless (a)
-# LOOP_SOROBAN_RPC_URL is also set (any env), and (b) in PRODUCTION,
-# LOOP_WORKERS_ENABLED=true too — the vault-emission sweep that drains
-# a claimed vault_emissions row only runs under LOOP_WORKERS_ENABLED,
-# so vaults-on/workers-off would strand every vault cashback.
+# byte-identical to pre-migration. Boot fails unless
+# LOOP_SOROBAN_RPC_URL is also set (any env); the vault sweeps start
+# with the flag, so vaults-on always has a drainer.
 # LOOP_VAULTS_ENABLED=true
 
 # ADR 031 §Detailed design D2/D9, V2 (ADR 049). Soroban RPC endpoint
@@ -501,7 +498,7 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # ADR 031 §Detailed design D4 (V5): vault drift + solvency watcher
 # (credits/vaults/vault-drift-watcher.ts) — the Soroban LOOPUSD/LOOPEUR
 # twin of the classic asset-drift watcher. 300s (5m) default. Runs
-# under LOOP_WORKERS_ENABLED AND LOOP_VAULTS_ENABLED.
+# under LOOP_VAULTS_ENABLED.
 # LOOP_VAULT_DRIFT_WATCHER_INTERVAL_SECONDS=300
 # INV-V1 threshold, 7-decimal vault-share smallest unit. 1e8 = 10
 # whole shares.
@@ -517,7 +514,7 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # redemption bookkeeping, catching the V4-accepted slow-withdraw-race /
 # phantom-share residual (docs/invariants.md's "Known residual"
 # under Vault redemptions). Daily default, matching R3-1's cadence.
-# Runs under LOOP_WORKERS_ENABLED AND LOOP_VAULTS_ENABLED.
+# Runs under LOOP_VAULTS_ENABLED.
 # LOOP_VAULT_FLOAT_RECONCILIATION_INTERVAL_HOURS=24
 # Share-count tolerance for the check above, same 7-decimal unit as
 # LOOP_VAULT_DRIFT_SHARES_THRESHOLD_STROOPS.
@@ -529,9 +526,8 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # GET /api/me/vault-apy can compute a past-30d/90d APY per LOOP-branded
 # yield asset from history instead of a live Soroban call per request.
 # 24h default — daily resolution is enough for a 30/90-day annualised
-# figure; not latency-sensitive. Runs under LOOP_WORKERS_ENABLED AND
-# LOOP_VAULTS_ENABLED, single-flighted fleet-wide like the drift
-# watcher above.
+# figure; not latency-sensitive. Runs under LOOP_VAULTS_ENABLED,
+# single-flighted fleet-wide like the drift watcher above.
 # LOOP_VAULT_APY_SNAPSHOT_INTERVAL_HOURS=24
 
 # ADR 044 / S4-1: payout channel accounts (Stellar payout throughput).
@@ -560,8 +556,8 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # LOOP_ORDER_VELOCITY_WINDOW_HOURS=24
 # LOOP_ORDER_VELOCITY_MAX_VALUE_MINOR=500000
 
-# CF-26 / X-PRIV-07/08: auth-row retention purge sweep. Runs under
-# LOOP_WORKERS_ENABLED; DELETE-only sweep of expired/consumed OTP rows
+# CF-26 / X-PRIV-07/08: auth-row retention purge sweep. Always on;
+# DELETE-only sweep of expired/consumed OTP rows
 # + dead refresh-token rows past the retention grace. Runbook:
 # docs/runbooks/dsr.md.
 # LOOP_AUTH_ROW_PURGE_INTERVAL_HOURS=1
@@ -569,8 +565,8 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 
 # Hardening C1: scheduled off-chain ledger-invariant check — pages
 # Discord while user_credits disagrees with the credit_transactions
-# sum anywhere. Daily default; single-flighted across machines; runs
-# under LOOP_WORKERS_ENABLED.
+# sum anywhere. Daily default; single-flighted across machines;
+# always on.
 # LOOP_LEDGER_INVARIANT_INTERVAL_HOURS=24
 
 # ADR 030: provider-agnostic embedded-wallet layer. '' (default)

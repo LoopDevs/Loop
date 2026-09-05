@@ -245,10 +245,10 @@ export async function refreshFleetSize(): Promise<void> {
 }
 
 /**
- * Starts the background refresh interval. Always-on (not gated behind
- * `LOOP_WORKERS_ENABLED`) because every machine enforces rate limits,
- * not just the ones running the Loop-native order workers — unlike
- * those workers, this isn't optional infrastructure. No-op in
+ * Starts the background refresh interval. Always-on because every
+ * machine enforces rate limits, not just the ones running background
+ * workers — unlike those workers, this isn't optional
+ * infrastructure. No-op in
  * `NODE_ENV=test` (vitest imports `app.ts` repeatedly across files; a
  * leaked interval keeps the runner alive, same reasoning as
  * `startCleanupInterval` in `cleanup.ts`). `.unref()`'d so a process

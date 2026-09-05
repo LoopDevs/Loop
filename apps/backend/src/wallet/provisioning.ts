@@ -744,9 +744,9 @@ let provisioningTimer: ReturnType<typeof setInterval> | null = null;
 
 /**
  * Starts the periodic provisioning sweeper. Gated at the caller
- * (`index.ts`) by `LOOP_WORKERS_ENABLED` + a configured wallet
- * provider. Per-tick errors are swallowed so a transient provider /
- * Horizon / DB blip doesn't kill the interval.
+ * (`index.ts`) by a configured wallet provider. Per-tick errors are
+ * swallowed so a transient provider / Horizon / DB blip doesn't kill
+ * the interval.
  */
 export function startWalletProvisioning(args?: { intervalMs?: number }): void {
   if (provisioningTimer !== null) return;

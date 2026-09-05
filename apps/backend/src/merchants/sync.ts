@@ -287,10 +287,10 @@ async function refreshMerchantsInternal(opts: { rethrow?: boolean } = {}): Promi
   // merchants CTX serves Loop (linked, with effective per-operator
   // `status` and any per-link discount override) — the same scope the
   // ws merchant topic and /locations use.
-  const authHeaders: Record<string, string> =
-    env.GIFT_CARD_API_KEY !== undefined && env.GIFT_CARD_API_SECRET !== undefined
-      ? { 'X-Api-Key': env.GIFT_CARD_API_KEY, 'X-Api-Secret': env.GIFT_CARD_API_SECRET }
-      : {};
+  const authHeaders: Record<string, string> = {
+    'X-Api-Key': env.GIFT_CARD_API_KEY,
+    'X-Api-Secret': env.GIFT_CARD_API_SECRET,
+  };
 
   try {
     while (page <= totalPages && page <= MAX_PAGES) {

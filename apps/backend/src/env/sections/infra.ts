@@ -136,13 +136,6 @@ export const infraEnvFields = {
   LOOP_PAYOUT_FEE_CAP_STROOPS: z.coerce.number().int().positive().default(100_000),
   LOOP_PAYOUT_FEE_MULTIPLIER: z.coerce.number().positive().default(2),
 
-  // Feature flag for the Loop-native order workers (ADR 010). When
-  // true at boot, the backend starts the payment watcher and
-  // procurement worker intervals. Default false — workers are opt-in
-  // per deployment so a fresh clone doesn't start hitting Horizon /
-  // CTX pre-configuration.
-  LOOP_WORKERS_ENABLED: envBoolean.default(false),
-
   // ADR 031 §Detailed design D9: vault-subsystem master switch for the
   // LOOPUSD/LOOPEUR DeFindex-vault path (V1 foundation — schema +
   // read layer only, no Soroban client / emission / withdraw logic
@@ -228,7 +221,7 @@ export const infraEnvFields = {
   // Off by default (0 bps) — ADR 009 explicitly feature-flags this
   // "until counsel confirms the framing of interest on promotional
   // credits in each target market." Switching on requires setting
-  // INTEREST_APY_BASIS_POINTS > 0 AND LOOP_WORKERS_ENABLED=true.
+  // INTEREST_APY_BASIS_POINTS > 0.
   // APY in integer basis points (400 = 4.00%); periodsPerYear is
   // the denominator the primitive divides the annual rate by (365
   // for daily, 12 for monthly, 52 for weekly). Tick interval is the
@@ -240,8 +233,8 @@ export const infraEnvFields = {
   INTEREST_PERIODS_PER_YEAR: z.coerce.number().int().positive().default(365),
   INTEREST_TICK_INTERVAL_HOURS: z.coerce.number().int().positive().default(24),
 
-  // CF-26 / X-PRIV-07/08: auth-row retention purge. Periodic sweep
-  // (gated with the other workers on LOOP_WORKERS_ENABLED) that deletes
+  // CF-26 / X-PRIV-07/08: auth-row retention purge. Always-on
+  // periodic sweep that deletes
   // expired/consumed OTP rows and dead (expired or long-revoked)
   // refresh-token rows past the retention grace. Both tables hold PII
   // (email / token hash) with no lawful basis to retain dead rows. The
@@ -257,7 +250,7 @@ export const infraEnvFields = {
   // still equals SUM(credit_transactions) per (user, currency), paging
   // Discord while any drift persists. Full-table aggregate, so daily
   // by default; the check single-flights across machines via an
-  // advisory lock. Runs under LOOP_WORKERS_ENABLED.
+  // advisory lock. Always on.
   LOOP_LEDGER_INVARIANT_INTERVAL_HOURS: z.coerce.number().int().positive().default(24),
   LOOP_AUTH_ROW_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
 
@@ -284,8 +277,8 @@ export const infraEnvFields = {
   // (`credits/vaults/vault-drift-watcher.ts`) — the Soroban
   // LOOPUSD/LOOPEUR twin of the classic asset-drift watcher above.
   // 300s (5m) default, same cadence reasoning: an accounting metric,
-  // not latency-sensitive. Runs under LOOP_WORKERS_ENABLED AND
-  // LOOP_VAULTS_ENABLED (checked inside the tick — an unstarted
+  // not latency-sensitive. Runs under LOOP_VAULTS_ENABLED
+  // (checked inside the tick — an unstarted
   // watcher with vaults off is consistent, not merely inert).
   LOOP_VAULT_DRIFT_WATCHER_INTERVAL_SECONDS: z.coerce.number().int().positive().default(300),
 
@@ -314,8 +307,8 @@ export const infraEnvFields = {
   // accepted slow-withdraw-race / phantom-share residual
   // (`docs/invariants.md`'s "Known residual (NOT self-correcting)"
   // under Vault redemptions). Daily default, matching R3-1's cadence
-  // (an accounting reconciliation, not latency-sensitive). Runs under
-  // LOOP_WORKERS_ENABLED AND LOOP_VAULTS_ENABLED.
+  // (an accounting reconciliation, not latency-sensitive). Runs
+  // under LOOP_VAULTS_ENABLED.
   LOOP_VAULT_FLOAT_RECONCILIATION_INTERVAL_HOURS: z.coerce.number().int().positive().default(24),
 
   // Share-count tolerance for the float/pool desync check above, same
@@ -335,7 +328,7 @@ export const infraEnvFields = {
   // USDC — catching a float RECORDED as backing that isn't physically
   // held. Daily default, matching R3-1 / the share reconciler (an
   // accounting reconciliation, not latency-sensitive). Runs under
-  // LOOP_WORKERS_ENABLED AND LOOP_VAULTS_ENABLED.
+  // LOOP_VAULTS_ENABLED.
   LOOP_HOT_FLOAT_BACKING_RECONCILIATION_INTERVAL_HOURS: z.coerce
     .number()
     .int()
@@ -362,7 +355,7 @@ export const infraEnvFields = {
   // 90-day range from history instead of hitting Soroban per request.
   // 24h default — a daily sample is enough resolution for a 30/90-day
   // annualised figure; not latency-sensitive. Runs under
-  // LOOP_WORKERS_ENABLED AND LOOP_VAULTS_ENABLED, single-flighted
+  // LOOP_VAULTS_ENABLED, single-flighted
   // fleet-wide like the drift watcher above.
   LOOP_VAULT_APY_SNAPSHOT_INTERVAL_HOURS: z.coerce.number().int().positive().default(24),
 };

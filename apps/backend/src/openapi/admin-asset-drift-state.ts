@@ -85,7 +85,7 @@ export function registerAdminAssetDriftStateOpenApi(
     path: '/api/admin/asset-drift/state',
     summary: 'Persisted snapshot of the asset-drift watcher (ADR 015).',
     description:
-      "Surfaces the background drift watcher's last-pass per-asset state (persisted in `asset_drift_state`, fleet-consistent) without forcing a fresh Horizon read. `running: false` means the watcher is not active in this process (no LOOP issuers configured or `LOOP_WORKERS_ENABLED=false`). `perAsset[].state` is `unknown` until the first successful per-asset tick. `perAsset[].failedRowsState = 'present'` flags terminally-failed burn / interest-mint rows needing an operator retry. Cheap enough to poll from the admin landing (120/min rate limit).",
+      "Surfaces the background drift watcher's last-pass per-asset state (persisted in `asset_drift_state`, fleet-consistent) without forcing a fresh Horizon read. `running: false` means the watcher is not active in this process (no LOOP issuers configured). `perAsset[].state` is `unknown` until the first successful per-asset tick. `perAsset[].failedRowsState = 'present'` flags terminally-failed burn / interest-mint rows needing an operator retry. Cheap enough to poll from the admin landing (120/min rate limit).",
     tags: ['Admin'],
     security: [{ bearerAuth: [] }],
     responses: {

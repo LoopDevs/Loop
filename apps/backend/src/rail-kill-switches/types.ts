@@ -9,8 +9,8 @@
  * `fly secrets set` + a rolling restart and read live from `process.env`.
  *
  * The rails here (deposit / payout / vault / refund) have NO runtime halt
- * today — only coarse boot flags (`LOOP_WORKERS_ENABLED`,
- * `LOOP_VAULTS_ENABLED`) that need a redeploy. NS-04 proposes a
+ * today — only coarse boot config (Stellar secrets,
+ * `LOOP_VAULTS_ENABLED`) that needs a redeploy. NS-04 proposes a
  * `rail_kill_switches` table (migration 0071+, applied later, serialized —
  * NOT part of this scaffold) so an admin can halt/resume a single rail
  * without a redeploy, and each rail's entry point rejects new work while

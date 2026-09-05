@@ -2,7 +2,7 @@
 
 Cross-platform app for buying discounted gift cards with XLM, USDC, or LOOP-asset cashback (USDLOOP / GBPLOOP / EURLOOP). Off-chain credits ledger + Stellar-side LOOP-asset payout for users who link a wallet. Single brand only (Loop, no white-label).
 
-**Phase 1 shipped:** XLM / USDC purchase rails, off-chain cashback ledger (ADR 009), per-merchant cashback split (ADR 011), Stellar wallet linking, LOOP-asset outbound payout worker (ADR 016) gated behind `LOOP_WORKERS_ENABLED` + per-currency issuer envs.
+**Phase 1 shipped:** XLM / USDC purchase rails, off-chain cashback ledger (ADR 009), per-merchant cashback split (ADR 011), Stellar wallet linking, LOOP-asset outbound payout worker (ADR 016) gated behind the operator-secret + per-currency issuer envs.
 **Phase 2 in progress:** principal-switch payment rails (ADR 010), Loop-native auth (ADR 013, gated by `LOOP_AUTH_NATIVE_ENABLED`), social login (ADR 014), admin step-up auth (ADR 028, designed-not-implemented), tax/regulatory CSV emitter (ADR 026, designed-not-implemented), user-initiated cash-out flow (ADR 024 Phase 2b).
 
 ## Quick start

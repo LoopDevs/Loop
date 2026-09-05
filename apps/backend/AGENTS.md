@@ -15,7 +15,7 @@ src/
 ├── discord.ts          ← Webhook senders (orders, health, circuit, payout-failed, below-floor)
 ├── openapi.ts          ← OpenAPI 3.1 spec (every new handler registers its path + status codes)
 ├── auth/handler.ts     ← Auth proxy + Loop-native OTP (ADR 013 + ADR 014 social login)
-├── auth/auth-row-purge.ts ← Retention sweep deleting expired/consumed OTP rows + dead refresh-token rows past LOOP_AUTH_ROW_RETENTION_DAYS (CF-26 / X-PRIV-07/08; gated on LOOP_WORKERS_ENABLED; runbooks/dsr.md)
+├── auth/auth-row-purge.ts ← Retention sweep deleting expired/consumed OTP rows + dead refresh-token rows past LOOP_AUTH_ROW_RETENTION_DAYS (CF-26 / X-PRIV-07/08; always on; runbooks/dsr.md)
 ├── csv/csv-escape.ts   ← Shared CSV cell escaper (RFC 4180 + formula-injection guard; CF-26 / X-PRIV-11). admin/csv-escape.ts re-exports it; user + tax-script exporters import it directly
 ├── auth/signer.ts      ← Pluggable JWT signer — RS256 (kid = RFC 7638 thumbprint) preferred
 │                         when LOOP_JWT_RSA_PRIVATE_KEY is set, HS256 fallback (ADR 030 Phase A)
@@ -103,7 +103,7 @@ src/
 │                           (gated on !LOOP_PHASE_1_ONLY too) inside the SAME txn as
 │                           the order's `fulfilled` transition; driven forward by the
 │                           interval-based `startVaultEmissionSweep` worker (gated on
-│                           LOOP_WORKERS_ENABLED + LOOP_VAULTS_ENABLED). The sweep
+│                           LOOP_VAULTS_ENABLED). The sweep
 │                           SELECTs FOR UPDATE SKIP LOCKED and CASes pending →
 │                           depositing before any deposit — the cross-machine
 │                           double-deposit guard (mirrors the payout worker's claim;

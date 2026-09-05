@@ -55,8 +55,11 @@ export default defineConfig({
         NODE_ENV: 'test',
         LOG_LEVEL: 'warn',
         // No real CTX upstream — the loop-native flow under test
-        // doesn't talk to it. Still required by env.ts validation.
+        // doesn't talk to it. Still required by env.ts validation
+        // (base URL and operator creds alike).
         GIFT_CARD_API_BASE_URL: 'http://unused.test.local',
+        GIFT_CARD_API_KEY: 'flywheel-e2e-unused-api-key',
+        GIFT_CARD_API_SECRET: 'flywheel-e2e-unused-api-secret',
         LOCATION_REFRESH_INTERVAL_HOURS: '24',
         DATABASE_URL: 'postgres://loop:loop@localhost:5433/loop_test',
         // Enable loop-native auth — this is the whole point of the
@@ -74,7 +77,10 @@ export default defineConfig({
         LOOP_STELLAR_USDLOOP_ISSUER: 'GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
         LOOP_STELLAR_GBPLOOP_ISSUER: 'GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC',
         LOOP_STELLAR_EURLOOP_ISSUER: 'GDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD',
-        LOOP_WORKERS_ENABLED: 'false',
+        // The issuer fixtures above would otherwise light up the
+        // asset-drift watcher against real pubnet Horizon — point it
+        // at a dead local port so its ticks fail fast and offline.
+        LOOP_STELLAR_HORIZON_URL: 'http://localhost:9096',
         DISABLE_RATE_LIMITING: '1',
         // AUDIT-2-E: required second control (in addition to
         // NODE_ENV=test) before test-endpoints.ts mounts

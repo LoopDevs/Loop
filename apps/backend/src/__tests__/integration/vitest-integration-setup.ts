@@ -35,8 +35,10 @@ process.env['LOOP_ADMIN_STEP_UP_SIGNING_KEY'] ??=
 
 // CTX upstream — the integration tests don't actually call out to
 // CTX (procurement worker is exercised via direct mock-fetch
-// injection), but env.ts requires the value.
+// injection), but env.ts requires the values.
 process.env['GIFT_CARD_API_BASE_URL'] ??= 'http://ctx.test.local';
+process.env['GIFT_CARD_API_KEY'] ??= 'integration-test-api-key';
+process.env['GIFT_CARD_API_SECRET'] ??= 'integration-test-api-secret';
 
 // Stellar deposit address — `loopCreateOrderHandler` 503s when this
 // is unset for non-credit payment methods. Most of the suite only
@@ -92,10 +94,6 @@ process.env['LOOP_STELLAR_EURLOOP_ISSUER'] ??=
 // §5b). No cross-field address to match (unlike the issuer pair) —
 // only the secret is configured.
 process.env['LOOP_STELLAR_OPERATOR_SECRET'] ??= Keypair.random().secret();
-
-// Workers stay off — the test drives transitions directly to keep
-// timing deterministic.
-process.env['LOOP_WORKERS_ENABLED'] = 'false';
 
 // ADR 031 §D5 (V3) — vault-subsystem master switch, needed by
 // `__tests__/integration/vault-emissions.test.ts` so

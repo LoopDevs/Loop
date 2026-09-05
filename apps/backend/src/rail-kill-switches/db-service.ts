@@ -26,13 +26,13 @@
  *     enforcement check reads before letting a NEW operation start; it
  *     never touches in-flight work.
  *
- * Boot-flag precedence (design §7 Q8): a rail is halted if EITHER its
- * boot flag disables it OR its row says halted (logical OR). This
- * service only owns the row half — the boot flags (`LOOP_WORKERS_ENABLED`
- * / `LOOP_VAULTS_ENABLED`) are enforced INDEPENDENTLY and earlier at each
- * entry point (the watcher/payout workers aren't scheduled when workers
- * are disabled; `requireVaultsEnabled()` throws before the vault-rail
- * check runs). So the OR holds structurally, and no row value can ever
+ * Boot-config precedence (design §7 Q8): a rail is halted if EITHER
+ * its boot config disables it OR its row says halted (logical OR).
+ * This service only owns the row half — the boot config (Stellar
+ * secrets / `LOOP_VAULTS_ENABLED`) is enforced INDEPENDENTLY and
+ * earlier at each entry point (the watcher/payout workers aren't
+ * scheduled when their config is absent; `requireVaultsEnabled()`
+ * throws before the vault-rail check runs). So the OR holds structurally, and no row value can ever
  * force a boot-disabled rail back on.
  */
 import { eq } from 'drizzle-orm';

@@ -20,10 +20,9 @@
  * removes the record.
  *
  * Lifecycle:
- *   - Requires the operator API creds — CTX's `/ws` authenticates the
- *     upgrade request. Without creds the maintainer stays off and the
- *     catalog falls back to the interval sweep alone (which also stays
- *     running WITH the maintainer, as the missed-event safety net).
+ *   - Authenticates the upgrade with the operator API creds (the env
+ *     schema guarantees them at boot). The interval sweep stays
+ *     running alongside the maintainer as the missed-event safety net.
  *   - The socket is Node's built-in (undici) WebSocket — no new
  *     dependency; the non-standard `headers` init option carries the
  *     auth headers on the upgrade request.
@@ -98,16 +97,8 @@ export function getMerchantWsStatus(): MerchantWsStatus {
   return status;
 }
 
-/**
- * Starts the maintainer. No-op when the operator API creds are absent
- * (CTX's /ws rejects unauthenticated upgrades) — the interval sweep is
- * then the only freshness mechanism, as before.
- */
+/** Starts the maintainer. */
 export function startMerchantWs(): void {
-  if (env.GIFT_CARD_API_KEY === undefined || env.GIFT_CARD_API_SECRET === undefined) {
-    log.info('CTX ws merchant maintenance disabled — operator API creds not configured');
-    return;
-  }
   stopped = false;
   connect();
 }
@@ -147,8 +138,8 @@ function connect(): void {
     // the upgrade request, which is how CTX authenticates /ws.
     ws = new WebSocket(wsUrl(), {
       headers: {
-        'X-Api-Key': env.GIFT_CARD_API_KEY ?? '',
-        'X-Api-Secret': env.GIFT_CARD_API_SECRET ?? '',
+        'X-Api-Key': env.GIFT_CARD_API_KEY,
+        'X-Api-Secret': env.GIFT_CARD_API_SECRET,
       },
     } as unknown as string[]);
   } catch (err) {

@@ -5,18 +5,14 @@ vi.hoisted(() => {
   process.env['DATABASE_URL'] ??= 'postgres://placeholder@localhost/test';
 });
 
-// Mock the operator pool — we control which credentials it returns
-// (or null, to skip SSE) and the ctxFetch responses the
-// polling fallback consumes.
-const { ctxFetchMock, credsState } = vi.hoisted(() => ({
+// Mock the operator credentials (boot-required, so always present)
+// and the ctxFetch responses the polling fallback consumes.
+const { ctxFetchMock } = vi.hoisted(() => ({
   ctxFetchMock: vi.fn(),
-  credsState: {
-    current: null as null | { apiKey: string; apiSecret: string; clientId: string },
-  },
 }));
 vi.mock('../../ctx/api-fetch.js', () => ({
   ctxFetch: (url: string, init?: RequestInit) => ctxFetchMock(url, init),
-  ctxApiCredentials: () => credsState.current,
+  ctxApiCredentials: () => ({ apiKey: 'key', apiSecret: 'secret', clientId: 'loopweb' }),
 }));
 
 // Mock the SSE stream client — tests choose whether it resolves,
@@ -59,7 +55,6 @@ beforeEach(() => {
   logMock.warn.mockReset();
   logMock.error.mockReset();
   logMock.debug.mockReset();
-  credsState.current = { apiKey: 'key', apiSecret: 'secret', clientId: 'loopweb' };
 });
 
 describe('waitForRedemption', () => {
@@ -88,16 +83,6 @@ describe('waitForRedemption', () => {
     ctxFetchMock.mockResolvedValueOnce(detailResponse({ redeemUrl: 'https://x.example' }));
     const result = await waitForRedemption('o-1', { pollIntervalMs: 1, totalTimeoutMs: 200 });
     expect(result.url).toBe('https://x.example');
-  });
-
-  it('no API credentials → skips SSE, polls directly', async () => {
-    credsState.current = null;
-    ctxFetchMock.mockResolvedValueOnce(
-      detailResponse({ code: 'X', pin: 'Y', url: 'https://x.example' }),
-    );
-    const result = await waitForRedemption('o-1', { pollIntervalMs: 1, totalTimeoutMs: 200 });
-    expect(result).toEqual({ code: 'X', pin: 'Y', url: 'https://x.example' });
-    expect(streamMock).not.toHaveBeenCalled();
   });
 
   it('schema drift on detail fetch pages the drift channel and returns null payload', async () => {
@@ -202,7 +187,7 @@ describe('waitForRedemption', () => {
   });
 
   it('polling tolerates intermittent failures and returns once codes appear', async () => {
-    credsState.current = null;
+    streamMock.mockRejectedValueOnce(new Error('socket hang up'));
     ctxFetchMock
       .mockResolvedValueOnce(new Response('boom', { status: 500 }))
       .mockResolvedValueOnce(detailResponse({})) // empty fields — polling continues
@@ -213,7 +198,7 @@ describe('waitForRedemption', () => {
   });
 
   it('returns the last (possibly empty) payload when the budget exhausts', async () => {
-    credsState.current = null;
+    streamMock.mockRejectedValueOnce(new Error('socket hang up'));
     // Audit 2026-06 regression guard: build a FRESH Response per tick.
     // The previous fixture resolved one shared Response object via
     // `mockResolvedValue(detailResponse({}))`, so every tick after the
@@ -227,7 +212,7 @@ describe('waitForRedemption', () => {
   });
 
   it('each poll tick performs a genuinely fresh fetch+read (N ticks → N fetches)', async () => {
-    credsState.current = null;
+    streamMock.mockRejectedValueOnce(new Error('socket hang up'));
     // Empty payloads for the first three ticks, codes on the fourth.
     // Every Response is a fresh object so every tick must complete a
     // full fetch + json() parse — if any tick re-read a consumed body
@@ -247,7 +232,7 @@ describe('waitForRedemption', () => {
   });
 
   it('a consumed-body failure on one tick does not poison subsequent ticks', async () => {
-    credsState.current = null;
+    streamMock.mockRejectedValueOnce(new Error('socket hang up'));
     // Defence-in-depth for the audited bug class: tick 1 receives a
     // Response whose body was already consumed (simulating any future
     // shared-Response regression); tick 2 gets a healthy fresh one.

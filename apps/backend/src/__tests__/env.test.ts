@@ -8,6 +8,8 @@ vi.hoisted(() => {
   if (!process.env.GIFT_CARD_API_BASE_URL) {
     process.env.GIFT_CARD_API_BASE_URL = 'https://placeholder-for-import.local';
   }
+  process.env.GIFT_CARD_API_KEY ??= 'placeholder-api-key';
+  process.env.GIFT_CARD_API_SECRET ??= 'placeholder-api-secret';
 });
 
 import { Keypair } from '@stellar/stellar-sdk';
@@ -35,6 +37,8 @@ const REDEEM_KEY = 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=';
 
 const base = {
   GIFT_CARD_API_BASE_URL: 'https://upstream.example.com',
+  GIFT_CARD_API_KEY: 'test-operator-key',
+  GIFT_CARD_API_SECRET: 'test-operator-secret',
   DATABASE_URL: 'postgres://user:pass@localhost:5433/loop',
   DISCORD_WEBHOOK_MONITORING: MONITORING_WEBHOOK,
   LOOP_REDEEM_ENCRYPTION_KEY: REDEEM_KEY,
@@ -82,6 +86,19 @@ describe('parseEnv', () => {
     expect(() => parseEnv({ GIFT_CARD_API_BASE_URL: 'ftp://upstream.example.com' })).toThrow(
       /GIFT_CARD_API_BASE_URL/,
     );
+  });
+
+  // ADR 052: ctx is the payment processor, so the operator API creds
+  // are boot-required — a deployment without them would come up with
+  // orders that never leave `unpaid`.
+  it('rejects an env without the operator API credentials', () => {
+    const withoutKey: Record<string, string> = { ...base };
+    delete withoutKey['GIFT_CARD_API_KEY'];
+    expect(() => parseEnv(withoutKey)).toThrow(/GIFT_CARD_API_KEY/);
+    const withoutSecret: Record<string, string> = { ...base };
+    delete withoutSecret['GIFT_CARD_API_SECRET'];
+    expect(() => parseEnv(withoutSecret)).toThrow(/GIFT_CARD_API_SECRET/);
+    expect(() => parseEnv({ ...base, GIFT_CARD_API_KEY: '' })).toThrow(/GIFT_CARD_API_KEY/);
   });
 
   it('accepts http and https for GIFT_CARD_API_BASE_URL', () => {
@@ -731,33 +748,13 @@ describe('parseEnv', () => {
       );
     });
 
-    it('P2-4: LOOP_VAULTS_ENABLED=true requires LOOP_WORKERS_ENABLED=true in production', () => {
-      expect(() =>
-        parseEnv({ ...prodBase, LOOP_VAULTS_ENABLED: 'true', LOOP_SOROBAN_RPC_URL: RPC }),
-      ).toThrow(/LOOP_WORKERS_ENABLED/);
-    });
-
-    it('P2-4: production vaults+workers both on is accepted', () => {
+    it('production vaults on (with Soroban RPC) is accepted — the vault sweeps start with it', () => {
       const env = parseEnv({
         ...prodBase,
         LOOP_VAULTS_ENABLED: 'true',
         LOOP_SOROBAN_RPC_URL: RPC,
-        LOOP_WORKERS_ENABLED: 'true',
       });
       expect(env.LOOP_VAULTS_ENABLED).toBe(true);
-      expect(env.LOOP_WORKERS_ENABLED).toBe(true);
-    });
-
-    it('P2-4: outside production, vaults on with workers off is allowed (tests/dev drive the sweep directly)', () => {
-      expect(() =>
-        parseEnv({
-          ...base,
-          NODE_ENV: 'test',
-          LOOP_VAULTS_ENABLED: 'true',
-          LOOP_SOROBAN_RPC_URL: RPC,
-          LOOP_WORKERS_ENABLED: 'false',
-        }),
-      ).not.toThrow();
     });
   });
 

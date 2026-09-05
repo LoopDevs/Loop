@@ -314,15 +314,6 @@ describe('enqueueCtxUserProvisioning', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it('is a no-op when operator credentials are absent', async () => {
-    mockEnv['GIFT_CARD_API_KEY'] = undefined;
-    const fetchSpy = vi.spyOn(globalThis, 'fetch');
-
-    enqueueCtxUserProvisioning({ ...user, id: 'no-creds' });
-    await flush();
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
-
   it('is a no-op when the user is already mapped', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
 
@@ -356,10 +347,5 @@ describe('ctxActAsHeaders', () => {
 
   it('returns null for an unmapped user', () => {
     expect(ctxActAsHeaders(null)).toBeNull();
-  });
-
-  it('returns null when operator credentials are absent', () => {
-    mockEnv['GIFT_CARD_API_SECRET'] = undefined;
-    expect(ctxActAsHeaders('ctx-u9')).toBeNull();
   });
 });

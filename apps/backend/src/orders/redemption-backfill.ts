@@ -26,9 +26,10 @@
  * runbook: docs/runbooks/redemption-backfill-exhausted.md.
  *
  * Wiring follows the sibling sweeps (`sweepStuckProcurement`,
- * `sweepExpiredOrders`): a `start…/stop…` timer pair gated in
- * `index.ts` on `LOOP_WORKERS_ENABLED`, with per-tick errors
- * swallowed so a transient CTX / DB blip doesn't kill the interval.
+ * `sweepExpiredOrders`): a `start…/stop…` timer pair started
+ * unconditionally in `index.ts` (ADR 052 order-mirror machinery),
+ * with per-tick errors swallowed so a transient CTX / DB blip
+ * doesn't kill the interval.
  */
 import { createHash } from 'node:crypto';
 import { and, eq, isNull, isNotNull, lt } from 'drizzle-orm';
@@ -502,10 +503,10 @@ function errMessage(err: unknown): string {
 let backfillTimer: ReturnType<typeof setInterval> | null = null;
 
 /**
- * Starts the periodic backfill sweeper. Gated at the caller
- * (`index.ts`) by `LOOP_WORKERS_ENABLED`, same as the procurement
- * worker it backstops. Per-tick errors are swallowed so a transient
- * CTX / DB blip doesn't kill the interval — the next tick retries.
+ * Starts the periodic backfill sweeper. Started unconditionally from
+ * `index.ts` with the rest of the ADR 052 order-mirror machinery.
+ * Per-tick errors are swallowed so a transient CTX / DB blip doesn't
+ * kill the interval — the next tick retries.
  */
 export function startRedemptionBackfill(args?: { intervalMs?: number }): void {
   if (backfillTimer !== null) return;

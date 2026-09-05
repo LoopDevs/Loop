@@ -24,7 +24,6 @@
  *
  * Backend prerequisites (env on the backend, not this script):
  *   LOOP_AUTH_NATIVE_ENABLED=true       (Loop mints HS256 JWTs)
- *   LOOP_WORKERS_ENABLED=true            (payment-watcher + procurement)
  *   LOOP_STELLAR_DEPOSIT_ADDRESS=G…       (where users send XLM/USDC)
  *   LOOP_STELLAR_OPERATOR_SECRET=S…       (procurement-worker signing key)
  *   LOOP_STELLAR_USDC_ISSUER=GA5ZSEJ…     (Centre USDC mainnet)
@@ -346,7 +345,7 @@ async function pollForFulfilment(accessToken, orderId) {
  * never strands a paid order in limbo (procure-one.ts fulfils on
  * `ctxOrderId`, not on redemption data). The documented recovery path
  * is the redemption-backfill sweeper (orders/redemption-backfill.ts,
- * 60s cadence, gated on LOOP_WORKERS_ENABLED). Give that sweeper a
+ * 60s cadence, always on). Give that sweeper a
  * `REDEMPTION_GRACE_MS` window of re-polling before treating an empty
  * payload as a real regression — this is exactly the check that was
  * missing when the 2026-05-14 order fulfilled with nulls and nothing

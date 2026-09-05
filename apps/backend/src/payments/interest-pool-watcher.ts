@@ -195,7 +195,7 @@ let timer: ReturnType<typeof setInterval> | null = null;
 
 /**
  * Schedules `runInterestPoolWatcherTick` on a fixed interval. Caller
- * gates on `LOOP_WORKERS_ENABLED` + `INTEREST_APY_BASIS_POINTS > 0`.
+ * gates on `INTEREST_APY_BASIS_POINTS > 0`.
  * Idempotent — calling twice clears the prior interval.
  */
 export function startInterestPoolWatcher(args: {

@@ -46,6 +46,7 @@ import { getLocations, isLocationLoading } from './clustering/data-store.js';
 import { getMerchants } from './merchants/sync.js';
 import { MERCHANT_REFRESH_INTERVAL_MS } from './merchants/sync-interval.js';
 import { getMerchantWsStatus } from './merchants/ws-maintainer.js';
+import { getGiftcardWsStatus } from './ctx/giftcard-ws-maintainer.js';
 import { getRuntimeHealthSnapshot } from './runtime-health.js';
 import { upstreamUrl } from './upstream.js';
 import { notifyGeoDbStale } from './discord.js';
@@ -481,12 +482,18 @@ export async function healthHandler(c: Context): Promise<Response> {
       merchantsStale,
       locationsStale,
       // Event-driven merchant maintenance (merchants/ws-maintainer.ts).
-      // 'disabled' = operator API creds absent (interval sweep only);
-      // 'connecting' = between sessions / backoff; 'connected' = the
-      // CTX merchant-topic subscription is live. Informational — a
-      // down ws degrades freshness to the sweep cadence, which
-      // `merchantsStale` already covers.
+      // 'disabled' = not started / stopped; 'connecting' = between
+      // sessions / backoff; 'connected' = the CTX merchant-topic
+      // subscription is live. Informational — a down ws degrades
+      // freshness to the sweep cadence, which `merchantsStale` already
+      // covers.
       merchantWs: getMerchantWsStatus(),
+      // Event-driven order-mirror maintenance (ctx/giftcard-ws-
+      // maintainer.ts), same state vocabulary as merchantWs.
+      // Informational — a down ws degrades order-status freshness to
+      // the mirror-sweep cadence, whose own tick health the `workers`
+      // array covers.
+      giftcardWs: getGiftcardWsStatus(),
       // go-live-plan §T1-F: staleness/absence signal for the operator-
       // provided GeoLite2-Country .mmdb (docs/deployment.md §GeoLite2).
       // `geoDbStale` is false both when fresh AND when

@@ -138,39 +138,49 @@ if (env.NODE_ENV !== 'test') {
 // for cross-referencing pin logos.
 await startMerchantRefresh();
 // Event-driven store maintenance between sweeps (CTX /ws merchant topic).
-// No-op without the operator API creds.
 startMerchantWs();
 const locationStartTimer = setTimeout(() => {
   void startLocationRefresh();
 }, 3000);
 
-// Loop order workers (ADR 052). Gated behind LOOP_WORKERS_ENABLED so a
-// fresh checkout doesn't start hammering CTX before an operator has
-// configured the API credentials. ctx is the payment processor — the
-// giftcard ws maintainer pushes status onto the mirror, the mirror
-// sweep reconciles missed events + payment expiry.
-if (env.LOOP_WORKERS_ENABLED) {
-  startGiftcardWs();
-  startMirrorSweep();
-  // Redemption-backfill sweeper — backstops the fulfil-time
-  // redemption fetch: fulfilled orders that captured a ctx_order_id
-  // but no redemption payload get re-fetched with backoff until
-  // recovered or the attempts cap pages ops.
-  startRedemptionBackfill();
+// Order-mirror machinery (ADR 052). ctx is the payment processor and
+// these are the only writers of order state — an order can never
+// leave `unpaid` without them — so they run unconditionally (the env
+// schema requires the operator API creds at boot, so there is no
+// unconfigured state to guard). The giftcard ws maintainer pushes
+// status onto the mirror; the mirror sweep reconciles missed events
+// + payment expiry.
+startGiftcardWs();
+startMirrorSweep();
+// Redemption-backfill sweeper — backstops the fulfil-time
+// redemption fetch: fulfilled orders that captured a ctx_order_id
+// but no redemption payload get re-fetched with backoff until
+// recovered or the attempts cap pages ops.
+startRedemptionBackfill();
+
+// Background workers. There is no umbrella flag: each worker gates on
+// its own config (Stellar secrets, issuer addresses, interest APY,
+// wallet provider, vaults switch) and simply stays off — visible in
+// /health's workers array — while that config is absent.
+{
   // Payout worker (ADR 016). Resolve reads LOOP_STELLAR_OPERATOR_SECRET
   // + network passphrase; returns null when the secret is unset, in
-  // which case pending_payouts rows stay pending until ops plumbs it.
+  // which case pending_payouts rows stay pending until ops plumbs it —
+  // a misconfiguration in production (blocked + warn), a normal
+  // posture in dev/test (quietly disabled).
   const payoutConfig = resolvePayoutConfig();
-  if (payoutConfig === null) {
+  if (payoutConfig !== null) {
+    startPayoutWorker(payoutConfig);
+  } else if (env.NODE_ENV === 'production') {
     markWorkerBlocked('payout_worker', {
       reason: 'LOOP_STELLAR_OPERATOR_SECRET is unset',
       staleAfterMs: env.LOOP_PAYOUT_WORKER_INTERVAL_SECONDS * 3000,
     });
     logger.warn(
-      'LOOP_WORKERS_ENABLED=true but LOOP_STELLAR_OPERATOR_SECRET is unset — payout worker will not start; pending_payouts rows will queue until configured',
+      'LOOP_STELLAR_OPERATOR_SECRET is unset — payout worker will not start; pending_payouts rows will queue until configured',
     );
   } else {
-    startPayoutWorker(payoutConfig);
+    markWorkerDisabled('payout_worker', 'LOOP_STELLAR_OPERATOR_SECRET is unset');
   }
 
   // Asset-drift watcher (ADR 015). Silently skips when no LOOP
@@ -267,8 +277,7 @@ if (env.LOOP_WORKERS_ENABLED) {
   // expired/consumed OTP rows, dead refresh-token rows, and expired
   // social id-token replay-guard rows past the retention grace so none
   // of these auth tables grow without bound. DELETE-only, no Stellar /
-  // CTX dependency — gated here purely to share the workers' lifecycle.
-  // Runbook: docs/runbooks/dsr.md.
+  // CTX dependency — always on. Runbook: docs/runbooks/dsr.md.
   startAuthRowPurge({
     intervalMs: env.LOOP_AUTH_ROW_PURGE_INTERVAL_HOURS * 60 * 60 * 1000,
   });
@@ -277,8 +286,7 @@ if (env.LOOP_WORKERS_ENABLED) {
   // pages Discord while user_credits disagrees with the
   // credit_transactions sum anywhere. The check itself single-flights
   // across machines via a transaction-scoped advisory lock; DB-only,
-  // no Stellar / CTX dependency — gated here to share the workers'
-  // lifecycle.
+  // no Stellar / CTX dependency — always on.
   startLedgerInvariantWatcher({
     intervalMs: env.LOOP_LEDGER_INVARIANT_INTERVAL_HOURS * 60 * 60 * 1000,
   });
@@ -330,20 +338,6 @@ if (env.LOOP_WORKERS_ENABLED) {
     markWorkerDisabled('hot_float_backing_reconciliation', 'LOOP_VAULTS_ENABLED is false');
     markWorkerDisabled('vault_apy_snapshot', 'LOOP_VAULTS_ENABLED is false');
   }
-} else {
-  markWorkerDisabled('ctx_mirror_sweep', 'LOOP_WORKERS_ENABLED is false');
-  markWorkerDisabled('redemption_backfill', 'LOOP_WORKERS_ENABLED is false');
-  markWorkerDisabled('payout_worker', 'LOOP_WORKERS_ENABLED is false');
-  markWorkerDisabled('asset_drift_watcher', 'LOOP_WORKERS_ENABLED is false');
-  markWorkerDisabled('interest_scheduler', 'LOOP_WORKERS_ENABLED is false');
-  markWorkerDisabled('auth_row_purge', 'LOOP_WORKERS_ENABLED is false');
-  markWorkerDisabled('interest_mint', 'LOOP_WORKERS_ENABLED is false');
-  markWorkerDisabled('wallet_provisioning', 'LOOP_WORKERS_ENABLED is false');
-  markWorkerDisabled('vault_emission_sweep', 'LOOP_WORKERS_ENABLED is false');
-  markWorkerDisabled('vault_redemption_sweep', 'LOOP_WORKERS_ENABLED is false');
-  markWorkerDisabled('vault_drift_watcher', 'LOOP_WORKERS_ENABLED is false');
-  markWorkerDisabled('vault_float_reconciliation', 'LOOP_WORKERS_ENABLED is false');
-  markWorkerDisabled('vault_apy_snapshot', 'LOOP_WORKERS_ENABLED is false');
 }
 
 logger.info({ port: env.PORT }, 'Loop backend starting');

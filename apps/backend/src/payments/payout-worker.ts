@@ -367,9 +367,9 @@ let payoutTimer: ReturnType<typeof setInterval> | null = null;
 let stuckPayoutWatchdogTimer: ReturnType<typeof setInterval> | null = null;
 
 /**
- * Starts the periodic payout worker. Gated at the caller by
- * `LOOP_WORKERS_ENABLED` + `LOOP_STELLAR_OPERATOR_SECRET` — this
- * function trusts that both are set.
+ * Starts the periodic payout worker. Gated at the caller
+ * (`index.ts`) on `LOOP_STELLAR_OPERATOR_SECRET` being configured —
+ * this function trusts that it is.
  *
  * Swallows per-tick errors so a transient Horizon / DB blip
  * doesn't kill the interval; next tick retries.

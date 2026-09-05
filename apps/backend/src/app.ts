@@ -249,8 +249,8 @@ export { stopCleanupInterval } from './cleanup.js';
 //
 // Background `.internal` DNS refresh feeding the rate limiter's
 // dynamic machine-count divisor lives in `./middleware/fleet-size.ts`.
-// Always-on (not gated behind LOOP_WORKERS_ENABLED — every machine
-// rate-limits, not just the ones running Loop-native order workers).
+// Always-on — every machine rate-limits, not just the ones running
+// background workers.
 // Started here at module-init time for the same reason as the cleanup
 // interval above; `stopFleetSizeEstimator` re-exported for
 // `index.ts`'s graceful-shutdown handler.

@@ -30,10 +30,8 @@ const FIXTURE_OPERATOR_KEYPAIR = Keypair.random();
  * folding into `playwright.flywheel.config.ts` because this suite
  * needs `LOOP_PHASE_1_ONLY=true` (to pin the CTX-payment rail to XLM
  * deterministically — see `orders/procure-one.ts`'s
- * `LOOP_PHASE_1_ONLY` override) and `LOOP_WORKERS_ENABLED=true` (the
- * payment watcher + procurement worker must actually run — and
- * `config.loopOrdersEnabled` structurally REQUIRES
- * `LOOP_WORKERS_ENABLED=true`, see `apps/backend/src/config/handler.ts`).
+ * `LOOP_PHASE_1_ONLY` override) and a configured operator secret
+ * (the payout worker must actually run).
  * `LOOP_PHASE_1_ONLY=true` hides the cashback UI surfaces
  * `tests/e2e-flywheel/flywheel-walk.test.ts` asserts on ("Earned with
  * Loop" headline) — sharing one backend process between the two
@@ -110,6 +108,8 @@ export default defineConfig({
         NODE_ENV: 'test',
         LOG_LEVEL: 'warn',
         GIFT_CARD_API_BASE_URL: 'http://localhost:9093',
+        GIFT_CARD_API_KEY: 'loop-purchase-e2e-api-key',
+        GIFT_CARD_API_SECRET: 'loop-purchase-e2e-api-secret',
         LOCATION_REFRESH_INTERVAL_HOURS: '24',
         DATABASE_URL: 'postgres://loop:loop@localhost:5433/loop_test',
         DISABLE_RATE_LIMITING: '1',
@@ -121,13 +121,11 @@ export default defineConfig({
         LOOP_TEST_ENDPOINTS_SECRET: 'loop-purchase-e2e-test-endpoints-secret',
         LOOP_AUTH_NATIVE_ENABLED: 'true',
         LOOP_JWT_SIGNING_KEY: 'loop-purchase-e2e-jwt-signing-key-at-least-32-chars',
-        // Structurally required: `config.loopOrdersEnabled` (the flag
-        // PurchaseContainer branches on) is
-        // `LOOP_AUTH_NATIVE_ENABLED && LOOP_WORKERS_ENABLED &&
-        // LOOP_STELLAR_DEPOSIT_ADDRESS !== undefined` — see
-        // apps/backend/src/config/handler.ts. Without this the
-        // loop-native path is unreachable from the UI at all.
-        LOOP_WORKERS_ENABLED: 'true',
+        // `config.loopOrdersEnabled` (the flag PurchaseContainer
+        // branches on) follows LOOP_AUTH_NATIVE_ENABLED alone — see
+        // apps/backend/src/config/handler.ts. The operator secret
+        // below is what lights up the payout worker this suite
+        // exercises.
         LOOP_STELLAR_DEPOSIT_ADDRESS: FIXTURE_OPERATOR_KEYPAIR.publicKey(),
         LOOP_STELLAR_OPERATOR_SECRET: FIXTURE_OPERATOR_KEYPAIR.secret(),
         LOOP_STELLAR_HORIZON_URL: 'http://localhost:9094',

@@ -116,16 +116,12 @@ function escapeCtxRegex(value: string): string {
 }
 
 /**
- * True when the feature flag is on AND the operator API credentials
- * exist. Both are required: the flag is the deploy gate, the
- * credentials are the transport.
+ * True when the feature flag is on. The operator API credentials (the
+ * transport) are boot-required by the env schema, so the flag is the
+ * only remaining gate.
  */
 function provisioningConfigured(): boolean {
-  return (
-    env.CTX_USER_PROVISIONING_ENABLED &&
-    env.GIFT_CARD_API_KEY !== undefined &&
-    env.GIFT_CARD_API_SECRET !== undefined
-  );
+  return env.CTX_USER_PROVISIONING_ENABLED;
 }
 
 /**
@@ -167,8 +163,8 @@ export async function provisionCtxUser(user: ProvisionableUser): Promise<void> {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-Api-Key': env.GIFT_CARD_API_KEY ?? '',
-      'X-Api-Secret': env.GIFT_CARD_API_SECRET ?? '',
+      'X-Api-Key': env.GIFT_CARD_API_KEY,
+      'X-Api-Secret': env.GIFT_CARD_API_SECRET,
     },
     body: JSON.stringify({
       email: user.email,
@@ -327,19 +323,18 @@ export async function adoptExistingCtxUser(user: ProvisionableUser): Promise<voi
 
 /**
  * Act-as headers for a user-scoped CTX call, or null when the
- * mapping / credentials are absent (the caller must then NOT reach
- * CTX for this user — a user-scoped read without `X-User-Id` would
- * return the operator's own data). `X-Client-Id` reflects where the
- * request originated (loopweb / loopandroid) — it's a per-request
- * fact, so callers pass the client id from the inbound request;
- * absent, it falls back to the web client.
+ * mapping is absent (the caller must then NOT reach CTX for this
+ * user — a user-scoped read without `X-User-Id` would return the
+ * operator's own data). `X-Client-Id` reflects where the request
+ * originated (loopweb / loopandroid) — it's a per-request fact, so
+ * callers pass the client id from the inbound request; absent, it
+ * falls back to the web client.
  */
 export function ctxActAsHeaders(
   ctxUserId: string | null,
   clientId?: string,
 ): Record<string, string> | null {
   if (ctxUserId === null) return null;
-  if (env.GIFT_CARD_API_KEY === undefined || env.GIFT_CARD_API_SECRET === undefined) return null;
   return {
     'X-Api-Key': env.GIFT_CARD_API_KEY,
     'X-Api-Secret': env.GIFT_CARD_API_SECRET,

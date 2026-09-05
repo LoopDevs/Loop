@@ -22,16 +22,13 @@
  * DELETE-only — no migration needed.
  *
  * Wiring mirrors the sibling sweeps (`redemption-backfill.ts`,
- * `asset-drift-watcher.ts`): a `start…/stop…` timer pair gated in
- * `index.ts` on `LOOP_WORKERS_ENABLED`, registered with the runtime-
- * health worker registry, with per-tick errors swallowed so a
- * transient DB blip doesn't kill the interval — the next tick retries.
- *
- * Gating note: this runs only when `LOOP_WORKERS_ENABLED=true`, same as
- * the other background workers. In Phase-1 discount mode (workers off)
- * the auth tables still accrue rows; operators flipping the workers on
- * for any reason — or running the manual one-shot in the DSR runbook —
- * reclaim them. See `docs/runbooks/dsr.md` for the manual sweep.
+ * `asset-drift-watcher.ts`): a `start…/stop…` timer pair started
+ * unconditionally in `index.ts` (DELETE-only, no Stellar / CTX
+ * dependency, so there is no config for it to gate on), registered
+ * with the runtime-health worker registry, with per-tick errors
+ * swallowed so a transient DB blip doesn't kill the interval — the
+ * next tick retries. See `docs/runbooks/dsr.md` for the manual
+ * one-shot sweep.
  */
 import { env } from '../env.js';
 import { logger } from '../logger.js';
@@ -117,8 +114,8 @@ export async function runAuthRowPurgeTick(args?: {
 let purgeTimer: ReturnType<typeof setInterval> | null = null;
 
 /**
- * Starts the periodic auth-row purge sweeper. Gated at the caller
- * (`index.ts`) by `LOOP_WORKERS_ENABLED`. Per-tick errors are swallowed
+ * Starts the periodic auth-row purge sweeper. Started
+ * unconditionally from `index.ts`. Per-tick errors are swallowed
  * so a transient DB blip doesn't kill the interval.
  */
 export function startAuthRowPurge(args?: { intervalMs?: number }): void {

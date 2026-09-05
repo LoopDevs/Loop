@@ -641,8 +641,8 @@ export async function tickInterestMint(args?: { apyBps?: number }): Promise<void
 
 /**
  * Starts the periodic interest-mint worker. Gated at the caller
- * (`index.ts`) by `LOOP_WORKERS_ENABLED` + `LOOP_INTEREST_ONCHAIN_ENABLED`
- * + a non-zero APY + at least one issuer signer.
+ * (`index.ts`) by `LOOP_INTEREST_ONCHAIN_ENABLED` + a non-zero APY
+ * + at least one issuer signer.
  */
 export function startInterestMintWorker(args?: { apyBps?: number; intervalMs?: number }): void {
   stopInterestMintWorker();

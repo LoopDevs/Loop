@@ -3,8 +3,6 @@
  * (`admin/ctx-commission.ts`, ctx-interop).
  *
  * Covers the behaviours that matter:
- *   - not-configured (missing API creds) is a 200 `{ configured: false }`,
- *     and no upstream fetch fires;
  *   - the company id is EVALUATED, not configured: resolved from CTX
  *     `GET /me` under the API creds and cached per process (second
  *     request must not re-fetch /me);
@@ -90,17 +88,6 @@ describe('adminCtxCommissionHandler', () => {
     resetCtxCompanyIdCache();
     mockEnv['GIFT_CARD_API_KEY'] = 'op-key';
     mockEnv['GIFT_CARD_API_SECRET'] = 'op-secret';
-  });
-
-  it('returns { configured: false } without fetching when API creds are unset', async () => {
-    mockEnv['GIFT_CARD_API_SECRET'] = undefined;
-    const fetchSpy = vi.spyOn(globalThis, 'fetch');
-
-    const res = await makeApp().request('/api/admin/ctx-commission');
-
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ configured: false });
-    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it('resolves the company id from /me and proxies balances + settlements with API-key headers', async () => {

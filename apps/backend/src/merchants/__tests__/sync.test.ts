@@ -12,8 +12,8 @@ const { envState } = vi.hoisted(() => ({
     LOCATION_REFRESH_INTERVAL_HOURS: 24,
     EMAIL_FROM: 'test@test.com',
     LOOP_MERCHANT_DENYLIST: undefined as string | undefined,
-    GIFT_CARD_API_KEY: undefined as string | undefined,
-    GIFT_CARD_API_SECRET: undefined as string | undefined,
+    GIFT_CARD_API_KEY: 'test-key',
+    GIFT_CARD_API_SECRET: 'test-secret',
   },
 }));
 
@@ -497,8 +497,8 @@ describe('refreshMerchants', () => {
       // Effective status is authoritative over the global flag.
       expect(store.merchantsById.has('m-link-off')).toBe(false);
     } finally {
-      envState.GIFT_CARD_API_KEY = undefined;
-      envState.GIFT_CARD_API_SECRET = undefined;
+      envState.GIFT_CARD_API_KEY = 'test-key';
+      envState.GIFT_CARD_API_SECRET = 'test-secret';
     }
   });
 

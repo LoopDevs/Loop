@@ -40,9 +40,6 @@ primary_region = "iad"
   # OTPs, sends email via Resend. Required for the Tranche-1
   # Loop-deposit-address payment flow (ADR 010 principal switch).
   LOOP_AUTH_NATIVE_ENABLED = "true"
-  # Payment-watcher + procurement + payout workers. Boot-time fail-safe
-  # in env.ts requires `LOOP_STELLAR_OPERATOR_SECRET` when set true.
-  LOOP_WORKERS_ENABLED = "true"
   # Resend (https://resend.com) is the only supported provider when
   # `LOOP_AUTH_NATIVE_ENABLED=true` in production. The `console`
   # variant is dev-only; env.ts boot-rejects `console` in prod.

@@ -297,7 +297,7 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # /cashback, the onboarding currency picker + wallet-intro screens,
 # "you've earned X cashback" copy). Discount badges stay — they ARE the
 # Phase 1 user proposition. UI-side equivalent of the backend Phase 2
-# gates (LOOP_WORKERS_ENABLED / LOOP_AUTH_NATIVE_ENABLED /
+# gates (Stellar secrets/issuers / LOOP_AUTH_NATIVE_ENABLED /
 # INTEREST_APY_BASIS_POINTS — keep those off in a Phase 1 deploy too).
 # (The loop_asset spend surface this flag also structurally gated died
 # with the ADR 052 money-in rip — orders are paid at CTX now.)
@@ -404,11 +404,6 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # LOOP_STELLAR_NETWORK_PASSPHRASE=Public Global Stellar Network ; September 2015
 
 # ── Workers (ADR 010 / 015 / 016 / A2-602 / A2-905) ──────────────────
-# Feature flag. Default false — a fresh clone doesn't auto-start
-# Horizon + CTX polling. Set true once the operator account + issuers
-# are configured above.
-# LOOP_WORKERS_ENABLED=true
-
 # ADR 031 §Detailed design D9: vault-subsystem master switch for the
 # LOOPUSD/LOOPEUR DeFindex-vault path. V1 shipped the schema + read
 # layer; V2 adds the Soroban deposit/withdraw/transfer client
@@ -431,7 +426,7 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # active vault's live share price into vault_share_price_snapshots so
 # GET /api/me/vault-apy can compute a past-30d/90d APY from history
 # without hitting Soroban per request. 24h default. Runs under
-# LOOP_WORKERS_ENABLED AND LOOP_VAULTS_ENABLED.
+# LOOP_VAULTS_ENABLED.
 # LOOP_VAULT_APY_SNAPSHOT_INTERVAL_HOURS=24
 
 # Per-worker cadences. Payout interval matches Stellar ledger-close
@@ -485,8 +480,8 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # LOOP_INTEREST_POOL_ACCOUNT=G...(55 chars)
 # LOOP_INTEREST_POOL_MIN_DAYS_COVER=7
 
-# CF-26 / X-PRIV-07/08 auth-row retention purge. Periodic DELETE-only
-# sweep (runs under LOOP_WORKERS_ENABLED) that reaps expired/consumed
+# CF-26 / X-PRIV-07/08 auth-row retention purge. Always-on periodic
+# DELETE-only sweep that reaps expired/consumed
 # OTP rows + dead refresh-token rows past the retention grace so
 # neither PII-bearing table grows without bound. Runbook:
 # docs/runbooks/dsr.md.
@@ -498,7 +493,7 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # per (user, currency); pages the Discord monitoring channel every tick
 # while any drift persists (deliberately no dedup — unresolved ledger
 # drift must not go quiet). Single-flighted across machines via an
-# advisory lock; runs under LOOP_WORKERS_ENABLED.
+# advisory lock; always on.
 # LOOP_LEDGER_INVARIANT_INTERVAL_HOURS=24
 
 # ── Embedded wallet (ADR 030) ────────────────────────────────────────
@@ -507,8 +502,8 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # reachable. 'privy' → the Privy REST adapter is active (plain
 # fetch + Zod, no SDK dependency) and both PRIVY_* credentials are
 # required — parseEnv refuses to boot otherwise. Phase C flows:
-# signup-time wallet provisioning + activation sweeper (under
-# LOOP_WORKERS_ENABLED), payout targeting to the activated wallet,
+# signup-time wallet provisioning + activation sweeper,
+# payout targeting to the activated wallet,
 # GET /api/me/wallet.
 # LOOP_WALLET_PROVIDER=
 # PRIVY_APP_ID=your-privy-app-id

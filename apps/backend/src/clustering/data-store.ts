@@ -148,13 +148,10 @@ export async function refreshLocations(): Promise<void> {
       url.searchParams.set('page', String(page));
       url.searchParams.set('perPage', '1000');
 
-      const headers: Record<string, string> = {};
-      if (env.GIFT_CARD_API_KEY) {
-        headers['X-Api-Key'] = env.GIFT_CARD_API_KEY;
-      }
-      if (env.GIFT_CARD_API_SECRET) {
-        headers['X-Api-Secret'] = env.GIFT_CARD_API_SECRET;
-      }
+      const headers: Record<string, string> = {
+        'X-Api-Key': env.GIFT_CARD_API_KEY,
+        'X-Api-Secret': env.GIFT_CARD_API_SECRET,
+      };
 
       const response = await getUpstreamCircuit('locations').fetch(url.toString(), {
         headers,

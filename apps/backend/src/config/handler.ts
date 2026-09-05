@@ -51,9 +51,9 @@ export interface AppConfig {
    * any "you've earned X cashback" copy. The discount badges stay
    * (they ARE the Tranche 1 user proposition).
    *
-   * Operator side: also turn off `LOOP_WORKERS_ENABLED`, leave LOOP
-   * issuers + operator secret unset, and set
-   * `INTEREST_APY_BASIS_POINTS=0` (defaults already do all three).
+   * Operator side: leave LOOP issuers + operator secret unset and
+   * set `INTEREST_APY_BASIS_POINTS=0` (defaults already do both) —
+   * the money-moving workers each gate on that config directly.
    * Flipping `LOOP_PHASE_1_ONLY=false` later is a server-side
    * config change — no app store resubmission needed.
    */
@@ -105,15 +105,11 @@ function assetConfig(issuer: string | undefined): LoopAssetConfig {
 export function configHandler(c: Context): Response {
   const body: AppConfig = {
     loopAuthNativeEnabled: env.LOOP_AUTH_NATIVE_ENABLED,
-    // ADR 052: ctx is the payment processor — orders only need the
-    // operator API creds (the CTX create + status mirror transport).
-    // `LOOP_WORKERS_ENABLED` still gates the mirror sweep, so the UI
-    // stays off when nothing would reconcile missed events.
-    loopOrdersEnabled:
-      env.LOOP_AUTH_NATIVE_ENABLED &&
-      env.LOOP_WORKERS_ENABLED &&
-      env.GIFT_CARD_API_KEY !== undefined &&
-      env.GIFT_CARD_API_SECRET !== undefined,
+    // ADR 052: ctx is the payment processor. The operator API creds
+    // (the CTX create + status mirror transport) are boot-required
+    // and the order-mirror machinery always runs, so native auth is
+    // the only remaining gate.
+    loopOrdersEnabled: env.LOOP_AUTH_NATIVE_ENABLED,
     ctxPaymentCurrencies: ctxPaymentCurrencies(),
     phase1Only: env.LOOP_PHASE_1_ONLY,
     loopAssets: {

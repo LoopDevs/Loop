@@ -50,8 +50,8 @@
  * writes to a history table nothing else reads authoritatively — no
  * value moves, no on-chain call is signed or submitted. Gated on
  * `LOOP_VAULTS_ENABLED` (checked inside the tick, mirroring every
- * other vault worker) and started only under `LOOP_WORKERS_ENABLED`
- * (see `index.ts`).
+ * other vault worker; `index.ts` also only starts it when vaults are
+ * on).
  */
 import { createHash } from 'node:crypto';
 import { withAdvisoryLock } from '../../db/client.js';

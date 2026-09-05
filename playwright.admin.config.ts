@@ -68,8 +68,11 @@ export default defineConfig({
         LOG_LEVEL: 'warn',
         // No real CTX upstream — this suite never reaches procurement
         // (the step-up gate rejects the redrive/refund attempts
-        // first). Still required by env.ts validation.
+        // first). Still required by env.ts validation (base URL and
+        // operator creds alike).
         GIFT_CARD_API_BASE_URL: 'http://unused.test.local',
+        GIFT_CARD_API_KEY: 'admin-e2e-unused-api-key',
+        GIFT_CARD_API_SECRET: 'admin-e2e-unused-api-secret',
         LOCATION_REFRESH_INTERVAL_HOURS: '24',
         DATABASE_URL: 'postgres://loop:loop@localhost:5433/loop_test',
         LOOP_AUTH_NATIVE_ENABLED: 'true',
@@ -82,7 +85,6 @@ export default defineConfig({
         // step-up-triggers assertion would be testing the wrong
         // failure mode.
         LOOP_ADMIN_STEP_UP_SIGNING_KEY: 'admin-e2e-step-up-signing-key-at-least-32-chars-min',
-        LOOP_WORKERS_ENABLED: 'false',
         DISABLE_RATE_LIMITING: '1',
         // AUDIT-2-E: required second control (in addition to
         // NODE_ENV=test) before test-endpoints.ts mounts

@@ -1093,8 +1093,8 @@ export async function tickVaultEmissionSweep(): Promise<void> {
 
 /**
  * Starts the periodic vault-emission sweep. Gated at the caller
- * (`index.ts`) by `LOOP_WORKERS_ENABLED` + `vaultsEnabled()` — with
- * either off, `orders/fulfillment.ts`'s gated fork never claims a
+ * (`index.ts`) by `vaultsEnabled()` — with vaults off,
+ * `orders/fulfillment.ts`'s gated fork never claims a
  * `vault_emissions` row in the first place, so an unstarted sweep
  * here is consistent, not merely inert.
  */

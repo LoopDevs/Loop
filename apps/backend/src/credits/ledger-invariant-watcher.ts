@@ -29,10 +29,10 @@
  * unlock could land on a different connection.
  *
  * Wiring mirrors the sibling workers (`auth-row-purge.ts`,
- * `asset-drift-watcher.ts`): `start…/stop…` timer pair gated in
- * `index.ts` on `LOOP_WORKERS_ENABLED`, runtime-health registration,
- * per-tick errors swallowed so a transient DB blip doesn't kill the
- * interval.
+ * `asset-drift-watcher.ts`): `start…/stop…` timer pair started
+ * unconditionally in `index.ts` (DB-only, nothing to gate on),
+ * runtime-health registration, per-tick errors swallowed so a
+ * transient DB blip doesn't kill the interval.
  */
 import { createHash } from 'node:crypto';
 import { sql } from 'drizzle-orm';
@@ -129,8 +129,8 @@ export async function runLedgerInvariantTick(args?: {
 let checkTimer: ReturnType<typeof setInterval> | null = null;
 
 /**
- * Starts the periodic ledger-invariant check. Gated at the caller
- * (`index.ts`) by `LOOP_WORKERS_ENABLED`.
+ * Starts the periodic ledger-invariant check. Started
+ * unconditionally from `index.ts`.
  */
 export function startLedgerInvariantWatcher(args?: { intervalMs?: number }): void {
   if (checkTimer !== null) return;

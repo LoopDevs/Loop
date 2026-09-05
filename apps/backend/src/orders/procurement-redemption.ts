@@ -192,49 +192,39 @@ export async function waitForRedemption(
   const deadline = Date.now() + totalTimeoutMs;
 
   const creds = ctxApiCredentials();
-  if (creds === null) {
-    // No API credentials configured — fall straight through to
-    // polling, which uses `ctxFetch` and surfaces the misconfig via
-    // its own unavailable handling.
-    log.warn(
-      { ctxOrderId },
-      'No CTX API credentials for SSE stream — falling back to polling immediately',
-    );
-  } else {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), totalTimeoutMs);
     try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), totalTimeoutMs);
-      try {
-        await streamGiftCardStatus(ctxOrderId, {
-          apiKey: creds.apiKey,
-          apiSecret: creds.apiSecret,
-          clientId: creds.clientId,
-          signal: controller.signal,
-          onUpdate: (frame) => {
-            const status =
-              typeof frame.fulfilmentStatus === 'string'
-                ? frame.fulfilmentStatus
-                : typeof frame.status === 'string'
-                  ? frame.status
-                  : 'unknown';
-            log.debug({ ctxOrderId, status }, 'CTX SSE frame');
-          },
-        });
-      } finally {
-        clearTimeout(timer);
-      }
-      // Stream confirmed terminal status. Do the canonical read.
-      return await fetchRedemption(ctxOrderId);
-    } catch (err) {
-      // CTX-side rejections must propagate so the procurement worker
-      // transitions the order to `failed`. Stream-transport errors
-      // (network/timeout/etc.) fall through to the polling loop.
-      const msg = err instanceof Error ? err.message : String(err);
-      if (/^CTX order .* (rejected|failed|error)/.test(msg)) {
-        throw err;
-      }
-      log.warn({ ctxOrderId, err: msg }, 'CTX SSE stream errored — falling back to polling');
+      await streamGiftCardStatus(ctxOrderId, {
+        apiKey: creds.apiKey,
+        apiSecret: creds.apiSecret,
+        clientId: creds.clientId,
+        signal: controller.signal,
+        onUpdate: (frame) => {
+          const status =
+            typeof frame.fulfilmentStatus === 'string'
+              ? frame.fulfilmentStatus
+              : typeof frame.status === 'string'
+                ? frame.status
+                : 'unknown';
+          log.debug({ ctxOrderId, status }, 'CTX SSE frame');
+        },
+      });
+    } finally {
+      clearTimeout(timer);
     }
+    // Stream confirmed terminal status. Do the canonical read.
+    return await fetchRedemption(ctxOrderId);
+  } catch (err) {
+    // CTX-side rejections must propagate so the procurement worker
+    // transitions the order to `failed`. Stream-transport errors
+    // (network/timeout/etc.) fall through to the polling loop.
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/^CTX order .* (rejected|failed|error)/.test(msg)) {
+      throw err;
+    }
+    log.warn({ ctxOrderId, err: msg }, 'CTX SSE stream errored — falling back to polling');
   }
 
   // Polling fallback. Re-fetches `/gift-cards/:id` every

@@ -77,11 +77,14 @@ export const coreEnvFields = {
   CTX_CLIENT_ID_WEB: z.string().default(DEFAULT_CLIENT_IDS.web),
   CTX_CLIENT_ID_IOS: z.string().default(DEFAULT_CLIENT_IDS.ios),
   CTX_CLIENT_ID_ANDROID: z.string().default(DEFAULT_CLIENT_IDS.android),
-  // Operator API credentials — scope the merchant catalog + /locations
-  // to what CTX serves Loop (per-operator status + link discounts) and
-  // authenticate the /ws merchant-topic subscription.
-  GIFT_CARD_API_KEY: z.string().optional(),
-  GIFT_CARD_API_SECRET: z.string().optional(),
+  // Operator API credentials. Required: ctx is the payment processor
+  // (ADR 052) — they authenticate every upstream surface (order
+  // create + status mirror, merchant catalog + /locations scoping,
+  // both /ws topic subscriptions), so a deployment without them can't
+  // do anything useful and refuses to boot rather than come up with
+  // orders that never leave `unpaid`.
+  GIFT_CARD_API_KEY: z.string().min(1),
+  GIFT_CARD_API_SECRET: z.string().min(1),
 
   // Refresh interval (hours). The merchant sweep has no equivalent var:
   // it's hardcoded hourly (merchants/sync-interval.ts) — it's only the

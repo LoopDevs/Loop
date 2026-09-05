@@ -17,9 +17,9 @@
  *
  * Loop's company id is not configuration — it's resolved from CTX
  * `GET /me` under the same API credentials and cached per process.
- * Not-configured (API creds unset) is a deployment state, not an
- * error: returns 200 `{ configured: false }` so the admin UI renders
- * a hint instead of an error card. Upstream
+ * The credentials themselves are boot-required by the env schema, so
+ * `configured` is always true on the wire (the field survives for
+ * response-shape stability with older admin bundles). Upstream
  * failures (network, non-2xx, schema drift) return 502 — this is a
  * read-only reporting surface, so there is nothing to fail closed
  * over.
@@ -85,8 +85,8 @@ const CtxCommissionSettlementsResponse = z
 
 function ctxApiKeyHeaders(): Record<string, string> {
   return {
-    'X-Api-Key': env.GIFT_CARD_API_KEY ?? '',
-    'X-Api-Secret': env.GIFT_CARD_API_SECRET ?? '',
+    'X-Api-Key': env.GIFT_CARD_API_KEY,
+    'X-Api-Secret': env.GIFT_CARD_API_SECRET,
   };
 }
 
@@ -131,12 +131,6 @@ async function fetchCtxJson(path: string): Promise<unknown> {
 }
 
 export async function adminCtxCommissionHandler(c: Context): Promise<Response> {
-  const configured = Boolean(env.GIFT_CARD_API_KEY && env.GIFT_CARD_API_SECRET);
-  if (!configured) {
-    const body: AdminCtxCommissionResponse = { configured: false };
-    return c.json(body, 200);
-  }
-
   try {
     const companyId = await resolveCompanyId();
     const [commissionRaw, settlementsRaw] = await Promise.all([
