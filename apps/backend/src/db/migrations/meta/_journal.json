@@ -554,6 +554,13 @@
       "when": 1780277400000,
       "tag": "0078_burn_shape_withdrawal",
       "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1780277700000,
+      "tag": "0079_orders_currency_cad",
+      "breakpoints": true
     }
   ]
 }

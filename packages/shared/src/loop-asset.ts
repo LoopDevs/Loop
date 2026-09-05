@@ -117,19 +117,24 @@ export function isHomeCurrency(s: string): s is HomeCurrency {
  *     / `credit_transactions` ledger is denominated in. The schema
  *     CHECKs on those columns stay pinned to the three.
  *   - EXTENDED_ORDER_CURRENCIES are the *gift-card catalog* currencies
- *     the order path now accepts. An extended-market order is charged
- *     in the user's home currency (FX-pinned at order creation), so the
- *     extended code only ever lands in `orders.currency` (catalog),
- *     never in `orders.charge_currency` or the credit ledger.
+ *     the order path accepts beyond the home three. Under ADR 052 the
+ *     customer pays CTX directly and the charge is recorded in the
+ *     card's own fiat currency, so an extended code can land in both
+ *     `orders.currency` and `orders.charge_currency` — but never in
+ *     the credit ledger (no AEDLOOP/CADLOOP/… asset exists).
  *
- * ADR 035 surfaces these as display markets (≥15 enabled merchants:
- * AE/IN/SA/AU/MX). The Loop-side order path is wired (this set + the
- * migration that widens `orders_currency_known`); a market only goes
- * live end-to-end once the external rates service serves a fiat→crypto
- * rate for the currency — until then the order path fails gracefully
- * with `CURRENCY_NOT_AVAILABLE` ("coming soon"), never a wrong charge.
+ * ADR 035 surfaced the first five as display markets (≥15 enabled
+ * merchants: AE/IN/SA/AU/MX), gated on the since-retired FX feed. CAD
+ * joined under ADR 052: CA is an ADR 034 display country whose
+ * merchants CTX serves, and with CTX as the payment processor there
+ * is no rates-service gate left to wait on. The order handler
+ * validates a request's currency against the merchant's CTX catalog
+ * entry; this set's remaining job is pinning the DB-side
+ * `orders_currency_known` CHECK (the fail-closed fence behind the
+ * handler) via the lock-step tests, so keep set + schema mirror +
+ * latest migration in agreement when adding a currency.
  */
-export const EXTENDED_ORDER_CURRENCIES = ['AED', 'INR', 'SAR', 'AUD', 'MXN'] as const;
+export const EXTENDED_ORDER_CURRENCIES = ['AED', 'INR', 'SAR', 'AUD', 'MXN', 'CAD'] as const;
 export type ExtendedOrderCurrency = (typeof EXTENDED_ORDER_CURRENCIES)[number];
 
 /**

@@ -131,11 +131,13 @@ export const orders = pgTable(
       sql`${t.state} IN ('unpaid', 'paid', 'fulfilled', 'rejected', 'refunded', 'expired')`,
     ),
     // A2-705 / CF-19: catalog-side currency — the three cashback home
-    // currencies plus the ADR-035 extended markets. Keep in lock-step
-    // with `ORDERABLE_CURRENCIES` in `@loop/shared` and migration 0037.
+    // currencies plus the extended catalog markets (ADR 035, + CAD
+    // under ADR 052). Keep in lock-step with `ORDERABLE_CURRENCIES`
+    // in `@loop/shared` and the latest orders_currency migration
+    // (currently 0079).
     check(
       'orders_currency_known',
-      sql`${t.currency} IN ('USD', 'GBP', 'EUR', 'AED', 'INR', 'SAR', 'AUD', 'MXN')`,
+      sql`${t.currency} IN ('USD', 'GBP', 'EUR', 'AED', 'INR', 'SAR', 'AUD', 'MXN', 'CAD')`,
     ),
     check(
       'orders_minor_amounts_non_negative',
