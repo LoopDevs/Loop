@@ -20,7 +20,9 @@
  *     (+ /settlements, /entries) reads the ledger, and
  *     POST /_test/settle-commission stands in for the real CTX
  *     `commission-settlement` system trigger. POST /users echoes an id so
- *     the act-as provisioning path works offline.
+ *     the act-as provisioning path works offline; GET /users (regex email
+ *     filter, operatorUserId omitted when empty) + PUT /users/:id
+ *     (operatorUserId claim) back the adopt-on-email-exists branch.
  *
  * Usage:
  *   node tests/e2e-mocked/fixtures/mock-ctx.mjs            # runs on :9091
@@ -300,14 +302,75 @@ const server = http.createServer(async (req, res) => {
   }
 
   // ── ctx-interop: user provisioning (act-as) ──
+  // Mirrors the real CTX validation envelope on rejection
+  // (`{ error: 'bad request', fields: { <field>: [msgs] } }`) — the
+  // backend's adoption branch routes on `fields.email` specifically.
   if (method === 'POST' && path === '/users') {
     const body = await readBody(req);
-    if (!body.email) return json(res, 400, { error: 'email required' });
-    const existing = provisionedUsers.get(body.email);
-    if (existing) return json(res, 400, { error: 'user already exists' });
-    const user = { id: randomUUID(), email: body.email, operatorUserId: body.operatorUserId ?? '' };
-    provisionedUsers.set(body.email, user);
+    if (!body.email)
+      return json(res, 400, { error: 'bad request', fields: { email: ['required'] } });
+    const email = String(body.email).trim().toLowerCase();
+    if (provisionedUsers.has(email))
+      return json(res, 400, { error: 'bad request', fields: { email: ['already exists'] } });
+    const user = {
+      id: randomUUID(),
+      email,
+      type: body.type ?? 'customer',
+      operatorUserId: body.operatorUserId ?? '',
+    };
+    provisionedUsers.set(email, user);
     return json(res, 201, { id: user.id });
+  }
+
+  // ── ctx-interop: adoption lookup + operatorUserId claim ──
+  // Real CTX filters `email` as an unanchored case-insensitive regex
+  // and omits `operatorUserId` from the JSON when empty; both facts
+  // are load-bearing for the backend's adopt-on-email-exists path.
+  if (method === 'GET' && path === '/users') {
+    const emailFilter = parsed.searchParams.get('email');
+    let result = [...provisionedUsers.values()];
+    if (emailFilter) {
+      const re = new RegExp(emailFilter, 'i');
+      result = result.filter((u) => re.test(u.email));
+    }
+    const typeFilter = parsed.searchParams.get('type');
+    if (typeFilter) result = result.filter((u) => u.type === typeFilter);
+    return json(res, 200, {
+      result: result.map((u) => ({
+        id: u.id,
+        email: u.email,
+        type: u.type,
+        ...(u.operatorUserId ? { operatorUserId: u.operatorUserId } : {}),
+      })),
+      pagination: { page: 1, perPage: 50, total: result.length },
+    });
+  }
+
+  const userUpdateMatch = path.match(/^\/users\/([^/]+)$/);
+  if (method === 'PUT' && userUpdateMatch) {
+    const target = [...provisionedUsers.values()].find((u) => u.id === userUpdateMatch[1]);
+    if (!target) return json(res, 404, { error: 'not found' });
+    const body = await readBody(req);
+    const operatorUserId = String(body.operatorUserId ?? '').trim();
+    if (operatorUserId && operatorUserId !== target.operatorUserId) {
+      // Real CTX enforces per-company operatorUserId uniqueness on
+      // update too — a claim racing another writer fails, not doubles.
+      const claimed = [...provisionedUsers.values()].some(
+        (u) => u.id !== target.id && u.operatorUserId === operatorUserId,
+      );
+      if (claimed)
+        return json(res, 400, {
+          error: 'bad request',
+          fields: { operatorUserId: ['already exists'] },
+        });
+      target.operatorUserId = operatorUserId;
+    }
+    return json(res, 200, {
+      id: target.id,
+      email: target.email,
+      type: target.type,
+      ...(target.operatorUserId ? { operatorUserId: target.operatorUserId } : {}),
+    });
   }
 
   // ── ctx-interop: operator commission ──

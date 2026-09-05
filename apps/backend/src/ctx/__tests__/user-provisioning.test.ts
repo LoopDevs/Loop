@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, type MockInstance } from 'vitest';
 
 vi.mock('../../logger.js', () => ({
   logger: {
@@ -29,6 +29,7 @@ vi.mock('../../db/users.js', () => ({
 import {
   enqueueCtxUserProvisioning,
   provisionCtxUser,
+  adoptExistingCtxUser,
   ctxActAsHeaders,
 } from '../user-provisioning.js';
 
@@ -64,13 +65,20 @@ describe('provisionCtxUser', () => {
     expect(setUserCtxUserIdMock).toHaveBeenCalledWith('loop-u1', 'ctx-u1');
   });
 
-  it('logs and stores nothing on a 400 (uniqueness rejection)', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ operatorUserId: 'already exists' }), { status: 400 }),
-    );
+  it('logs and stores nothing on a non-email 400 (operatorUserId uniqueness rejection)', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({ error: 'bad request', fields: { operatorUserId: ['already exists'] } }),
+          { status: 400 },
+        ),
+      );
 
     await provisionCtxUser(user);
     expect(setUserCtxUserIdMock).not.toHaveBeenCalled();
+    // No adoption lookup either — only the email-exists 400 triggers it.
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
   it('stores nothing on response schema drift', async () => {
@@ -80,6 +88,210 @@ describe('provisionCtxUser', () => {
 
     await provisionCtxUser(user);
     expect(setUserCtxUserIdMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Route a mocked upstream by method + path. Each entry returns a FRESH
+ * Response per call — Response bodies are single-use.
+ */
+function routeFetch(
+  routes: Array<{ method: string; match: (url: string) => boolean; respond: () => Response }>,
+): MockInstance<typeof globalThis.fetch> {
+  return vi
+    .spyOn(globalThis, 'fetch')
+    .mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+      const route = routes.find((r) => r.method === method && r.match(url));
+      if (!route) throw new Error(`unrouted mock fetch: ${method} ${url}`);
+      return route.respond();
+    });
+}
+
+const emailExists400 = (): Response =>
+  new Response(JSON.stringify({ error: 'bad request', fields: { email: ['already exists'] } }), {
+    status: 400,
+  });
+
+describe('adoption on email-exists 400', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    setUserCtxUserIdMock.mockReset();
+    setUserCtxUserIdMock.mockResolvedValue(true);
+    mockEnv['CTX_USER_PROVISIONING_ENABLED'] = true;
+    mockEnv['GIFT_CARD_API_KEY'] = 'op-key';
+    mockEnv['GIFT_CARD_API_SECRET'] = 'op-secret';
+  });
+
+  it('claims the unclaimed pre-contract customer and stores its id', async () => {
+    const fetchSpy = routeFetch([
+      { method: 'POST', match: (u) => u === 'http://ctx.test/users', respond: emailExists400 },
+      {
+        method: 'GET',
+        match: (u) => u.startsWith('http://ctx.test/users?'),
+        respond: () =>
+          new Response(
+            JSON.stringify({
+              result: [{ id: 'ctx-legacy', email: 'u1@test.io', type: 'customer' }],
+            }),
+            { status: 200 },
+          ),
+      },
+      {
+        method: 'PUT',
+        match: (u) => u === 'http://ctx.test/users/ctx-legacy',
+        respond: () => new Response(JSON.stringify({ id: 'ctx-legacy' }), { status: 200 }),
+      },
+    ]);
+
+    await provisionCtxUser(user);
+
+    // Lookup is regex-escaped + type-narrowed.
+    const getCall = fetchSpy.mock.calls.find(([, init]) => (init?.method ?? 'GET') === 'GET');
+    expect(String(getCall?.[0])).toBe(
+      `http://ctx.test/users?type=customer&email=${encodeURIComponent('u1@test\\.io')}`,
+    );
+    // The claim carries our Loop user id.
+    const putCall = fetchSpy.mock.calls.find(([, init]) => init?.method === 'PUT');
+    expect(JSON.parse((putCall?.[1] as RequestInit).body as string)).toEqual({
+      operatorUserId: 'loop-u1',
+    });
+    expect(setUserCtxUserIdMock).toHaveBeenCalledWith('loop-u1', 'ctx-legacy');
+  });
+
+  it('skips the claim when CTX already carries our operatorUserId, and just stores', async () => {
+    const fetchSpy = routeFetch([
+      { method: 'POST', match: (u) => u === 'http://ctx.test/users', respond: emailExists400 },
+      {
+        method: 'GET',
+        match: (u) => u.startsWith('http://ctx.test/users?'),
+        respond: () =>
+          new Response(
+            JSON.stringify({
+              result: [
+                {
+                  id: 'ctx-legacy',
+                  email: 'u1@test.io',
+                  type: 'customer',
+                  operatorUserId: 'loop-u1',
+                },
+              ],
+            }),
+            { status: 200 },
+          ),
+      },
+    ]);
+
+    await provisionCtxUser(user);
+
+    expect(fetchSpy.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false);
+    expect(setUserCtxUserIdMock).toHaveBeenCalledWith('loop-u1', 'ctx-legacy');
+  });
+
+  it('never adopts a customer mapped to a DIFFERENT Loop user', async () => {
+    const fetchSpy = routeFetch([
+      { method: 'POST', match: (u) => u === 'http://ctx.test/users', respond: emailExists400 },
+      {
+        method: 'GET',
+        match: (u) => u.startsWith('http://ctx.test/users?'),
+        respond: () =>
+          new Response(
+            JSON.stringify({
+              result: [
+                {
+                  id: 'ctx-legacy',
+                  email: 'u1@test.io',
+                  type: 'customer',
+                  operatorUserId: 'someone-else',
+                },
+              ],
+            }),
+            { status: 200 },
+          ),
+      },
+    ]);
+
+    await provisionCtxUser(user);
+
+    expect(fetchSpy.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false);
+    expect(setUserCtxUserIdMock).not.toHaveBeenCalled();
+  });
+
+  it('stores nothing when the regex lookup returns only superstring emails', async () => {
+    routeFetch([
+      { method: 'POST', match: (u) => u === 'http://ctx.test/users', respond: emailExists400 },
+      {
+        method: 'GET',
+        match: (u) => u.startsWith('http://ctx.test/users?'),
+        respond: () =>
+          new Response(
+            JSON.stringify({
+              result: [{ id: 'ctx-other', email: 'xu1@test.iox', type: 'customer' }],
+            }),
+            { status: 200 },
+          ),
+      },
+    ]);
+
+    await provisionCtxUser(user);
+    expect(setUserCtxUserIdMock).not.toHaveBeenCalled();
+  });
+
+  it('stores nothing when the operatorUserId claim is rejected', async () => {
+    routeFetch([
+      { method: 'POST', match: (u) => u === 'http://ctx.test/users', respond: emailExists400 },
+      {
+        method: 'GET',
+        match: (u) => u.startsWith('http://ctx.test/users?'),
+        respond: () =>
+          new Response(
+            JSON.stringify({
+              result: [{ id: 'ctx-legacy', email: 'u1@test.io', type: 'customer' }],
+            }),
+            { status: 200 },
+          ),
+      },
+      {
+        method: 'PUT',
+        match: (u) => u === 'http://ctx.test/users/ctx-legacy',
+        respond: () =>
+          new Response(
+            JSON.stringify({
+              error: 'bad request',
+              fields: { operatorUserId: ['already exists'] },
+            }),
+            { status: 400 },
+          ),
+      },
+    ]);
+
+    await provisionCtxUser(user);
+    expect(setUserCtxUserIdMock).not.toHaveBeenCalled();
+  });
+
+  it('is exported for direct backfill use', async () => {
+    routeFetch([
+      {
+        method: 'GET',
+        match: (u) => u.startsWith('http://ctx.test/users?'),
+        respond: () =>
+          new Response(
+            JSON.stringify({
+              result: [{ id: 'ctx-legacy', email: 'u1@test.io', type: 'customer' }],
+            }),
+            { status: 200 },
+          ),
+      },
+      {
+        method: 'PUT',
+        match: (u) => u === 'http://ctx.test/users/ctx-legacy',
+        respond: () => new Response(JSON.stringify({ id: 'ctx-legacy' }), { status: 200 }),
+      },
+    ]);
+
+    await adoptExistingCtxUser(user);
+    expect(setUserCtxUserIdMock).toHaveBeenCalledWith('loop-u1', 'ctx-legacy');
   });
 });
 
