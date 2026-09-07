@@ -83,4 +83,4 @@ tmp/reports/
 # Local document-store dump. The memory driver hydrates from / flushes
 # to `DB_JSON_PATH`, which defaults into here — it's whatever the last
 # local run happened to write, never shared state.
-apps/backend/data/
+apps/backend/_data/

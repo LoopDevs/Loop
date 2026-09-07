@@ -201,10 +201,10 @@ describe('parseEnv', () => {
   // memory driver persists to DB_JSON_PATH, the mongo driver needs a
   // real mongodb:// connection string.
   describe('document-store configuration (DB_DRIVER / DB_JSON_PATH / MONGODB_*)', () => {
-    it('defaults to the memory driver with the data/db.json path and the loop database name', () => {
+    it('defaults to the memory driver with the _data/db.json path and the loop database name', () => {
       const env = parseEnv(base);
       expect(env.DB_DRIVER).toBe('memory');
-      expect(env.DB_JSON_PATH).toBe('data/db.json');
+      expect(env.DB_JSON_PATH).toBe('_data/db.json');
       expect(env.MONGODB_DB).toBe('loop');
       expect(env.MONGODB_URI).toBeUndefined();
     });

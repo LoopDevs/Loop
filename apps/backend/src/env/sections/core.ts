@@ -271,7 +271,7 @@ export const coreEnvFields = {
   DB_DRIVER: z.enum(['memory', 'mongo']).default('memory'),
   // Where the memory driver persists the database ('' → ephemeral, no
   // persistence — the unit-test posture).
-  DB_JSON_PATH: z.string().default('data/db.json'),
+  DB_JSON_PATH: z.string().default('_data/db.json'),
   MONGODB_URI: z
     .string()
     .url()
