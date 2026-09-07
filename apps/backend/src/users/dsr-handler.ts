@@ -103,48 +103,6 @@ export async function dsrDeleteHandler(c: Context): Promise<Response> {
   try {
     const result = await deleteUserViaAnonymisation(user.id);
     if (!result.ok) {
-      if (result.blockedBy === 'pending_payouts') {
-        return c.json(
-          {
-            code: 'PENDING_PAYOUTS',
-            message:
-              'Cannot delete account while a cashback payout is pending or submitted — wait for it to settle, or contact support.',
-          },
-          409,
-        );
-      }
-      if (result.blockedBy === 'failed_uncompensated_withdrawals') {
-        // A4-078: a failed legacy (pre-ADR-036) withdrawal whose compensation hasn't
-        // landed yet — anonymising now would orphan the balance the
-        // user is owed (see dsr-delete.ts). Distinct from the
-        // generic in-flight-orders reason so the client can render
-        // the right instruction: this one can only be resolved by
-        // support, not by waiting.
-        return c.json(
-          {
-            code: 'FAILED_UNCOMPENSATED_WITHDRAWALS',
-            message:
-              'Cannot delete account while a failed withdrawal is awaiting compensation — contact support about the failed withdrawal before deleting your account.',
-          },
-          409,
-        );
-      }
-      if (result.blockedBy === 'non_zero_credit_balance') {
-        // PLAT-30-03: a never-linked-wallet user can accumulate an
-        // arbitrary cashback balance with zero pending_payouts rows —
-        // anonymising here would permanently orphan real money (no
-        // self-serve withdrawal path exists). Distinct code so the
-        // client can point the user at withdrawing/spending the
-        // balance first rather than a generic "try again later".
-        return c.json(
-          {
-            code: 'BALANCE_NOT_ZERO',
-            message:
-              'Cannot delete account while you have an unredeemed cashback balance — spend it or contact support to withdraw it before deleting your account.',
-          },
-          409,
-        );
-      }
       return c.json(
         {
           code: 'IN_FLIGHT_ORDERS',

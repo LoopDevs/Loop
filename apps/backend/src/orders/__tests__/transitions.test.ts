@@ -1,49 +1,32 @@
 /**
- * Mirror-transition writer tests (ADR 052). The writers are guarded
- * single-row UPDATEs; these tests pin the SET payloads (including the
- * at-rest encryption of redemption secrets) through a captured db
- * chain. The state guards themselves are SQL (`WHERE state IN ...`)
- * — the update-vs-null return contract is pinned by returning-row
- * control; guard membership is covered by the integration suite.
+ * Mirror-transition writer tests (ADR 052), against the real
+ * in-memory document store. The writers are guarded single-doc
+ * updates ("still in state X" predicates in the filter) — with the
+ * real store both halves are pinned here: the $set payloads
+ * (including the at-rest encryption of redemption secrets) AND the
+ * guard membership / update-vs-null return contract.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import { db, __resetDbForTests } from '../../db/client.js';
+import type { OrderDoc, OrderState } from '../../db/types.js';
 
-const { dbMock, state, envState } = vi.hoisted(() => {
-  const s = {
-    updateSet: undefined as Record<string, unknown> | undefined,
-    returningRows: [] as unknown[],
+const { envState } = vi.hoisted(() => ({
+  envState: { redeemKey: undefined as string | undefined },
+}));
+
+// Partial env mock: only the redeem key is per-test mutable — the rest
+// of the real (test-setup) env stays intact so logger/db/client keep
+// booting normally.
+vi.mock('../../env.js', async (importActual) => {
+  const actual = (await importActual()) as { env: Record<string, unknown> };
+  return {
+    ...actual,
+    get env() {
+      return { ...actual.env, LOOP_REDEEM_ENCRYPTION_KEY: envState.redeemKey };
+    },
   };
-  const envState = { redeemKey: undefined as string | undefined };
-  const chain: Record<string, unknown> = {};
-  chain['update'] = vi.fn(() => chain);
-  chain['set'] = vi.fn((v: Record<string, unknown>) => {
-    s.updateSet = v;
-    return chain;
-  });
-  chain['where'] = vi.fn(() => chain);
-  chain['returning'] = vi.fn(async () => s.returningRows);
-  return { dbMock: chain, state: s, envState };
 });
-
-vi.mock('../../env.js', () => ({
-  get env() {
-    return { LOOP_REDEEM_ENCRYPTION_KEY: envState.redeemKey };
-  },
-}));
-
-vi.mock('../../db/client.js', () => ({ db: dbMock }));
-vi.mock('../../db/schema.js', () => ({
-  orders: {
-    id: 'id',
-    state: 'state',
-    failedAt: 'failed_at',
-    failureReason: 'failure_reason',
-    fulfilledAt: 'fulfilled_at',
-    redeemCode: 'redeem_code',
-    redeemPin: 'redeem_pin',
-    redeemUrl: 'redeem_url',
-  },
-}));
 
 import { resetRedeemKeyCache } from '../redeem-crypto.js';
 import {
@@ -55,101 +38,160 @@ import {
 } from '../transitions.js';
 
 beforeEach(() => {
-  state.updateSet = undefined;
-  state.returningRows = [];
+  __resetDbForTests();
   envState.redeemKey = undefined;
   resetRedeemKeyCache();
 });
 
+/** Seeds a mirror doc in the given state; returns its id. */
+async function seedOrder(state: OrderState, overrides: Partial<OrderDoc> = {}): Promise<string> {
+  const id = overrides.id ?? randomUUID();
+  const now = new Date();
+  await db.collection('orders').insertOne({
+    id,
+    userId: 'u-1',
+    merchantId: 'm-1',
+    faceValueMinor: 1000,
+    currency: 'USD',
+    chargeMinor: 950,
+    chargeCurrency: 'USD',
+    userCashbackMinor: 0,
+    expectedCommissionMinor: null,
+    ctxOrderId: null,
+    ctxPaymentId: null,
+    paymentCryptoCurrency: 'XLM',
+    redeemCode: null,
+    redeemPin: null,
+    redeemUrl: null,
+    redemptionBackfillAttempts: 0,
+    redemptionBackfillLastAttemptAt: null,
+    state,
+    failureReason: null,
+    idempotencyKey: null,
+    createdAt: now,
+    fulfilledAt: null,
+    failedAt: null,
+    ...overrides,
+  });
+  return id;
+}
+
+async function getOrder(id: string): Promise<OrderDoc | null> {
+  return db.collection('orders').findOne({ id });
+}
+
 describe('markOrderPaid', () => {
-  it('sets state=paid and returns the row', async () => {
-    state.returningRows = [{ id: 'o-1', state: 'paid' }];
-    const r = await markOrderPaid('o-1');
+  it('sets state=paid and returns the doc', async () => {
+    const id = await seedOrder('unpaid');
+    const r = await markOrderPaid(id);
     expect(r?.state).toBe('paid');
-    expect(state.updateSet).toEqual({ state: 'paid' });
+    expect((await getOrder(id))?.state).toBe('paid');
   });
 
   it('returns null when the guard does not match (already past unpaid)', async () => {
-    state.returningRows = [];
-    expect(await markOrderPaid('o-1')).toBeNull();
+    const id = await seedOrder('fulfilled');
+    expect(await markOrderPaid(id)).toBeNull();
+    // A replayed event never regresses the mirror.
+    expect((await getOrder(id))?.state).toBe('fulfilled');
   });
 });
 
 describe('markOrderFulfilled', () => {
-  it('sets state, fulfilledAt, and the redemption payload', async () => {
-    state.returningRows = [{ id: 'o-1', state: 'fulfilled' }];
-    const r = await markOrderFulfilled('o-1', {
+  it('sets state, fulfilledAt, and the redemption payload (from paid)', async () => {
+    const id = await seedOrder('paid');
+    const r = await markOrderFulfilled(id, {
       redemption: { code: 'CODE-1', pin: '1234', url: 'https://redeem.example/x' },
     });
     expect(r?.state).toBe('fulfilled');
-    expect(state.updateSet).toMatchObject({
-      state: 'fulfilled',
-      fulfilledAt: expect.any(Date),
-      redeemUrl: 'https://redeem.example/x',
-    });
+    const stored = await getOrder(id);
+    expect(stored?.fulfilledAt).toBeInstanceOf(Date);
+    expect(stored?.redeemUrl).toBe('https://redeem.example/x');
     // No encryption key in this test env → plaintext passthrough.
-    expect(state.updateSet?.['redeemCode']).toBe('CODE-1');
-    expect(state.updateSet?.['redeemPin']).toBe('1234');
+    expect(stored?.redeemCode).toBe('CODE-1');
+    expect(stored?.redeemPin).toBe('1234');
+  });
+
+  it('a card can jump straight from unpaid when Loop missed the paid event', async () => {
+    const id = await seedOrder('unpaid');
+    const r = await markOrderFulfilled(id, {});
+    expect(r?.state).toBe('fulfilled');
   });
 
   it('CF-25: encrypts code + pin at rest when the key is set, url stays plaintext', async () => {
     envState.redeemKey = Buffer.alloc(32, 7).toString('base64');
-    state.returningRows = [{ id: 'o-1', state: 'fulfilled' }];
-    await markOrderFulfilled('o-1', {
+    const id = await seedOrder('paid');
+    await markOrderFulfilled(id, {
       redemption: { code: 'SECRET-CODE', pin: '9999', url: 'https://redeem.example/y' },
     });
-    expect(String(state.updateSet?.['redeemCode'])).toMatch(/^enc:v1:/);
-    expect(String(state.updateSet?.['redeemPin'])).toMatch(/^enc:v1:/);
-    expect(state.updateSet?.['redeemUrl']).toBe('https://redeem.example/y');
+    const stored = await getOrder(id);
+    expect(String(stored?.redeemCode)).toMatch(/^enc:v1:/);
+    expect(String(stored?.redeemPin)).toMatch(/^enc:v1:/);
+    expect(stored?.redeemCode).not.toContain('SECRET-CODE');
+    expect(stored?.redeemUrl).toBe('https://redeem.example/y');
   });
 
   it('fulfils with null payload when the redemption fetch raced (backfill retries)', async () => {
-    state.returningRows = [{ id: 'o-1', state: 'fulfilled' }];
-    await markOrderFulfilled('o-1', {});
-    expect(state.updateSet?.['redeemCode']).toBeNull();
-    expect(state.updateSet?.['redeemPin']).toBeNull();
-    expect(state.updateSet?.['redeemUrl']).toBeNull();
+    const id = await seedOrder('paid');
+    await markOrderFulfilled(id, {});
+    const stored = await getOrder(id);
+    expect(stored?.redeemCode).toBeNull();
+    expect(stored?.redeemPin).toBeNull();
+    expect(stored?.redeemUrl).toBeNull();
+  });
+
+  it('returns null on a terminal doc (guard miss)', async () => {
+    const id = await seedOrder('refunded');
+    expect(await markOrderFulfilled(id, {})).toBeNull();
   });
 });
 
 describe('markOrderRejected', () => {
   it('sets state, failedAt, and the reason', async () => {
-    state.returningRows = [{ id: 'o-1', state: 'rejected' }];
-    await markOrderRejected('o-1', 'rejected by supplier');
-    expect(state.updateSet).toMatchObject({
-      state: 'rejected',
-      failedAt: expect.any(Date),
-      failureReason: 'rejected by supplier',
-    });
+    const id = await seedOrder('unpaid');
+    await markOrderRejected(id, 'rejected by supplier');
+    const stored = await getOrder(id);
+    expect(stored?.state).toBe('rejected');
+    expect(stored?.failedAt).toBeInstanceOf(Date);
+    expect(stored?.failureReason).toBe('rejected by supplier');
   });
 
   it('omits failureReason when null (keeps any earlier reason)', async () => {
-    state.returningRows = [{ id: 'o-1', state: 'rejected' }];
-    await markOrderRejected('o-1', null);
-    expect(state.updateSet).not.toHaveProperty('failureReason');
+    const id = await seedOrder('paid', { failureReason: 'earlier reason' });
+    await markOrderRejected(id, null);
+    const stored = await getOrder(id);
+    expect(stored?.state).toBe('rejected');
+    expect(stored?.failureReason).toBe('earlier reason');
   });
 });
 
 describe('markOrderRefunded', () => {
-  it('sets state + failedAt', async () => {
-    state.returningRows = [{ id: 'o-1', state: 'refunded' }];
-    await markOrderRefunded('o-1');
-    expect(state.updateSet).toMatchObject({ state: 'refunded', failedAt: expect.any(Date) });
+  it('sets state + failedAt — even from fulfilled (CTX can refund a delivered card)', async () => {
+    for (const from of ['unpaid', 'paid', 'fulfilled'] as const) {
+      const id = await seedOrder(from);
+      const r = await markOrderRefunded(id);
+      expect(r?.state).toBe('refunded');
+      expect((await getOrder(id))?.failedAt).toBeInstanceOf(Date);
+    }
+  });
+
+  it('returns null from expired (guard miss)', async () => {
+    const id = await seedOrder('expired');
+    expect(await markOrderRefunded(id)).toBeNull();
   });
 });
 
 describe('markOrderExpired', () => {
   it('sets state=expired with the payment-window reason', async () => {
-    state.returningRows = [{ id: 'o-1', state: 'expired' }];
-    await markOrderExpired('o-1');
-    expect(state.updateSet).toMatchObject({
-      state: 'expired',
-      failureReason: 'payment window expired',
-    });
+    const id = await seedOrder('unpaid');
+    await markOrderExpired(id);
+    const stored = await getOrder(id);
+    expect(stored?.state).toBe('expired');
+    expect(stored?.failureReason).toBe('payment window expired');
   });
 
-  it('returns null when the row already left unpaid (paid event won)', async () => {
-    state.returningRows = [];
-    expect(await markOrderExpired('o-1')).toBeNull();
+  it('returns null when the doc already left unpaid (paid event won)', async () => {
+    const id = await seedOrder('paid');
+    expect(await markOrderExpired(id)).toBeNull();
+    expect((await getOrder(id))?.state).toBe('paid');
   });
 });

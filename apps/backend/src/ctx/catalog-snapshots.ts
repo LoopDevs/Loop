@@ -1,8 +1,6 @@
-import { eq, sql } from 'drizzle-orm';
 import type { Merchant } from '@loop/shared';
 import type { Location } from '../clustering/algorithm.js';
 import { db } from '../db/client.js';
-import { ctxCatalogSnapshots } from '../db/schema.js';
 import { logger } from '../logger.js';
 
 const log = logger.child({ module: 'ctx-catalog-snapshots' });
@@ -60,15 +58,8 @@ function parseSnapshotPayload<T>(name: CatalogSnapshotName, payload: unknown): T
 export async function loadCatalogSnapshot<T>(
   name: CatalogSnapshotName,
 ): Promise<CatalogSnapshot<T> | null> {
-  const [row] = await db
-    .select({
-      payload: ctxCatalogSnapshots.payload,
-      loadedAt: ctxCatalogSnapshots.loadedAt,
-    })
-    .from(ctxCatalogSnapshots)
-    .where(eq(ctxCatalogSnapshots.name, name))
-    .limit(1);
-  if (row === undefined) return null;
+  const row = await db.collection('ctx_catalog_snapshots').findOne({ name });
+  if (row === null) return null;
 
   const ageMs = Date.now() - row.loadedAt.getTime();
   if (ageMs > MAX_WARM_START_AGE_MS) {
@@ -92,21 +83,15 @@ export async function saveCatalogSnapshot<T>(args: {
   items: T[];
   loadedAt: Date;
 }): Promise<void> {
-  await db
-    .insert(ctxCatalogSnapshots)
-    .values({
+  await db.collection('ctx_catalog_snapshots').replaceOne(
+    { name: args.name },
+    {
       name: args.name,
-      payload: args.items,
+      payload: args.items as unknown[],
       itemCount: args.items.length,
       loadedAt: args.loadedAt,
-    })
-    .onConflictDoUpdate({
-      target: ctxCatalogSnapshots.name,
-      set: {
-        payload: args.items,
-        itemCount: args.items.length,
-        loadedAt: args.loadedAt,
-        updatedAt: sql`NOW()`,
-      },
-    });
+      updatedAt: new Date(),
+    },
+    { upsert: true },
+  );
 }

@@ -54,22 +54,13 @@ vi.mock('../../db/client.js', () => ({
     select: vi.fn(() => ({ from: vi.fn(() => ({ where: vi.fn(async () => []) })) })),
   },
 }));
-vi.mock('../../circuit-breaker.js', () => ({
-  CircuitOpenError: class CircuitOpenError extends Error {
-    constructor() {
-      super('open');
-      this.name = 'CircuitOpenError';
-    }
-  },
-  getAllCircuitStates: () => ({}),
-  getUpstreamCircuit: () => ({
-    fetch: async () => {
-      throw new Error('upstream disabled in tests');
-    },
-    getState: () => 'closed' as const,
-    reset: () => {},
-  }),
-}));
+// The merchant handlers proxy CTX through global `fetch`. Fail every
+// outbound call so the handler falls through to the cached baseline —
+// leaving `fetch` unstubbed would actually hit
+// http://test-upstream.local/ and hang.
+vi.stubGlobal('fetch', async () => {
+  throw new Error('upstream disabled in tests');
+});
 
 import { app } from '../../app.js';
 

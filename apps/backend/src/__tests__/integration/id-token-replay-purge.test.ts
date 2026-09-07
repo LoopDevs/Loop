@@ -1,19 +1,14 @@
 /**
- * Real-postgres integration test for the `social_id_token_uses`
- * retention sweep (AGT-06). The unit suite can't exercise the actual
- * `DELETE ... WHERE expires_at < cutoff` SQL — this pins that a row past
- * the retention grace is reaped while any row still inside the window
- * (or whose token is still valid) is spared, so the sweep never weakens
- * replay protection.
+ * Integration test for the `social_id_token_uses` retention sweep
+ * (AGT-06). This pins that a row past the retention grace is reaped
+ * while any row still inside the window (or whose token is still
+ * valid) is spared, so the sweep never weakens replay protection.
  *
- * Runs under `vitest.integration.config.ts` (LOOP_E2E_DB=1 + a real
- * `loop_test` postgres).
+ * Runs under `vitest.integration.config.ts` against the ephemeral
+ * in-memory document store — no external database required.
  */
-import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
-import { eq } from 'drizzle-orm';
-import { ensureMigrated, truncateAllTables } from './db-test-setup.js';
-import { db } from '../../db/client.js';
-import { socialIdTokenUses } from '../../db/schema.js';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { db, __resetDbForTests } from '../../db/client.js';
 import { purgeExpiredIdTokenUses } from '../../auth/id-token-replay.js';
 
 const NOW = new Date('2026-07-10T00:00:00Z');
@@ -24,24 +19,18 @@ const NOW = new Date('2026-07-10T00:00:00Z');
 const RETENTION_MS = 48 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
 
-beforeAll(async () => {
-  await ensureMigrated();
-});
-
-beforeEach(async () => {
-  await truncateAllTables();
+beforeEach(() => {
+  __resetDbForTests();
 });
 
 async function seedUse(tokenHash: string, expiresAt: Date): Promise<void> {
-  await db.insert(socialIdTokenUses).values({ tokenHash, provider: 'google', expiresAt });
+  await db
+    .collection('social_id_token_uses')
+    .insertOne({ tokenHash, provider: 'google', expiresAt, createdAt: new Date() });
 }
 
 async function exists(tokenHash: string): Promise<boolean> {
-  const rows = await db
-    .select({ tokenHash: socialIdTokenUses.tokenHash })
-    .from(socialIdTokenUses)
-    .where(eq(socialIdTokenUses.tokenHash, tokenHash));
-  return rows.length > 0;
+  return (await db.collection('social_id_token_uses').findOne({ tokenHash })) !== null;
 }
 
 describe('purgeExpiredIdTokenUses', () => {

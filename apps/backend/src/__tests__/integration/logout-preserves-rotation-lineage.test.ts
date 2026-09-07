@@ -23,18 +23,17 @@
  *   2. a well-behaved tail logout still invalidates the live token and
  *      leaves the whole chain intact.
  *
- * Runs under `vitest.integration.config.ts` (LOOP_E2E_DB=1 + a real
- * `loop_test` postgres).
+ * Runs under `vitest.integration.config.ts` against the ephemeral
+ * in-memory document store.
  */
-import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
-import { eq } from 'drizzle-orm';
+import { describe, it, expect, beforeEach, afterAll } from 'vitest';
+import { randomUUID } from 'node:crypto';
 import type { Context } from 'hono';
-import { ensureMigrated, truncateAllTables } from './db-test-setup.js';
-import { db } from '../../db/client.js';
-import { refreshTokens, users } from '../../db/schema.js';
+import { db, __resetDbForTests } from '../../db/client.js';
+import type { RefreshTokenDoc } from '../../db/types.js';
 import { logoutHandler } from '../../auth/logout-handler.js';
 import { signLoopToken } from '../../auth/tokens.js';
-import { hashRefreshToken, type RefreshTokenRow } from '../../auth/refresh-tokens.js';
+import { hashRefreshToken } from '../../auth/refresh-tokens.js';
 
 const REFRESH_TTL = 30 * 24 * 60 * 60; // 30 days, matches production
 const T1 = new Date('2026-07-10T00:00:00Z');
@@ -42,12 +41,8 @@ const T2 = new Date('2026-07-11T00:00:00Z');
 
 let realFetch: typeof globalThis.fetch;
 
-beforeAll(async () => {
-  await ensureMigrated();
-});
-
-beforeEach(async () => {
-  await truncateAllTables();
+beforeEach(() => {
+  __resetDbForTests();
   // Logout best-effort revokes upstream (CTX /logout) after the local
   // revoke. Stub `fetch` so the test never touches the network — the
   // handler swallows upstream errors anyway, but a stubbed 200 keeps
@@ -73,8 +68,8 @@ function makeCtx(body: unknown): Context {
   } as unknown as Context;
 }
 
-async function getRow(jti: string): Promise<RefreshTokenRow | undefined> {
-  return db.query.refreshTokens.findFirst({ where: eq(refreshTokens.jti, jti) });
+async function getRow(jti: string): Promise<RefreshTokenDoc | null> {
+  return db.collection('refresh_tokens').findOne({ jti });
 }
 
 /**
@@ -86,11 +81,17 @@ async function seedChain(): Promise<{
   userId: string;
   tokens: { A: string; B: string; C: string };
 }> {
-  const [u] = await db
-    .insert(users)
-    .values({ email: `cor11-${Date.now()}@test.local` })
-    .returning({ id: users.id });
-  const userId = u!.id;
+  const userId = randomUUID();
+  const seededAt = new Date();
+  await db.collection('users').insertOne({
+    id: userId,
+    ctxUserId: null,
+    email: `cor11-${Date.now()}@test.local`,
+    tokenVersion: 0,
+    homeCurrency: 'USD',
+    createdAt: seededAt,
+    updatedAt: seededAt,
+  });
 
   const jtis = { A: 'cor11-jti-A', B: 'cor11-jti-B', C: 'cor11-jti-C' };
   const mint = (jti: string): string =>
@@ -104,38 +105,40 @@ async function seedChain(): Promise<{
   const tokens = { A: mint(jtis.A), B: mint(jtis.B), C: mint(jtis.C) };
   const expiresAt = new Date(Date.now() + REFRESH_TTL * 1000);
 
-  await db.insert(refreshTokens).values([
-    // A: rotated out, links to its successor B.
-    {
-      jti: jtis.A,
-      userId,
-      tokenHash: hashRefreshToken(tokens.A),
-      expiresAt,
-      revokedAt: T1,
-      replacedByJti: jtis.B,
-      lastUsedAt: T1,
-    },
-    // B: rotated out, links to its successor C.
-    {
-      jti: jtis.B,
-      userId,
-      tokenHash: hashRefreshToken(tokens.B),
-      expiresAt,
-      revokedAt: T2,
-      replacedByJti: jtis.C,
-      lastUsedAt: T2,
-    },
-    // C: the live tail (never rotated → no successor yet).
-    {
-      jti: jtis.C,
-      userId,
-      tokenHash: hashRefreshToken(tokens.C),
-      expiresAt,
-      revokedAt: null,
-      replacedByJti: null,
-      lastUsedAt: null,
-    },
-  ]);
+  const refreshTokensCollection = db.collection('refresh_tokens');
+  // A: rotated out, links to its successor B.
+  await refreshTokensCollection.insertOne({
+    jti: jtis.A,
+    userId,
+    tokenHash: hashRefreshToken(tokens.A),
+    expiresAt,
+    revokedAt: T1,
+    replacedByJti: jtis.B,
+    lastUsedAt: T1,
+    createdAt: seededAt,
+  });
+  // B: rotated out, links to its successor C.
+  await refreshTokensCollection.insertOne({
+    jti: jtis.B,
+    userId,
+    tokenHash: hashRefreshToken(tokens.B),
+    expiresAt,
+    revokedAt: T2,
+    replacedByJti: jtis.C,
+    lastUsedAt: T2,
+    createdAt: seededAt,
+  });
+  // C: the live tail (never rotated → no successor yet).
+  await refreshTokensCollection.insertOne({
+    jti: jtis.C,
+    userId,
+    tokenHash: hashRefreshToken(tokens.C),
+    expiresAt,
+    revokedAt: null,
+    replacedByJti: null,
+    lastUsedAt: null,
+    createdAt: seededAt,
+  });
 
   return { userId, tokens };
 }

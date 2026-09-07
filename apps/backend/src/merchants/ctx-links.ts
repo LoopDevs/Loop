@@ -25,9 +25,7 @@
  * consistent with CTX", never blocks an admin save or a sweep.
  */
 import { logger } from '../logger.js';
-import { eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { merchantCashbackConfigs } from '../db/schema.js';
 import { ctxFetch } from '../ctx/api-fetch.js';
 import { upstreamUrl } from '../upstream.js';
 import { operatorCompanyId } from '../orders/ctx-order.js';
@@ -152,14 +150,7 @@ export async function pushUserDiscountForMerchant(
 export async function reconcileUserDiscounts(): Promise<void> {
   let configs;
   try {
-    configs = await db
-      .select({
-        merchantId: merchantCashbackConfigs.merchantId,
-        userCashbackPct: merchantCashbackConfigs.userCashbackPct,
-        active: merchantCashbackConfigs.active,
-      })
-      .from(merchantCashbackConfigs)
-      .where(eq(merchantCashbackConfigs.active, true));
+    configs = await db.collection('merchant_cashback_configs').findMany({ active: true });
   } catch (err) {
     log.error({ err }, 'Cashback-config read failed — skipping user-discount reconcile');
     return;

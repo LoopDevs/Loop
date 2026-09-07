@@ -1,51 +1,27 @@
 /**
- * Self-serve home-currency change integration tests on real postgres
- * (DOM-03).
+ * Self-serve home-currency change integration tests on the real
+ * document store.
  *
  * `POST /api/users/me/home-currency` is the onboarding-time region
- * picker. It already refuses the change once the user has placed an
- * order (A2-552 order guard → HOME_CURRENCY_LOCKED). DOM-03 closes the
- * money hole the order guard misses: a user can hold a non-zero
- * `user_credits` balance WITHOUT any order (referral / promo credit,
- * admin credit-adjustment, a prior support-mediated flip). That
- * balance is denominated in the CURRENT home currency; flipping the
- * currency without zeroing it first orphans it — every user surface
- * filters on `charge_currency = user.home_currency`, so the row stays
- * on the ledger but goes invisible, mis-stating money.
+ * picker. It refuses the change once the user has placed an order
+ * (A2-552 order guard → HOME_CURRENCY_LOCKED) because pricing history
+ * pins currency at order creation.
  *
- * The ADMIN path (`applyAdminHomeCurrencyChange`) already rejects this
- * with 409 HOME_CURRENCY_HAS_LIVE_BALANCE. These tests assert the
- * self-serve path now enforces the SAME guard with the SAME error, and
- * still allows the happy path (zero balance).
+ * (The DOM-03 live-credit-balance guard these tests used to also pin
+ * died with the credits ledger under ADR 052 — there is no
+ * `user_credits` balance to orphan any more; the order guard is the
+ * remaining precondition.)
  *
- * Gated on `LOOP_E2E_DB=1` like the sibling integration suites.
+ * Runs through the REAL `app` (routing + requireAuth + rate limiting)
+ * against the ephemeral in-memory store — the unit suite covers the
+ * handler in isolation; this pins the mounted route end-to-end.
  */
-import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
-import { eq } from 'drizzle-orm';
-
-const RUN_INTEGRATION = process.env['LOOP_E2E_DB'] === '1';
-
-// Discord notifiers fire-and-forget; mock to keep test logs quiet
-// (mirrors the sibling integration suites — the self-serve path itself
-// does not fan out to Discord, but app boot wires the module).
-vi.mock('../../discord.js', async (importActual) => {
-  const actual = (await importActual()) as Record<string, unknown>;
-  const noop = vi.fn();
-  return { ...actual, notifyAdminAudit: noop, notifyAdminBulkRead: noop };
-});
-
-import { db } from '../../db/client.js';
-import { users, userCredits } from '../../db/schema.js';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import { db, __resetDbForTests } from '../../db/client.js';
 import { findOrCreateUserByEmail } from '../../db/users.js';
 import { signLoopToken, DEFAULT_ACCESS_TTL_SECONDS } from '../../auth/tokens.js';
 import { app, __resetRateLimitsForTests } from '../../app.js';
-import {
-  ensureMigrated,
-  truncateAllTables,
-  seedUserCreditsWithBackingLedger,
-} from './db-test-setup.js';
-
-const describeIf = RUN_INTEGRATION ? describe : describe.skip;
 
 interface SeededUser {
   userId: string;
@@ -55,17 +31,46 @@ interface SeededUser {
 
 async function seedUser(email: string, homeCurrency: 'USD' | 'GBP' | 'EUR'): Promise<SeededUser> {
   const user = await findOrCreateUserByEmail(email);
-  await db.update(users).set({ homeCurrency }).where(eq(users.id, user.id));
+  await db.collection('users').updateOne({ id: user.id }, { $set: { homeCurrency } });
   const access = signLoopToken({
     sub: user.id,
     email: user.email,
     typ: 'access',
     ttlSeconds: DEFAULT_ACCESS_TTL_SECONDS,
-    // NS-09: stamp the seeded user's current token_version (0) so
+    // NS-09: stamp the seeded user's current tokenVersion (0) so
     // requireAuth's revocation check admits the token.
     tv: user.tokenVersion,
   });
   return { userId: user.id, email: user.email, bearer: access.token };
+}
+
+async function seedFulfilledOrder(userId: string): Promise<void> {
+  const now = new Date();
+  await db.collection('orders').insertOne({
+    id: randomUUID(),
+    userId,
+    merchantId: 'amazon',
+    faceValueMinor: 5000,
+    currency: 'USD',
+    chargeMinor: 5000,
+    chargeCurrency: 'USD',
+    userCashbackMinor: 0,
+    expectedCommissionMinor: null,
+    ctxOrderId: null,
+    ctxPaymentId: null,
+    paymentCryptoCurrency: 'XLM',
+    redeemCode: null,
+    redeemPin: null,
+    redeemUrl: null,
+    redemptionBackfillAttempts: 0,
+    redemptionBackfillLastAttemptAt: null,
+    state: 'fulfilled',
+    failureReason: null,
+    idempotencyKey: null,
+    createdAt: now,
+    fulfilledAt: now,
+    failedAt: null,
+  });
 }
 
 async function postHomeCurrency(
@@ -82,44 +87,14 @@ async function postHomeCurrency(
   });
 }
 
-describeIf('self-serve home-currency change — real postgres (DOM-03)', () => {
-  beforeAll(async () => {
-    await ensureMigrated();
-  });
-
-  beforeEach(async () => {
-    await truncateAllTables();
+describe('self-serve home-currency change — document store', () => {
+  beforeEach(() => {
+    __resetDbForTests();
     __resetRateLimitsForTests();
   });
 
-  it('409 HOME_CURRENCY_HAS_LIVE_BALANCE when the (order-less) user holds a non-zero balance in the current currency', async () => {
-    const me = await seedUser('dom03-live-balance@test.local', 'USD');
-    // A non-zero credit balance in the CURRENT home currency, and no
-    // order — the case the A2-552 order guard alone lets through. Backed
-    // by a matching opening-balance ledger row in ONE transaction
-    // (DAT-01-inv1, migration 0066) so the mirror is consistent; the
-    // guard reads only the balance, so the backing row is invisible here.
-    await seedUserCreditsWithBackingLedger(db, {
-      userId: me.userId,
-      currency: 'USD',
-      balanceMinor: 4200n,
-    });
-
-    const res = await postHomeCurrency(me.bearer, 'GBP');
-
-    expect(res.status).toBe(409);
-    const body = (await res.json()) as { code: string; message: string };
-    // Same error the ADMIN path returns (see admin-writes.test.ts).
-    expect(body.code).toBe('HOME_CURRENCY_HAS_LIVE_BALANCE');
-    expect(body.message).toContain('4200');
-
-    // Critical: no transition happened — the balance is not orphaned.
-    const after = await db.select().from(users).where(eq(users.id, me.userId));
-    expect(after[0]?.homeCurrency).toBe('USD');
-  });
-
-  it('allows the change when the order-less user has no credit balance', async () => {
-    const me = await seedUser('dom03-zero-balance@test.local', 'USD');
+  it('allows the change for an order-less user and persists it', async () => {
+    const me = await seedUser('hc-zero@test.local', 'USD');
 
     const res = await postHomeCurrency(me.bearer, 'GBP');
 
@@ -127,24 +102,42 @@ describeIf('self-serve home-currency change — real postgres (DOM-03)', () => {
     const body = (await res.json()) as { homeCurrency: string };
     expect(body.homeCurrency).toBe('GBP');
 
-    const after = await db.select().from(users).where(eq(users.id, me.userId));
-    expect(after[0]?.homeCurrency).toBe('GBP');
+    const after = await db.collection('users').findOne({ id: me.userId });
+    expect(after?.homeCurrency).toBe('GBP');
   });
 
-  it('allows the change when the user has a zero-balance row in the current currency', async () => {
-    const me = await seedUser('dom03-zero-row@test.local', 'USD');
-    // A settled-then-fully-debited balance leaves a zero-balance row.
-    // Mirrors the admin path's zero-balance allowance.
-    await db.insert(userCredits).values({
-      userId: me.userId,
-      currency: 'USD',
-      balanceMinor: 0n,
-    });
+  it('409 HOME_CURRENCY_LOCKED once the user has placed an order (A2-552)', async () => {
+    const me = await seedUser('hc-locked@test.local', 'USD');
+    await seedFulfilledOrder(me.userId);
 
-    const res = await postHomeCurrency(me.bearer, 'EUR');
+    const res = await postHomeCurrency(me.bearer, 'GBP');
+
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('HOME_CURRENCY_LOCKED');
+
+    // Critical: no transition happened.
+    const after = await db.collection('users').findOne({ id: me.userId });
+    expect(after?.homeCurrency).toBe('USD');
+  });
+
+  it('same-currency request is a no-op success even with an order on file', async () => {
+    const me = await seedUser('hc-noop@test.local', 'USD');
+    await seedFulfilledOrder(me.userId);
+
+    const res = await postHomeCurrency(me.bearer, 'USD');
 
     expect(res.status).toBe(200);
-    const after = await db.select().from(users).where(eq(users.id, me.userId));
-    expect(after[0]?.homeCurrency).toBe('EUR');
+    const body = (await res.json()) as { homeCurrency: string };
+    expect(body.homeCurrency).toBe('USD');
+  });
+
+  it('401 without a bearer token', async () => {
+    const res = await app.request('http://localhost/api/users/me/home-currency', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ currency: 'GBP' }),
+    });
+    expect(res.status).toBe(401);
   });
 });

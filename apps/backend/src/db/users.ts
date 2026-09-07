@@ -1,144 +1,71 @@
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
 import { db } from './client.js';
-import { users } from './schema.js';
-import { env } from '../env.js';
+import { isUniqueViolation } from './errors.js';
+import type { UserDoc } from './types.js';
 
-export type User = typeof users.$inferSelect;
-
-/**
- * Admin allowlist — CTX user IDs parsed from env once at module load.
- * Env is immutable after boot so caching is safe; re-read is a deploy.
- *
- * Fallback to an empty string handles test harnesses that mock the
- * env module with a subset of keys; the resulting empty set means
- * no admin access, which is the right failure mode.
- */
-const adminCtxUserIds = new Set(
-  (env.ADMIN_CTX_USER_IDS ?? '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0),
-);
+export type User = UserDoc;
 
 /**
- * CF-30: Admin allowlist for LOOP-NATIVE users — verified emails parsed
- * from `ADMIN_EMAILS` once at module load. The CTX allowlist above is
- * keyed on `ctx_user_id`, which UUID-anchored native users never carry,
- * so without this an `LOOP_AUTH_NATIVE_ENABLED=true` deployment leaves
- * `/api/admin/*` unreachable to everyone (every native session is
- * `is_admin = false`). Emails are normalized lowercase + trim to match
- * the canonical form persisted on `users.email`. Same module-load
- * caching rationale as the CTX set: env is immutable after boot, so a
- * grant/revoke is a config change (re-deploy), not a DB write.
- */
-const adminEmails = new Set(
-  (env.ADMIN_EMAILS ?? '')
-    .split(',')
-    .map((s) => s.trim().toLowerCase())
-    .filter((s) => s.length > 0),
-);
-
-/**
- * CF-30: True when `email` is on the `ADMIN_EMAILS` allowlist. Callers
- * MUST only pass a provider/OTP-verified email — granting admin off an
- * unverified address would let anyone claim an allowlisted identity.
- * Both native entry points (`findOrCreateUserByEmail` on OTP-verify,
- * `resolveOrCreateUserForIdentity` on `email_verified` social login)
- * satisfy that. An empty allowlist (the default) always returns false.
- */
-export function isAdminEmail(email: string): boolean {
-  return adminEmails.has(email.toLowerCase().trim());
-}
-
-/**
- * Upsert a Loop user from a CTX identity. Called from `requireAdmin`
- * (and, later, from `requireAuth` when the identity takeover lands
- * — ADR 013). The email is best-effort — if the bearer's JWT didn't
- * carry an email claim, we store an empty string and fix it up on
- * a later request that has it.
- *
- * is_admin is derived from the `ADMIN_CTX_USER_IDS` env allowlist.
- * Recomputing every upsert means adding/removing an admin is a
- * config change, not a database write.
+ * Upsert a Loop user from a CTX identity. Called from `requireAuth` on
+ * the legacy CTX-proxy path. The email is best-effort — if the bearer's
+ * JWT didn't carry an email claim, we store an empty string and fix it
+ * up on a later request that has it.
  */
 export async function upsertUserFromCtx(args: {
   ctxUserId: string;
   email: string | undefined;
 }): Promise<User> {
-  const isAdmin = adminCtxUserIds.has(args.ctxUserId);
-  // Atomic upsert — if the row exists, only `email` / `is_admin`
-  // / `updated_at` are refreshed. The `updated_at` set keeps the
-  // session-freshness signal useful without a manual bump.
-  const [row] = await db
-    .insert(users)
-    .values({
-      ctxUserId: args.ctxUserId,
-      email: args.email ?? '',
-      isAdmin,
-    })
-    .onConflictDoUpdate({
-      target: users.ctxUserId,
-      // Partial unique index — `targetWhere` is the conflict-arbiter
-      // predicate that mirrors `users_ctx_user_id_unique`'s
-      // `WHERE ctx_user_id IS NOT NULL` in schema.ts. Postgres
-      // requires this on the conflict target (`ON CONFLICT (col) WHERE
-      // <predicate>`) to disambiguate which partial unique index
-      // arbitrates. The previous `setWhere` was incorrect — `setWhere`
-      // filters which existing rows the UPDATE applies to (after the
-      // conflict has already been arbitrated), not which index to
-      // arbiter on. Without `targetWhere`, postgres throws
-      // `there is no unique or exclusion constraint matching the
-      // ON CONFLICT specification` because none of the unconditional
-      // indexes match the implicit arbiter predicate.
-      targetWhere: sql`${users.ctxUserId} IS NOT NULL`,
-      set: {
-        email: sql`COALESCE(EXCLUDED.email, ${users.email})`,
-        isAdmin,
-        updatedAt: sql`NOW()`,
+  const users = db.collection('users');
+  const now = new Date();
+  const updated = await users.updateOne(
+    { ctxUserId: args.ctxUserId },
+    {
+      $set: {
+        // Only refresh the email when the token actually carried one.
+        ...(args.email !== undefined && args.email !== '' ? { email: args.email } : {}),
+        updatedAt: now,
       },
-    })
-    .returning();
-  if (row === undefined) {
-    // Should be unreachable — INSERT ... RETURNING always returns at
-    // least the inserted row. Narrowed so TS is happy + so we throw
-    // loudly rather than returning an undefined-shaped user.
-    throw new Error('upsertUserFromCtx: no row returned');
-  }
-  return row;
+    },
+  );
+  if (updated !== null) return updated;
+  const doc: UserDoc = {
+    id: randomUUID(),
+    ctxUserId: args.ctxUserId,
+    email: args.email ?? '',
+    tokenVersion: 0,
+    homeCurrency: 'USD',
+    createdAt: now,
+    updatedAt: now,
+  };
+  await users.insertOne(doc);
+  return doc;
 }
 
 /** Looks up a Loop user by their internal UUID. */
 export async function getUserById(id: string): Promise<User | null> {
-  const row = await db.query.users.findFirst({ where: eq(users.id, id) });
-  return row ?? null;
+  return db.collection('users').findOne({ id });
 }
 
 /**
- * Column-scoped read of a user's CTX customer mapping. Used by the
- * procurement path to decide whether to act-as the customer on CTX
- * calls — keep it narrow, it runs per order.
+ * Read of a user's CTX customer mapping. Used by the procurement path
+ * to decide whether to act-as the customer on CTX calls.
  */
 export async function getUserCtxUserId(id: string): Promise<string | null> {
-  const row = await db.query.users.findFirst({
-    columns: { ctxUserId: true },
-    where: eq(users.id, id),
-  });
-  return row?.ctxUserId ?? null;
+  const user = await db.collection('users').findOne({ id });
+  return user?.ctxUserId ?? null;
 }
 
 /**
  * Records the CTX customer id minted by async provisioning
- * (`ctx/user-provisioning.ts`). Guarded on `ctx_user_id IS NULL` so a
+ * (`ctx/user-provisioning.ts`). Guarded on `ctxUserId: null` so a
  * concurrent provision (or a legacy CTX-proxy mapping) is never
  * clobbered — first write wins, later writers see `false`.
  */
 export async function setUserCtxUserId(id: string, ctxUserId: string): Promise<boolean> {
-  const rows = await db
-    .update(users)
-    .set({ ctxUserId, updatedAt: sql`NOW()` })
-    .where(and(eq(users.id, id), isNull(users.ctxUserId)))
-    .returning({ id: users.id });
-  return rows.length > 0;
+  const updated = await db
+    .collection('users')
+    .updateOne({ id, ctxUserId: null }, { $set: { ctxUserId, updatedAt: new Date() } });
+  return updated !== null;
 }
 
 /**
@@ -147,124 +74,63 @@ export async function setUserCtxUserId(id: string, ctxUserId: string): Promise<b
  * a token whose `tv` claim differs from this value (or that carries no
  * `tv` at all). Returns `null` when no such user row exists — the
  * caller fails closed (a token pointing at a deleted user is invalid).
- *
- * Column-scoped read (only `token_version`) — this runs on the hot
- * per-request auth path, so it must not drag the full row over the
- * wire. It is the one DB round-trip NS-09 adds to `requireAuth`.
  */
 export async function getUserTokenVersion(id: string): Promise<number | null> {
-  const row = await db.query.users.findFirst({
-    columns: { tokenVersion: true },
-    where: eq(users.id, id),
-  });
-  return row?.tokenVersion ?? null;
+  const user = await db.collection('users').findOne({ id });
+  return user?.tokenVersion ?? null;
 }
 
 /**
- * NS-09: atomically bumps a user's access-token-revocation counter
- * (`token_version = token_version + 1`). Every access token minted
- * before this bump (its `tv` claim now stale) is rejected on its next
- * `requireAuth` check. Called on logout (auth/logout-handler.ts); the
- * bulk sign-out / admin-revoke / refresh-reuse paths bump it inline
- * inside `revokeAllRefreshTokensForUser` (auth/refresh-tokens.ts) so
- * the increment is atomic with the refresh-row revoke. The `+ 1` runs
- * in the DB, so concurrent bumps compose correctly (no lost update).
+ * NS-09: atomically bumps a user's access-token-revocation counter.
+ * Every access token minted before this bump (its `tv` claim now
+ * stale) is rejected on its next `requireAuth` check. Called on logout;
+ * the bulk sign-out / refresh-reuse paths bump it inside
+ * `revokeAllRefreshTokensForUser` (auth/refresh-tokens.ts).
  */
 export async function bumpUserTokenVersion(id: string): Promise<void> {
   await db
-    .update(users)
-    .set({ tokenVersion: sql`${users.tokenVersion} + 1`, updatedAt: sql`NOW()` })
-    .where(eq(users.id, id));
+    .collection('users')
+    .updateOne({ id }, { $inc: { tokenVersion: 1 }, $set: { updatedAt: new Date() } });
 }
 
 /**
  * Find-or-create a Loop user by email (ADR 013 — Loop-native signup).
- * Loop-native users have no `ctx_user_id` mapping, so the partial
- * unique index on `users.ctx_user_id` does not apply; we find by
- * lower-cased email and insert a new row if nothing matches.
  *
  * **Invariant: callers MUST only pass a provider/OTP-verified email.**
- * `isAdmin` is derived from `ADMIN_EMAILS` (see `isAdminEmail` above)
- * with no further check here — granting admin off an unverified
- * address would let anyone claim an allowlisted identity. The two
- * production entry points (`verify-otp`, `email_verified` social
- * login) satisfy this by construction. The ONE deliberate exception is
- * `test-endpoints.ts`'s `/__test__/mint-loop-token` (AUDIT-2-E),
- * which calls this function with a caller-supplied, unverified email —
- * that's safe only because reaching the endpoint at all requires
- * `NODE_ENV==='test'` AND a shared secret that's never set outside
- * test infrastructure (see that file's doc comment). Do not add a
- * second unguarded caller.
+ * The two production entry points (`verify-otp`, `email_verified`
+ * social login) satisfy this by construction; the one deliberate
+ * exception is `test-endpoints.ts`'s `/__test__/mint-loop-token`,
+ * which is double-gated on NODE_ENV=test + a shared secret.
  *
- * Race-safe (A2-706). The unique index
- * `users_email_loop_native_unique` on `LOWER(email) WHERE
- * ctx_user_id IS NULL` (migration 0020) means two concurrent
- * `verify-otp` calls for the same new email will collide at the
- * second INSERT — we use `ON CONFLICT DO NOTHING` to absorb the
- * collision and re-SELECT so the losing caller returns the winning
- * caller's row instead of erroring.
+ * The email reaching here is already NFKC-normalised by
+ * `auth/normalize-email.ts`; the lowercase + trim below is
+ * defence-in-depth for any future caller that forgets the guard.
  */
 export async function findOrCreateUserByEmail(email: string): Promise<User> {
-  // A2-2002: NFKC normalize + ASCII-only check now lives in
-  // `auth/normalize-email.ts`. Callers (verify-otp, social) already
-  // route through it before calling here, so by the time we land at
-  // this function the email is canonical. The lowercase + trim below
-  // is preserved as defence-in-depth for any future caller that
-  // forgets the upstream guard — both shapes converge to the same
-  // canonical string.
+  const users = db.collection('users');
   const normalised = email.toLowerCase().trim();
-  // CF-30: the email reaching here is OTP/provider-verified (callers
-  // route through verify-otp / email_verified social login), so it's
-  // safe to consult the native admin allowlist.
-  const isAdmin = isAdminEmail(normalised);
-  const existing = await db.query.users.findFirst({
-    where: eq(users.email, normalised),
-  });
-  if (existing !== undefined && existing !== null) {
-    // CF-30: config-parity reconcile. The allowlist is the source of
-    // truth (env, not DB), mirroring the CTX path's recompute-on-upsert.
-    // If a grant/revoke was deployed after this row was created, bring
-    // `is_admin` in line on next verified login rather than leaving it
-    // stuck at the create-time value.
-    if (existing.isAdmin !== isAdmin) {
-      const [updated] = await db
-        .update(users)
-        .set({ isAdmin, updatedAt: sql`NOW()` })
-        .where(eq(users.id, existing.id))
-        .returning();
-      return updated ?? { ...existing, isAdmin };
+  const existing = await users.findOne({ email: normalised });
+  if (existing !== null) return existing;
+  const now = new Date();
+  const doc: UserDoc = {
+    id: randomUUID(),
+    ctxUserId: null,
+    email: normalised,
+    tokenVersion: 0,
+    homeCurrency: 'USD',
+    createdAt: now,
+    updatedAt: now,
+  };
+  try {
+    await users.insertOne(doc);
+    return doc;
+  } catch (err) {
+    // A concurrent signup raced us past the findOne — return the
+    // winner's row.
+    if (isUniqueViolation(err)) {
+      const raced = await users.findOne({ email: normalised });
+      if (raced !== null) return raced;
     }
-    return existing;
+    throw err;
   }
-  // INSERT ... ON CONFLICT DO NOTHING — if a concurrent signup raced
-  // us past the SELECT, the unique index trips and no row is
-  // returned. We then re-SELECT to find the row the winning caller
-  // inserted.
-  const inserted = await db
-    .insert(users)
-    .values({
-      email: normalised,
-      // CF-30: native admin grant via the `ADMIN_EMAILS` allowlist —
-      // the email is verified by the time we reach here.
-      isAdmin,
-    })
-    .onConflictDoNothing()
-    .returning();
-  if (inserted[0] !== undefined) return inserted[0];
-  const raced = await db.query.users.findFirst({
-    where: eq(users.email, normalised),
-  });
-  if (raced === undefined || raced === null) {
-    throw new Error('findOrCreateUserByEmail: no row returned after conflict');
-  }
-  // CF-30: same config-parity reconcile on the raced winner.
-  if (raced.isAdmin !== isAdmin) {
-    const [updated] = await db
-      .update(users)
-      .set({ isAdmin, updatedAt: sql`NOW()` })
-      .where(eq(users.id, raced.id))
-      .returning();
-    return updated ?? { ...raced, isAdmin };
-  }
-  return raced;
 }

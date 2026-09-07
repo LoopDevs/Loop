@@ -31,10 +31,7 @@
  * with per-tick errors swallowed so a transient CTX / DB blip
  * doesn't kill the interval.
  */
-import { createHash } from 'node:crypto';
-import { and, eq, isNull, isNotNull, lt } from 'drizzle-orm';
-import { db, withAdvisoryLock } from '../db/client.js';
-import { orders } from '../db/schema.js';
+import { db, withSingleFlight } from '../db/client.js';
 import { logger } from '../logger.js';
 import { notifyRedemptionBackfillExhausted } from '../discord.js';
 import { CtxUnavailableError, CtxRateLimitedError } from '../ctx/api-fetch.js';
@@ -99,29 +96,6 @@ export interface RedemptionBackfillTickResult {
 }
 
 /**
- * S4-8 (docs/readiness-backlog-2026-07-03.md): fixed advisory-lock key
- * for the redemption-backfill single-flight, same sha256→int64
- * derivation as `interestMintLockKey` / `ledgerInvariantLockKey`,
- * fixed scope string. Per the doc-comment above, duplicate concurrent
- * runs of this sweep were already money-safe (CAS-guarded writes) —
- * this lock is a pure efficiency win (fewer redundant CTX reads), not
- * a correctness fix.
- */
-function redemptionBackfillLockKey(): bigint {
-  const digest = createHash('sha256').update('loop:redemption-backfill').digest();
-  const raw =
-    (BigInt(digest[0]!) << 56n) |
-    (BigInt(digest[1]!) << 48n) |
-    (BigInt(digest[2]!) << 40n) |
-    (BigInt(digest[3]!) << 32n) |
-    (BigInt(digest[4]!) << 24n) |
-    (BigInt(digest[5]!) << 16n) |
-    (BigInt(digest[6]!) << 8n) |
-    BigInt(digest[7]!);
-  return BigInt.asIntN(64, raw);
-}
-
-/**
  * Single sweep pass. Safe to call repeatedly — the WHERE guards on
  * the persist UPDATE mean a concurrent writer (or a second sweeper)
  * can't double-write or clobber a payload that landed in between.
@@ -159,33 +133,30 @@ async function runRedemptionBackfillTickLocked(args?: {
     skippedLocked: false,
   };
 
-  // Matches the partial index `orders_redemption_backfill_pending`
-  // (migration 0034) plus the code-side attempts cap. Oldest
-  // fulfillment first so a long-stuck order isn't starved by newer
-  // ones when the batch limit bites.
-  const rows = await db
-    .select({
-      id: orders.id,
-      userId: orders.userId,
-      merchantId: orders.merchantId,
-      ctxOrderId: orders.ctxOrderId,
-      fulfilledAt: orders.fulfilledAt,
-      attempts: orders.redemptionBackfillAttempts,
-      lastAttemptAt: orders.redemptionBackfillLastAttemptAt,
-    })
-    .from(orders)
-    .where(
-      and(
-        eq(orders.state, 'fulfilled'),
-        isNotNull(orders.ctxOrderId),
-        isNull(orders.redeemCode),
-        isNull(orders.redeemPin),
-        isNull(orders.redeemUrl),
-        lt(orders.redemptionBackfillAttempts, REDEMPTION_BACKFILL_MAX_ATTEMPTS),
-      ),
-    )
-    .orderBy(orders.fulfilledAt)
-    .limit(args?.limit ?? REDEMPTION_BACKFILL_BATCH_LIMIT);
+  // Candidate scan: fulfilled docs that captured a ctxOrderId but no
+  // redemption payload, under the attempts cap. Oldest fulfillment
+  // first so a long-stuck order isn't starved by newer ones when the
+  // batch limit bites.
+  const candidates = await db.collection('orders').findMany(
+    {
+      state: 'fulfilled',
+      ctxOrderId: { $ne: null },
+      redeemCode: null,
+      redeemPin: null,
+      redeemUrl: null,
+      redemptionBackfillAttempts: { $lt: REDEMPTION_BACKFILL_MAX_ATTEMPTS },
+    },
+    { sort: [['fulfilledAt', 'asc']], limit: args?.limit ?? REDEMPTION_BACKFILL_BATCH_LIMIT },
+  );
+  const rows = candidates.map((o) => ({
+    id: o.id,
+    userId: o.userId,
+    merchantId: o.merchantId,
+    ctxOrderId: o.ctxOrderId,
+    fulfilledAt: o.fulfilledAt,
+    attempts: o.redemptionBackfillAttempts,
+    lastAttemptAt: o.redemptionBackfillLastAttemptAt,
+  }));
   result.picked = rows.length;
 
   for (const row of rows) {
@@ -292,7 +263,7 @@ export async function runRedemptionBackfillTick(args?: {
   now?: number;
 }): Promise<RedemptionBackfillTickResult> {
   let leaseTimer: ReturnType<typeof setTimeout> | undefined;
-  const locked = await withAdvisoryLock(redemptionBackfillLockKey(), () =>
+  const locked = await withSingleFlight('redemption-backfill', () =>
     Promise.race([
       runRedemptionBackfillTickLocked(args),
       new Promise<typeof TICK_LEASE_TIMED_OUT>((resolve) => {
@@ -327,29 +298,22 @@ async function persistRecoveredRedemption(
   redemption: { code: string | null; pin: string | null; url: string | null },
   now: number,
 ): Promise<boolean> {
-  const updated = await db
-    .update(orders)
-    .set({
-      // CF-25 / X-PRIV-03: same envelope as the primary fulfillment
-      // write — encrypt code + PIN at rest, leave the URL plaintext.
-      // No-op passthrough when LOOP_REDEEM_ENCRYPTION_KEY is unset.
-      redeemCode: encryptRedeemField(redemption.code),
-      redeemPin: encryptRedeemField(redemption.pin),
-      redeemUrl: redemption.url,
-      redemptionBackfillAttempts: row.attempts + 1,
-      redemptionBackfillLastAttemptAt: new Date(now),
-    })
-    .where(
-      and(
-        eq(orders.id, row.id),
-        eq(orders.state, 'fulfilled'),
-        isNull(orders.redeemCode),
-        isNull(orders.redeemPin),
-        isNull(orders.redeemUrl),
-      ),
-    )
-    .returning({ id: orders.id });
-  if (updated.length === 0) return false;
+  const updated = await db.collection('orders').updateOne(
+    { id: row.id, state: 'fulfilled', redeemCode: null, redeemPin: null, redeemUrl: null },
+    {
+      $set: {
+        // CF-25 / X-PRIV-03: same envelope as the primary fulfillment
+        // write — encrypt code + PIN at rest, leave the URL plaintext.
+        // No-op passthrough when LOOP_REDEEM_ENCRYPTION_KEY is unset.
+        redeemCode: encryptRedeemField(redemption.code),
+        redeemPin: encryptRedeemField(redemption.pin),
+        redeemUrl: redemption.url,
+        redemptionBackfillAttempts: row.attempts + 1,
+        redemptionBackfillLastAttemptAt: new Date(now),
+      },
+    },
+  );
+  if (updated === null) return false;
   log.info(
     {
       orderId: row.id,
@@ -396,31 +360,25 @@ export async function refetchOrderRedemption(
   nowMs?: number,
 ): Promise<AdminRedemptionRefetchOutcome> {
   const now = nowMs ?? Date.now();
-  const [row] = await db
-    .select({
-      id: orders.id,
-      userId: orders.userId,
-      merchantId: orders.merchantId,
-      state: orders.state,
-      ctxOrderId: orders.ctxOrderId,
-      fulfilledAt: orders.fulfilledAt,
-      redeemCode: orders.redeemCode,
-      redeemPin: orders.redeemPin,
-      redeemUrl: orders.redeemUrl,
-      attempts: orders.redemptionBackfillAttempts,
-    })
-    .from(orders)
-    .where(eq(orders.id, orderId));
-  if (row === undefined) return { kind: 'order_not_found' };
-  if (row.state !== 'fulfilled') return { kind: 'not_eligible', reason: 'not_fulfilled' };
-  if (row.ctxOrderId === null) return { kind: 'not_eligible', reason: 'no_ctx_order_id' };
-  if (row.redeemCode !== null || row.redeemPin !== null || row.redeemUrl !== null) {
+  const order = await db.collection('orders').findOne({ id: orderId });
+  if (order === null) return { kind: 'order_not_found' };
+  if (order.state !== 'fulfilled') return { kind: 'not_eligible', reason: 'not_fulfilled' };
+  if (order.ctxOrderId === null) return { kind: 'not_eligible', reason: 'no_ctx_order_id' };
+  if (order.redeemCode !== null || order.redeemPin !== null || order.redeemUrl !== null) {
     return { kind: 'not_eligible', reason: 'already_present' };
   }
+  const row: BackfillRow = {
+    id: order.id,
+    userId: order.userId,
+    merchantId: order.merchantId,
+    ctxOrderId: order.ctxOrderId,
+    fulfilledAt: order.fulfilledAt,
+    attempts: order.redemptionBackfillAttempts,
+  };
 
   let redemption: { code: string | null; pin: string | null; url: string | null };
   try {
-    redemption = await fetchRedemption(row.ctxOrderId);
+    redemption = await fetchRedemption(order.ctxOrderId);
   } catch (err) {
     if (err instanceof CtxUnavailableError) return { kind: 'ctx_unavailable' };
     throw err;
@@ -464,15 +422,16 @@ async function recordEmptyAttempt(
   result?: RedemptionBackfillTickResult,
 ): Promise<void> {
   const nextAttempts = row.attempts + 1;
-  const updated = await db
-    .update(orders)
-    .set({
-      redemptionBackfillAttempts: nextAttempts,
-      redemptionBackfillLastAttemptAt: new Date(now),
-    })
-    .where(and(eq(orders.id, row.id), eq(orders.redemptionBackfillAttempts, row.attempts)))
-    .returning({ id: orders.id });
-  if (updated.length === 0) return; // raced — the other writer owns the bump
+  const updated = await db.collection('orders').updateOne(
+    { id: row.id, redemptionBackfillAttempts: row.attempts },
+    {
+      $set: {
+        redemptionBackfillAttempts: nextAttempts,
+        redemptionBackfillLastAttemptAt: new Date(now),
+      },
+    },
+  );
+  if (updated === null) return; // raced — the other writer owns the bump
   // `===` not `>=`: the sweeper can only ever land exactly on the cap
   // (its SQL filter excludes rows at/past the cap), and the ADR-037
   // admin re-drive keeps bumping past it — re-paging ops on every

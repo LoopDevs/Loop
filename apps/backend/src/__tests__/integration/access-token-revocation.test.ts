@@ -1,22 +1,21 @@
 /**
- * NS-09 — real-postgres integration test for ACCESS-TOKEN REVOCATION.
+ * NS-09 — integration test for ACCESS-TOKEN REVOCATION.
  *
  * The gap: access tokens are 15-min, signature-only, and carry no
  * per-token DB row, so before NS-09 `verifyLoopToken` checked only the
  * signature + expiry — NOT liveness. A logout, a "sign out everywhere",
  * or a compromise event could not invalidate an already-issued,
  * still-signed access token: it stayed valid for its full TTL. (Refresh
- * tokens were already DB-revocable; the gap was the ACCESS token, and
- * the admin bearers, which ARE Loop access tokens.)
+ * tokens were already DB-revocable; the gap was the ACCESS token.)
  *
- * The fix: a per-user `users.token_version` (migration 0070) that is
+ * The fix: a per-user `users.tokenVersion` counter that is
  *   - stamped as the `tv` claim on every minted access token,
- *   - compared against the row's CURRENT value on every authenticated
+ *   - compared against the doc's CURRENT value on every authenticated
  *     request in `requireAuth`, and
  *   - bumped (atomic +1) on logout / sign-out-all / refresh-reuse.
  *
  * These tests drive the REAL enforcement point (`requireAuth`) against a
- * live `users` row and pin the security property directly:
+ * live `users` doc and pin the security property directly:
  *   (a) a valid access token whose `tv` matches verifies OK;
  *   (b) after a bump (revoke-all AND logout), the SAME previously-valid
  *       token is REJECTED 401 — the load-bearing assertion, red against
@@ -24,16 +23,15 @@
  *   (c) a token minted AFTER the bump (carrying the new `tv`) verifies OK;
  *   (d) a legacy access token with NO `tv` claim fails closed (401).
  *
- * Runs under `vitest.integration.config.ts` (LOOP_E2E_DB=1 + a real
- * postgres). `requireAuth` is exercised through a minimal Hono-context
- * stub — the same pattern as `logout-preserves-rotation-lineage.test.ts`.
+ * Runs under `vitest.integration.config.ts` against the ephemeral
+ * in-memory document store. `requireAuth` is exercised through a
+ * minimal Hono-context stub — the same pattern as
+ * `logout-preserves-rotation-lineage.test.ts`.
  */
-import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
-import { eq } from 'drizzle-orm';
+import { describe, it, expect, beforeEach, afterAll } from 'vitest';
+import { randomUUID } from 'node:crypto';
 import type { Context } from 'hono';
-import { ensureMigrated, truncateAllTables } from './db-test-setup.js';
-import { db } from '../../db/client.js';
-import { users, refreshTokens } from '../../db/schema.js';
+import { db, __resetDbForTests } from '../../db/client.js';
 import { requireAuth } from '../../auth/require-auth.js';
 import { logoutHandler } from '../../auth/logout-handler.js';
 import { signLoopToken } from '../../auth/tokens.js';
@@ -45,12 +43,8 @@ const REFRESH_TTL = 30 * 24 * 60 * 60; // 30 days
 
 let realFetch: typeof globalThis.fetch;
 
-beforeAll(async () => {
-  await ensureMigrated();
-});
-
-beforeEach(async () => {
-  await truncateAllTables();
+beforeEach(() => {
+  __resetDbForTests();
   // logoutHandler best-effort revokes upstream (CTX /logout). Stub fetch
   // so the test never touches the network — the handler swallows upstream
   // errors anyway; a stubbed 200 keeps the circuit breaker closed.
@@ -115,8 +109,18 @@ async function runAuth(
 
 async function seedUser(): Promise<{ userId: string; email: string }> {
   const email = `ns09-${Date.now()}-${Math.random().toString(36).slice(2)}@test.local`;
-  const [u] = await db.insert(users).values({ email }).returning({ id: users.id });
-  return { userId: u!.id, email };
+  const userId = randomUUID();
+  const now = new Date();
+  await db.collection('users').insertOne({
+    id: userId,
+    ctxUserId: null,
+    email,
+    tokenVersion: 0,
+    homeCurrency: 'USD',
+    createdAt: now,
+    updatedAt: now,
+  });
+  return { userId, email };
 }
 
 /** Mints a real, signature-valid access token carrying an explicit `tv`. */
@@ -178,11 +182,15 @@ describe('NS-09: access tokens are revocable via users.token_version', () => {
       ttlSeconds: REFRESH_TTL,
       jti,
     }).token;
-    await db.insert(refreshTokens).values({
+    await db.collection('refresh_tokens').insertOne({
       jti,
       userId,
       tokenHash: hashRefreshToken(refreshToken),
       expiresAt: new Date(Date.now() + REFRESH_TTL * 1000),
+      revokedAt: null,
+      replacedByJti: null,
+      lastUsedAt: null,
+      createdAt: new Date(),
     });
 
     // Access token works before logout.
@@ -202,7 +210,7 @@ describe('NS-09: access tokens are revocable via users.token_version', () => {
 
     // The presented refresh token's own row was revoked too (COR-11 path
     // still intact) — the logout is a full session kill, not just a tv bump.
-    const row = await db.query.refreshTokens.findFirst({ where: eq(refreshTokens.jti, jti) });
+    const row = await db.collection('refresh_tokens').findOne({ jti });
     expect(row?.revokedAt).not.toBeNull();
   });
 

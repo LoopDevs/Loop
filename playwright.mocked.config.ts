@@ -92,7 +92,6 @@ export default defineConfig({
         // cause a hydration mismatch in the existing CTX-proxy tests.
         // A future flywheel-via-UI test will pin those env vars in a
         // dedicated `playwright.flywheel.config.ts`.
-        DATABASE_URL: 'postgres://loop:loop@localhost:5433/loop_test',
         // Bypass per-IP rate limits — the suite runs 2 tests with
         // Playwright retries=2 in CI, hitting /api/auth/request-otp
         // up to 6 times in a cold window vs the 5/min limit.

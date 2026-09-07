@@ -3,8 +3,7 @@ import { z } from 'zod';
 import { foldForSearch } from '@loop/shared';
 import { getMerchants } from './sync.js';
 import { toLiteMerchant } from './lite.js';
-import { getUpstreamCircuit } from '../circuit-breaker.js';
-import { upstreamUrl } from '../upstream.js';
+import { upstreamUrl, upstreamFetch } from '../upstream.js';
 import { logger } from '../logger.js';
 import type { LoopAuthContext } from '../auth/require-auth.js';
 import { getUserCtxUserId } from '../db/users.js';
@@ -181,13 +180,10 @@ export async function merchantDetailHandler(c: Context): Promise<Response> {
     }
 
     if (headers !== null) {
-      const response = await getUpstreamCircuit('merchants').fetch(
-        upstreamUrl(`/merchants/${id}`),
-        {
-          headers,
-          signal: AbortSignal.timeout(10_000),
-        },
-      );
+      const response = await upstreamFetch(upstreamUrl(`/merchants/${id}`), {
+        headers,
+        signal: AbortSignal.timeout(10_000),
+      });
 
       if (response.ok) {
         const raw = (await response.json().catch(() => null)) as unknown;

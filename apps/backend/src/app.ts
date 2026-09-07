@@ -12,7 +12,7 @@ import { secureHeadersMiddleware } from './middleware/secure-headers.js';
 import { bodyLimitMiddleware } from './middleware/body-limit.js';
 import { startCleanupInterval } from './cleanup.js';
 import { startFleetSizeEstimator } from './middleware/fleet-size.js';
-import { metricsHandler, openApiHandler } from './observability-handlers.js';
+import { metricsHandler } from './observability-handlers.js';
 import { mountTestEndpoints } from './test-endpoints.js';
 import { mountMerchantRoutes } from './routes/merchants.js';
 import { mountAuthRoutes } from './routes/auth.js';
@@ -20,7 +20,6 @@ import { mountOrderRoutes } from './routes/orders.js';
 import { mountMiscRoutes } from './routes/misc.js';
 import { mountPublicRoutes } from './routes/public.js';
 import { mountUserRoutes } from './routes/users.js';
-import { mountAdminRoutes } from './routes/admin.js';
 import { mountWellKnownRoutes } from './routes/well-known.js';
 
 export const app = new Hono();
@@ -127,12 +126,10 @@ app.use('*', globalRateLimit());
 // (still-unread) request body.
 app.use('*', bodyLimitMiddleware);
 
-// `/metrics` (Prometheus exposition) + `/openapi.json` (static
-// spec) handlers live in `./observability-handlers.ts`. Both are
-// gated by `probeGateAllows` (closed-by-default in production
-// unless `*_BEARER_TOKEN` env var is set).
+// `/metrics` (Prometheus exposition) handler lives in
+// `./observability-handlers.ts`, gated by `probeGateAllows`
+// (closed-by-default in production unless METRICS_BEARER_TOKEN is set).
 app.get('/metrics', metricsHandler);
-app.get('/openapi.json', openApiHandler);
 
 // ─── Test-only reset endpoint ─────────────────────────────────────────────────
 //
@@ -195,12 +192,6 @@ mountOrderRoutes(app);
 // mount-order constraint between them (cache-control before auth
 // so 401s also get `private, no-store`) is the contract.
 mountUserRoutes(app);
-
-// `/api/admin/*` route mounts (the entire admin panel — ~80
-// endpoints) live in `./routes/admin.ts`. Bundles cache-control
-// + requireAuth + requireAdmin + Discord-bulk-notify together
-// because their mount-order discipline is the contract.
-mountAdminRoutes(app);
 
 // ─── 404 fallback ────────────────────────────────────────────────────────────
 

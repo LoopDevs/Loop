@@ -24,12 +24,8 @@
  *     fixture; per-surface 10-minute dedup),
  *     `notifyOperatorPoolExhausted` (every operator in the pool
  *     unhealthy).
- *   - **Circuit-breaker transitions** — `notifyCircuitBreaker`
- *     (per-(name,state) 10-minute dedup so a flapping circuit
- *     doesn't flood the channel — A2-1326).
  *
- * Test seams (`__resetCircuitNotifyDedupForTests` /
- * `__resetCtxSchemaDriftDedupForTests` /
+ * Test seams (`__resetCtxSchemaDriftDedupForTests` /
  * `__resetUnrecognizedDepositDedupForTests`) wipe the per-process
  * dedup state so tests can exercise the throttles deterministically.
  *
@@ -445,8 +441,8 @@ export {
 /**
  * CF-13 (single-key form): dedup so a rejected API key doesn't flood
  * `#monitoring` with one alert per request while it keeps returning
- * 401. 10-minute window matches the circuit-breaker and
- * CTX-schema-drift dedup cadence — long enough to stay quiet during
+ * 401. 10-minute window matches the CTX-schema-drift dedup
+ * cadence — long enough to stay quiet during
  * a sustained outage, short enough that "still rejected" fires within
  * an ops rotation.
  */
@@ -476,7 +472,7 @@ export function notifyCtxCredentialInvalid(): void {
   void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
     title: '🔴 CTX API Key Rejected (401)',
     description: truncate(
-      `CTX returned 401 — the operator API key was rejected (revoked, rotated upstream, or misconfigured). Every CTX call is blocked until \`GIFT_CARD_API_KEY\`/\`GIFT_CARD_API_SECRET\` are restored. The upstream breaker has been forced OPEN so procurement defers instead of failing paid orders (ADR 051).`,
+      `CTX returned 401 — the operator API key was rejected (revoked, rotated upstream, or misconfigured). Every CTX call fails until \`GIFT_CARD_API_KEY\`/\`GIFT_CARD_API_SECRET\` are restored. Calls raise a transient error, so procurement defers and paid orders stay retryable rather than failing (ADR 051).`,
       DESCRIPTION_MAX,
     ),
     color: RED,
@@ -495,16 +491,6 @@ export {
   notifyVaultEmissionsStuck,
   notifyWalletProvisioningStuck,
 } from './monitoring-stuck-sweepers.js';
-
-// `notifyCircuitBreaker` (A2-1326) and its per-(name, state) dedup
-// state live in `./monitoring-circuit-breaker.ts`. Re-exported below
-// alongside `__resetCircuitNotifyDedupForTests` so existing import
-// sites — including `circuit-breaker.ts` and the discord test
-// suite — resolve unchanged.
-export {
-  notifyCircuitBreaker,
-  __resetCircuitNotifyDedupForTests,
-} from './monitoring-circuit-breaker.js';
 
 /**
  * Notify: ADR 045 (B-3) duplicate-account signal — a fresh

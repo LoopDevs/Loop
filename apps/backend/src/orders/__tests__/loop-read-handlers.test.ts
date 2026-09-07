@@ -35,18 +35,10 @@ const { dbState, ctxState } = vi.hoisted(() => ({
 
 vi.mock('../../db/client.js', () => ({
   db: {
-    select: vi.fn(() => ({
-      from: () => ({
-        where: () => ({
-          orderBy: () => ({ limit: async () => dbState.listRows }),
-        }),
-      }),
+    collection: vi.fn(() => ({
+      findOne: vi.fn(async () => dbState.row ?? null),
+      findMany: vi.fn(async () => dbState.listRows),
     })),
-    query: {
-      orders: {
-        findFirst: vi.fn(async () => dbState.row),
-      },
-    },
   },
 }));
 

@@ -14,34 +14,22 @@ const state = vi.hoisted(() => ({
   >(),
 }));
 
-const limitMock = vi.fn(async () => {
-  if (state.throwErr !== null) throw state.throwErr;
-  return state.configRows;
-});
-const whereMock = vi.fn(() => ({ limit: limitMock }));
-const fromMock = vi.fn(() => ({ where: whereMock }));
-const selectMock = vi.fn(() => ({ from: fromMock }));
-
+// The handler reads the active config doc via
+// `db.collection('merchant_cashback_configs').findOne(...)` and calls
+// `.toFixed(2)` on the numeric pct — the mock parses the historical
+// string fixtures into doc-shaped numbers.
 vi.mock('../../db/client.js', () => ({
-  db: { select: () => selectMock() },
-}));
-
-vi.mock('../../db/schema.js', () => ({
-  merchantCashbackConfigs: {
-    merchantId: 'merchant_cashback_configs.merchant_id',
-    userCashbackPct: 'merchant_cashback_configs.user_cashback_pct',
-    active: 'merchant_cashback_configs.active',
+  db: {
+    collection: () => ({
+      findOne: async () => {
+        if (state.throwErr !== null) throw state.throwErr;
+        const row = state.configRows[0];
+        if (row === undefined) return null;
+        return { userCashbackPct: Number.parseFloat(row.userCashbackPct), active: true };
+      },
+    }),
   },
 }));
-
-vi.mock('drizzle-orm', async () => {
-  const actual = (await vi.importActual('drizzle-orm')) as Record<string, unknown>;
-  return {
-    ...actual,
-    eq: (col: unknown, value: unknown) => ({ __eq: true, col, value }),
-    and: (...parts: unknown[]) => ({ __and: true, parts }),
-  };
-});
 
 vi.mock('../../merchants/sync.js', () => ({
   getMerchants: () => ({

@@ -18,13 +18,6 @@ vi.mock('../../logger.js', () => ({
   },
 }));
 
-vi.mock('../../circuit-breaker.js', () => ({
-  getAllCircuitStates: () => ({}),
-  getUpstreamCircuit: () => ({
-    fetch: (...args: Parameters<typeof globalThis.fetch>) => globalThis.fetch(...args),
-  }),
-}));
-
 const { snapshotState } = vi.hoisted(() => ({
   snapshotState: {
     saved: [] as Array<{ name: string; items: unknown[]; loadedAt: Date }>,

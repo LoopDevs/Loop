@@ -141,38 +141,12 @@ export const coreEnvFields = {
   MIN_SUPPORTED_APP_VERSION_IOS: z.string().optional(),
   MIN_SUPPORTED_APP_VERSION_ANDROID: z.string().optional(),
 
-  // Hardening B3: emergency opt-out for the production step-up-key
-  // boot guard below. Same `"1"`-only shape as the image-proxy
-  // override so a deploy typo fails at parse time. Setting it ships
-  // an admin surface whose destructive writes all 503
-  // STEP_UP_UNAVAILABLE — deliberate for a staging deploy that
-  // hasn't provisioned the key, never for real production.
-  DISABLE_ADMIN_STEP_UP_ENFORCEMENT: z.enum(['1']).optional(),
-
   // R3-7: emergency opt-out for the production native-auth boot
   // guard below. Only `"1"` counts. Setting it deliberately permits
   // a production deploy to use the legacy CTX-proxy auth path, so it
   // is for rollback / staging only; normal production must run
   // LOOP_AUTH_NATIVE_ENABLED=true.
   DISABLE_NATIVE_AUTH_ENFORCEMENT: z.enum(['1']).optional(),
-
-  // AUDIT-2 finding A: emergency opt-out for the production
-  // USDC-issuer boot guard below. Same `"1"`-only shape as its
-  // siblings so a deploy typo fails at parse time. Setting it ships
-  // production with the USDC deposit rail deliberately disabled (the
-  // watcher's issuer-match guard already fails closed with no issuer
-  // configured — matches nothing rather than "any issuer" — so this
-  // is a launch-readiness override, not a security override).
-  DISABLE_USDC_ISSUER_ENFORCEMENT: z.enum(['1']).optional(),
-
-  // CFG-01: emergency opt-out for the production DISCORD_WEBHOOK_MONITORING
-  // boot guard below (env.ts). Same `"1"`-only shape as its siblings so a
-  // deploy typo fails at parse time. Setting it ships production with the
-  // monitoring/alert tier deliberately un-wired — every drift / circuit /
-  // stuck-sweeper / ledger-invariant page is dropped silently. For a
-  // staging or throwaway deploy that genuinely wants no alerting, never
-  // for a real production launch.
-  DISABLE_MONITORING_WEBHOOK_ENFORCEMENT: z.enum(['1']).optional(),
 
   // NS-10 (CF-25 / X-PRIV-03 follow-up): emergency opt-out for the
   // production LOOP_REDEEM_ENCRYPTION_KEY boot guard below (env.ts).
@@ -258,73 +232,17 @@ export const coreEnvFields = {
   // `RATE_LIMIT_MACHINE_COUNT_ESTIMATE` above, unchanged behaviour.
   FLY_APP_NAME: z.string().optional(),
 
-  // A2-1606 / A2-1607: shared-secret bearer tokens for `/metrics` and
-  // `/openapi.json`. When set, the route requires `Authorization:
-  // Bearer <token>` for every request. When unset the route is open in
-  // development/test and 404s in production so probes can't scrape
-  // the live route-map or circuit state anonymously. 32+ chars
-  // recommended (the same threshold LOOP_JWT_SIGNING_KEY enforces).
+  // A2-1606: shared-secret bearer token for `/metrics`. When set, the
+  // route requires `Authorization: Bearer <token>` for every request.
+  // When unset the route is open in development/test and 404s in
+  // production so probes can't scrape circuit state anonymously.
   METRICS_BEARER_TOKEN: z.string().min(16).optional(),
-  OPENAPI_BEARER_TOKEN: z.string().min(16).optional(),
-
-  // A2-1610: per-admin per-currency daily cap on credit adjustments,
-  // in minor units. Stops a stolen admin session from draining the
-  // treasury via many sub-per-request-cap writes inside the token
-  // TTL. Default 100M minor (£1M / $1M / €1M) — a volume in-flight
-  // ops would never hit in a single UTC day. Set to `0` to disable
-  // the check (dev / test). The per-request ±10M cap stays in place
-  // regardless.
-  ADMIN_DAILY_ADJUSTMENT_CAP_MINOR: z.coerce.bigint().nonnegative().default(100_000_000n),
-
-  // ADM-01 (2026-06-30 cold audit): withdrawals had NO daily aggregate
-  // cap at all, unlike every sibling admin money-write (adjustment,
-  // refund, payout-compensation) — the one path where real value
-  // actually leaves the system as a Stellar payment was bounded only
-  // by the per-call cap and the 20/min rate limit. ADR 036 re-scoped
-  // the withdrawal writer to EMISSION and the cap var was silently
-  // orphaned in that merge (found by check-dead-flags, hardening C5);
-  // hardening A1 revives it as the cap on the emission writer — the
-  // same "value leaves the system" surface under its new name. Same
-  // semantics as ADMIN_DAILY_ADJUSTMENT_CAP_MINOR: per currency, per
-  // UTC day, across all admins; `0` disables the check.
-  ADMIN_DAILY_WITHDRAWAL_CAP_MINOR: z.coerce.bigint().nonnegative().default(100_000_000n),
-
-  // NS-05: per-ACTION value cap (minor units) on the admin money-move
-  // levers — payout retry, order redrive, vault emission/redemption
-  // redrive, and operator-float manual movement. Unlike the DAILY caps
-  // above (an aggregate across a UTC day), this bounds a SINGLE action:
-  // a fat-finger or compromised admin can't push an unbounded amount
-  // through one retry/redrive/adjust. Owner's decision: $1,000 per
-  // action → 100_000 minor. Compared against each action's value in ITS
-  // OWN currency's minor units (never FX-converted), so a £/€/$ action
-  // is bounded to 1,000 units of its own denomination; a non-fiat asset
-  // (XLM) is bounded to 1,000 units of that asset (no price oracle).
-  // Fail-CLOSED: `.positive()` (unlike the `0`-disables daily caps) so
-  // a security control can't be silently zeroed — loosen by raising it.
-  LOOP_ADMIN_ACTION_VALUE_CAP_MINOR: z.coerce.bigint().positive().default(100_000n),
-
-  // ADR 045 (B-3): Phase-1 fraud/abuse velocity limits on order
-  // creation. Two independent dimensions, both per-user (not per-IP —
-  // see ADR 045 for why the existing per-IP rate limiter doesn't
-  // bound this threat). `0` disables a dimension (dev/test escape
-  // hatch, same convention as ADMIN_DAILY_ADJUSTMENT_CAP_MINOR).
-  // Defaults are generous — sized against the existing $50k single-
-  // order face-value ceiling, not against normal usage.
-  LOOP_ORDER_VELOCITY_MAX_PER_WINDOW: z.coerce.number().int().nonnegative().default(20),
-  LOOP_ORDER_VELOCITY_WINDOW_HOURS: z.coerce.number().int().positive().default(24),
-  LOOP_ORDER_VELOCITY_MAX_VALUE_MINOR: z.coerce.bigint().nonnegative().default(500_000n),
 
   // Discord webhooks (optional — for notifications). SEC-10: each must
   // be a real HTTPS Discord webhook URL, not merely a well-formed URL —
-  // see `discordWebhookUrl` above. DISCORD_WEBHOOK_MONITORING is
-  // additionally REQUIRED in production (CFG-01 boot guard in env.ts).
+  // see `discordWebhookUrl` above.
   DISCORD_WEBHOOK_ORDERS: discordWebhookUrl.optional(),
   DISCORD_WEBHOOK_MONITORING: discordWebhookUrl.optional(),
-  // Admin audit fanout (ADR 017 / 018). Every successful admin write
-  // posts here fire-and-forget AFTER the DB commit. Unset in dev;
-  // set in production so a leaked admin token produces visible
-  // Discord noise rather than silent ledger drift.
-  DISCORD_WEBHOOK_ADMIN_AUDIT: discordWebhookUrl.optional(),
 
   // Error tracking (optional — get DSN from sentry.io)
   SENTRY_DSN: z.string().url().optional(),
@@ -347,50 +265,21 @@ export const coreEnvFields = {
   // unset, so existing deploys keep working.
   LOOP_ENV: z.string().min(1).optional(),
 
-  // Database (ADR 012). Required — the credits ledger + admin panel
-  // can't start without it. Standard postgres URL; in dev points at
-  // the docker-compose Postgres on :5433.
-  DATABASE_URL: z
+  // Document store driver. `memory` (default) loads the whole database
+  // into memory from the JSON file at DB_JSON_PATH; `mongo` connects to
+  // MONGODB_URI. See src/db/client.ts.
+  DB_DRIVER: z.enum(['memory', 'mongo']).default('memory'),
+  // Where the memory driver persists the database ('' → ephemeral, no
+  // persistence — the unit-test posture).
+  DB_JSON_PATH: z.string().default('data/db.json'),
+  MONGODB_URI: z
     .string()
     .url()
-    .refine((u) => u.startsWith('postgres://') || u.startsWith('postgresql://'), {
-      message: 'must be a postgres:// or postgresql:// URL',
-    }),
-  DATABASE_POOL_MAX: z.coerce.number().int().positive().default(10),
-
-  // A2-724: per-session statement_timeout (milliseconds). Sent as a
-  // startup parameter on every connection so a runaway query
-  // (admin aggregate, errant ad-hoc) can't monopolise a pool slot
-  // indefinitely. 30s is the Phase-1 baseline — every documented
-  // admin endpoint completes well under this with the partial
-  // indexes from A2-708/709 + A2-716. Set to 0 to disable (the
-  // migrator path runs through the same pool and can take longer
-  // on a fresh-clone replay; default keeps boot-time migrations
-  // well-bounded since none currently exceed 5s of pure DDL).
-  DATABASE_STATEMENT_TIMEOUT_MS: z.coerce.number().int().nonnegative().default(30_000),
-
-  // Comma-separated list of CTX user IDs granted admin privileges
-  // (ADR 011). Evaluated at user-upsert time to set `users.is_admin`.
-  // Matching by CTX sub (not email) keeps the upsert path synchronous
-  // against the JWT — we don't need to round-trip to CTX's `/me`
-  // endpoint on every admin request. Emails as an allowlist is a
-  // future refinement once the user-profile sync job lands.
-  ADMIN_CTX_USER_IDS: z.string().default(''),
-
-  // CF-30: Comma-separated list of verified emails granted admin
-  // privileges on the LOOP-NATIVE auth path (ADR 013). The
-  // `ADMIN_CTX_USER_IDS` allowlist above is keyed on `ctx_user_id`,
-  // which UUID-anchored Loop-native users never carry — so without
-  // this var every native session resolves `is_admin = false` and the
-  // entire `/api/admin/*` surface is unreachable once
-  // `LOOP_AUTH_NATIVE_ENABLED=true`. Evaluated at native user
-  // create/login to set `users.is_admin` (config-not-DB-write parity
-  // with the CTX path). Only granted on a provider/OTP-verified email:
-  // both native entry points (`findOrCreateUserByEmail` on OTP,
-  // `resolveOrCreateUserForIdentity` on social) are reached only after
-  // the email is verified. Matched case-insensitively (normalized
-  // lowercase + trim, same canonical form as the user row's email).
-  ADMIN_EMAILS: z.string().default(''),
+    .refine((u) => u.startsWith('mongodb://') || u.startsWith('mongodb+srv://'), {
+      message: 'must be a mongodb:// or mongodb+srv:// URL',
+    })
+    .optional(),
+  MONGODB_DB: z.string().min(1).default('loop'),
 
   // Defaults for the cashback split when a merchant has no admin-set
   // `merchant_cashback_configs` row (ADR 011). Applied in

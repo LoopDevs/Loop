@@ -1,7 +1,7 @@
 /**
  * AsyncLocalStorage request-context wrapper (A2-1305). Mounts
  * the per-request `requestId` into an ALS scope so any downstream
- * helper — `ctxFetch`, `CircuitBreaker.fetch`, handler-scope
+ * helper — `ctxFetch`, handler-scope
  * code that doesn't pass `c` around — can read it and propagate
  * it onto outbound CTX fetches as `X-Request-Id`. CTX then logs
  * our id against theirs, letting ops ask "what happened to our
@@ -13,13 +13,12 @@
  * `requestId` from the ALS-populated context.
  *
  * The response-side X-Ctx-Request-Id propagation is the second
- * half of the contract: `circuit-breaker.ts::wrappedFetch`
- * captures the `X-Request-Id` (or `X-Correlation-Id`) header
- * from every CTX response into the per-request store; this
- * middleware reads the most recent one out — last-write wins
- * when a single inbound request fires multiple CTX calls (e.g.
- * a circuit half-open retry). Skipped silently when no CTX call
- * happened — most non-proxy endpoints (health, admin reads)
+ * half of the contract: `ctx/api-fetch.ts::ctxFetch` captures the
+ * `X-Request-Id` (or `X-Correlation-Id`) header from every CTX
+ * response into the per-request store; this middleware reads the
+ * most recent one out — last-write wins when a single inbound
+ * request fires multiple CTX calls. Skipped silently when no CTX
+ * call happened — most non-proxy endpoints (health, admin reads)
  * won't emit the header.
  *
  * The READ has to happen INSIDE the `als.run` callback —

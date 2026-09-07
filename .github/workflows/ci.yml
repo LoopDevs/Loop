@@ -67,40 +67,9 @@ jobs:
         run: |
           npm ci --ignore-scripts
           npm rebuild esbuild
-      # Install flyctl so `lint:docs` can run `flyctl config validate` on
-      # every fly.toml in the repo. Without this, a regression like the
-      # orphaned `[[services.http_checks]]` block (PR #120) slips through
-      # CI and only surfaces when an ops engineer runs validate locally.
-      - name: Install flyctl
-        # A2-114: SHA-pinned to the 1.5 release so a compromised
-        # fly-side push to `master` can't swap in a token-exfil
-        # step. Bump deliberately — verify the new SHA against a
-        # signed release tag, don't chase the tag.
-        uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # v1.6
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run format:check
-      - run: npm run lint:docs
-      # Route-mount ↔ OpenAPI-registration parity (comprehensive audit
-      # 2026-06-11). Static cross-check: every app.get/post/put/delete
-      # mount must have a registerPath registration; rate-limited
-      # mounts must declare 429; /api/admin/* must declare 404 (not
-      # 403 — requireAdmin masks non-admins as 404 by design).
-      # Deferred violations live in scripts/openapi-parity-allowlist.json
-      # (currently empty) and ratchet down — stale entries fail.
-      - run: npm run check:openapi-parity
-      - run: npm run check:dead-flags
-      # T0-3 (docs/money-auth-worklist.md): static presence + shape
-      # assertion for the money-critical DB objects docs/invariants.md
-      # documents as "DB:" tier (the emission-conservation trigger,
-      # the payout/settlement/ledger unique indexes, the ledger/order
-      # CHECK constraints). Replays the migration chain's CREATE/DROP
-      # events textually (no live postgres) so it runs here in the
-      # REQUIRED Quality job rather than waiting on flywheel-integration
-      # (which validates the same objects against a real DB but isn't
-      # a required merge check today — see docs/invariants.md and
-      # docs/money-auth-worklist.md T0-3 for the follow-up).
-      - run: npm run check:money-invariants
       # Catalog media-pipeline tool self-tests (tools/ isn't a vitest workspace,
       # so this is their only regression guard). Network-free subset — see
       # scripts/test-catalog-tools.sh.
@@ -202,39 +171,14 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-  # A2-1705 phase A.1: real-postgres integration suite. Walks the
-  # cashback-flywheel happy path through a live `loop_test` database
-  # so the schema-level invariants (CHECK constraints, partial unique
-  # indexes, triggers) and drizzle SQL emission + multi-table txn
-  # semantics in `markOrderFulfilled` are exercised end-to-end —
-  # exactly the layer Phase 6.5 of the audit found bugs A2-610 / 611
-  # / 700 in via empirical testing. The default unit suite uses a
-  # placeholder DATABASE_URL + per-file mocks; this job is the only
-  # path that runs against a real postgres.
+  # Integration suite — flow-level tests (auth CAS races, order
+  # transitions, purge sweeps) against the in-memory document store.
+  # No external database: the store is process-local and each test
+  # resets it via __resetDbForTests().
   flywheel-integration:
-    name: Flywheel integration (real postgres)
+    name: Flywheel integration
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    services:
-      # `postgres:16` matches docker-compose.yml + the prod base image
-      # (Fly Postgres tracks the same major). Port 5432 → host 5433
-      # mirrors the dev port choice so DATABASE_URL is identical.
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: loop
-          POSTGRES_PASSWORD: loop
-          POSTGRES_DB: loop_test
-        ports:
-          - 5433:5432
-        # Wait for the container to accept connections before the job
-        # actually runs — `pg_isready` is the upstream-recommended
-        # readiness probe.
-        options: >-
-          --health-cmd "pg_isready -U loop -d loop_test"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -257,30 +201,7 @@ jobs:
           npm ci --ignore-scripts
           npm rebuild esbuild
       - name: Run flywheel integration suite
-        # The integration setup file pins DATABASE_URL to the loop_test
-        # DB on port 5433 (identical shape locally + in CI). The suite
-        # runs migrations on cold start via the `ensureMigrated` helper
-        # so the GitHub-hosted postgres lands at the right schema
-        # before any test touches it.
         run: npm run test:integration -w @loop/backend
-      # Migration-chain replay + schema parity (comprehensive audit
-      # 2026-06-11). Two legs:
-      #   1. `drizzle-kit check` — snapshot-journal consistency (cheap;
-      #      guards an accidental re-baseline collision).
-      #   2. `check-migration-parity.ts` — replays migrations
-      #      0000→latest into a scratch DB via the same drizzle-orm
-      #      migrator `runMigrations()` uses at startup, materialises
-      #      schema.ts into a second scratch DB, and diffs both
-      #      catalogs (columns / constraints / indexes / triggers /
-      #      enums). Divergences fail unless allowlisted in
-      #      scripts/migration-parity-allowlist.json (drizzle-DSL-
-      #      unrepresentable shapes only, e.g. the ADR-011 triggers).
-      # Reuses this job's postgres service; the loop_test DB is only
-      # the maintenance connection — scratch DBs are created/dropped.
-      - name: Migration chain replay + schema.ts parity
-        env:
-          DATABASE_URL: postgres://loop:loop@localhost:5433/loop_test
-        run: npm run check:migration-parity -w @loop/backend
 
   audit:
     name: Security audit
@@ -537,24 +458,6 @@ jobs:
           npm rebuild esbuild
       - name: Build backend
         run: npm run build -w @loop/backend
-      # A4-023 / A4-109: Drizzle's migrator reads `migrationsFolder`
-      # at runtime, so the bundled `dist` must ship `meta/_journal.json`
-      # and every journaled SQL file alongside `migrate-cli.js`. tsup's
-      # `onSuccess` hook copies `src/db/migrations` into `dist/migrations`
-      # on build; the Dockerfile then ships the dist tree as-is. Pin
-      # both invariants here so a regression — either source files
-      # disappearing or the build no longer copying — trips before deploy.
-      - name: Verify backend migrations ship in dist/
-        run: |
-          set -euo pipefail
-          # Source must contain the journaled set tsup will copy.
-          test -f apps/backend/src/db/migrations/meta/_journal.json
-          src_sql=$(find apps/backend/src/db/migrations -maxdepth 1 -name '*.sql' | wc -l | tr -d ' ')
-          test "$src_sql" -gt 0
-          # Build output must mirror it so production runtime resolves.
-          test -f apps/backend/dist/migrations/meta/_journal.json
-          dist_sql=$(find apps/backend/dist/migrations -maxdepth 1 -name '*.sql' | wc -l | tr -d ' ')
-          test "$dist_sql" -eq "$src_sql"
       - name: Build web (SSR)
         run: npm run build -w @loop/web
         env:
@@ -564,25 +467,11 @@ jobs:
           # apps/web/app/root.tsx) matches the source-map artifacts
           # uploaded below. Push-only; PR builds leave it unset.
           VITE_SENTRY_RELEASE: ${{ github.event_name == 'push' && github.sha || '' }}
-      # A2-1711 (comprehensive audit 2026-06-11: documented but never
-      # enforced until now). Fails the build when apps/web/build/client
-      # exceeds MAX_SSR_KB (2500) or any single JS chunk exceeds
-      # MAX_CHUNK_KB (800). Runs directly after the SSR build it
-      # measures; the human-readable size table below stays as the
-      # at-a-glance summary.
-      - name: Check bundle budget
-        run: npm run check:bundle-budget
       - name: Build web (mobile static export)
         run: npm run build:mobile -w @loop/web
         env:
           VITE_API_URL: https://api.loopfinance.io
           VITE_SENTRY_RELEASE: ${{ github.event_name == 'push' && github.sha || '' }}
-      # A2-1115: assert admin route chunks stay out of the eagerly-loaded
-      # entry/root bundle. Catches regressions like a non-admin route
-      # importing from routes/admin*.tsx, which would silently ship
-      # admin payloads to every signed-out visitor.
-      - name: Verify admin bundle code-split
-        run: ./scripts/check-admin-bundle-split.sh
       # A2-1307: upload web source maps to Sentry on push-to-main only.
       # Without source maps, the Sentry events from prod (`apps/web/app/
       # root.tsx` Sentry.init) carry minified stack traces — operator
@@ -808,28 +697,6 @@ jobs:
     timeout-minutes: 20
     if: github.event_name == 'pull_request'
     needs: [quality, test-unit, build]
-    services:
-      # /health now SELECT 1's the DB and returns 503 on critical
-      # degradation. The e2e backend used to point DATABASE_URL at a
-      # placeholder host because the suite never touches db-backed
-      # endpoints, but `wait-on /health --timeout 30000` now never
-      # passes — orchestrator-grade health is the right default for
-      # production but breaks the placeholder pattern. Provision a
-      # real postgres so /health returns 200 and the e2e suite
-      # boots.
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: loop
-          POSTGRES_PASSWORD: loop
-          POSTGRES_DB: loop_test
-        ports:
-          - 5433:5432
-        options: >-
-          --health-cmd "pg_isready -U loop -d loop_test"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -898,12 +765,6 @@ jobs:
           NODE_ENV: test
           GIFT_CARD_API_BASE_URL: https://spend.ctx.com
           INCLUDE_DISABLED_MERCHANTS: 'true'
-          # /health probes the DB now (SELECT 1, 503 on failure), so the
-          # placeholder DATABASE_URL pattern would block wait-on. Point
-          # at the postgres service this job provisions; e2e tests
-          # still don't exercise db-backed admin/credits endpoints, the
-          # connection just needs to be reachable.
-          DATABASE_URL: postgres://loop:loop@localhost:5433/loop_test
       - name: Wait for backend
         run: npx wait-on http://localhost:8080/health --timeout 30000
       - name: Run e2e tests (real CTX)
@@ -925,28 +786,6 @@ jobs:
     # Deterministic, no external dependencies — runs on every push and PR
     # (unlike `test-e2e` which talks to the real upstream and is PR-gated).
     needs: [quality, test-unit]
-    services:
-      # A2-1705 phase A.2: postgres for the mocked-e2e harness.
-      # `playwright.mocked.config.ts::globalSetup` runs the checked-in
-      # drizzle migrations against this DB before booting the backend
-      # webServer. Same port mapping (5433 → 5432) as docker-compose so
-      # the URL is identical locally + in CI. The existing CTX-proxy
-      # purchase flow doesn't write to this DB (orders live in
-      # mock-CTX's memory map); this is the harness investment for
-      # future loop-native UI tests.
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: loop
-          POSTGRES_PASSWORD: loop
-          POSTGRES_DB: loop_test
-        ports:
-          - 5433:5432
-        options: >-
-          --health-cmd "pg_isready -U loop -d loop_test"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -1009,124 +848,6 @@ jobs:
           path: playwright-report/
           retention-days: 7
 
-  test-e2e-flywheel:
-    name: E2E tests (loop-native flywheel)
-    runs-on: ubuntu-latest
-    # 15 -> 20 (Q6-5): a third Playwright suite (admin/support
-    # dashboard smoke) now runs sequentially in this job alongside the
-    # flywheel walk and the loop-purchase suite.
-    timeout-minutes: 20
-    # A2-1705 phase A.3 closure — separate config / port range from
-    # the mocked-e2e suite because LOOP_AUTH_NATIVE_ENABLED=true
-    # changes the home page's SSR branch and would break the legacy
-    # CTX-proxy tests that run there. Walks the consumer-side UI
-    # surface: real session restore via the test-only mint-token
-    # endpoint → /orders renders the seeded fulfilled order +
-    # cashback earnings headline.
-    #
-    # Q6-4 (docs/money-auth-worklist.md): a SECOND, independent
-    # Playwright config/webServer (playwright.loop-purchase.config.ts)
-    # runs as a later step in this same job — the producer-side
-    # counterpart to the walk above: drives the real loop-native
-    # order-create → deposit → paid → procured → fulfilled →
-    # redemption-reveal path through the UI, against a mocked
-    # Horizon + mocked CTX, rather than seeding a terminal state.
-    needs: [quality, test-unit]
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: loop
-          POSTGRES_PASSWORD: loop
-          POSTGRES_DB: loop_test
-        ports:
-          - 5433:5432
-        options: >-
-          --health-cmd "pg_isready -U loop -d loop_test"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: '22'
-          cache: 'npm'
-      - name: Cache node_modules
-        id: npm-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            node_modules
-            apps/*/node_modules
-            packages/*/node_modules
-          key: node_modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
-      - name: Install deps
-        if: steps.npm-cache.outputs.cache-hit != 'true'
-        run: |
-          npm ci --ignore-scripts
-          npm rebuild esbuild
-      - name: Cache Playwright browsers
-        id: playwright-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
-      - name: Prepare apt sources for Playwright deps
-        run: |
-          # GitHub's Ubuntu image carries optional Microsoft apt sources
-          # (Azure CLI / Microsoft packages). They are not needed for
-          # Chromium deps, but a bad InRelease from those repos makes
-          # Playwright's apt update fail before tests run.
-          sudo rm -f \
-            /etc/apt/sources.list.d/azure-cli.list \
-            /etc/apt/sources.list.d/microsoft-prod.list \
-            /etc/apt/sources.list.d/microsoft-prod.sources
-      - name: Install Playwright browsers
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: npx playwright install --with-deps chromium
-      - name: Install Playwright system deps (cache hit path)
-        if: steps.playwright-cache.outputs.cache-hit == 'true'
-        run: npx playwright install-deps chromium
-      - name: Run loop-native flywheel e2e tests
-        run: npm run test:e2e:flywheel
-      - name: Upload Playwright report
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: playwright-report-flywheel
-          path: playwright-report/
-          retention-days: 7
-      # Q6-4 (docs/money-auth-worklist.md): loop-native purchase-
-      # through-the-UI e2e. Runs as a second step in this SAME job
-      # (own config/port range/webServer — see
-      # playwright.loop-purchase.config.ts's header comment for why
-      # it can't share the flywheel suite's backend process) rather
-      # than a new CI job, reusing the postgres service above.
-      - name: Run loop-native purchase-through-the-UI e2e tests
-        run: npm run test:e2e:loop-purchase
-      - name: Upload Playwright report (loop-purchase)
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: playwright-report-loop-purchase
-          path: playwright-report-loop-purchase/
-          retention-days: 7
-      # Q6-5 (docs/money-auth-worklist.md): admin/support dashboard
-      # E2E smoke. Runs as a third step in this SAME job (own
-      # config/port range/webServer — see
-      # playwright.admin.config.ts's header comment) rather than a
-      # new CI job, reusing the postgres service above.
-      - name: Run admin/support dashboard e2e tests
-        run: npm run test:e2e:admin
-      - name: Upload Playwright report (admin)
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: playwright-report-admin
-          path: playwright-report-admin/
-          retention-days: 7
-
   notify:
     name: Discord notification
     runs-on: ubuntu-latest
@@ -1148,7 +869,6 @@ jobs:
         mobile-overlay-guard,
         test-e2e,
         test-e2e-mocked,
-        test-e2e-flywheel,
       ]
     steps:
       - name: Notify Discord

@@ -12,46 +12,39 @@ vi.hoisted(() => {
   process.env.GIFT_CARD_API_SECRET ??= 'placeholder-api-secret';
 });
 
-import { Keypair } from '@stellar/stellar-sdk';
-import { parseEnv, CANONICAL_MAINNET_USDC_ISSUER } from '../env.js';
+import { parseEnv } from '../env.js';
 
-// A valid HTTPS Discord webhook URL (SEC-10 schema shape). Reused as
-// the production monitoring webhook that CFG-01 now requires.
+// A valid HTTPS Discord webhook URL (SEC-10 schema shape).
 const MONITORING_WEBHOOK = 'https://discord.com/api/webhooks/123456789012345678/AbCdEf-gh_Ij';
 
 // Minimum viable env — everything else is optional or has a default.
-// `DATABASE_URL` is required (ADR 012) so every parse run needs it;
-// the value is a valid shape so the .url() + protocol check passes
-// without opening a real connection. `DISCORD_WEBHOOK_MONITORING` is
-// carried here so the production-success fixtures below (which spread
-// `...base`) satisfy the CFG-01 required-in-prod boot guard; it's
-// optional in dev/test, so its presence is inert for the dev parses.
 // NS-10 (CF-25 / X-PRIV-03): production boots require
 // LOOP_REDEEM_ENCRYPTION_KEY (or the explicit opt-out). A 32-byte key
 // (base64 of "0123456789abcdef0123456789abcdef") that also clears the
-// 32-byte length validation. Carried in `base` — same pattern as
-// DISCORD_WEBHOOK_MONITORING above — so every production-success
-// fixture that spreads `...base` satisfies the guard; it's optional in
-// dev/test, so its presence is inert for the dev parses.
+// 32-byte length validation. Carried in `base` so every
+// production-success fixture that spreads `...base` satisfies the
+// guard; it's optional in dev/test, so its presence is inert for the
+// dev parses.
 const REDEEM_KEY = 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=';
 
 const base = {
   GIFT_CARD_API_BASE_URL: 'https://upstream.example.com',
   GIFT_CARD_API_KEY: 'test-operator-key',
   GIFT_CARD_API_SECRET: 'test-operator-secret',
-  DATABASE_URL: 'postgres://user:pass@localhost:5433/loop',
-  DISCORD_WEBHOOK_MONITORING: MONITORING_WEBHOOK,
   LOOP_REDEEM_ENCRYPTION_KEY: REDEEM_KEY,
 };
 
-// Hardening B3: production boots require LOOP_ADMIN_STEP_UP_SIGNING_KEY
-// (or the explicit opt-out), so production-success fixtures carry it.
-const STEP_UP_KEY = 'admin-step-up-test-key-32-chars-min!!';
 const JWT_KEY = 'jwt-test-signing-key-32-chars-min!!';
-// AUDIT-2 finding A: production boots require LOOP_STELLAR_USDC_ISSUER
-// (or the explicit opt-out), so production-success fixtures carry it
-// too — same pattern as STEP_UP_KEY above.
-const USDC_ISSUER = CANONICAL_MAINNET_USDC_ISSUER;
+
+// R3-7: production boots require native auth enabled + a signing key
+// (or the explicit rollback opt-out), so production-success fixtures
+// carry the pair.
+const prodBase = {
+  ...base,
+  NODE_ENV: 'production' as const,
+  LOOP_AUTH_NATIVE_ENABLED: 'true' as const,
+  LOOP_JWT_SIGNING_KEY: JWT_KEY,
+};
 
 describe('parseEnv', () => {
   it('parses a minimal valid env with defaults', () => {
@@ -73,11 +66,6 @@ describe('parseEnv', () => {
     expect(() => parseEnv({ ...base, PORT: '65536' })).toThrow(/PORT/);
     expect(() => parseEnv({ ...base, PORT: '-1' })).toThrow(/PORT/);
   });
-
-  // R3-1 production readiness (2026-07-10): the operator-float
-  // reconciler's per-asset drift thresholds and reconciliation cadence
-  // are `parseEnv`-validated, not hardcoded — a malformed override
-  // fails boot instead of silently coercing to something unintended.
 
   it('rejects non-http(s) URLs for GIFT_CARD_API_BASE_URL', () => {
     expect(() => parseEnv({ GIFT_CARD_API_BASE_URL: 'file:///etc/passwd' })).toThrow(
@@ -209,19 +197,66 @@ describe('parseEnv', () => {
     );
   });
 
-  // ADR 050: the A-025 image-proxy host-allowlist boot guard is retired —
-  // the proxy is reference-keyed (clients send merchant/order ids, never
-  // URLs), so production boots with no image-proxy config at all.
-  it('boots in production without any image-proxy configuration', () => {
-    const env = parseEnv({
-      ...base,
-      NODE_ENV: 'production',
-      LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
-      LOOP_AUTH_NATIVE_ENABLED: 'true',
-      LOOP_JWT_SIGNING_KEY: JWT_KEY,
-      LOOP_STELLAR_USDC_ISSUER: USDC_ISSUER,
+  // The document store (post-Drizzle): DB_DRIVER picks the driver, the
+  // memory driver persists to DB_JSON_PATH, the mongo driver needs a
+  // real mongodb:// connection string.
+  describe('document-store configuration (DB_DRIVER / DB_JSON_PATH / MONGODB_*)', () => {
+    it('defaults to the memory driver with the data/db.json path and the loop database name', () => {
+      const env = parseEnv(base);
+      expect(env.DB_DRIVER).toBe('memory');
+      expect(env.DB_JSON_PATH).toBe('data/db.json');
+      expect(env.MONGODB_DB).toBe('loop');
+      expect(env.MONGODB_URI).toBeUndefined();
     });
-    expect(env.NODE_ENV).toBe('production');
+
+    it('rejects an unknown DB_DRIVER value', () => {
+      expect(() => parseEnv({ ...base, DB_DRIVER: 'postgres' })).toThrow(/DB_DRIVER/);
+    });
+
+    it("accepts DB_JSON_PATH overrides, including '' (ephemeral, no persistence)", () => {
+      expect(parseEnv({ ...base, DB_JSON_PATH: '/var/data/loop.json' }).DB_JSON_PATH).toBe(
+        '/var/data/loop.json',
+      );
+      expect(parseEnv({ ...base, DB_JSON_PATH: '' }).DB_JSON_PATH).toBe('');
+    });
+
+    it('accepts mongodb:// and mongodb+srv:// connection strings', () => {
+      expect(parseEnv({ ...base, MONGODB_URI: 'mongodb://localhost:27017' }).MONGODB_URI).toBe(
+        'mongodb://localhost:27017',
+      );
+      expect(
+        parseEnv({ ...base, MONGODB_URI: 'mongodb+srv://cluster.example.mongodb.net' }).MONGODB_URI,
+      ).toBe('mongodb+srv://cluster.example.mongodb.net');
+    });
+
+    it('rejects a MONGODB_URI that is not a mongodb URL', () => {
+      expect(() => parseEnv({ ...base, MONGODB_URI: 'not-a-url' })).toThrow(/MONGODB_URI/);
+      // A well-formed URL on the wrong scheme is the classic paste
+      // error (postgres:// from the old stack) — must fail loudly.
+      expect(() =>
+        parseEnv({ ...base, MONGODB_URI: 'postgres://user:pass@localhost:5432/loop' }),
+      ).toThrow(/MONGODB_URI/);
+      expect(() => parseEnv({ ...base, MONGODB_URI: 'https://localhost:27017' })).toThrow(
+        /MONGODB_URI/,
+      );
+    });
+
+    it('DB_DRIVER=mongo without MONGODB_URI fails at boot (never on first collection access)', () => {
+      expect(() => parseEnv({ ...base, DB_DRIVER: 'mongo' })).toThrow(
+        /DB_DRIVER=mongo requires MONGODB_URI/,
+      );
+    });
+
+    it('accepts DB_DRIVER=mongo once MONGODB_URI is set', () => {
+      const env = parseEnv({
+        ...base,
+        DB_DRIVER: 'mongo',
+        MONGODB_URI: 'mongodb://localhost:27017',
+        MONGODB_DB: 'loop_test',
+      });
+      expect(env.DB_DRIVER).toBe('mongo');
+      expect(env.MONGODB_DB).toBe('loop_test');
+    });
   });
 
   // CF2-17 (2026-06-30 cold audit): length alone doesn't rule out a
@@ -256,51 +291,10 @@ describe('parseEnv', () => {
       ).toThrow(/LOOP_JWT_SIGNING_KEY_PREVIOUS.*low-entropy/);
     });
 
-    it('applies the same check to the admin step-up signing keys', () => {
-      expect(() => parseEnv({ ...base, LOOP_ADMIN_STEP_UP_SIGNING_KEY: 'd'.repeat(32) })).toThrow(
-        /LOOP_ADMIN_STEP_UP_SIGNING_KEY.*low-entropy/,
-      );
-      expect(() => parseEnv({ ...base, LOOP_ADMIN_STEP_UP_SIGNING_KEY: REAL_KEY })).not.toThrow();
-    });
-
     it('still enforces the minimum-length bar independently of entropy', () => {
       expect(() => parseEnv({ ...base, LOOP_JWT_SIGNING_KEY: 'short' })).toThrow(
         /LOOP_JWT_SIGNING_KEY must be at least 32 characters/,
       );
-    });
-  });
-
-  // Launch-runbook tripwire: a typo'd USDC issuer on mainnet makes
-  // the payment watcher silently ignore every legitimate deposit.
-  describe('LOOP_STELLAR_USDC_ISSUER mainnet tripwire', () => {
-    const NON_CANONICAL_ISSUER = `G${'B'.repeat(55)}`;
-    const TESTNET_PASSPHRASE = 'Test SDF Network ; September 2015';
-
-    it('warns (does not throw) when a mainnet config uses a non-canonical USDC issuer', () => {
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      parseEnv({ ...base, LOOP_STELLAR_USDC_ISSUER: NON_CANONICAL_ISSUER });
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('LOOP_STELLAR_USDC_ISSUER'));
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining(CANONICAL_MAINNET_USDC_ISSUER));
-      warn.mockRestore();
-    });
-
-    it('stays quiet for the canonical Circle issuer on mainnet', () => {
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      parseEnv({ ...base, LOOP_STELLAR_USDC_ISSUER: CANONICAL_MAINNET_USDC_ISSUER });
-      expect(warn).not.toHaveBeenCalled();
-      warn.mockRestore();
-    });
-
-    it('stays quiet off mainnet (testnet passphrase) and when the issuer is unset', () => {
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      parseEnv({
-        ...base,
-        LOOP_STELLAR_USDC_ISSUER: NON_CANONICAL_ISSUER,
-        LOOP_STELLAR_NETWORK_PASSPHRASE: TESTNET_PASSPHRASE,
-      });
-      parseEnv({ ...base });
-      expect(warn).not.toHaveBeenCalled();
-      warn.mockRestore();
     });
   });
 
@@ -310,11 +304,8 @@ describe('parseEnv', () => {
     it('refuses to start in production when DISABLE_RATE_LIMITING=true', () => {
       expect(() =>
         parseEnv({
-          ...base,
-          NODE_ENV: 'production',
-          IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
+          ...prodBase,
           DISABLE_RATE_LIMITING: 'true',
-          DISABLE_NATIVE_AUTH_ENFORCEMENT: '1',
         }),
       ).toThrow(/DISABLE_RATE_LIMITING/);
     });
@@ -323,11 +314,8 @@ describe('parseEnv', () => {
       for (const v of ['1', 'yes', 'on']) {
         expect(() =>
           parseEnv({
-            ...base,
-            NODE_ENV: 'production',
-            IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
+            ...prodBase,
             DISABLE_RATE_LIMITING: v,
-            DISABLE_NATIVE_AUTH_ENFORCEMENT: '1',
           }),
         ).toThrow(/DISABLE_RATE_LIMITING/);
       }
@@ -341,27 +329,8 @@ describe('parseEnv', () => {
     });
 
     it('accepts production when DISABLE_RATE_LIMITING is unset / false', () => {
-      expect(() =>
-        parseEnv({
-          ...base,
-          NODE_ENV: 'production',
-          IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
-          LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
-          DISABLE_NATIVE_AUTH_ENFORCEMENT: '1',
-          LOOP_STELLAR_USDC_ISSUER: USDC_ISSUER,
-        }),
-      ).not.toThrow();
-      expect(() =>
-        parseEnv({
-          ...base,
-          NODE_ENV: 'production',
-          IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
-          DISABLE_RATE_LIMITING: 'false',
-          LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
-          DISABLE_NATIVE_AUTH_ENFORCEMENT: '1',
-          LOOP_STELLAR_USDC_ISSUER: USDC_ISSUER,
-        }),
-      ).not.toThrow();
+      expect(() => parseEnv(prodBase)).not.toThrow();
+      expect(() => parseEnv({ ...prodBase, DISABLE_RATE_LIMITING: 'false' })).not.toThrow();
     });
   });
 
@@ -372,26 +341,14 @@ describe('parseEnv', () => {
     it('refuses to start in production when LOOP_TEST_ENDPOINTS_SECRET is set', () => {
       expect(() =>
         parseEnv({
-          ...base,
-          NODE_ENV: 'production',
-          IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
-          DISABLE_NATIVE_AUTH_ENFORCEMENT: '1',
+          ...prodBase,
           LOOP_TEST_ENDPOINTS_SECRET: 'a-secret-that-is-long-enough-16',
         }),
       ).toThrow(/LOOP_TEST_ENDPOINTS_SECRET/);
     });
 
     it('accepts production when LOOP_TEST_ENDPOINTS_SECRET is unset', () => {
-      expect(() =>
-        parseEnv({
-          ...base,
-          NODE_ENV: 'production',
-          IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
-          LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
-          DISABLE_NATIVE_AUTH_ENFORCEMENT: '1',
-          LOOP_STELLAR_USDC_ISSUER: USDC_ISSUER,
-        }),
-      ).not.toThrow();
+      expect(() => parseEnv(prodBase)).not.toThrow();
     });
 
     it('accepts LOOP_TEST_ENDPOINTS_SECRET in development + test', () => {
@@ -420,7 +377,7 @@ describe('parseEnv', () => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
       parseEnv({
         ...base,
-        LOOP_JWT_SIGNING_KEY: 'jwt-test-signing-key-32-chars-min!!',
+        LOOP_JWT_SIGNING_KEY: JWT_KEY,
         LOOP_JWT_RSA_PRIVATE_KEY: pem,
       });
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('remove LOOP_JWT_SIGNING_KEY'));
@@ -429,14 +386,14 @@ describe('parseEnv', () => {
 
     it('stays quiet when only one signing family is configured', () => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      parseEnv({ ...base, LOOP_JWT_SIGNING_KEY: 'jwt-test-signing-key-32-chars-min!!' });
+      parseEnv({ ...base, LOOP_JWT_SIGNING_KEY: JWT_KEY });
       expect(warn).not.toHaveBeenCalled();
       warn.mockRestore();
     });
   });
 
-  // Hardening B3 (2026-07 plan): the two auth misconfigurations that
-  // previously only surfaced at request time now fail at boot.
+  // Hardening B3 (2026-07 plan): the auth misconfiguration that
+  // previously only surfaced at request time now fails at boot.
   describe('B3: native-auth signing-key boot guard', () => {
     it('refuses LOOP_AUTH_NATIVE_ENABLED=true with no signing capability (any env)', () => {
       for (const nodeEnv of ['development', 'test', 'production'] as const) {
@@ -445,8 +402,6 @@ describe('parseEnv', () => {
             ...base,
             NODE_ENV: nodeEnv,
             LOOP_AUTH_NATIVE_ENABLED: 'true',
-            IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
-            LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
           }),
         ).toThrow(/LOOP_AUTH_NATIVE_ENABLED=true requires a JWT signing key/);
       }
@@ -457,7 +412,7 @@ describe('parseEnv', () => {
         parseEnv({
           ...base,
           LOOP_AUTH_NATIVE_ENABLED: 'true',
-          LOOP_JWT_SIGNING_KEY: 'jwt-test-signing-key-32-chars-min!!',
+          LOOP_JWT_SIGNING_KEY: JWT_KEY,
         }),
       ).not.toThrow();
     });
@@ -486,8 +441,6 @@ describe('parseEnv', () => {
           parseEnv({
             ...base,
             NODE_ENV: 'production',
-            IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
-            LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
             ...(value === undefined ? {} : { LOOP_AUTH_NATIVE_ENABLED: value }),
           }),
         ).toThrow(/LOOP_AUTH_NATIVE_ENABLED must be true in production/);
@@ -495,17 +448,7 @@ describe('parseEnv', () => {
     });
 
     it('accepts production with native auth enabled and a signing key', () => {
-      expect(() =>
-        parseEnv({
-          ...base,
-          NODE_ENV: 'production',
-          IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
-          LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
-          LOOP_AUTH_NATIVE_ENABLED: 'true',
-          LOOP_JWT_SIGNING_KEY: JWT_KEY,
-          LOOP_STELLAR_USDC_ISSUER: USDC_ISSUER,
-        }),
-      ).not.toThrow();
+      expect(() => parseEnv(prodBase)).not.toThrow();
     });
 
     it('allows DISABLE_NATIVE_AUTH_ENFORCEMENT=1 as the explicit rollback opt-out', () => {
@@ -513,10 +456,7 @@ describe('parseEnv', () => {
         parseEnv({
           ...base,
           NODE_ENV: 'production',
-          IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
-          LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
           DISABLE_NATIVE_AUTH_ENFORCEMENT: '1',
-          LOOP_STELLAR_USDC_ISSUER: USDC_ISSUER,
         }),
       ).not.toThrow();
     });
@@ -526,127 +466,12 @@ describe('parseEnv', () => {
         parseEnv({
           ...base,
           NODE_ENV: 'production',
-          IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
-          LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
           DISABLE_NATIVE_AUTH_ENFORCEMENT: 'true',
         }),
       ).toThrow(/DISABLE_NATIVE_AUTH_ENFORCEMENT/);
     });
 
     it('does not enforce native auth outside production', () => {
-      expect(() => parseEnv({ ...base, NODE_ENV: 'development' })).not.toThrow();
-      expect(() => parseEnv({ ...base, NODE_ENV: 'test' })).not.toThrow();
-    });
-  });
-
-  describe('B3: production step-up-key boot guard (ADR 028)', () => {
-    it('refuses production without LOOP_ADMIN_STEP_UP_SIGNING_KEY', () => {
-      expect(() =>
-        parseEnv({
-          ...base,
-          NODE_ENV: 'production',
-          IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
-          LOOP_AUTH_NATIVE_ENABLED: 'true',
-          LOOP_JWT_SIGNING_KEY: JWT_KEY,
-        }),
-      ).toThrow(/LOOP_ADMIN_STEP_UP_SIGNING_KEY must be set in production/);
-    });
-
-    it('allows DISABLE_ADMIN_STEP_UP_ENFORCEMENT=1 as the explicit opt-out', () => {
-      expect(() =>
-        parseEnv({
-          ...base,
-          NODE_ENV: 'production',
-          IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
-          DISABLE_ADMIN_STEP_UP_ENFORCEMENT: '1',
-          LOOP_AUTH_NATIVE_ENABLED: 'true',
-          LOOP_JWT_SIGNING_KEY: JWT_KEY,
-          LOOP_STELLAR_USDC_ISSUER: USDC_ISSUER,
-        }),
-      ).not.toThrow();
-    });
-
-    it('rejects any opt-out value other than "1" at parse time', () => {
-      expect(() =>
-        parseEnv({
-          ...base,
-          NODE_ENV: 'production',
-          IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
-          DISABLE_ADMIN_STEP_UP_ENFORCEMENT: 'true',
-          LOOP_AUTH_NATIVE_ENABLED: 'true',
-          LOOP_JWT_SIGNING_KEY: JWT_KEY,
-        }),
-      ).toThrow(/DISABLE_ADMIN_STEP_UP_ENFORCEMENT/);
-    });
-
-    it('does not enforce the step-up key outside production', () => {
-      expect(() => parseEnv({ ...base, NODE_ENV: 'development' })).not.toThrow();
-      expect(() => parseEnv({ ...base, NODE_ENV: 'test' })).not.toThrow();
-    });
-  });
-
-  // AUDIT-2 finding A: production must not silently disable the USDC
-  // deposit rail. The watcher's issuer-match guard (horizon.ts) now
-  // fails closed on an unset issuer — matches no USDC deposit at all
-  // — but a production deploy that never noticed the rail went dark
-  // is still a launch-readiness gap, so parseEnv fails loud too.
-  // Same shape as the admin step-up guard directly above.
-  describe('production USDC-issuer boot guard (AUDIT-2 finding A)', () => {
-    it('refuses production without LOOP_STELLAR_USDC_ISSUER', () => {
-      expect(() =>
-        parseEnv({
-          ...base,
-          NODE_ENV: 'production',
-          IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
-          LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
-          LOOP_AUTH_NATIVE_ENABLED: 'true',
-          LOOP_JWT_SIGNING_KEY: JWT_KEY,
-        }),
-      ).toThrow(/LOOP_STELLAR_USDC_ISSUER must be set in production/);
-    });
-
-    it('accepts production once LOOP_STELLAR_USDC_ISSUER is set', () => {
-      const env = parseEnv({
-        ...base,
-        NODE_ENV: 'production',
-        IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
-        LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
-        LOOP_AUTH_NATIVE_ENABLED: 'true',
-        LOOP_JWT_SIGNING_KEY: JWT_KEY,
-        LOOP_STELLAR_USDC_ISSUER: USDC_ISSUER,
-      });
-      expect(env.LOOP_STELLAR_USDC_ISSUER).toBe(USDC_ISSUER);
-    });
-
-    it('allows DISABLE_USDC_ISSUER_ENFORCEMENT=1 as the explicit opt-out', () => {
-      expect(() =>
-        parseEnv({
-          ...base,
-          NODE_ENV: 'production',
-          IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
-          LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
-          LOOP_AUTH_NATIVE_ENABLED: 'true',
-          LOOP_JWT_SIGNING_KEY: JWT_KEY,
-          DISABLE_USDC_ISSUER_ENFORCEMENT: '1',
-        }),
-      ).not.toThrow();
-    });
-
-    it('rejects any opt-out value other than "1" at parse time', () => {
-      expect(() =>
-        parseEnv({
-          ...base,
-          NODE_ENV: 'production',
-          IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
-          LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
-          LOOP_AUTH_NATIVE_ENABLED: 'true',
-          LOOP_JWT_SIGNING_KEY: JWT_KEY,
-          DISABLE_USDC_ISSUER_ENFORCEMENT: 'true',
-        }),
-      ).toThrow(/DISABLE_USDC_ISSUER_ENFORCEMENT/);
-    });
-
-    it('does not enforce the USDC issuer outside production', () => {
       expect(() => parseEnv({ ...base, NODE_ENV: 'development' })).not.toThrow();
       expect(() => parseEnv({ ...base, NODE_ENV: 'test' })).not.toThrow();
     });
@@ -673,7 +498,7 @@ describe('parseEnv', () => {
   });
 
   // S4-4 (2026-07-09): FLY_APP_NAME feeds the dynamic fleet-size
-  // estimator (middleware/fleet-size.ts) that now takes priority over
+  // estimator (middleware/fleet-size.ts) that takes priority over
   // the static RATE_LIMIT_MACHINE_COUNT_ESTIMATE above. Platform-
   // injected (never admin-set), so it's optional with no default.
   describe('FLY_APP_NAME', () => {
@@ -685,76 +510,6 @@ describe('parseEnv', () => {
     it('passes through whatever the Fly runtime injects', () => {
       const env = parseEnv({ ...base, FLY_APP_NAME: 'loopfinance-api' });
       expect(env.FLY_APP_NAME).toBe('loopfinance-api');
-    });
-  });
-
-  describe('ADR 030 Phase B: LOOP_WALLET_PROVIDER cross-field requirement', () => {
-    it('defaults to the empty string (wallet layer OFF)', () => {
-      expect(parseEnv(base).LOOP_WALLET_PROVIDER).toBe('');
-    });
-
-    it('rejects unknown provider values', () => {
-      expect(() => parseEnv({ ...base, LOOP_WALLET_PROVIDER: 'dfns' })).toThrow(
-        /LOOP_WALLET_PROVIDER/,
-      );
-    });
-
-    it('requires PRIVY_APP_ID + PRIVY_APP_SECRET when provider=privy', () => {
-      expect(() => parseEnv({ ...base, LOOP_WALLET_PROVIDER: 'privy' })).toThrow(
-        /PRIVY_APP_ID and PRIVY_APP_SECRET/,
-      );
-      expect(() =>
-        parseEnv({ ...base, LOOP_WALLET_PROVIDER: 'privy', PRIVY_APP_ID: 'app123' }),
-      ).toThrow(/PRIVY_APP_SECRET/);
-      expect(() =>
-        parseEnv({ ...base, LOOP_WALLET_PROVIDER: 'privy', PRIVY_APP_SECRET: 'sec456' }),
-      ).toThrow(/PRIVY_APP_ID/);
-    });
-
-    it('accepts provider=privy with both credentials set', () => {
-      const env = parseEnv({
-        ...base,
-        LOOP_WALLET_PROVIDER: 'privy',
-        PRIVY_APP_ID: 'app123',
-        PRIVY_APP_SECRET: 'sec456',
-      });
-      expect(env.LOOP_WALLET_PROVIDER).toBe('privy');
-      expect(env.PRIVY_APP_ID).toBe('app123');
-      expect(env.PRIVY_APP_SECRET).toBe('sec456');
-    });
-
-    it('ignores stray PRIVY_* credentials when the provider is unset', () => {
-      expect(() => parseEnv({ ...base, PRIVY_APP_SECRET: 'sec456' })).not.toThrow();
-    });
-  });
-
-  describe('ADR 031 V3: LOOP_VAULTS_ENABLED cross-field requirements', () => {
-    const RPC = 'https://soroban-testnet.stellar.org';
-    // A production config that passes every OTHER production boot guard,
-    // so a test can isolate the vaults↔workers check.
-    const prodBase = {
-      ...base,
-      NODE_ENV: 'production',
-      IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
-      LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
-      LOOP_AUTH_NATIVE_ENABLED: 'true',
-      LOOP_JWT_SIGNING_KEY: JWT_KEY,
-      LOOP_STELLAR_USDC_ISSUER: USDC_ISSUER,
-    };
-
-    it('LOOP_VAULTS_ENABLED=true requires LOOP_SOROBAN_RPC_URL (any env)', () => {
-      expect(() => parseEnv({ ...base, LOOP_VAULTS_ENABLED: 'true' })).toThrow(
-        /LOOP_SOROBAN_RPC_URL/,
-      );
-    });
-
-    it('production vaults on (with Soroban RPC) is accepted — the vault sweeps start with it', () => {
-      const env = parseEnv({
-        ...prodBase,
-        LOOP_VAULTS_ENABLED: 'true',
-        LOOP_SOROBAN_RPC_URL: RPC,
-      });
-      expect(env.LOOP_VAULTS_ENABLED).toBe(true);
     });
   });
 
@@ -774,7 +529,7 @@ describe('parseEnv', () => {
         parseEnv({
           ...base,
           DISCORD_WEBHOOK_ORDERS: 'https://discord.com/api/v10/webhooks/1/abc',
-          DISCORD_WEBHOOK_ADMIN_AUDIT: 'https://canary.discord.com/api/webhooks/2/def',
+          DISCORD_WEBHOOK_MONITORING: 'https://canary.discord.com/api/webhooks/2/def',
         }),
       ).not.toThrow();
     });
@@ -793,8 +548,8 @@ describe('parseEnv', () => {
 
     it('rejects a Discord host with a non-webhook path', () => {
       expect(() =>
-        parseEnv({ ...base, DISCORD_WEBHOOK_ADMIN_AUDIT: 'https://discord.com/login' }),
-      ).toThrow(/DISCORD_WEBHOOK_ADMIN_AUDIT/);
+        parseEnv({ ...base, DISCORD_WEBHOOK_MONITORING: 'https://discord.com/login' }),
+      ).toThrow(/DISCORD_WEBHOOK_MONITORING/);
     });
 
     it('rejects a look-alike host (discord.com.evil.test)', () => {
@@ -805,56 +560,10 @@ describe('parseEnv', () => {
         }),
       ).toThrow(/DISCORD_WEBHOOK_ORDERS/);
     });
-  });
 
-  // CFG-01 (FT-06 follow-up): DISCORD_WEBHOOK_MONITORING is required in
-  // production — an unset webhook silently drops every monitoring alert.
-  describe('CFG-01: production DISCORD_WEBHOOK_MONITORING boot guard', () => {
-    const prodMinusMonitoring = {
-      ...base,
-      DISCORD_WEBHOOK_MONITORING: undefined,
-      NODE_ENV: 'production' as const,
-      IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
-      LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
-      DISABLE_NATIVE_AUTH_ENFORCEMENT: '1' as const,
-      LOOP_STELLAR_USDC_ISSUER: USDC_ISSUER,
-    };
-
-    it('refuses production when DISCORD_WEBHOOK_MONITORING is unset', () => {
-      expect(() => parseEnv(prodMinusMonitoring)).toThrow(/DISCORD_WEBHOOK_MONITORING must be set/);
-    });
-
-    it('also fires when only LOOP_ENV marks production (NODE_ENV=development)', () => {
-      expect(() =>
-        parseEnv({ ...base, DISCORD_WEBHOOK_MONITORING: undefined, LOOP_ENV: 'production' }),
-      ).toThrow(/DISCORD_WEBHOOK_MONITORING must be set/);
-    });
-
-    it('accepts production once the monitoring webhook is set', () => {
-      expect(() =>
-        parseEnv({ ...prodMinusMonitoring, DISCORD_WEBHOOK_MONITORING: MONITORING_WEBHOOK }),
-      ).not.toThrow();
-    });
-
-    it('allows DISABLE_MONITORING_WEBHOOK_ENFORCEMENT=1 as the explicit opt-out', () => {
-      expect(() =>
-        parseEnv({ ...prodMinusMonitoring, DISABLE_MONITORING_WEBHOOK_ENFORCEMENT: '1' }),
-      ).not.toThrow();
-    });
-
-    it('rejects any opt-out value other than "1" at parse time', () => {
-      expect(() =>
-        parseEnv({ ...prodMinusMonitoring, DISABLE_MONITORING_WEBHOOK_ENFORCEMENT: 'true' }),
-      ).toThrow(/DISABLE_MONITORING_WEBHOOK_ENFORCEMENT/);
-    });
-
-    it('does not require the monitoring webhook outside production', () => {
-      expect(() =>
-        parseEnv({ ...base, DISCORD_WEBHOOK_MONITORING: undefined, NODE_ENV: 'development' }),
-      ).not.toThrow();
-      expect(() =>
-        parseEnv({ ...base, DISCORD_WEBHOOK_MONITORING: undefined, NODE_ENV: 'test' }),
-      ).not.toThrow();
+    it('accepts the monitoring webhook fixture used across these tests', () => {
+      const env = parseEnv({ ...base, DISCORD_WEBHOOK_MONITORING: MONITORING_WEBHOOK });
+      expect(env.DISCORD_WEBHOOK_MONITORING).toBe(MONITORING_WEBHOOK);
     });
   });
 
@@ -862,22 +571,15 @@ describe('parseEnv', () => {
   // gift-card redeem code + PIN at rest. Before this guard the key was
   // opt-in and its absence only WARNed at boot, so a prod deploy that
   // forgot LOOP_REDEEM_ENCRYPTION_KEY silently stored every spendable
-  // bearer secret in PLAINTEXT. parseEnv now fails closed in production
-  // when the key is unset — same shape as the USDC-issuer / step-up
-  // guards above, with a `"1"`-only opt-out. Dev/test keep warn-and-allow.
+  // bearer secret in PLAINTEXT. parseEnv fails closed in production
+  // when the key is unset, with a `"1"`-only opt-out. Dev/test keep
+  // warn-and-allow.
   describe('NS-10: production redeem-encryption-key boot guard', () => {
     // A production config that clears every OTHER prod boot guard, so a
-    // test can isolate the redeem-key check (parseEnv throws on the FIRST
-    // failing guard, and this one runs late). `base` carries the redeem
+    // test can isolate the redeem-key check. `base` carries the redeem
     // key, so we explicitly UNSET it here to exercise the guard.
     const prodMinusRedeem = {
-      ...base,
-      NODE_ENV: 'production' as const,
-      IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
-      LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
-      LOOP_AUTH_NATIVE_ENABLED: 'true' as const,
-      LOOP_JWT_SIGNING_KEY: JWT_KEY,
-      LOOP_STELLAR_USDC_ISSUER: USDC_ISSUER,
+      ...prodBase,
       LOOP_REDEEM_ENCRYPTION_KEY: undefined,
     };
 
@@ -918,102 +620,19 @@ describe('parseEnv', () => {
         parseEnv({ ...base, LOOP_REDEEM_ENCRYPTION_KEY: undefined, NODE_ENV: 'test' }),
       ).not.toThrow();
     });
-  });
 
-  // CFG-02: an admin daily money cap of 0 DISABLES the cap. A fat-finger
-  // 0 in production silently removes the treasury safeguard, so warn.
-  describe('CFG-02: admin daily money cap = 0 in production', () => {
-    const prodOk = {
-      ...base,
-      NODE_ENV: 'production' as const,
-      IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
-      LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
-      DISABLE_NATIVE_AUTH_ENFORCEMENT: '1' as const,
-      LOOP_STELLAR_USDC_ISSUER: USDC_ISSUER,
-    };
-
-    it('warns (does not throw) when the adjustment cap is 0 in production', () => {
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      parseEnv({ ...prodOk, ADMIN_DAILY_ADJUSTMENT_CAP_MINOR: '0' });
-      expect(warn).toHaveBeenCalledWith(
-        expect.stringContaining('ADMIN_DAILY_ADJUSTMENT_CAP_MINOR=0 in production DISABLES'),
-      );
-      warn.mockRestore();
+    // CF-25 / X-PRIV-03: a wrong-length key would silently write
+    // ciphertext nobody can later decrypt, so parseEnv validates the
+    // decoded length whenever the key is present (any NODE_ENV).
+    it('rejects a key that does not decode to exactly 32 bytes', () => {
+      expect(() =>
+        parseEnv({ ...base, LOOP_REDEEM_ENCRYPTION_KEY: Buffer.from('short').toString('base64') }),
+      ).toThrow(/must decode to 32 bytes/);
     });
 
-    it('warns when the withdrawal/emission cap is 0 in production', () => {
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      parseEnv({ ...prodOk, ADMIN_DAILY_WITHDRAWAL_CAP_MINOR: '0' });
-      expect(warn).toHaveBeenCalledWith(
-        expect.stringContaining('ADMIN_DAILY_WITHDRAWAL_CAP_MINOR=0 in production DISABLES'),
-      );
-      warn.mockRestore();
-    });
-
-    it('stays quiet in production with the default (non-zero) caps', () => {
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      parseEnv(prodOk);
-      expect(warn).not.toHaveBeenCalledWith(
-        expect.stringContaining('DISABLES the per-admin daily'),
-      );
-      warn.mockRestore();
-    });
-
-    it('does not warn on a 0 cap outside production (documented dev/test hatch)', () => {
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      const env = parseEnv({ ...base, ADMIN_DAILY_ADJUSTMENT_CAP_MINOR: '0' });
-      expect(env.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR).toBe(0n);
-      expect(warn).not.toHaveBeenCalled();
-      warn.mockRestore();
-    });
-  });
-
-  // CFG-05: an unrecognised LOOP_STELLAR_NETWORK_PASSPHRASE (typo) warns
-  // — it silently points the payout signer / watcher at the wrong chain.
-  describe('CFG-05: unrecognised Stellar network passphrase', () => {
-    it('warns on a passphrase that is neither pubnet, testnet, nor futurenet', () => {
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      parseEnv({ ...base, LOOP_STELLAR_NETWORK_PASSPHRASE: 'Public Global Stellar Netwrok' });
-      expect(warn).toHaveBeenCalledWith(
-        expect.stringContaining('is not a recognised Stellar network passphrase'),
-      );
-      warn.mockRestore();
-    });
-
-    it('stays quiet for the recognised pubnet / testnet / futurenet passphrases', () => {
-      for (const passphrase of [
-        'Public Global Stellar Network ; September 2015',
-        'Test SDF Network ; September 2015',
-        'Test SDF Future Network ; October 2022',
-      ]) {
-        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        parseEnv({ ...base, LOOP_STELLAR_NETWORK_PASSPHRASE: passphrase });
-        expect(warn).not.toHaveBeenCalledWith(
-          expect.stringContaining('is not a recognised Stellar network passphrase'),
-        );
-        warn.mockRestore();
-      }
-    });
-  });
-
-  // CFG-06: a mis-typed LOOP_KILL_* value must fail CLOSED (engaged), not
-  // reject at boot (which crash-loops the machine and leaves Fly serving
-  // the old, un-killed machine = fail OPEN). See killSwitchBoolean.
-  describe('CFG-06: kill-switch schema fails CLOSED on an unrecognised value', () => {
-    it('accepts an unrecognised value at boot and maps it to engaged (true)', () => {
-      // envBoolean REJECTED these — a boot crash on the kill-carrying
-      // machine leaves Fly serving the old, un-killed machine.
-      expect(parseEnv({ ...base, LOOP_KILL_AUTH: 'disbaled' }).LOOP_KILL_AUTH).toBe(true);
-      expect(parseEnv({ ...base, LOOP_KILL_ORDERS: 'kill' }).LOOP_KILL_ORDERS).toBe(true);
-      expect(parseEnv({ ...base, LOOP_KILL_EMISSIONS: 'banana' }).LOOP_KILL_EMISSIONS).toBe(true);
-    });
-
-    it('still parses recognised booleans normally (truthy → engaged, falsy/unset → open)', () => {
-      expect(parseEnv({ ...base, LOOP_KILL_AUTH: 'true' }).LOOP_KILL_AUTH).toBe(true);
-      expect(parseEnv({ ...base, LOOP_KILL_AUTH: 'on' }).LOOP_KILL_AUTH).toBe(true);
-      expect(parseEnv({ ...base, LOOP_KILL_AUTH: 'false' }).LOOP_KILL_AUTH).toBe(false);
-      expect(parseEnv({ ...base, LOOP_KILL_AUTH: 'off' }).LOOP_KILL_AUTH).toBe(false);
-      expect(parseEnv(base).LOOP_KILL_AUTH).toBe(false);
+    it('accepts a 64-char hex key alongside the base64 form', () => {
+      const hexKey = '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff';
+      expect(() => parseEnv({ ...base, LOOP_REDEEM_ENCRYPTION_KEY: hexKey })).not.toThrow();
     });
   });
 
@@ -1021,12 +640,7 @@ describe('parseEnv', () => {
   // outage (every OTP swallowed into a fake 200). Fail at boot in prod.
   describe('FT-09: production RESEND_API_KEY boot guard', () => {
     const prodResend = {
-      ...base,
-      NODE_ENV: 'production' as const,
-      IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
-      LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
-      DISABLE_NATIVE_AUTH_ENFORCEMENT: '1' as const,
-      LOOP_STELLAR_USDC_ISSUER: USDC_ISSUER,
+      ...prodBase,
       EMAIL_PROVIDER: 'resend' as const,
     };
 
@@ -1045,8 +659,6 @@ describe('parseEnv', () => {
     });
 
     it('does not require RESEND_API_KEY when EMAIL_PROVIDER is not resend', () => {
-      // Native auth is disabled here (opt-out), so no email provider is
-      // needed at all — the guard must not fire on an unset provider.
       expect(() => parseEnv({ ...prodResend, EMAIL_PROVIDER: undefined })).not.toThrow();
     });
 
@@ -1118,141 +730,5 @@ describe('LOOP_JWT_RSA_PRIVATE_KEY (ADR 030 Phase A)', () => {
         LOOP_JWT_RSA_PRIVATE_KEY_PREVIOUS: 'garbage',
       }),
     ).toThrow(/LOOP_JWT_RSA_PRIVATE_KEY_PREVIOUS/);
-  });
-});
-
-describe('parseEnv — ADR 031 issuer-secret pinning', () => {
-  // Real ed25519 material: the check derives the public key from the
-  // secret, so the fixtures must be a genuine keypair.
-  const issuerKp = Keypair.random();
-  const otherKp = Keypair.random();
-
-  it('accepts a secret whose derived account matches the configured issuer address', () => {
-    const env = parseEnv({
-      ...base,
-      LOOP_STELLAR_GBPLOOP_ISSUER: issuerKp.publicKey(),
-      LOOP_STELLAR_GBPLOOP_ISSUER_SECRET: issuerKp.secret(),
-    });
-    expect(env.LOOP_STELLAR_GBPLOOP_ISSUER_SECRET).toBe(issuerKp.secret());
-  });
-
-  it('boot-fails when the derived account mismatches the issuer address', () => {
-    expect(() =>
-      parseEnv({
-        ...base,
-        LOOP_STELLAR_GBPLOOP_ISSUER: otherKp.publicKey(),
-        LOOP_STELLAR_GBPLOOP_ISSUER_SECRET: issuerKp.secret(),
-      }),
-    ).toThrow(/does not match LOOP_STELLAR_GBPLOOP_ISSUER/);
-  });
-
-  it('boot-fails on an orphan secret (no issuer address to validate against)', () => {
-    expect(() =>
-      parseEnv({
-        ...base,
-        LOOP_STELLAR_GBPLOOP_ISSUER_SECRET: issuerKp.secret(),
-      }),
-    ).toThrow(/LOOP_STELLAR_GBPLOOP_ISSUER is not/);
-  });
-
-  it('rejects malformed issuer secrets at the schema layer', () => {
-    expect(() =>
-      parseEnv({
-        ...base,
-        LOOP_STELLAR_GBPLOOP_ISSUER: issuerKp.publicKey(),
-        LOOP_STELLAR_GBPLOOP_ISSUER_SECRET: 'not-a-secret',
-      }),
-    ).toThrow(/LOOP_STELLAR_GBPLOOP_ISSUER_SECRET/);
-  });
-
-  it('LOOP_INTEREST_ONCHAIN_ENABLED parses as a strict boolean and defaults false', () => {
-    expect(parseEnv(base).LOOP_INTEREST_ONCHAIN_ENABLED).toBe(false);
-    expect(
-      parseEnv({ ...base, LOOP_INTEREST_ONCHAIN_ENABLED: 'true' }).LOOP_INTEREST_ONCHAIN_ENABLED,
-    ).toBe(true);
-    expect(() => parseEnv({ ...base, LOOP_INTEREST_ONCHAIN_ENABLED: 'sure' })).toThrow(
-      /LOOP_INTEREST_ONCHAIN_ENABLED/,
-    );
-  });
-});
-
-describe('parseEnv — ADR 044 / S4-1 payout channel accounts', () => {
-  // Real ed25519 material: the checks derive public keys from the
-  // secrets, so the fixtures must be genuine keypairs.
-  const operatorKp = Keypair.random();
-  const issuerKp = Keypair.random();
-  const chan1 = Keypair.random();
-  const chan2 = Keypair.random();
-
-  it('accepts an unset LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS (default — no channels)', () => {
-    const env = parseEnv(base);
-    expect(env.LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS).toBeUndefined();
-  });
-
-  it('accepts a single well-formed channel secret', () => {
-    const env = parseEnv({ ...base, LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS: chan1.secret() });
-    expect(env.LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS).toBe(chan1.secret());
-  });
-
-  it('accepts multiple comma-separated channel secrets distinct from operator/issuer', () => {
-    const env = parseEnv({
-      ...base,
-      LOOP_STELLAR_OPERATOR_SECRET: operatorKp.secret(),
-      LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS: `${chan1.secret()},${chan2.secret()}`,
-    });
-    expect(env.LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS).toBe(`${chan1.secret()},${chan2.secret()}`);
-  });
-
-  it('rejects a malformed entry at the schema layer', () => {
-    expect(() =>
-      parseEnv({ ...base, LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS: 'not-a-secret' }),
-    ).toThrow(/LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS/);
-    expect(() =>
-      parseEnv({
-        ...base,
-        LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS: `${chan1.secret()},not-a-secret`,
-      }),
-    ).toThrow(/LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS/);
-  });
-
-  it('boot-fails on two channel entries deriving the same account', () => {
-    expect(() =>
-      parseEnv({
-        ...base,
-        LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS: `${chan1.secret()},${chan1.secret()}`,
-      }),
-    ).toThrow(/derive the same account/);
-  });
-
-  it('boot-fails when a channel collides with the configured operator account', () => {
-    expect(() =>
-      parseEnv({
-        ...base,
-        LOOP_STELLAR_OPERATOR_SECRET: operatorKp.secret(),
-        LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS: `${chan1.secret()},${operatorKp.secret()}`,
-      }),
-    ).toThrow(/LOOP_STELLAR_OPERATOR_SECRET/);
-  });
-
-  it('boot-fails when a channel collides with a configured issuer account', () => {
-    expect(() =>
-      parseEnv({
-        ...base,
-        LOOP_STELLAR_GBPLOOP_ISSUER: issuerKp.publicKey(),
-        LOOP_STELLAR_GBPLOOP_ISSUER_SECRET: issuerKp.secret(),
-        LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS: `${chan1.secret()},${issuerKp.secret()}`,
-      }),
-    ).toThrow(/LOOP_STELLAR_GBPLOOP_ISSUER_SECRET/);
-  });
-
-  it('does not require an operator or any issuer to be configured at all', () => {
-    // Channels are validated on their own merits; the only cross-field
-    // checks are collision checks against whatever IS configured.
-    const env = parseEnv({
-      ...base,
-      LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS: `${chan1.secret()},${chan2.secret()}`,
-    });
-    expect(env.LOOP_STELLAR_OPERATOR_SECRET).toBeUndefined();
-    expect(env.LOOP_STELLAR_PAYOUT_CHANNEL_SECRETS).toBe(`${chan1.secret()},${chan2.secret()}`);
   });
 });

@@ -32,13 +32,6 @@ vi.mock('../../env.js', () => ({
   env: { GIFT_CARD_API_BASE_URL: 'http://test-upstream.local' },
 }));
 
-vi.mock('../../circuit-breaker.js', () => ({
-  CircuitOpenError: class CircuitOpenError extends Error {},
-  getUpstreamCircuit: () => ({
-    fetch: (...args: Parameters<typeof globalThis.fetch>) => globalThis.fetch(...args),
-  }),
-}));
-
 const { notifyCtxSchemaDrift } = vi.hoisted(() => ({ notifyCtxSchemaDrift: vi.fn() }));
 vi.mock('../../discord.js', () => ({ notifyCtxSchemaDrift }));
 

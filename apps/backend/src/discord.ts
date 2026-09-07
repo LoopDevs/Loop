@@ -41,44 +41,18 @@ export {
   notifyVaultRedemptionsStuck,
   notifyCtxSchemaDrift,
   notifyCtxCredentialInvalid,
-  notifyCircuitBreaker,
   notifyDuplicateAccountSignal,
-  __resetCircuitNotifyDedupForTests,
   __resetCtxSchemaDriftDedupForTests,
   __resetCtxCredentialDedupForTests,
   __resetAwaitingTrustlineDedupForTests,
 } from './discord/monitoring.js';
 
-// Admin-audit channel notifiers (3 functions covering admin
-// writes, bulk-read exports, cashback-config diffs) plus the
-// `CashbackConfigSnapshot` type live in `./discord/admin-audit.ts`.
-// Re-exported here so existing call sites keep working.
-export {
-  type CashbackConfigSnapshot,
-  notifyAdminAudit,
-  notifyAdminBulkRead,
-  notifyCashbackConfigChanged,
-} from './discord/admin-audit.js';
-
 /**
- * Discord channels the backend posts to. Mirrors the three
+ * Discord channels the backend posts to. Mirrors the two
  * `DISCORD_WEBHOOK_*` env vars — keeping this as a closed union
- * means adding a new channel is a type-level change that forces
- * every catalog entry to declare which channel it posts to.
+ * means adding a new channel is a type-level change.
  */
-export type DiscordChannel = 'orders' | 'monitoring' | 'admin-audit';
-
-/**
- * One catalogued notifier — the function name, the channel it posts
- * to, and a one-line description of when it fires. Catalog is an
- * `Object.freeze`d const so runtime mutation throws (the admin
- * endpoint surfaces this read-only; nobody should be rewriting it).
- */
-export interface DiscordNotifier {
-  name: string;
-  channel: DiscordChannel;
-  description: string;
-}
+export type DiscordChannel = 'orders' | 'monitoring';
 
 /**
  * Resolves the raw webhook URL for a given channel. Centralised so
@@ -91,8 +65,6 @@ function webhookUrlFor(channel: DiscordChannel): string | undefined {
       return env.DISCORD_WEBHOOK_ORDERS;
     case 'monitoring':
       return env.DISCORD_WEBHOOK_MONITORING;
-    case 'admin-audit':
-      return env.DISCORD_WEBHOOK_ADMIN_AUDIT;
   }
 }
 
@@ -130,16 +102,3 @@ export function notifyWebhookPing(channel: DiscordChannel, actorId: string): voi
     color: BLUE,
   });
 }
-
-/**
- * Static catalog of the Discord notifiers the backend can emit
- * (ADR 018 operational-visibility surface).
- *
- * Lives in `./discord/notifiers-catalog.ts`. Re-exported below so
- * existing import sites (admin handler, the OpenAPI spec) keep
- * resolving against the historical `./discord.js` path.
- *
- * Keep the entries sorted by channel first, then by function name so
- * the admin-rendered table is stable and diff-friendly.
- */
-export { DISCORD_NOTIFIERS } from './discord/notifiers-catalog.js';

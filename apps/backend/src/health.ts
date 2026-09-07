@@ -38,7 +38,6 @@
  * always the one from the last probe.
  */
 import type { Context } from 'hono';
-import { sql } from 'drizzle-orm';
 import { env } from './env.js';
 import { logger } from './logger.js';
 import { db } from './db/client.js';
@@ -51,7 +50,7 @@ import { getRuntimeHealthSnapshot } from './runtime-health.js';
 import { upstreamUrl } from './upstream.js';
 import { notifyGeoDbStale } from './discord.js';
 import { sendWebhook, GREEN, ORANGE, DESCRIPTION_MAX, truncate } from './discord/shared.js';
-import { applyBinaryWatchdogAlert } from './credits/vaults/vault-watchdog-alert.js';
+import { applyBinaryWatchdogAlert } from './discord/watchdog-alert.js';
 import { getCtxApiHealth } from './ctx/api-fetch.js';
 import { getGeoDbStatus, GEO_DB_STALE_AFTER_DAYS } from './public/geo.js';
 import { currentFleetSizeEstimate, currentFleetSizeSource } from './middleware/fleet-size.js';
@@ -214,13 +213,10 @@ async function probeDb(): Promise<boolean> {
   dbProbeInFlight = (async () => {
     let reachable = true;
     try {
-      // SELECT 1 with a short timeout. A pool-exhausted state will
-      // queue the query past the timeout and surface as unreachable.
-      // The race against AbortSignal.timeout is the cheapest way to
-      // bound this without bringing in a query-timeout primitive
-      // we don't have today.
+      // Cheap store probe with a short timeout — a wedged driver
+      // surfaces as unreachable rather than hanging /health.
       await Promise.race([
-        db.execute(sql`SELECT 1`),
+        db.collection('users').count({}),
         new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error('db probe timeout')), DB_PROBE_TIMEOUT_MS).unref?.(),
         ),
@@ -257,15 +253,6 @@ async function probeUpstream(): Promise<boolean> {
   upstreamProbeInFlight = (async () => {
     let reachable = true;
     try {
-      // Deliberately bare `fetch`, NOT `getUpstreamCircuit('status').fetch`.
-      // /health needs to detect upstream *recovery*; if we routed
-      // through a circuit breaker that was open (because a different
-      // endpoint just failed, for example), the probe would short-
-      // circuit to CircuitOpenError and /health would keep reporting
-      // `degraded` long after upstream came back. See
-      // `docs/architecture.md §Circuit breaker` — this is the one
-      // documented exception to the AGENTS.md "never bare fetch" rule
-      // for upstream calls.
       const res = await fetch(upstreamUrl('/status'), {
         signal: AbortSignal.timeout(UPSTREAM_PROBE_TIMEOUT_MS),
       });
@@ -313,14 +300,13 @@ export async function healthHandler(c: Context): Promise<Response> {
   ]);
   const runtime = getRuntimeHealthSnapshot();
 
-  // CF2-01 (2026-06-30 cold audit): the CTX-upstream circuit-breaker
-  // state was previously invisible to /health entirely, so an outage
-  // (breaker OPEN) had no external signal besides procurement/orders
-  // silently failing. Surfaced as SOFT degraded (visible, doesn't
-  // cycle the Fly machine) rather than critical — the breaker
-  // self-heals via the cooldown+half-open probe on its own schedule;
-  // cycling this backend instance wouldn't fix an upstream CTX outage
-  // and would just reset the recovery timers.
+  // Retained for response-shape stability only: `getCtxApiHealth()`
+  // reports constants now that the CTX-upstream breaker it used to
+  // read is gone, so `ctxApiDown` never becomes true and the branches
+  // keyed on it below never fire. `upstreamReachable` above is the
+  // live "is CTX up" signal. The fields stay because the shared
+  // `TreasurySnapshot` type and the admin UI's CTX status indicator
+  // still read them — see `packages/shared/src/admin-treasury.ts`.
   const ctxApiHealth = getCtxApiHealth();
   const ctxApiDown = ctxApiHealth.configured && ctxApiHealth.state === 'open';
 
@@ -450,7 +436,7 @@ export async function healthHandler(c: Context): Promise<Response> {
   }
 
   // BK-healthrecon: the detailed body below is reconnaissance surface for
-  // an UNAUTHENTICATED caller — per-operator circuit-breaker states,
+  // an UNAUTHENTICATED caller —
   // internal worker names + which are broken, the fleet machine count
   // (⇒ the aggregate rate-limit budget), raw OTP-delivery error strings,
   // and DB/upstream reachability. None of it is needed by a legitimate
@@ -515,9 +501,8 @@ export async function healthHandler(c: Context): Promise<Response> {
       // A4-034: DB readiness component. False = pool exhausted /
       // credentials rotated / network partition / DB hard-down.
       databaseReachable,
-      // CF2-01: CTX-upstream circuit-breaker snapshot so a breaker
-      // stuck OPEN is visible externally, not just inferred from
-      // procurement failures.
+      // Constant now — kept because the admin CTX status indicator
+      // reads this shape. See the note at the assignment above.
       ctxApi: ctxApiHealth,
       ctxApiDown,
       criticalDegraded,

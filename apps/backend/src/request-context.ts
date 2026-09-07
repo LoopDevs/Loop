@@ -3,8 +3,8 @@
  *
  * Hono's `requestId()` middleware stores the ID in `c.get('requestId')`,
  * which is reachable only where a handler has `c` in scope. But outbound
- * fetches happen inside helpers (`ctxFetch`, `CircuitBreaker.fetch`)
- * that don't see the Hono context, so there was no way to thread the
+ * fetches happen inside helpers (`ctxFetch`) that don't see the Hono
+ * context, so there was no way to thread the
  * request ID onto the outbound headers — CTX could not correlate our
  * request with theirs when we asked "what happened to our order xyz?"
  *
@@ -24,14 +24,14 @@ export interface RequestContext {
   /**
    * A2-1305 follow-up: the `X-Request-Id` (or `X-Correlation-Id`)
    * header from the most recent CTX response observed during this
-   * request. `circuit-breaker.ts::wrappedFetch` writes it after every
+   * request. `ctx/api-fetch.ts::ctxFetch` writes it after every
    * outbound CTX call; the post-handler middleware in `app.ts` reads
    * it and surfaces it back to the client as `X-Ctx-Request-Id`.
    *
    * Stored as a mutable field on the per-request context object so
    * the latest CTX response wins — when a single inbound request makes
-   * multiple CTX calls (e.g. retry on circuit half-open), ops can
-   * trace the most recent CTX-side log line against ours.
+   * multiple CTX calls, ops can trace the most recent CTX-side log
+   * line against ours.
    */
   ctxRequestId?: string;
 }

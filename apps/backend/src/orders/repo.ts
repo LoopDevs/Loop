@@ -1,18 +1,22 @@
 /**
  * Loop-order repository (ADR 052).
  *
- * Owns writes against the `orders` table — a local mirror of a CTX
- * gift card plus Loop's commission log for it. The create handler
- * inserts the row first (its uuid becomes the CTX
+ * Owns writes against the `orders` collection — a local mirror of a
+ * CTX gift card plus Loop's commission log for it. The create handler
+ * inserts the doc first (its uuid becomes the CTX
  * `operatorReference`), calls CTX, then records the CTX identifiers;
  * everything downstream (ws maintainer, mirror sweep) keys on either
- * the row id or `ctx_order_id`.
+ * the doc id or `ctxOrderId`.
+ *
+ * Money fields are integer minor units held as `number` in the store;
+ * the create-path arguments still accept `bigint` (the zod layer
+ * coerces to bigint) and are narrowed here at the boundary.
  */
-import { and, eq, inArray } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
 import { db } from '../db/client.js';
-import { orders } from '../db/schema.js';
+import type { OrderDoc } from '../db/types.js';
 
-export type Order = typeof orders.$inferSelect;
+export type Order = OrderDoc;
 
 // A2-2003 idempotency primitives (error type + pre-write lookup +
 // post-insert conflict resolver) live in `./repo-idempotency.ts`.
@@ -34,39 +38,50 @@ export interface CreateOrderArgs {
   paymentCryptoCurrency: string;
   /**
    * A2-2003: optional client-supplied idempotency key. When set, the
-   * row carries it and the (user_id, key) partial unique index in
-   * `orders_user_idempotency_unique` rejects a second insert with the
-   * same pair. The handler converts that violation into a replay of
-   * the already-created order's response.
+   * doc carries it and the (userId, idempotencyKey) unique spec
+   * rejects a second insert with the same pair. The handler converts
+   * that violation into a replay of the already-created order's
+   * response.
    */
   idempotencyKey?: string;
 }
 
 /**
- * Writes a new mirror row in `unpaid` with the charge provisionally
+ * Writes a new mirror doc in `unpaid` with the charge provisionally
  * pinned to the face value — the CTX create + operator read-back
- * then overwrite `charge_minor` / `user_cashback_minor` /
- * `expected_commission_minor` with CTX's actual numbers via
+ * then overwrite `chargeMinor` / `userCashbackMinor` /
+ * `expectedCommissionMinor` with CTX's actual numbers via
  * {@link recordCtxCreate} + {@link recordOrderEconomics}.
  */
 export async function createOrder(args: CreateOrderArgs): Promise<Order> {
-  const baseValues = {
+  const doc: OrderDoc = {
+    id: randomUUID(),
     userId: args.userId,
     merchantId: args.merchantId,
-    faceValueMinor: args.faceValueMinor,
+    faceValueMinor: Number(args.faceValueMinor),
     currency: args.currency,
-    chargeMinor: args.faceValueMinor,
+    chargeMinor: Number(args.faceValueMinor),
     chargeCurrency: args.currency,
-    userCashbackMinor: 0n,
+    userCashbackMinor: 0,
+    expectedCommissionMinor: null,
+    ctxOrderId: null,
+    ctxPaymentId: null,
     paymentCryptoCurrency: args.paymentCryptoCurrency,
-    state: 'unpaid' as const,
-    ...(args.idempotencyKey !== undefined ? { idempotencyKey: args.idempotencyKey } : {}),
+    redeemCode: null,
+    redeemPin: null,
+    redeemUrl: null,
+    redemptionBackfillAttempts: 0,
+    redemptionBackfillLastAttemptAt: null,
+    state: 'unpaid',
+    failureReason: null,
+    idempotencyKey: args.idempotencyKey ?? null,
+    createdAt: new Date(),
+    fulfilledAt: null,
+    failedAt: null,
   };
   try {
-    const rows = await db.insert(orders).values(baseValues).returning();
-    const row = rows[0];
-    if (row === undefined) throw new Error('order insert returned no row');
-    return row;
+    await db.collection('orders').insertOne(doc);
+    return doc;
   } catch (err) {
     const conflict = await maybeFetchIdempotentConflict(
       {
@@ -90,66 +105,57 @@ export async function recordCtxCreate(
     chargeCurrency: string | null;
   },
 ): Promise<void> {
-  await db
-    .update(orders)
-    .set({
-      ctxOrderId: fields.ctxOrderId,
-      ...(fields.ctxPaymentId !== null ? { ctxPaymentId: fields.ctxPaymentId } : {}),
-      ...(fields.chargeMinor !== null ? { chargeMinor: fields.chargeMinor } : {}),
-      ...(fields.chargeCurrency !== null ? { chargeCurrency: fields.chargeCurrency } : {}),
-    })
-    .where(eq(orders.id, orderId));
+  await db.collection('orders').updateOne(
+    { id: orderId },
+    {
+      $set: {
+        ctxOrderId: fields.ctxOrderId,
+        ...(fields.ctxPaymentId !== null ? { ctxPaymentId: fields.ctxPaymentId } : {}),
+        ...(fields.chargeMinor !== null ? { chargeMinor: Number(fields.chargeMinor) } : {}),
+        ...(fields.chargeCurrency !== null ? { chargeCurrency: fields.chargeCurrency } : {}),
+      },
+    },
+  );
 }
 
 /**
  * Records the per-order economics from the operator read-back. Only
- * non-null values are written — a failed read-back leaves the row
+ * non-null values are written — a failed read-back leaves the doc
  * for the mirror sweep to retry, never zeroes it.
  */
 export async function recordOrderEconomics(
   orderId: string,
   fields: { userCashbackMinor: bigint | null; expectedCommissionMinor: bigint | null },
 ): Promise<void> {
-  const set: Record<string, bigint> = {};
-  if (fields.userCashbackMinor !== null) set['userCashbackMinor'] = fields.userCashbackMinor;
+  const set: Partial<OrderDoc> = {};
+  if (fields.userCashbackMinor !== null) set.userCashbackMinor = Number(fields.userCashbackMinor);
   if (fields.expectedCommissionMinor !== null) {
-    set['expectedCommissionMinor'] = fields.expectedCommissionMinor;
+    set.expectedCommissionMinor = Number(fields.expectedCommissionMinor);
   }
   if (Object.keys(set).length === 0) return;
-  await db.update(orders).set(set).where(eq(orders.id, orderId));
+  await db.collection('orders').updateOne({ id: orderId }, { $set: set });
 }
 
 export async function getOrderById(orderId: string): Promise<Order | null> {
-  const row = await db.query.orders.findFirst({
-    where: eq(orders.id, orderId),
-  });
-  return row ?? null;
+  return db.collection('orders').findOne({ id: orderId });
 }
 
 /** Mirror lookup for giftcard ws events — keyed on the CTX card id. */
 export async function getOrderByCtxOrderId(ctxOrderId: string): Promise<Order | null> {
-  const row = await db.query.orders.findFirst({
-    where: eq(orders.ctxOrderId, ctxOrderId),
-  });
-  return row ?? null;
+  return db.collection('orders').findOne({ ctxOrderId });
 }
 
 /**
- * Non-terminal rows for the mirror sweep, oldest-first. `unpaid`
- * rows are polled for payment expiry + missed paid events; `paid`
- * rows for missed fulfilment events.
+ * Non-terminal docs for the mirror sweep, oldest-first. `unpaid`
+ * docs are polled for payment expiry + missed paid events; `paid`
+ * docs for missed fulfilment events.
  */
 export async function listOpenMirrorOrders(limit: number): Promise<Order[]> {
-  return db.query.orders.findMany({
-    where: inArray(orders.state, ['unpaid', 'paid']),
-    orderBy: (t, { asc }) => [asc(t.createdAt)],
-    limit,
-  });
+  return db
+    .collection('orders')
+    .findMany({ state: { $in: ['unpaid', 'paid'] } }, { sort: [['createdAt', 'asc']], limit });
 }
 
 export async function findOwnedOrder(userId: string, orderId: string): Promise<Order | null> {
-  const row = await db.query.orders.findFirst({
-    where: and(eq(orders.id, orderId), eq(orders.userId, userId)),
-  });
-  return row ?? null;
+  return db.collection('orders').findOne({ id: orderId, userId });
 }

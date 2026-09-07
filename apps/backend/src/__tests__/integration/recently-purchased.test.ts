@@ -1,9 +1,10 @@
 /**
- * Caller-scoped recently-purchased integration tests on real postgres.
+ * Caller-scoped recently-purchased integration tests on the real
+ * document store.
  *
  * Covers `GET /api/users/me/recently-purchased`:
- *   - GROUP BY merchant_id: multiple orders to the same merchant
- *     collapse to one chip ordered by MAX(created_at) DESC.
+ *   - Group by merchantId: multiple orders to the same merchant
+ *     collapse to one chip ordered by max(createdAt) DESC.
  *   - State filter: only `paid` / `fulfilled` count;
  *     `unpaid` / `rejected` / `expired` are excluded.
  *   - Catalog join: known merchants surface with `merchant` set;
@@ -11,18 +12,10 @@
  *   - Limit: default 8, clamped to [1, 20] via `?limit=`.
  *   - Scope: caller A never sees caller B's orders.
  *
- * Gated on `LOOP_E2E_DB=1` like the sibling integration suites.
+ * Runs through the REAL `app` against the ephemeral in-memory store.
  */
-import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
-import { eq } from 'drizzle-orm';
-
-const RUN_INTEGRATION = process.env['LOOP_E2E_DB'] === '1';
-
-vi.mock('../../discord.js', async (importActual) => {
-  const actual = (await importActual()) as Record<string, unknown>;
-  const noop = vi.fn();
-  return { ...actual, notifyAdminAudit: noop, notifyAdminBulkRead: noop };
-});
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { randomUUID } from 'node:crypto';
 
 const merchantState = vi.hoisted(() => ({
   knownIds: new Set<string>(['amazon', 'starbucks', 'home-depot', 'target']),
@@ -38,14 +31,10 @@ vi.mock('../../merchants/sync.js', () => ({
   }),
 }));
 
-import { db } from '../../db/client.js';
-import { users, orders } from '../../db/schema.js';
+import { db, __resetDbForTests } from '../../db/client.js';
 import { findOrCreateUserByEmail } from '../../db/users.js';
 import { signLoopToken, DEFAULT_ACCESS_TTL_SECONDS } from '../../auth/tokens.js';
 import { app } from '../../app.js';
-import { ensureMigrated, truncateAllTables } from './db-test-setup.js';
-
-const describeIf = RUN_INTEGRATION ? describe : describe.skip;
 
 interface SeededUser {
   userId: string;
@@ -54,7 +43,6 @@ interface SeededUser {
 
 async function seedUser(email: string): Promise<SeededUser> {
   const user = await findOrCreateUserByEmail(email);
-  await db.update(users).set({ homeCurrency: 'USD' }).where(eq(users.id, user.id));
   const access = signLoopToken({
     sub: user.id,
     email: user.email,
@@ -75,27 +63,36 @@ interface SeedOrderArgs {
 }
 
 async function seedOrder(args: SeedOrderArgs): Promise<void> {
-  await db.insert(orders).values({
+  await db.collection('orders').insertOne({
+    id: randomUUID(),
     userId: args.userId,
     merchantId: args.merchantId,
-    faceValueMinor: 5000n,
+    faceValueMinor: 5000,
     currency: 'USD',
-    chargeMinor: 5000n,
+    chargeMinor: 5000,
     chargeCurrency: 'USD',
+    userCashbackMinor: 250,
+    expectedCommissionMinor: null,
+    ctxOrderId: null,
+    ctxPaymentId: null,
     paymentCryptoCurrency: 'XLM',
-    userCashbackMinor: 250n,
+    redeemCode: null,
+    redeemPin: null,
+    redeemUrl: null,
+    redemptionBackfillAttempts: 0,
+    redemptionBackfillLastAttemptAt: null,
     state: args.state,
-    ...(args.createdAt !== undefined ? { createdAt: args.createdAt } : {}),
+    failureReason: null,
+    idempotencyKey: null,
+    createdAt: args.createdAt ?? new Date(),
+    fulfilledAt: null,
+    failedAt: null,
   });
 }
 
-describeIf('user recently-purchased — real postgres', () => {
-  beforeAll(async () => {
-    await ensureMigrated();
-  });
-
-  beforeEach(async () => {
-    await truncateAllTables();
+describe('user recently-purchased — document store', () => {
+  beforeEach(() => {
+    __resetDbForTests();
   });
 
   it('returns an empty list before any orders exist', async () => {

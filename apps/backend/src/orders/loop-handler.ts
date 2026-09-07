@@ -21,8 +21,6 @@ import type { LoopAuthContext } from '../auth/require-auth.js';
 import type { CreateLoopOrderResponse, MerchantDenominations } from '@loop/shared';
 import { getMerchants } from '../merchants/sync.js';
 import { LoopCreateOrderBody as CreateBody } from './request-schemas.js';
-import { checkOrderVelocity, VelocityCheckUnavailableError } from '../fraud/velocity.js';
-import { guardAccountNotFrozen } from '../fraud/account-freeze-http.js';
 import { getUserCtxUserId } from '../db/users.js';
 import { ctxActAsHeaders, provisionCtxUser } from '../ctx/user-provisioning.js';
 import { getUserById } from '../db/users.js';
@@ -158,7 +156,7 @@ async function createResponseForOrder(
   }
   const fallback = {
     cryptoCurrency: order.paymentCryptoCurrency ?? '',
-    amountMinor: order.chargeMinor,
+    amountMinor: BigInt(order.chargeMinor),
     currency: order.chargeCurrency,
   };
   return {
@@ -256,47 +254,6 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
     if (prior !== null) {
       return c.json(await createResponseForOrder(prior, null, null), 200);
     }
-  }
-
-  // ADR 045 (B-3): per-user order-create velocity gate, fails closed.
-  try {
-    const velocity = await checkOrderVelocity(auth.userId);
-    if (!velocity.allowed) {
-      log.warn(
-        { userId: auth.userId, reason: velocity.reason, currency: velocity.currency },
-        'Order rejected — velocity limit exceeded (ADR 045 / B-3)',
-      );
-      return c.json(
-        {
-          code: 'ORDER_VELOCITY_EXCEEDED',
-          message:
-            velocity.reason === 'value'
-              ? `You've reached the maximum order value for a ${env.LOOP_ORDER_VELOCITY_WINDOW_HOURS}-hour period. Please try again later or contact support.`
-              : `You've reached the maximum number of orders for a ${env.LOOP_ORDER_VELOCITY_WINDOW_HOURS}-hour period. Please try again later or contact support.`,
-        },
-        429,
-      );
-    }
-  } catch (err) {
-    if (err instanceof VelocityCheckUnavailableError) {
-      log.error({ err, userId: auth.userId }, 'Order velocity check unavailable — failing closed');
-      return c.json(
-        {
-          code: 'ORDER_VELOCITY_CHECK_UNAVAILABLE',
-          message: 'Unable to verify order velocity right now — please try again shortly',
-        },
-        503,
-      );
-    }
-    throw err;
-  }
-
-  // NS-08: per-account freeze / AML-hold gate — a live hold refuses
-  // order creation before any CTX call.
-  const frozen = await guardAccountNotFrozen(c, auth.userId, 'user_spend');
-  if (frozen !== null) {
-    log.warn({ userId: auth.userId }, 'Order create refused — account frozen (NS-08)');
-    return frozen;
   }
 
   if (parsed.data.amountMinor > ORDER_MAX_FACE_VALUE_MINOR) {

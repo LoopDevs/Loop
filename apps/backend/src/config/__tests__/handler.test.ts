@@ -23,18 +23,11 @@ function makeCtx(): { headers: Record<string, string>; ctx: Context } {
   };
 }
 
-const LOOP_ISSUER_VARS = [
-  'LOOP_STELLAR_USDLOOP_ISSUER',
-  'LOOP_STELLAR_GBPLOOP_ISSUER',
-  'LOOP_STELLAR_EURLOOP_ISSUER',
-];
-
 function clearEnv(): void {
   delete process.env['LOOP_AUTH_NATIVE_ENABLED'];
   delete process.env['LOOP_JWT_SIGNING_KEY'];
   delete process.env['MIN_SUPPORTED_APP_VERSION_IOS'];
   delete process.env['MIN_SUPPORTED_APP_VERSION_ANDROID'];
-  for (const k of LOOP_ISSUER_VARS) delete process.env[k];
 }
 
 beforeEach(() => {
@@ -134,45 +127,6 @@ describe('configHandler', () => {
     delete process.env['LOOP_PHASE_1_ONLY'];
   });
 
-  it('reports loopAssets with null issuers + available=false when unconfigured', async () => {
-    const { configHandler } = await import('../handler.js');
-    const { ctx } = makeCtx();
-    const body = (await configHandler(ctx).json()) as {
-      loopAssets: {
-        USDLOOP: { issuer: string | null; available: boolean };
-        GBPLOOP: { issuer: string | null; available: boolean };
-        EURLOOP: { issuer: string | null; available: boolean };
-      };
-    };
-    expect(body.loopAssets).toEqual({
-      USDLOOP: { issuer: null, available: false },
-      GBPLOOP: { issuer: null, available: false },
-      EURLOOP: { issuer: null, available: false },
-    });
-  });
-
-  it('populates loopAssets per-currency when the issuer env is set', async () => {
-    process.env['LOOP_STELLAR_USDLOOP_ISSUER'] =
-      'GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW';
-    process.env['LOOP_STELLAR_GBPLOOP_ISSUER'] =
-      'GBBCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW';
-    // EUR issuer left unset — should still render as null.
-    const { configHandler } = await import('../handler.js');
-    const { ctx } = makeCtx();
-    const body = (await configHandler(ctx).json()) as {
-      loopAssets: {
-        USDLOOP: { issuer: string | null; available: boolean };
-        GBPLOOP: { issuer: string | null; available: boolean };
-        EURLOOP: { issuer: string | null; available: boolean };
-      };
-    };
-    expect(body.loopAssets.USDLOOP.available).toBe(true);
-    expect(body.loopAssets.USDLOOP.issuer).toMatch(/^G[A-Z2-7]{55}$/);
-    expect(body.loopAssets.GBPLOOP.available).toBe(true);
-    expect(body.loopAssets.EURLOOP.available).toBe(false);
-    expect(body.loopAssets.EURLOOP.issuer).toBeNull();
-  });
-
   it('defaults minSupportedVersion to null per platform when unset (no gate)', async () => {
     const { configHandler } = await import('../handler.js');
     const { ctx } = makeCtx();
@@ -192,16 +146,5 @@ describe('configHandler', () => {
     };
     expect(body.minSupportedVersion.ios).toBe('0.4.0');
     expect(body.minSupportedVersion.android).toBeNull();
-  });
-
-  it('always emits all three LOOP-asset keys so the client shape is stable', async () => {
-    process.env['LOOP_STELLAR_USDLOOP_ISSUER'] =
-      'GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW';
-    const { configHandler } = await import('../handler.js');
-    const { ctx } = makeCtx();
-    const body = (await configHandler(ctx).json()) as {
-      loopAssets: Record<string, unknown>;
-    };
-    expect(Object.keys(body.loopAssets).sort()).toEqual(['EURLOOP', 'GBPLOOP', 'USDLOOP']);
   });
 });

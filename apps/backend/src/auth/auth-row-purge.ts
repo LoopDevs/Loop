@@ -36,7 +36,6 @@ import { purgeExpiredOtps } from './otps.js';
 import { purgeDeadRefreshTokens } from './refresh-tokens.js';
 import { purgeStaleOtpAttemptCounters } from './otp-attempt-counter.js';
 import { purgeExpiredIdTokenUses } from './id-token-replay.js';
-import { purgeExpiredAdminStepUpConsumptions } from './admin-step-up.js';
 import {
   markWorkerStarted,
   markWorkerStopped,
@@ -55,8 +54,6 @@ export interface AuthRowPurgeTickResult {
   otpAttemptCountersDeleted: number;
   /** AGT-06: expired social id-token replay-guard rows deleted this tick. */
   idTokenUsesDeleted: number;
-  /** SEC-02-stepup: expired admin step-up single-use ledger rows deleted this tick. */
-  adminStepUpConsumptionsDeleted: number;
 }
 
 /**
@@ -96,16 +93,11 @@ export async function runAuthRowPurgeTick(args?: {
     retentionMs,
     ...(now ? { now } : {}),
   });
-  const adminStepUpConsumptionsDeleted = await purgeExpiredAdminStepUpConsumptions({
-    retentionMs,
-    ...(now ? { now } : {}),
-  });
   return {
     otpsDeleted,
     refreshTokensDeleted,
     otpAttemptCountersDeleted,
     idTokenUsesDeleted,
-    adminStepUpConsumptionsDeleted,
   };
 }
 
@@ -133,8 +125,7 @@ export function startAuthRowPurge(args?: { intervalMs?: number }): void {
         r.otpsDeleted > 0 ||
         r.refreshTokensDeleted > 0 ||
         r.otpAttemptCountersDeleted > 0 ||
-        r.idTokenUsesDeleted > 0 ||
-        r.adminStepUpConsumptionsDeleted > 0
+        r.idTokenUsesDeleted > 0
       ) {
         log.info(r, 'Auth-row purge tick reclaimed rows');
       }

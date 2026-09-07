@@ -4,44 +4,8 @@
  * domain HERE — keeps `env.ts` from being a merge-conflict magnet.
  */
 import { z } from 'zod';
-import { envBoolean } from '../schema-helpers.js';
-
-/**
- * CFG-06 (A4-047 alignment): kill-switch value parser. UNLIKE
- * `envBoolean`, an UNRECOGNISED value must NOT reject at boot. The
- * `LOOP_KILL_*` switches are flipped live via
- * `fly secrets set LOOP_KILL_* … `, which triggers a rolling restart
- * that re-runs `parseEnv`. Under `envBoolean` a mis-typed kill value
- * (e.g. `disbaled`) throws at boot, so the machine carrying the
- * operator's kill crash-loops and Fly keeps the OLD, un-killed machine
- * serving — the subsystem the operator tried to disable stays OPEN.
- * That is the exact silent fail-OPEN that A4-047 (`kill-switches.ts`)
- * documents as fixed. Map an unrecognised value to `true` (ENGAGED) so
- * the machine boots AND the frozen value agrees with `kill-switches.ts`'s
- * runtime fail-CLOSED. Recognised falsy spellings (and empty) stay
- * `false` (open); recognised truthy AND any unrecognised typo → engaged.
- * The runtime authority remains `kill-switches.ts` (reads `process.env`
- * live); nothing consumes the frozen `env.LOOP_KILL_*` value.
- */
-const killSwitchBoolean = z.union([z.boolean(), z.string()]).transform((v) => {
-  if (typeof v === 'boolean') return v;
-  const s = v.trim().toLowerCase();
-  if (s === 'false' || s === '0' || s === 'no' || s === 'off' || s === '') return false;
-  return true;
-});
 
 export const infraEnvFields = {
-  // Interest pool depletion threshold (days of cover).
-  //
-  // The pool watcher pages the Discord monitoring channel when the
-  // on-chain pool balance can cover fewer than this many days of
-  // forecast daily interest at the current APY. 7 days gives the
-  // operator a week to mint the next batch before users would be
-  // under-allocated. Tighter ops can lower it (3-5 days); operators
-  // with monthly mint cadence + multi-day reaction time should
-  // raise it.
-  LOOP_INTEREST_POOL_MIN_DAYS_COVER: z.coerce.number().int().min(1).max(365).default(7),
-
   // Transactional email provider (ADR 013). When unset / `console`
   // the dev-only stub fires; production refuses to start with the
   // console value (see auth/email.ts). Add a real provider before
@@ -64,36 +28,13 @@ export const infraEnvFields = {
 
   // Optional Reply-To address for transactional email. When set, OTP
   // emails carry a `reply_to` header so user replies route to a
-  // monitored inbox (production sets hello@loopfinance.io via
-  // fly.toml) instead of bouncing off the no-reply sender. Unset →
-  // the reply_to key is omitted from the provider payload entirely.
+  // monitored inbox instead of bouncing off the no-reply sender.
+  // Unset → the reply_to key is omitted from the provider payload.
   //
-  // Declared in the schema so a typo'd address fails parseEnv at boot
-  // (it previously bypassed env.ts via a bare process.env read in
-  // auth/email.ts — a malformed value silently sent mail with no
-  // Reply-To). The call site still reads process.env live, matching
-  // the documented test-reload pattern (A2-1513 / A2-1812 resolution
-  // notes) used by the sibling EMAIL_* vars: zod validates at boot,
-  // runtime reads stay live so tests can mutate process.env and reset
-  // the cached provider.
+  // Declared in the schema so a typo'd address fails parseEnv at boot;
+  // the call site still reads process.env live, matching the
+  // documented test-reload pattern used by the sibling EMAIL_* vars.
   EMAIL_REPLY_TO_ADDRESS: z.string().email().optional(),
-
-  // Network passphrase for payout signing. PUBLIC mainnet is the
-  // default; operators override with TESTNET string for staging.
-  // Anything non-empty is accepted so a self-hosted network can
-  // set its own passphrase.
-  LOOP_STELLAR_NETWORK_PASSPHRASE: z
-    .string()
-    .default('Public Global Stellar Network ; September 2015'),
-
-  // A2-1513: Horizon base URL for all payment-watcher / balance /
-  // circulation reads AND the payout-worker submit. Previously every
-  // consumer did `process.env['LOOP_STELLAR_HORIZON_URL']` directly,
-  // bypassing the env.ts zod layer — a typo in the URL (missing
-  // https://, trailing slash, etc.) only surfaced on the first
-  // Horizon call rather than at boot. Moved into the zod schema so
-  // a malformed URL fails `parseEnv()` at startup.
-  LOOP_STELLAR_HORIZON_URL: z.string().url().default('https://horizon.stellar.org'),
 
   // ADR 052: chain-qualified CTX payment currencies Loop offers at
   // checkout, comma-separated (e.g. "XLM,DASH,ETH.USDT"). The
@@ -101,261 +42,14 @@ export const infraEnvFields = {
   // final say per company crypto permissions. Unset → XLM only.
   LOOP_CTX_PAYMENT_CURRENCIES: z.string().min(1).optional(),
 
-  // Payout-worker tick interval (seconds). 30s matches ADR 016's
-  // recommended pacing — the worker is slower than the watcher
-  // (10s) or procurement (5s) because each payout is a Stellar
-  // submit + ledger-close (~5s) and parallelism on the operator
-  // account is unsafe (sequence numbers serialise).
-  LOOP_PAYOUT_WORKER_INTERVAL_SECONDS: z.coerce.number().int().positive().default(30),
-
-  // Max auto-retry attempts before a row promotes from transient
-  // failure to terminal `failed`. ADR 016 default 5.
-  LOOP_PAYOUT_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
-
-  // A2-602 watchdog: rows stuck in `submitted` for longer than this
-  // (seconds) are re-picked by the worker. The idempotency pre-check
-  // converges them to `confirmed` if the prior submit actually landed;
-  // otherwise a fresh submit is issued with a new sequence number.
-  // Default 300s (5m) — a well-behaved Horizon close is ~5s, so five
-  // minutes is well outside the normal submit→seal window while still
-  // short enough that a crash-loop doesn't silently eat payouts.
-  LOOP_PAYOUT_WATCHDOG_STALE_SECONDS: z.coerce.number().int().positive().default(300),
-
-  // A2-1921 fee-bump strategy. Under Stellar network congestion the
-  // SDK default `BASE_FEE` (100 stroops) gets out-bid by user-side
-  // traffic and the tx returns `tx_insufficient_fee`. The worker now
-  // scales the fee per-attempt so a congested period drains naturally:
-  //   attempt 1 → BASE
-  //   attempt 2 → BASE * MULTIPLIER
-  //   attempt 3 → BASE * MULTIPLIER^2
-  //   …capped at CAP
-  // Defaults: 100 → 200 → 400 → 800 → 1600 stroops at MULTIPLIER=2,
-  // CAP=100_000 (any single payout is well under $0.001 of fee even
-  // at the cap, so this is cheap insurance against a stuck row).
-  LOOP_PAYOUT_FEE_BASE_STROOPS: z.coerce.number().int().positive().default(100),
-  LOOP_PAYOUT_FEE_CAP_STROOPS: z.coerce.number().int().positive().default(100_000),
-  LOOP_PAYOUT_FEE_MULTIPLIER: z.coerce.number().positive().default(2),
-
-  // ADR 031 §Detailed design D9: vault-subsystem master switch for the
-  // LOOPUSD/LOOPEUR DeFindex-vault path (V1 foundation — schema +
-  // read layer only, no Soroban client / emission / withdraw logic
-  // yet). Distinct from `LOOP_PHASE_1_ONLY`, which gates the
-  // user-facing cashback/wallet surface generally — this flag gates
-  // the vault subsystem specifically, so the read layer
-  // (`credits/vaults/registry.ts`) stays a no-op even once
-  // `loop_vaults` rows exist. Default false: an empty registry table
-  // + this flag off is byte-identical to pre-migration.
-  LOOP_VAULTS_ENABLED: envBoolean.default(false),
-
-  // ADR 031 §Detailed design D2/D9, V2 (Soroban vault client). Soroban
-  // RPC endpoint the vault client (`credits/vaults/vault-client.ts`)
-  // uses for account loads, `simulateTransaction` /
-  // `prepareTransaction` / `sendTransaction` / `getTransaction` —
-  // distinct from `LOOP_STELLAR_HORIZON_URL` (Horizon is a classic-
-  // ledger REST API; Soroban RPC is a separate JSON-RPC endpoint,
-  // even on the same network). Nullable — the cross-field check below
-  // requires it only when `LOOP_VAULTS_ENABLED=true` (mirrors the
-  // `LOOP_WALLET_PROVIDER=privy` → `PRIVY_APP_ID`/`PRIVY_APP_SECRET`
-  // pattern), so a deployment that never flips the vault flag doesn't
-  // need to configure Soroban RPC at all.
-  LOOP_SOROBAN_RPC_URL: z.string().url().optional(),
-
-  // A2-1907: runtime kill switches. Setting any of these to `true` on
-  // a running deployment makes the matching surface return 503
-  // SUBSYSTEM_DISABLED without redeploying. Toggle via:
-  //   `fly secrets set LOOP_KILL_<NAME>=true -a loopfinance-api`
-  // The Fly secret-set triggers a rolling restart picking up the new
-  // value. Default false on every switch — an UNSET switch is open.
-  //
-  // CFG-06: parsed with `killSwitchBoolean` (not `envBoolean`) so an
-  // UNRECOGNISED/mis-typed value maps to ENGAGED (fail CLOSED) instead
-  // of rejecting at boot. A boot reject would crash-loop the machine
-  // carrying the operator's kill and leave Fly serving the old,
-  // un-killed machine (fail OPEN) — see the `killSwitchBoolean` header
-  // and A4-047 in kill-switches.ts. Recognised falsy/unset stay open.
-  LOOP_KILL_ORDERS: killSwitchBoolean.default(false),
-  // Per-path order switches (comprehensive-audit 2026-06-11, P10):
-  // when set they override LOOP_KILL_ORDERS for their path; when
-  // UNSET they fall back to it — fully backward compatible. No
-  // `.default(false)` on purpose: the unset/false distinction is the
-  // fallback semantic (kill-switches.ts reads process.env directly;
-  // these entries exist for boot-parse + .env.example parity).
-  LOOP_KILL_ORDERS_LOOP: killSwitchBoolean.optional(),
-  LOOP_KILL_AUTH: killSwitchBoolean.default(false),
-  // Pre-ADR-036 name: LOOP_KILL_WITHDRAWALS (renamed with the
-  // withdrawal→emission re-scope; gates admin emissions + the
-  // payout-compensation endpoint).
-  LOOP_KILL_EMISSIONS: killSwitchBoolean.default(false),
-
-  // Asset-drift watcher (ADR 015). 300s (5m) default — drift is an
-  // accounting metric, not latency-sensitive; paging the monitoring
-  // channel faster than that would just generate noise from
-  // in-flight payouts.
-  LOOP_ASSET_DRIFT_WATCHER_INTERVAL_SECONDS: z.coerce.number().int().positive().default(300),
-
-  // Threshold in stroops at which a non-zero drift pages ops. 1e8
-  // stroops = 10 whole LOOP units = $10 of over/under-mint for the
-  // USD asset. Leaves room for normal in-flight payout drift (a
-  // queue of say 20 × $5 cashbacks still fits) while catching
-  // real accounting divergence.
-  LOOP_ASSET_DRIFT_THRESHOLD_STROOPS: z.coerce.bigint().nonnegative().default(100_000_000n),
-
-  // ADR 030 Phase B: provider-agnostic embedded-wallet substrate.
-  // '' (default) → the wallet layer is OFF: `getWalletProvider()`
-  // returns null and no vendor code path is reachable. 'privy' →
-  // the Privy REST adapter is active and PRIVY_APP_ID +
-  // PRIVY_APP_SECRET become required (cross-field check in
-  // `parseEnv` below). Nothing user-facing consumes this in Phase B
-  // — it is the substrate Phase C wires into flows.
-  LOOP_WALLET_PROVIDER: z.enum(['', 'privy']).default(''),
-
-  // Privy app credentials (ADR 030). Used as HTTP Basic auth
-  // (`PRIVY_APP_ID:PRIVY_APP_SECRET`) plus the `privy-app-id` header
-  // on every Privy REST call. The secret is never logged (pino
-  // redaction paths cover PRIVY_APP_SECRET). Both required iff
-  // LOOP_WALLET_PROVIDER=privy; ignored otherwise.
-  PRIVY_APP_ID: z.string().min(1).optional(),
-  PRIVY_APP_SECRET: z.string().min(1).optional(),
-
-  // A2-905 / ADR 009: interest accrual on user credit balances.
-  // Off by default (0 bps) — ADR 009 explicitly feature-flags this
-  // "until counsel confirms the framing of interest on promotional
-  // credits in each target market." Switching on requires setting
-  // INTEREST_APY_BASIS_POINTS > 0.
-  // APY in integer basis points (400 = 4.00%); periodsPerYear is
-  // the denominator the primitive divides the annual rate by (365
-  // for daily, 12 for monthly, 52 for weekly). Tick interval is the
-  // scheduler cadence — kept independent from periodsPerYear so a
-  // deploy that wants nightly accrual on the first UTC day after
-  // boot (periodsPerYear=365) can still tick hourly and rely on the
-  // per-cursor idempotency to no-op the duplicates.
-  INTEREST_APY_BASIS_POINTS: z.coerce.number().int().min(0).max(10_000).default(0),
-  INTEREST_PERIODS_PER_YEAR: z.coerce.number().int().positive().default(365),
-  INTEREST_TICK_INTERVAL_HOURS: z.coerce.number().int().positive().default(24),
-
   // CF-26 / X-PRIV-07/08: auth-row retention purge. Always-on
-  // periodic sweep that deletes
-  // expired/consumed OTP rows and dead (expired or long-revoked)
-  // refresh-token rows past the retention grace. Both tables hold PII
-  // (email / token hash) with no lawful basis to retain dead rows. The
-  // interval is hourly by default — retention hygiene is not latency-
-  // sensitive. The retention window defaults to 30 days, comfortably
-  // past the refresh horizon so a live session is never reaped, and
-  // long enough that the token-theft reuse signal (A2-1608) and the
-  // just-expired-OTP 401 edge stay intact.
+  // periodic sweep that deletes expired/consumed OTP rows and dead
+  // (expired or long-revoked) refresh-token rows past the retention
+  // grace. Both tables hold PII (email / token hash) with no lawful
+  // basis to retain dead rows. Hourly by default — retention hygiene
+  // is not latency-sensitive. The retention window defaults to 30
+  // days, comfortably past the refresh horizon so a live session is
+  // never reaped.
   LOOP_AUTH_ROW_PURGE_INTERVAL_HOURS: z.coerce.number().int().positive().default(1),
-
-  // Hardening C1 (2026-07 plan): cadence of the ledger-invariant
-  // watcher — the scheduled check that user_credits.balance_minor
-  // still equals SUM(credit_transactions) per (user, currency), paging
-  // Discord while any drift persists. Full-table aggregate, so daily
-  // by default; the check single-flights across machines via an
-  // advisory lock. Always on.
-  LOOP_LEDGER_INVARIANT_INTERVAL_HOURS: z.coerce.number().int().positive().default(24),
   LOOP_AUTH_ROW_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
-
-  // NS-03: retention window for the durable admin money-move AUDIT
-  // trail. `admin_idempotency_keys` is both the idempotency-replay
-  // store AND the sole durable record of every admin money-move
-  // (refunds, emissions, credit-adjustments — read by
-  // `admin/audit-tail.ts` + `admin/user-audit-timeline.ts`). Its sweep
-  // (`sweepStaleIdempotencyKeys`) previously reaped rows at the 24h
-  // REPLAY TTL, so the forensic/regulatory audit self-deleted after a
-  // day. Retention is now decoupled from replay: the replay-hit window
-  // stays 24h (IDEMPOTENCY_TTL_HOURS) while the sweep keeps rows for
-  // this many days.
-  //
-  // Default 2555 days (~7 years) is a CONSERVATIVE, defensible baseline
-  // for financial audit records (the SOX / typical financial-records
-  // retention horizon). NEEDS-DECISION (compliance): the exact
-  // jurisdiction-specific period is a legal/compliance call, not an
-  // engineering one — tune this var to the value your regulator
-  // mandates. Prefer keeping data (longer) over losing it.
-  LOOP_ADMIN_AUDIT_RETENTION_DAYS: z.coerce.number().int().positive().default(2555),
-
-  // ADR 031 §Detailed design D4, V5: vault drift + solvency watcher
-  // (`credits/vaults/vault-drift-watcher.ts`) — the Soroban
-  // LOOPUSD/LOOPEUR twin of the classic asset-drift watcher above.
-  // 300s (5m) default, same cadence reasoning: an accounting metric,
-  // not latency-sensitive. Runs under LOOP_VAULTS_ENABLED
-  // (checked inside the tick — an unstarted
-  // watcher with vaults off is consistent, not merely inert).
-  LOOP_VAULT_DRIFT_WATCHER_INTERVAL_SECONDS: z.coerce.number().int().positive().default(300),
-
-  // INV-V1 threshold, in the vault share token's 7-decimal smallest
-  // unit (same convention as LOOP-asset stroops). 1e8 = 10 whole
-  // shares — mirrors LOOP_ASSET_DRIFT_THRESHOLD_STROOPS's default
-  // reasoning: room for a handful of in-flight emissions/redemptions
-  // without paging on normal queue depth.
-  LOOP_VAULT_DRIFT_SHARES_THRESHOLD_STROOPS: z.coerce.bigint().nonnegative().default(100_000_000n),
-
-  // INV-V2 threshold, in the vault's underlying-asset 7-decimal
-  // smallest unit. 1e8 = $10 of tolerance on user-share value vs
-  // vault-redeemable backing + hot float — same default as the
-  // classic asset-drift threshold for consistency.
-  LOOP_VAULT_DRIFT_SOLVENCY_THRESHOLD_STROOPS: z.coerce
-    .bigint()
-    .nonnegative()
-    .default(100_000_000n),
-
-  // ADR 031 §Detailed design D4, V5: vault-aware hot-float
-  // reconciliation (`treasury/hot-float-reconciliation.ts`) — checks
-  // the operator's actual on-chain vault-share balance against what
-  // the emission/redemption bookkeeping (`vault_hot_float
-  // .pending_unredeemed_shares` + in-flight `vault_emissions
-  // 'deposited'` rows) says it should be holding, catching the V4-
-  // accepted slow-withdraw-race / phantom-share residual
-  // (`docs/invariants.md`'s "Known residual (NOT self-correcting)"
-  // under Vault redemptions). Daily default, matching R3-1's cadence
-  // (an accounting reconciliation, not latency-sensitive). Runs
-  // under LOOP_VAULTS_ENABLED.
-  LOOP_VAULT_FLOAT_RECONCILIATION_INTERVAL_HOURS: z.coerce.number().int().positive().default(24),
-
-  // Share-count tolerance for the float/pool desync check above, same
-  // 7-decimal share-token unit as LOOP_VAULT_DRIFT_SHARES_THRESHOLD_STROOPS.
-  // Tighter than the drift watcher's threshold (1e6 = 0.1 share)
-  // because this check compares two figures that should track exactly
-  // in normal operation (no in-flight emission/redemption window to
-  // absorb) — see the module header for why a gap here is meaningful.
-  LOOP_VAULT_FLOAT_SHARES_THRESHOLD_STROOPS: z.coerce.bigint().nonnegative().default(1_000_000n),
-
-  // NS-06: hot-float USDC-BACKING reconciliation
-  // (`treasury/hot-float-backing-reconciliation.ts`) — the balance twin
-  // of the share-desync reconciler above. Checks the RECORDED hot-float
-  // balance the INV-V2 solvency check trusts as backing
-  // (Σ `vault_hot_float.balance_minor * 100000 + carry_stroops` over the
-  // active USDC-backed vaults) against the operator's ACTUAL on-chain
-  // USDC — catching a float RECORDED as backing that isn't physically
-  // held. Daily default, matching R3-1 / the share reconciler (an
-  // accounting reconciliation, not latency-sensitive). Runs under
-  // LOOP_VAULTS_ENABLED.
-  LOOP_HOT_FLOAT_BACKING_RECONCILIATION_INTERVAL_HOURS: z.coerce
-    .number()
-    .int()
-    .positive()
-    .default(24),
-
-  // Shortfall tolerance in the underlying-asset 7-decimal smallest unit
-  // (USDC stroops). Only the SHORTFALL direction (recorded float exceeds
-  // real on-chain USDC) is drift — the surplus direction is expected,
-  // since the operator/deposit account commingles the float with
-  // user-deposit / CTX USDC (see the reconciler's module header for why
-  // the check is one-directional). 1e8 = $10, matching
-  // LOOP_VAULT_DRIFT_SOLVENCY_THRESHOLD_STROOPS: this reconciler guards
-  // the SAME backing figure that solvency check counts, so the tolerance
-  // on cross-read/commingling timing skew is kept consistent between
-  // them.
-  LOOP_HOT_FLOAT_BACKING_THRESHOLD_STROOPS: z.coerce.bigint().nonnegative().default(100_000_000n),
-
-  // ADR 031 §Detailed design D8, V5b: APY snapshot cron
-  // (`credits/vaults/vault-apy-snapshot.ts`) — periodically records
-  // each active vault's live share price into
-  // `vault_share_price_snapshots` so the read endpoint
-  // (`GET /api/me/vault-apy`) can compute a past-30-day APY + past-
-  // 90-day range from history instead of hitting Soroban per request.
-  // 24h default — a daily sample is enough resolution for a 30/90-day
-  // annualised figure; not latency-sensitive. Runs under
-  // LOOP_VAULTS_ENABLED, single-flighted
-  // fleet-wide like the drift watcher above.
-  LOOP_VAULT_APY_SNAPSHOT_INTERVAL_HOURS: z.coerce.number().int().positive().default(24),
 };

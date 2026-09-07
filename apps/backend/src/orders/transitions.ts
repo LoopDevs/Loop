@@ -16,9 +16,7 @@
  * exactly one effective transition. Returns the updated row or null
  * when the guard didn't match (already there / already terminal).
  */
-import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { orders } from '../db/schema.js';
 import type { Order } from './repo.js';
 import { encryptRedeemField } from './redeem-crypto.js';
 
@@ -29,12 +27,9 @@ export interface RedemptionPayload {
 }
 
 export async function markOrderPaid(orderId: string): Promise<Order | null> {
-  const rows = await db
-    .update(orders)
-    .set({ state: 'paid' })
-    .where(and(eq(orders.id, orderId), eq(orders.state, 'unpaid')))
-    .returning();
-  return rows[0] ?? null;
+  return db
+    .collection('orders')
+    .updateOne({ id: orderId, state: 'unpaid' }, { $set: { state: 'paid' } });
 }
 
 /**
@@ -49,43 +44,43 @@ export async function markOrderFulfilled(
   orderId: string,
   opts: { redemption?: RedemptionPayload },
 ): Promise<Order | null> {
-  const rows = await db
-    .update(orders)
-    .set({
-      state: 'fulfilled',
-      fulfilledAt: new Date(),
-      redeemCode: encryptRedeemField(opts.redemption?.code),
-      redeemPin: encryptRedeemField(opts.redemption?.pin),
-      redeemUrl: opts.redemption?.url ?? null,
-    })
-    .where(and(eq(orders.id, orderId), inArray(orders.state, ['unpaid', 'paid'])))
-    .returning();
-  return rows[0] ?? null;
+  return db.collection('orders').updateOne(
+    { id: orderId, state: { $in: ['unpaid', 'paid'] } },
+    {
+      $set: {
+        state: 'fulfilled',
+        fulfilledAt: new Date(),
+        redeemCode: encryptRedeemField(opts.redemption?.code),
+        redeemPin: encryptRedeemField(opts.redemption?.pin),
+        redeemUrl: opts.redemption?.url ?? null,
+      },
+    },
+  );
 }
 
 export async function markOrderRejected(
   orderId: string,
   reason: string | null,
 ): Promise<Order | null> {
-  const rows = await db
-    .update(orders)
-    .set({
-      state: 'rejected',
-      failedAt: new Date(),
-      ...(reason !== null ? { failureReason: reason } : {}),
-    })
-    .where(and(eq(orders.id, orderId), inArray(orders.state, ['unpaid', 'paid'])))
-    .returning();
-  return rows[0] ?? null;
+  return db.collection('orders').updateOne(
+    { id: orderId, state: { $in: ['unpaid', 'paid'] } },
+    {
+      $set: {
+        state: 'rejected',
+        failedAt: new Date(),
+        ...(reason !== null ? { failureReason: reason } : {}),
+      },
+    },
+  );
 }
 
 export async function markOrderRefunded(orderId: string): Promise<Order | null> {
-  const rows = await db
-    .update(orders)
-    .set({ state: 'refunded', failedAt: new Date() })
-    .where(and(eq(orders.id, orderId), inArray(orders.state, ['unpaid', 'paid', 'fulfilled'])))
-    .returning();
-  return rows[0] ?? null;
+  return db
+    .collection('orders')
+    .updateOne(
+      { id: orderId, state: { $in: ['unpaid', 'paid', 'fulfilled'] } },
+      { $set: { state: 'refunded', failedAt: new Date() } },
+    );
 }
 
 /**
@@ -94,10 +89,10 @@ export async function markOrderRefunded(orderId: string): Promise<Order | null> 
  * local row. Guarded to `unpaid` only — a paid event always wins.
  */
 export async function markOrderExpired(orderId: string): Promise<Order | null> {
-  const rows = await db
-    .update(orders)
-    .set({ state: 'expired', failedAt: new Date(), failureReason: 'payment window expired' })
-    .where(and(eq(orders.id, orderId), eq(orders.state, 'unpaid')))
-    .returning();
-  return rows[0] ?? null;
+  return db
+    .collection('orders')
+    .updateOne(
+      { id: orderId, state: 'unpaid' },
+      { $set: { state: 'expired', failedAt: new Date(), failureReason: 'payment window expired' } },
+    );
 }

@@ -1,15 +1,14 @@
 /**
- * BK-otpatomic regression (DB-backed): concurrent `verify-otp` with the
- * SAME valid code must stay single-use — of two truly concurrent
+ * BK-otpatomic regression (store-backed): concurrent `verify-otp` with
+ * the SAME valid code must stay single-use — of two truly concurrent
  * `nativeVerifyOtpHandler` calls EXACTLY ONE succeeds (200 + a token
- * pair) and the other is rejected (401), against real postgres.
+ * pair) and the other is rejected (401), against the real store.
  *
- * Runs under `vitest.integration.config.ts` (LOOP_E2E_DB=1 + a real
- * `loop_test` postgres). The security-critical steps all hit the live
- * DB: the OTP seed (`createOtp`), the atomic single-use consume
- * (`tryConsumeOtp` → `UPDATE otps SET consumed_at=now() WHERE id=? AND
- * consumed_at IS NULL RETURNING`), the user upsert, and the
- * `refresh_tokens` insert.
+ * Runs under `vitest.integration.config.ts` against the ephemeral
+ * in-memory document store. The security-critical steps all hit the
+ * live store: the OTP seed (`createOtp`), the atomic single-use
+ * consume (`tryConsumeOtp` — the `{id, consumedAt: null}` CAS
+ * updateOne), the user upsert, and the `refresh_tokens` insert.
  *
  * A 2-party read barrier wraps the REAL `findLiveOtp` so BOTH requests
  * observe the row as unconsumed BEFORE either consumes it — the widest
@@ -18,20 +17,17 @@
  *   - Pre-fix (`markOtpConsumed` — an UNCONDITIONAL update): both pass
  *     the read, both mark, both mint → two 200s + two live refresh rows.
  *     The `[200, 401]` assertion + `refresh count === 1` go RED.
- *   - Post-fix (atomic CAS): both pass the read, the conditional UPDATE
+ *   - Post-fix (atomic CAS): both pass the read, the conditional update
  *     lets exactly one win → one 200, one 401, one refresh row. GREEN.
  *
  * The barrier only fences the READ; the consume/mint run unfenced
- * against the real DB, so the atomic guarantee itself is what's under
- * test, not a mock of it.
+ * against the real store, so the atomic guarantee itself is what's
+ * under test, not a mock of it.
  */
-import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { Context } from 'hono';
 import type * as OtpsModule from '../../auth/otps.js';
-import { eq } from 'drizzle-orm';
-import { ensureMigrated, truncateAllTables } from './db-test-setup.js';
-import { db } from '../../db/client.js';
-import { otps, refreshTokens, users } from '../../db/schema.js';
+import { db, __resetDbForTests } from '../../db/client.js';
 
 // A rendezvous the wrapped `findLiveOtp` parks on: the first N-1 readers
 // block, and the Nth releases them all, so every reader has observed the
@@ -97,12 +93,8 @@ function makeCtx(body: unknown): Context {
   } as unknown as Context;
 }
 
-beforeAll(async () => {
-  await ensureMigrated();
-});
-
-beforeEach(async () => {
-  await truncateAllTables();
+beforeEach(() => {
+  __resetDbForTests();
 });
 
 describe('BK-otpatomic: concurrent verify-otp single-use (real DB)', () => {
@@ -131,24 +123,18 @@ describe('BK-otpatomic: concurrent verify-otp single-use (real DB)', () => {
     expect(winnerBody.refreshToken.split('.')).toHaveLength(3);
     expect(loserBody.code).toBe('UNAUTHORIZED');
 
-    // DB invariant #1: the OTP row is consumed exactly once.
-    const otpRows = await db
-      .select({ id: otps.id, consumedAt: otps.consumedAt })
-      .from(otps)
-      .where(eq(otps.email, email));
+    // Store invariant #1: the OTP row is consumed exactly once.
+    const otpRows = await db.collection('otps').findMany({ email });
     expect(otpRows).toHaveLength(1);
     expect(otpRows[0]?.consumedAt).not.toBeNull();
 
-    // DB invariant #2: exactly ONE session was issued — the loser minted
-    // nothing. Pre-fix, both callers minted, leaving two live refresh
-    // rows for the one user.
-    const userRows = await db.select({ id: users.id }).from(users).where(eq(users.email, email));
+    // Store invariant #2: exactly ONE session was issued — the loser
+    // minted nothing. Pre-fix, both callers minted, leaving two live
+    // refresh rows for the one user.
+    const userRows = await db.collection('users').findMany({ email });
     expect(userRows).toHaveLength(1);
-    const userId = userRows[0]?.id as string;
-    const refreshRows = await db
-      .select({ jti: refreshTokens.jti })
-      .from(refreshTokens)
-      .where(eq(refreshTokens.userId, userId));
+    const userId = userRows[0]!.id;
+    const refreshRows = await db.collection('refresh_tokens').findMany({ userId });
     expect(refreshRows).toHaveLength(1);
   });
 });

@@ -90,7 +90,7 @@ app/
 
 **Purchase flow state machine:** Managed by `stores/purchase.store.ts`. Steps: `amount → payment → complete | redeem | error`. The `PurchaseContainer` orchestrates the flow, `PaymentStep` polls order status with a countdown timer and enforces a bounded retry budget (`MAX_CONSECUTIVE_ERRORS = 5`, audit A-030).
 
-**Error handling:** `useAuth()` throws `Error` with user-facing messages mapped from `ApiException` status codes (401, 429, 502, 503). Payment polling stops on 401 (session expired) and surfaces a connection error after 5 consecutive transient failures; 503 doesn't count against the budget because the circuit breaker runs its own backoff.
+**Error handling:** `useAuth()` throws `Error` with user-facing messages mapped from `ApiException` status codes (401, 429, 502, 503). Payment polling stops on 401 (session expired) and surfaces a connection error after 5 consecutive transient failures; 503 doesn't count against the budget, since it signals a transient CTX-side outage the poll should ride out rather than a failure of this order.
 
 **Capacitor plugins:** Only imported in `app/native/`. Components use the native wrappers, never `@capacitor/*`, `@aparajita/capacitor-*`, or `@capgo/*` directly. ESLint `no-restricted-imports` blocks all three patterns outside `app/native/`.
 

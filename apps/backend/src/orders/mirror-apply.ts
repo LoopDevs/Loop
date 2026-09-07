@@ -80,7 +80,7 @@ export async function applyCtxCardStatus(order: Order, card: CtxGiftCard): Promi
         notifyOrderFulfilled({
           orderId: order.id,
           merchantId: order.merchantId,
-          faceValueMinor: order.faceValueMinor,
+          faceValueMinor: BigInt(order.faceValueMinor),
           currency: order.currency,
         });
       }

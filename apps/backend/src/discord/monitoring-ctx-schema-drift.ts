@@ -25,7 +25,7 @@ import {
 /**
  * A2-1915: dedup keyed on the surface name so a single CTX endpoint
  * silently breaking doesn't flood `#monitoring` with one alert per
- * failed parse. Same 10-minute window as the circuit-breaker dedup.
+ * failed parse. Same 10-minute window as the CTX-credential dedup.
  */
 const CTX_SCHEMA_DRIFT_DEDUP_MS = 10 * 60 * 1000;
 const ctxSchemaDriftLastNotified = new Map<string, number>();

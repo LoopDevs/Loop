@@ -23,8 +23,7 @@
  * `transitions.ts`, so duplicate runs are safe — the lock is a CTX
  * read-volume optimisation.
  */
-import { createHash } from 'node:crypto';
-import { withAdvisoryLock } from '../db/client.js';
+import { withSingleFlight } from '../db/client.js';
 import { logger } from '../logger.js';
 import {
   markWorkerStarted,
@@ -52,20 +51,6 @@ const SWEEP_BATCH = 50;
 const EXPIRY_SLACK_MS = 5 * 60 * 1000;
 /** A row with no CTX card after this long never got created upstream. */
 const ORPHAN_GRACE_MS = 60 * 60 * 1000;
-
-function mirrorSweepLockKey(): bigint {
-  const digest = createHash('sha256').update('loop:ctx-mirror-sweep').digest();
-  const raw =
-    (BigInt(digest[0]!) << 56n) |
-    (BigInt(digest[1]!) << 48n) |
-    (BigInt(digest[2]!) << 40n) |
-    (BigInt(digest[3]!) << 32n) |
-    (BigInt(digest[4]!) << 24n) |
-    (BigInt(digest[5]!) << 16n) |
-    (BigInt(digest[6]!) << 8n) |
-    BigInt(digest[7]!);
-  return BigInt.asIntN(64, raw);
-}
 
 export interface MirrorSweepResult {
   picked: number;
@@ -122,7 +107,7 @@ export async function runMirrorSweepTick(nowMs?: number): Promise<MirrorSweepRes
     abortedCtxUnavailable: false,
     skippedLocked: false,
   };
-  const locked = await withAdvisoryLock(mirrorSweepLockKey(), async () => {
+  const locked = await withSingleFlight('ctx-mirror-sweep', async () => {
     const now = nowMs ?? Date.now();
     const rows = await listOpenMirrorOrders(SWEEP_BATCH);
     r.picked = rows.length;

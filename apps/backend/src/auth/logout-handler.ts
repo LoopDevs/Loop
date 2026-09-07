@@ -16,8 +16,7 @@ import type { Context } from 'hono';
 import { z } from 'zod';
 import { env } from '../env.js';
 import { logger } from '../logger.js';
-import { getUpstreamCircuit, CircuitOpenError } from '../circuit-breaker.js';
-import { upstreamUrl } from '../upstream.js';
+import { upstreamUrl, upstreamFetch } from '../upstream.js';
 import { verifyLoopToken, isLoopAuthConfigured } from './tokens.js';
 import { revokeRefreshToken } from './refresh-tokens.js';
 import { bumpUserTokenVersion } from '../db/users.js';
@@ -148,7 +147,7 @@ export async function logoutHandler(c: Context): Promise<Response> {
   }
 
   try {
-    const response = await getUpstreamCircuit('logout').fetch(upstreamUrl('/logout'), {
+    const response = await upstreamFetch(upstreamUrl('/logout'), {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${bearer}`,
@@ -163,12 +162,8 @@ export async function logoutHandler(c: Context): Promise<Response> {
       );
     }
   } catch (err) {
-    if (err instanceof CircuitOpenError) {
-      // Upstream unreachable — client still gets its local clear.
-      log.info('Logout attempted while upstream circuit open');
-    } else {
-      log.warn({ err }, 'Logout upstream call failed');
-    }
+    // Upstream unreachable — client still gets its local clear.
+    log.warn({ err }, 'Logout upstream call failed');
   }
 
   return c.json({ message: 'Logged out' });

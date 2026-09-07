@@ -25,7 +25,6 @@ import { rateLimit } from '../middleware/rate-limit.js';
 import { publicCashbackStatsHandler } from '../public/cashback-stats.js';
 import { publicCashbackPreviewHandler } from '../public/cashback-preview.js';
 import { publicGeoHandler } from '../public/geo.js';
-import { publicLoopAssetsHandler } from '../public/loop-assets.js';
 import { publicMerchantHandler } from '../public/merchant.js';
 import { publicRumHandler } from '../public/rum.js';
 import { publicTopCashbackMerchantsHandler } from '../public/top-cashback-merchants.js';
@@ -80,16 +79,6 @@ export function mountPublicRoutes(app: Hono): void {
     '/api/public/cashback-preview',
     rateLimit('GET /api/public/cashback-preview', 60, 60_000),
     publicCashbackPreviewHandler,
-  );
-
-  // LOOP-asset transparency surface (ADR 015 / 020). Public list
-  // of configured (code, issuer) pairs so third-party wallets +
-  // users can add trustlines to the verified issuer accounts
-  // without guessing from on-chain traffic.
-  app.get(
-    '/api/public/loop-assets',
-    rateLimit('GET /api/public/loop-assets', 60, 60_000),
-    publicLoopAssetsHandler,
   );
 
   // First-party, cookieless RUM intake (ADR 048). Folds Core Web

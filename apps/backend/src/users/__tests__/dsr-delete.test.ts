@@ -1,312 +1,160 @@
 /**
  * A2-1905 — deleteUserViaAnonymisation tests.
  *
- * Critical invariants:
- *   - blocks deletion when a payout is `pending` or `submitted`
- *   - blocks deletion when an order is mid-fulfilment
+ * Critical invariants (post-ADR-052 shape — the payout / credit-balance
+ * blockers died with the credits ledger; the only remaining blocker is
+ * an order mid-fulfilment):
+ *   - blocks deletion when an order is mid-flight (`unpaid` / `paid`)
  *   - on success, the user's email is replaced with the synthetic
- *     placeholder, ctx_user_id + stellar_address null out
+ *     placeholder and ctxUserId nulls out
  *   - identities are deleted, refresh tokens revoked
+ *   - a revoke failure surfaces loudly (A4-086) after the writes
+ *
+ * Runs against the real in-memory document store; only the
+ * refresh-token revoke is mocked (its own suite covers it).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { db, __resetDbForTests } from '../../db/client.js';
+import type { OrderDoc, UserDoc } from '../../db/types.js';
 
-const { state } = vi.hoisted(() => {
-  const s: {
-    payoutBlockingRows: Array<{ id: string }>;
-    /**
-     * A4-078: rows the second pendingPayouts query (failed-
-     * uncompensated withdrawals) should return. Empty by default
-     * so existing tests pass through to the order-block check.
-     */
-    failedUncompensatedRows: Array<{ id: string }>;
-    payoutQueryCount: number;
-    orderBlockingRows: Array<{ id: string }>;
-    /** PLAT-30-03: user_credits rows with a non-zero balance. */
-    nonZeroBalanceRows: Array<{ currency: string }>;
-    /** Captures of writes for assertions. */
-    deletedFromIdentitiesUserId: string | null;
-    updatedUserSet: Record<string, unknown> | null;
-    updatedUserWhereId: string | null;
-    revokedForUserId: string | null;
-    txnRan: boolean;
-    /**
-     * A4-123: capture of the `pending_payouts` scrub update —
-     * separate from `updatedUserSet` because the txn fires both
-     * (users + pending_payouts) and the test should see each call
-     * independently.
-     */
-    pendingPayoutsScrubSet: Record<string, unknown> | null;
-    pendingPayoutsScrubFired: boolean;
-    /**
-     * CON-02: set true when the per-user advisory lock (tx.execute of
-     * `pg_advisory_xact_lock`) is acquired inside the delete
-     * transaction — proves the preconditions are re-checked under the
-     * lock rather than on the pooled handle outside the txn.
-     */
-    advisoryLockAcquired: boolean;
-  } = {
-    payoutBlockingRows: [],
-    failedUncompensatedRows: [],
-    payoutQueryCount: 0,
-    orderBlockingRows: [],
-    nonZeroBalanceRows: [],
-    deletedFromIdentitiesUserId: null,
-    updatedUserSet: null,
-    updatedUserWhereId: null,
-    revokedForUserId: null,
-    txnRan: false,
-    pendingPayoutsScrubSet: null,
-    pendingPayoutsScrubFired: false,
-    advisoryLockAcquired: false,
-  };
-  return { state: s };
-});
-
-vi.mock('../../db/schema.js', () => ({
-  pendingPayouts: {
-    __tag: 'pendingPayouts',
-    userId: 'userId',
-    state: 'state',
-    kind: 'kind',
-    compensatedAt: 'compensated_at',
-  },
-  orders: { __tag: 'orders', userId: 'userId', state: 'state' },
-  userIdentities: { __tag: 'userIdentities', userId: 'userId' },
-  users: { __tag: 'users', id: 'id' },
-  userCredits: {
-    __tag: 'userCredits',
-    userId: 'userId',
-    currency: 'currency',
-    balanceMinor: 'balance_minor',
-  },
-  // ADR 036: the failed-uncompensated check joins to the legacy
-  // at-send debit row via an EXISTS subquery over creditTransactions.
-  creditTransactions: {
-    __tag: 'creditTransactions',
-    type: 'type',
-    referenceType: 'reference_type',
-    referenceId: 'reference_id',
-  },
-  PAYOUT_STATES: ['pending', 'submitted', 'confirmed', 'failed'],
-  ORDER_STATES: ['pending_payment', 'paid', 'procuring', 'fulfilled', 'failed', 'expired'],
-}));
-
-vi.mock('drizzle-orm', () => ({
-  and: (...args: unknown[]) => ({ __and: args }),
-  eq: (col: unknown, value: unknown) => ({ __eq: col, value }),
-  ne: (col: unknown, value: unknown) => ({ __ne: col, value }),
-  inArray: (col: unknown, values: unknown[]) => ({ __inArray: col, values }),
-  // A4-078: dsr-delete uses sql`... IS NULL` for the
-  // failed-uncompensated check; mock returns a tagged sentinel.
-  sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({ __sql: strings.raw, values }),
-}));
-
+const { revokeMock } = vi.hoisted(() => ({ revokeMock: vi.fn() }));
 vi.mock('../../auth/refresh-tokens.js', () => ({
-  revokeAllRefreshTokensForUser: vi.fn(async (userId: string) => {
-    state.revokedForUserId = userId;
-  }),
+  revokeAllRefreshTokensForUser: (userId: string) => revokeMock(userId),
 }));
 
-vi.mock('../../db/client.js', () => {
-  function selectChain(): {
-    from: (t: { __tag: string }) => {
-      where: (where: unknown) => {
-        limit: (n: number) => Promise<Array<{ id: string } | { currency: string }>>;
-      };
-    };
-  } {
-    return {
-      from: (t) => ({
-        where: () => ({
-          limit: async () => {
-            if (t.__tag === 'pendingPayouts') {
-              // A4-078: dsr-delete now issues TWO pendingPayouts
-              // queries — the first for pending/submitted block,
-              // the second for failed-uncompensated. Track the
-              // call order so each test can drive both states
-              // independently.
-              const idx = state.payoutQueryCount++;
-              if (idx === 0) return state.payoutBlockingRows;
-              if (idx === 1) return state.failedUncompensatedRows;
-              return [];
-            }
-            if (t.__tag === 'orders') return state.orderBlockingRows;
-            if (t.__tag === 'userCredits') return state.nonZeroBalanceRows;
-            return [];
-          },
-        }),
-      }),
-    };
-  }
-  function tx(): {
-    // CON-02: the preconditions now run through the transaction handle,
-    // guarded by tx.execute(pg_advisory_xact_lock). Mirror the pooled
-    // `db.select` routing on `tx` and record the lock acquisition.
-    execute: (query: unknown) => Promise<unknown>;
-    select: () => ReturnType<typeof selectChain>;
-    delete: (t: { __tag: string }) => {
-      where: (where: { value?: string }) => Promise<void>;
-    };
-    update: (t: { __tag: string }) => {
-      set: (s: Record<string, unknown>) => {
-        where: (where: { value?: string }) => Promise<void>;
-      };
-    };
-  } {
-    return {
-      execute: async () => {
-        state.advisoryLockAcquired = true;
-        return [];
-      },
-      select: () => selectChain(),
-      delete: (t) => ({
-        where: async (where) => {
-          if (t.__tag === 'userIdentities') {
-            state.deletedFromIdentitiesUserId = (where as { value?: string }).value ?? null;
-          }
-        },
-      }),
-      update: (t) => ({
-        set: (setBody) => ({
-          where: async (where) => {
-            if (t.__tag === 'users') {
-              state.updatedUserSet = setBody;
-              state.updatedUserWhereId = (where as { value?: string }).value ?? null;
-            } else if (t.__tag === 'pendingPayouts') {
-              state.pendingPayoutsScrubSet = setBody;
-              state.pendingPayoutsScrubFired = true;
-            }
-          },
-        }),
-      }),
-    };
-  }
-  return {
-    db: {
-      select: () => selectChain(),
-      transaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => {
-        state.txnRan = true;
-        return cb(tx());
-      }),
-    },
-  };
-});
-
-import { deleteUserViaAnonymisation, deletedEmailFor, SCRUBBED_TO_ADDRESS } from '../dsr-delete.js';
+import { deleteUserViaAnonymisation, deletedEmailFor } from '../dsr-delete.js';
 
 beforeEach(() => {
-  state.payoutBlockingRows = [];
-  state.failedUncompensatedRows = [];
-  state.payoutQueryCount = 0;
-  state.orderBlockingRows = [];
-  state.nonZeroBalanceRows = [];
-  state.deletedFromIdentitiesUserId = null;
-  state.updatedUserSet = null;
-  state.updatedUserWhereId = null;
-  state.revokedForUserId = null;
-  state.txnRan = false;
-  state.pendingPayoutsScrubSet = null;
-  state.pendingPayoutsScrubFired = false;
-  state.advisoryLockAcquired = false;
+  __resetDbForTests();
+  revokeMock.mockReset();
+  revokeMock.mockResolvedValue(undefined);
 });
 
+async function seedUser(overrides: Partial<UserDoc> = {}): Promise<UserDoc> {
+  const now = new Date();
+  const doc: UserDoc = {
+    id: 'u-1',
+    ctxUserId: 'ctx-1',
+    email: 'real@b.com',
+    tokenVersion: 0,
+    homeCurrency: 'USD',
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
+  };
+  await db.collection('users').insertOne(doc);
+  return doc;
+}
+
+async function seedOrder(overrides: Partial<OrderDoc> = {}): Promise<OrderDoc> {
+  const now = new Date();
+  const doc: OrderDoc = {
+    id: overrides.id ?? 'o-1',
+    userId: 'u-1',
+    merchantId: 'm-1',
+    faceValueMinor: 1000,
+    currency: 'USD',
+    chargeMinor: 950,
+    chargeCurrency: 'USD',
+    userCashbackMinor: 0,
+    expectedCommissionMinor: null,
+    ctxOrderId: null,
+    ctxPaymentId: null,
+    paymentCryptoCurrency: null,
+    redeemCode: null,
+    redeemPin: null,
+    redeemUrl: null,
+    redemptionBackfillAttempts: 0,
+    redemptionBackfillLastAttemptAt: null,
+    state: 'fulfilled',
+    failureReason: null,
+    idempotencyKey: null,
+    createdAt: now,
+    fulfilledAt: now,
+    failedAt: null,
+    ...overrides,
+  };
+  await db.collection('orders').insertOne(doc);
+  return doc;
+}
+
 describe('deleteUserViaAnonymisation (A2-1905)', () => {
-  it('refuses with blockedBy=pending_payouts when a payout is in flight', async () => {
-    state.payoutBlockingRows = [{ id: 'p-1' }];
-    const out = await deleteUserViaAnonymisation('u-1');
-    expect(out).toEqual({ ok: false, blockedBy: 'pending_payouts' });
-    // CON-02: the transaction opens so the per-user advisory lock can
-    // be taken and the preconditions re-checked under it — but a block
-    // does NO writes and never revokes sessions.
-    expect(state.advisoryLockAcquired).toBe(true);
-    expect(state.deletedFromIdentitiesUserId).toBeNull();
-    expect(state.updatedUserSet).toBeNull();
-    expect(state.revokedForUserId).toBeNull();
-  });
+  it.each(['unpaid', 'paid'] as const)(
+    'refuses with blockedBy=in_flight_orders when an order is %s',
+    async (state) => {
+      await seedUser();
+      await seedOrder({ state });
+      const out = await deleteUserViaAnonymisation('u-1');
+      expect(out).toEqual({ ok: false, blockedBy: 'in_flight_orders' });
+      // A block does NO writes and never revokes sessions.
+      const user = await db.collection('users').findOne({ id: 'u-1' });
+      expect(user?.email).toBe('real@b.com');
+      expect(user?.ctxUserId).toBe('ctx-1');
+      expect(revokeMock).not.toHaveBeenCalled();
+    },
+  );
 
-  it('refuses with blockedBy=in_flight_orders when an order is mid-fulfilment', async () => {
-    state.orderBlockingRows = [{ id: 'o-1' }];
-    const out = await deleteUserViaAnonymisation('u-1');
-    expect(out).toEqual({ ok: false, blockedBy: 'in_flight_orders' });
-    // CON-02: the transaction opens so the per-user advisory lock can
-    // be taken and the preconditions re-checked under it — but a block
-    // does NO writes and never revokes sessions.
-    expect(state.advisoryLockAcquired).toBe(true);
-    expect(state.deletedFromIdentitiesUserId).toBeNull();
-    expect(state.updatedUserSet).toBeNull();
-    expect(state.revokedForUserId).toBeNull();
-  });
+  it.each(['fulfilled', 'rejected', 'refunded', 'expired'] as const)(
+    'a terminal %s order does not block deletion',
+    async (state) => {
+      await seedUser();
+      await seedOrder({ state });
+      const out = await deleteUserViaAnonymisation('u-1');
+      expect(out).toEqual({ ok: true });
+    },
+  );
 
-  it('refuses with blockedBy=failed_uncompensated_withdrawals when an admin withdrawal is failed but not yet compensated (A4-078)', async () => {
-    // A4-078 (narrowed by ADR 036): a failed legacy kind=emission
-    // payout carrying the at-send type='withdrawal' debit row with
-    // compensated_at IS NULL means user_credits was debited but
-    // no on-chain transfer / fiat reached the user. Anonymising
-    // here orphans the recovery path. (The EXISTS legacy-debit
-    // predicate travels inside the mocked sql template; this test
-    // drives the query result directly.)
-    state.failedUncompensatedRows = [{ id: 'p-failed-1' }];
-    const out = await deleteUserViaAnonymisation('u-1');
-    expect(out).toEqual({ ok: false, blockedBy: 'failed_uncompensated_withdrawals' });
-    // CON-02: the transaction opens so the per-user advisory lock can
-    // be taken and the preconditions re-checked under it — but a block
-    // does NO writes and never revokes sessions.
-    expect(state.advisoryLockAcquired).toBe(true);
-    expect(state.deletedFromIdentitiesUserId).toBeNull();
-    expect(state.updatedUserSet).toBeNull();
-    expect(state.revokedForUserId).toBeNull();
-  });
-
-  // PLAT-30-03 (2026-06-30 cold audit): a never-linked-wallet user can
-  // accumulate a bare user_credits balance with zero pending_payouts
-  // rows ever created — the other three preconditions are trivially
-  // satisfied regardless of balance size.
-  it('refuses with blockedBy=non_zero_credit_balance when any user_credits row has a non-zero balance', async () => {
-    state.nonZeroBalanceRows = [{ currency: 'GBP' }];
-    const out = await deleteUserViaAnonymisation('u-1');
-    expect(out).toEqual({ ok: false, blockedBy: 'non_zero_credit_balance' });
-    // CON-02: the transaction opens so the per-user advisory lock can
-    // be taken and the preconditions re-checked under it — but a block
-    // does NO writes and never revokes sessions.
-    expect(state.advisoryLockAcquired).toBe(true);
-    expect(state.deletedFromIdentitiesUserId).toBeNull();
-    expect(state.updatedUserSet).toBeNull();
-    expect(state.revokedForUserId).toBeNull();
-  });
-
-  it('on success, anonymises the row and revokes all refresh tokens', async () => {
+  it("another user's in-flight order does not block deletion", async () => {
+    await seedUser();
+    await seedOrder({ id: 'o-other', userId: 'u-other', state: 'paid' });
     const out = await deleteUserViaAnonymisation('u-1');
     expect(out).toEqual({ ok: true });
-    expect(state.txnRan).toBe(true);
-    // CON-02: the anonymisation runs under the per-user advisory lock,
-    // taken inside the same transaction as the re-checked preconditions.
-    expect(state.advisoryLockAcquired).toBe(true);
-    expect(state.deletedFromIdentitiesUserId).toBe('u-1');
-    expect(state.updatedUserSet).toMatchObject({
-      email: 'deleted-u-1@deleted.loopfinance.io',
-      ctxUserId: null,
-      stellarAddress: null,
+  });
+
+  it('on success, anonymises the doc, deletes identities, and revokes all refresh tokens', async () => {
+    await seedUser();
+    await db.collection('user_identities').insertOne({
+      id: 'ident-1',
+      userId: 'u-1',
+      provider: 'google',
+      providerSub: 'sub-1',
+      emailAtLink: 'real@b.com',
+      createdAt: new Date(),
     });
-    expect(state.updatedUserWhereId).toBe('u-1');
-    expect(state.revokedForUserId).toBe('u-1');
-  });
+    // Another user's identity must survive.
+    await db.collection('user_identities').insertOne({
+      id: 'ident-2',
+      userId: 'u-other',
+      provider: 'google',
+      providerSub: 'sub-2',
+      emailAtLink: 'other@b.com',
+      createdAt: new Date(),
+    });
 
-  it('blocks-first wins: a pending payout AND a mid-fulfilment order both present → reports payouts', async () => {
-    state.payoutBlockingRows = [{ id: 'p-1' }];
-    state.orderBlockingRows = [{ id: 'o-1' }];
-    const out = await deleteUserViaAnonymisation('u-1');
-    expect(out.blockedBy).toBe('pending_payouts');
-  });
-
-  it('A4-123: scrubs to_address on terminal payout rows during anonymisation', async () => {
     const out = await deleteUserViaAnonymisation('u-1');
     expect(out).toEqual({ ok: true });
-    expect(state.pendingPayoutsScrubFired).toBe(true);
-    expect(state.pendingPayoutsScrubSet).toMatchObject({ toAddress: SCRUBBED_TO_ADDRESS });
-    // The synthetic placeholder must satisfy the schema CHECK regex
-    // pinned in 0024_pending_payouts_to_address_format so the
-    // production UPDATE doesn't bounce.
-    expect(SCRUBBED_TO_ADDRESS).toMatch(/^G[A-Z2-7]{55}$/);
+
+    // PII anchors gone: synthetic email, null ctxUserId.
+    const user = await db.collection('users').findOne({ id: 'u-1' });
+    expect(user?.email).toBe('deleted-u-1@deleted.loopfinance.io');
+    expect(user?.ctxUserId).toBeNull();
+
+    // OAuth links deleted — only for the target user.
+    expect(await db.collection('user_identities').count({ userId: 'u-1' })).toBe(0);
+    expect(await db.collection('user_identities').count({ userId: 'u-other' })).toBe(1);
+
+    // Sessions dead.
+    expect(revokeMock).toHaveBeenCalledWith('u-1');
+  });
+
+  it('A4-086: surfaces a revoke failure loudly AFTER the anonymisation writes land', async () => {
+    await seedUser();
+    revokeMock.mockRejectedValue(new Error('db down'));
+    await expect(deleteUserViaAnonymisation('u-1')).rejects.toThrow('db down');
+    // The anonymisation already landed — the failure must not roll it
+    // back (operators re-run the revoke manually).
+    const user = await db.collection('users').findOne({ id: 'u-1' });
+    expect(user?.email).toBe(deletedEmailFor('u-1'));
   });
 
   it('deletedEmailFor produces a unique synthetic email per userId', () => {

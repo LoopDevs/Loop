@@ -17,7 +17,8 @@ const mockEnv = vi.hoisted(
 );
 vi.mock('../../env.js', () => ({ env: mockEnv }));
 
-vi.mock('../../upstream.js', () => ({
+vi.mock('../../upstream.js', async (importOriginal) => ({
+  ...((await importOriginal()) as Record<string, unknown>),
   upstreamUrl: (path: string) => `http://ctx.test${path}`,
 }));
 

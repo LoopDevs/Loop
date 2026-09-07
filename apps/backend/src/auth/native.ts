@@ -21,7 +21,6 @@ import {
   clearOtpAttempts,
   OTP_EMAIL_LOCKOUT_MS,
 } from './otp-attempt-counter.js';
-import { enqueueWalletProvisioning } from '../wallet/provisioning.js';
 import { enqueueCtxUserProvisioning } from '../ctx/user-provisioning.js';
 import { normalizeEmail, NonAsciiEmailError } from './normalize-email.js';
 import { verifyLoopToken, isLoopAuthConfigured } from './tokens.js';
@@ -176,11 +175,6 @@ export async function nativeVerifyOtpHandler(c: Context): Promise<Response> {
       email: user.email,
       tokenVersion: user.tokenVersion,
     });
-    // ADR 030 Phase C1 — fire-and-forget embedded-wallet
-    // provisioning. Synchronous + never throws; signup must not
-    // block on Stellar or the wallet provider. Failures are picked
-    // up by the provisioning sweeper with backoff.
-    enqueueWalletProvisioning(user.id);
     // Attributed-operator-traffic: fire-and-forget CTX customer
     // provisioning. Runs on every login (not just signup) so a user
     // whose earlier attempt failed self-heals next session; no-ops

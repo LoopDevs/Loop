@@ -13,10 +13,9 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { ctxFetchMock, companyIdMock, dbRows } = vi.hoisted(() => ({
+const { ctxFetchMock, companyIdMock } = vi.hoisted(() => ({
   ctxFetchMock: vi.fn(),
   companyIdMock: vi.fn(),
-  dbRows: { value: [] as Array<Record<string, unknown>> },
 }));
 
 vi.mock('../../ctx/api-fetch.js', () => ({
@@ -25,24 +24,9 @@ vi.mock('../../ctx/api-fetch.js', () => ({
 vi.mock('../../orders/ctx-order.js', () => ({
   operatorCompanyId: companyIdMock,
 }));
-vi.mock('../../upstream.js', () => ({
+vi.mock('../../upstream.js', async (importOriginal) => ({
+  ...((await importOriginal()) as Record<string, unknown>),
   upstreamUrl: (path: string) => `http://ctx.test${path}`,
-}));
-vi.mock('../../db/client.js', () => ({
-  db: {
-    select: () => ({
-      from: () => ({
-        where: () => Promise.resolve(dbRows.value),
-      }),
-    }),
-  },
-}));
-vi.mock('../../db/schema.js', () => ({
-  merchantCashbackConfigs: {
-    merchantId: 'merchant_id',
-    userCashbackPct: 'user_cashback_pct',
-    active: 'active',
-  },
 }));
 vi.mock('../../logger.js', () => ({
   logger: {
@@ -50,6 +34,7 @@ vi.mock('../../logger.js', () => ({
   },
 }));
 
+import { db, __resetDbForTests } from '../../db/client.js';
 import {
   __resetCtxLinksForTests,
   desiredUserDiscountBp,
@@ -63,13 +48,28 @@ function okResponse(): Response {
   return new Response('{}', { status: 200 });
 }
 
+/** Seeds a cashback config doc the reconcile sweep will read. */
+async function seedConfig(
+  merchantId: string,
+  userCashbackPct: number,
+  active: boolean,
+): Promise<void> {
+  await db.collection('merchant_cashback_configs').insertOne({
+    merchantId,
+    userCashbackPct,
+    active,
+    updatedBy: 'test-operator',
+    updatedAt: new Date(),
+  });
+}
+
 beforeEach(() => {
+  __resetDbForTests();
   __resetCtxLinksForTests();
   ctxFetchMock.mockReset();
   ctxFetchMock.mockResolvedValue(okResponse());
   companyIdMock.mockReset();
   companyIdMock.mockResolvedValue('company-1');
-  dbRows.value = [];
 });
 
 describe('desiredUserDiscountBp', () => {
@@ -177,11 +177,11 @@ describe('reconcileUserDiscounts', () => {
         ['m-ok', { id: 'l-b', operatorDiscountBasisPoints: 1000, userDiscountBasisPoints: 500 }],
       ]),
     );
-    dbRows.value = [
-      { merchantId: 'm-drifted', userCashbackPct: '50.00', active: true },
-      { merchantId: 'm-ok', userCashbackPct: '50.00', active: true },
-      { merchantId: 'm-no-link', userCashbackPct: '10.00', active: true },
-    ];
+    await seedConfig('m-drifted', 50, true);
+    await seedConfig('m-ok', 50, true);
+    await seedConfig('m-no-link', 10, true);
+    // Inactive configs are excluded from the reconcile query entirely.
+    await seedConfig('m-inactive', 50, false);
     await reconcileUserDiscounts();
     expect(ctxFetchMock).toHaveBeenCalledTimes(1);
     const body = JSON.parse(
@@ -196,16 +196,14 @@ describe('reconcileUserDiscounts', () => {
         ['m1', { id: 'l-a', operatorDiscountBasisPoints: 1000, userDiscountBasisPoints: null }],
       ]),
     );
-    dbRows.value = [{ merchantId: 'm1', userCashbackPct: '0.00', active: true }];
+    await seedConfig('m1', 0, true);
     await reconcileUserDiscounts();
     expect(ctxFetchMock).not.toHaveBeenCalled();
   });
 
   it('swallows a config-read failure', async () => {
-    const dbModule = await import('../../db/client.js');
-    vi.spyOn(dbModule.db, 'select').mockImplementation(() => {
-      throw new Error('db down');
-    });
+    const configs = db.collection('merchant_cashback_configs');
+    vi.spyOn(configs, 'findMany').mockRejectedValueOnce(new Error('db down'));
     await expect(reconcileUserDiscounts()).resolves.toBeUndefined();
   });
 });

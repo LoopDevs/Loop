@@ -17,9 +17,7 @@
  * require an `auth.kind === 'loop'` bearer (401 otherwise).
  */
 import type { Context } from 'hono';
-import { and, desc, eq, lt } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { orders } from '../db/schema.js';
 import { env } from '../env.js';
 import { logger } from '../logger.js';
 import type { LoopAuthContext } from '../auth/handler.js';
@@ -102,10 +100,8 @@ export async function loopGetOrderHandler(c: Context): Promise<Response> {
     return c.json({ code: 'VALIDATION_ERROR', message: 'id is required' }, 400);
   }
 
-  const row = await db.query.orders.findFirst({
-    where: and(eq(orders.id, id), eq(orders.userId, auth.userId)),
-  });
-  if (row === undefined || row === null) {
+  const row = await db.collection('orders').findOne({ id, userId: auth.userId });
+  if (row === null) {
     return c.json({ code: 'NOT_FOUND', message: 'Order not found' }, 404);
   }
 
@@ -119,7 +115,7 @@ export async function loopGetOrderHandler(c: Context): Promise<Response> {
         paymentId !== null && paymentId !== undefined ? await fetchCtxPayment(paymentId) : null;
       view.payment = paymentInstructionsFromCard(card, payment, {
         cryptoCurrency: row.paymentCryptoCurrency ?? '',
-        amountMinor: row.chargeMinor,
+        amountMinor: BigInt(row.chargeMinor),
         currency: row.chargeCurrency,
       });
     } catch (err) {
@@ -151,16 +147,13 @@ export async function loopListOrdersHandler(c: Context): Promise<Response> {
     );
   }
 
-  const rows = await db
-    .select()
-    .from(orders)
-    .where(
-      beforeDate !== null
-        ? and(eq(orders.userId, auth.userId), lt(orders.createdAt, beforeDate))
-        : eq(orders.userId, auth.userId),
-    )
-    .orderBy(desc(orders.createdAt))
-    .limit(limit);
+  const rows = await db.collection('orders').findMany(
+    {
+      userId: auth.userId,
+      ...(beforeDate !== null ? { createdAt: { $lt: beforeDate } } : {}),
+    },
+    { sort: [['createdAt', 'desc']], limit },
+  );
 
   return c.json({ orders: rows.map(orderToView) });
 }

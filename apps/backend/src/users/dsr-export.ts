@@ -1,63 +1,30 @@
 /**
  * A2-1906 — Data Subject Rights (DSR) export.
  *
- * `GET /api/users/me/dsr/export` — returns every database row
- * Loop holds keyed to the calling user. Self-serve compliance with
- * the GDPR "right to data portability" / CCPA equivalent that our
- * privacy policy promises (`/privacy` route, §5).
+ * `GET /api/users/me/dsr/export` — returns every stored record Loop
+ * holds keyed to the calling user. Self-serve compliance with the
+ * GDPR "right to data portability" / CCPA equivalent.
  *
  * What's included:
- *   - `users` row (id, email, isAdmin, homeCurrency, stellarAddress)
- *   - `user_identities` rows (Google / Apple linkage; ADR 014)
- *   - `user_credits` rows (per-currency balance)
- *   - `credit_transactions` rows (full ledger history)
- *   - `orders` rows (purchase history with the cashback split)
- *   - `pending_payouts` rows (queued + submitted cashback payouts)
+ *   - `users` doc (id, email, homeCurrency, ctxUserId)
+ *   - `user_identities` docs (Google / Apple linkage; ADR 014)
+ *   - `orders` docs (purchase history with the per-order economics)
  *
- * What's NOT included (must be requested via privacy@loopfinance.io
- * per the privacy policy):
- *   - CTX-side data — gift card codes, redeem URLs, CTX user mapping.
- *     The Loop side stores the CTX user id (mapping included) but the
- *     gift card codes themselves live on CTX's side after fulfillment.
- *   - Backend access logs (Pino → Fly logflow). These are stored
- *     off-host with 14-day retention (`docs/log-policy.md`); a per-
- *     user log dump requires an off-host log query and is a manual
- *     operator process, not a self-serve endpoint.
- *   - Sentry events — same off-host story; 30d retention.
- *   - Discord audit messages — text channel; not extractable per-user.
- *
- * The response is a stable JSON envelope versioned at the top level
- * (`schemaVersion: 1`). Future additions bump the version so tooling
- * downstream can branch on shape.
- *
- * Sensitive material the export DOES surface:
- *   - The user's email (it's their own; trivially knowable to them).
- *   - Stellar address linked for cashback (it's theirs).
- *   - Order memos + ctxOrderId (these are payment-tracking values
- *     specific to that order; they don't reveal anything beyond the
- *     fact that the order exists, which the user already knows).
+ * What's NOT included (must be requested via privacy@loopfinance.io):
+ *   - CTX-side data — gift card codes live on CTX's side after
+ *     fulfillment; Loop stores only the mapping (included).
+ *   - Backend access logs / Sentry events (off-host, short retention).
  *
  * Sensitive material the export deliberately REDACTS:
- *   - `redeem_code` / `redeem_pin` on `orders`. These are the gift
- *     card secret material — exporting them in plaintext would mean
- *     a stolen Loop bearer + this endpoint = full gift-card theft
- *     even if the user has redeemed/burned the card already. The
- *     export shows whether a redeem code was issued (`redeemIssued`
- *     boolean) and where to retrieve it (the existing in-app order
- *     view), not the secret itself.
+ *   - `redeemCode` / `redeemPin` on orders. These are the gift card
+ *     secret material — exporting them in plaintext would mean a
+ *     stolen Loop bearer + this endpoint = full gift-card theft. The
+ *     export shows whether a redeem code was issued (`redeemIssued`)
+ *     and points at the in-app order view instead.
  */
-import { eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import {
-  creditTransactions,
-  orders,
-  pendingPayouts,
-  userCredits,
-  userIdentities,
-  users,
-} from '../db/schema.js';
 
-export const DSR_EXPORT_SCHEMA_VERSION = 1;
+export const DSR_EXPORT_SCHEMA_VERSION = 2;
 
 export interface DsrExport {
   schemaVersion: number;
@@ -65,9 +32,7 @@ export interface DsrExport {
   user: {
     id: string;
     email: string;
-    isAdmin: boolean;
     homeCurrency: string;
-    stellarAddress: string | null;
     createdAt: string;
     ctxUserId: string | null;
   };
@@ -76,21 +41,6 @@ export interface DsrExport {
     provider: string;
     providerSub: string;
     emailAtLink: string;
-    createdAt: string;
-  }>;
-  credits: Array<{
-    currency: string;
-    balanceMinor: string;
-    updatedAt: string;
-  }>;
-  creditTransactions: Array<{
-    id: string;
-    type: string;
-    amountMinor: string;
-    currency: string;
-    referenceType: string | null;
-    referenceId: string | null;
-    reason: string | null;
     createdAt: string;
   }>;
   orders: Array<{
@@ -110,24 +60,6 @@ export interface DsrExport {
     fulfilledAt: string | null;
     failedAt: string | null;
   }>;
-  pendingPayouts: Array<{
-    id: string;
-    state: string;
-    kind: string;
-    orderId: string | null;
-    amountStroops: string;
-    assetCode: string;
-    assetIssuer: string;
-    toAddress: string;
-    memoText: string;
-    txHash: string | null;
-    lastError: string | null;
-    attempts: number;
-    createdAt: string;
-    submittedAt: string | null;
-    confirmedAt: string | null;
-    failedAt: string | null;
-  }>;
   notes: {
     excluded: string[];
     fallbackContact: string;
@@ -135,52 +67,32 @@ export interface DsrExport {
 }
 
 export async function buildDsrExport(userId: string): Promise<DsrExport | null> {
-  const userRow = await db.query.users.findFirst({ where: eq(users.id, userId) });
-  if (userRow === undefined) return null;
+  const userDoc = await db.collection('users').findOne({ id: userId });
+  if (userDoc === null) return null;
 
-  const [identitiesRows, creditsRows, txRows, ordersRows, payoutsRows] = await Promise.all([
-    db.select().from(userIdentities).where(eq(userIdentities.userId, userId)),
-    db.select().from(userCredits).where(eq(userCredits.userId, userId)),
-    db.select().from(creditTransactions).where(eq(creditTransactions.userId, userId)),
-    db.select().from(orders).where(eq(orders.userId, userId)),
-    db.select().from(pendingPayouts).where(eq(pendingPayouts.userId, userId)),
+  const [identities, orders] = await Promise.all([
+    db.collection('user_identities').findMany({ userId }),
+    db.collection('orders').findMany({ userId }),
   ]);
 
   return {
     schemaVersion: DSR_EXPORT_SCHEMA_VERSION,
     generatedAt: new Date().toISOString(),
     user: {
-      id: userRow.id,
-      email: userRow.email,
-      isAdmin: userRow.isAdmin,
-      homeCurrency: userRow.homeCurrency,
-      stellarAddress: userRow.stellarAddress,
-      createdAt: userRow.createdAt.toISOString(),
-      ctxUserId: userRow.ctxUserId,
+      id: userDoc.id,
+      email: userDoc.email,
+      homeCurrency: userDoc.homeCurrency,
+      createdAt: userDoc.createdAt.toISOString(),
+      ctxUserId: userDoc.ctxUserId,
     },
-    identities: identitiesRows.map((r) => ({
+    identities: identities.map((r) => ({
       id: r.id,
       provider: r.provider,
       providerSub: r.providerSub,
       emailAtLink: r.emailAtLink,
       createdAt: r.createdAt.toISOString(),
     })),
-    credits: creditsRows.map((r) => ({
-      currency: r.currency,
-      balanceMinor: r.balanceMinor.toString(),
-      updatedAt: r.updatedAt.toISOString(),
-    })),
-    creditTransactions: txRows.map((r) => ({
-      id: r.id,
-      type: r.type,
-      amountMinor: r.amountMinor.toString(),
-      currency: r.currency,
-      referenceType: r.referenceType,
-      referenceId: r.referenceId,
-      reason: r.reason,
-      createdAt: r.createdAt.toISOString(),
-    })),
-    orders: ordersRows.map((r) => ({
+    orders: orders.map((r) => ({
       id: r.id,
       merchantId: r.merchantId,
       state: r.state,
@@ -198,31 +110,11 @@ export async function buildDsrExport(userId: string): Promise<DsrExport | null> 
       fulfilledAt: r.fulfilledAt?.toISOString() ?? null,
       failedAt: r.failedAt?.toISOString() ?? null,
     })),
-    pendingPayouts: payoutsRows.map((r) => ({
-      id: r.id,
-      state: r.state,
-      kind: r.kind,
-      orderId: r.orderId,
-      amountStroops: r.amountStroops.toString(),
-      assetCode: r.assetCode,
-      assetIssuer: r.assetIssuer,
-      toAddress: r.toAddress,
-      memoText: r.memoText,
-      txHash: r.txHash,
-      lastError: r.lastError,
-      attempts: r.attempts,
-      createdAt: r.createdAt.toISOString(),
-      submittedAt: r.submittedAt?.toISOString() ?? null,
-      confirmedAt: r.confirmedAt?.toISOString() ?? null,
-      failedAt: r.failedAt?.toISOString() ?? null,
-    })),
     notes: {
       excluded: [
-        'Gift card redeem codes / PINs (in-app order view shows them; not exported as plaintext per A2-1906)',
-        'CTX-side gift card metadata (request via privacy@loopfinance.io)',
-        'Backend access logs (off-host, 14d retention via Fly logflow; manual operator process)',
-        'Sentry events (off-host, 30d retention; manual operator process)',
-        'Discord audit messages (per-channel text; not per-user extractable)',
+        'CTX-side gift card data (request via privacy@loopfinance.io)',
+        'Backend access logs (14-day retention, off-host)',
+        'Sentry error events (30-day retention, off-host)',
       ],
       fallbackContact: 'privacy@loopfinance.io',
     },

@@ -4,8 +4,8 @@
  * CTX create act-as → relay payment instructions. These pin:
  *
  *   - the gate ladder (flag 404, auth 401, X-Client-Id 400,
- *     cryptoCurrency allowlist 400, velocity 429/fails-closed 503,
- *     freeze, face-value cap, merchant/denomination validation)
+ *     cryptoCurrency allowlist 400, face-value cap,
+ *     merchant/denomination validation)
  *   - the CTX call shape (act-as headers + platform client id,
  *     operatorReference = the local row id, major-unit fiatAmount)
  *   - CTX failure mapping (400 pass-through class, 5xx/transport →
@@ -27,7 +27,6 @@ vi.mock('../../env.js', () => ({
     return {
       LOOP_AUTH_NATIVE_ENABLED: process.env['LOOP_AUTH_NATIVE_ENABLED'] === 'true',
       LOOP_CTX_PAYMENT_CURRENCIES: process.env['LOOP_CTX_PAYMENT_CURRENCIES'],
-      LOOP_ORDER_VELOCITY_WINDOW_HOURS: 24,
       GIFT_CARD_API_KEY: 'k',
       GIFT_CARD_API_SECRET: 's',
       CTX_CLIENT_ID_WEB: 'loopweb',
@@ -49,8 +48,6 @@ vi.mock('../../logger.js', () => ({
 
 const {
   merchantsState,
-  velocityState,
-  freezeState,
   usersState,
   repoState,
   ctxFetchMock,
@@ -61,8 +58,6 @@ const {
   merchantsState: {
     map: new Map<string, { id: string; name: string; enabled: boolean; denominations?: unknown }>(),
   },
-  velocityState: { result: { allowed: true } as unknown, throws: null as unknown },
-  freezeState: { frozen: false },
   usersState: { ctxUserId: 'ctx-u-1' as string | null },
   repoState: {
     created: undefined as Record<string, unknown> | undefined,
@@ -80,21 +75,6 @@ const {
 
 vi.mock('../../merchants/sync.js', () => ({
   getMerchants: () => ({ merchantsById: merchantsState.map }),
-}));
-vi.mock('../../fraud/velocity.js', async (importActual) => {
-  const actual = (await importActual()) as Record<string, unknown>;
-  return {
-    ...actual,
-    checkOrderVelocity: vi.fn(async () => {
-      if (velocityState.throws !== null) throw velocityState.throws;
-      return velocityState.result;
-    }),
-  };
-});
-vi.mock('../../fraud/account-freeze-http.js', () => ({
-  guardAccountNotFrozen: vi.fn(async (c: Context) =>
-    freezeState.frozen ? c.json({ code: 'ACCOUNT_FROZEN' }, 403) : null,
-  ),
 }));
 vi.mock('../../db/users.js', () => ({
   getUserCtxUserId: vi.fn(async () => usersState.ctxUserId),
@@ -233,9 +213,6 @@ function ctx201(body?: Record<string, unknown>): Response {
 beforeEach(() => {
   process.env['LOOP_AUTH_NATIVE_ENABLED'] = 'true';
   merchantsState.map = new Map([['amazon', { id: 'amazon', name: 'Amazon', enabled: true }]]);
-  velocityState.result = { allowed: true };
-  velocityState.throws = null;
-  freezeState.frozen = false;
   usersState.ctxUserId = 'ctx-u-1';
   repoState.created = undefined;
   repoState.priorByKey = null;
@@ -282,22 +259,6 @@ describe('gate ladder', () => {
       }),
     );
     expect(res.status).toBe(400);
-  });
-
-  it('429s when the velocity gate trips', async () => {
-    velocityState.result = { allowed: false, reason: 'count' };
-    const res = await loopCreateOrderHandler(
-      makeCtx({ auth: LOOP_AUTH, clientId: 'loopweb', body: GOOD_BODY }),
-    );
-    expect(res.status).toBe(429);
-  });
-
-  it('refuses when frozen (NS-08)', async () => {
-    freezeState.frozen = true;
-    const res = await loopCreateOrderHandler(
-      makeCtx({ auth: LOOP_AUTH, clientId: 'loopweb', body: GOOD_BODY }),
-    );
-    expect(res.status).toBe(403);
   });
 
   it('400s on an unknown merchant', async () => {

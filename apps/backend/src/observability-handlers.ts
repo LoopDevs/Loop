@@ -19,8 +19,6 @@ import {
   getMoneyIntegritySignals,
   metrics,
 } from './metrics.js';
-import { getAllCircuitStates } from './circuit-breaker.js';
-import { generateOpenApiSpec } from './openapi.js';
 import { probeGateAllows } from './middleware/probe-gate.js';
 import { getRuntimeHealthSnapshot } from './runtime-health.js';
 import { getMerchants } from './merchants/sync.js';
@@ -45,8 +43,7 @@ function probeScopedHeaders(): Record<string, string> {
 
 /**
  * `GET /metrics` — Prometheus text exposition format. Counters
- * for rate-limit hits + per-(method, route, status) request totals
- * + a circuit-breaker state gauge per upstream endpoint.
+ * for rate-limit hits + per-(method, route, status) request totals.
  */
 export async function metricsHandler(c: Context): Promise<Response> {
   if (!probeGateAllows(c, env.METRICS_BEARER_TOKEN)) {
@@ -100,22 +97,6 @@ export async function metricsHandler(c: Context): Promise<Response> {
     lines.push(`loop_request_duration_seconds_bucket{${baseLabels},le="+Inf"} ${hist.count}`);
     lines.push(`loop_request_duration_seconds_sum{${baseLabels}} ${hist.sumSeconds}`);
     lines.push(`loop_request_duration_seconds_count{${baseLabels}} ${hist.count}`);
-  }
-  lines.push('');
-
-  // Prometheus exposition format allows exactly one HELP line per
-  // metric. We used to emit two (one for the description, one for
-  // the state-value mapping) which some scrapers/parsers rejected
-  // outright. Merge into one and move the mapping into separate
-  // comment lines so the information is still visible but not
-  // mistaken for metadata.
-  lines.push(
-    '# HELP loop_circuit_state Circuit breaker state per upstream endpoint (0=closed, 1=half_open, 2=open).',
-  );
-  lines.push('# TYPE loop_circuit_state gauge');
-  for (const [key, state] of Object.entries(getAllCircuitStates())) {
-    const val = state === 'closed' ? 0 : state === 'half_open' ? 1 : 2;
-    lines.push(`loop_circuit_state{endpoint="${key}"} ${val}`);
   }
   lines.push('');
 
@@ -182,7 +163,7 @@ export async function metricsHandler(c: Context): Promise<Response> {
   lines.push('');
 
   // FT-07 / NS-02: money-integrity breach gauges. Before this the
-  // /metrics surface carried request/latency/worker/circuit signals
+  // /metrics surface carried request/latency/worker signals
   // but NOT ONE money-integrity gauge — so a live ledger drift, asset
   // drift, vault solvency breach, or operator-float divergence was a
   // GREEN dashboard, detectable only if the Discord monitoring channel
@@ -269,7 +250,7 @@ export async function metricsHandler(c: Context): Promise<Response> {
   // B-5: S4-4's per-machine → fleet-wide rate-limit budget divisor,
   // previously only visible via /health JSON. `source` is a label
   // rather than folded into the gauge value so both facts stay queryable
-  // independently (mirrors the loop_circuit_state 0/1/2 gauge pattern).
+  // independently.
   lines.push(
     '# HELP loop_rate_limit_fleet_estimate Current divisor the rate limiter uses for its per-machine to fleet-wide budget conversion.',
   );
@@ -320,24 +301,6 @@ export async function metricsHandler(c: Context): Promise<Response> {
     // scraper config.
     'Cache-Control': 'no-store',
   });
-}
-
-// Generate once at module load. The spec is a pure function of the
-// zod registrations in openapi.ts — it does not depend on runtime
-// state — so serializing on every request would just burn CPU.
-const openApiSpec = generateOpenApiSpec();
-
-/**
- * `GET /openapi.json` — the static OpenAPI 3.1 spec. Even though the
- * payload only changes on deploy, we still send `private, no-store`
- * plus `Vary: Authorization` because the bearer gate changes whether
- * an admin-inclusive spec is reachable at all.
- */
-export function openApiHandler(c: Context): Response {
-  if (!probeGateAllows(c, env.OPENAPI_BEARER_TOKEN)) {
-    return gateRejection(c, env.OPENAPI_BEARER_TOKEN);
-  }
-  return c.json(openApiSpec, 200, probeScopedHeaders());
 }
 
 /**

@@ -184,13 +184,9 @@ export async function fetchAndTransformImage(
   const log = logger.child({ handler: 'image-proxy' });
   const { width, height, quality } = opts;
   try {
-    // Deliberately not `getUpstreamCircuit('...').fetch`. Our breakers
-    // are keyed per fixed endpoint category (`login`, `gift-cards`,
-    // etc.); image hosts vary per record, and one bad host would trip
-    // a shared breaker for every other host's fetches. The
-    // FETCH_TIMEOUT_MS bound is the right protection here. Documented
-    // exception in `apps/backend/AGENTS.md` under "Upstream calls
-    // always use".
+    // The FETCH_TIMEOUT_MS bound is the protection here: image hosts
+    // vary per record, so there is no fixed upstream to reason about
+    // beyond capping how long any one host can stall us.
     const upstream = await __imageUpstream.fetch(imageUrl, {
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       redirect: 'manual',

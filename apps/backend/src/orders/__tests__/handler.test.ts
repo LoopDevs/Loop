@@ -67,28 +67,8 @@ vi.mock('../../discord.js', () => ({
   notifyOrderCreated: (...args: unknown[]) => mockNotifyOrderCreated(...args),
   notifyOrderFulfilled: (...args: unknown[]) => mockNotifyOrderFulfilled(...args),
   notifyHealthChange: vi.fn(),
-  notifyCircuitBreaker: vi.fn(),
   notifyCtxSchemaDrift: vi.fn(),
 }));
-
-// Mock circuit breaker to pass through to global fetch (avoids cross-test state leaks)
-vi.mock('../../circuit-breaker.js', () => {
-  class CircuitOpenError extends Error {
-    constructor() {
-      super('Circuit breaker is open — upstream service unavailable');
-      this.name = 'CircuitOpenError';
-    }
-  }
-  return {
-    CircuitOpenError,
-    getAllCircuitStates: () => ({}),
-    getUpstreamCircuit: () => ({
-      fetch: (...args: Parameters<typeof globalThis.fetch>) => globalThis.fetch(...args),
-      getState: () => 'closed' as const,
-      reset: () => {},
-    }),
-  };
-});
 
 import { app, __resetRateLimitsForTests } from '../../app.js';
 

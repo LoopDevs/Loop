@@ -44,21 +44,6 @@ vi.mock('../../images/proxy.js', async (importOriginal) => {
   return { ...(orig as Record<string, unknown>), evictExpiredImageCache: vi.fn() };
 });
 
-vi.mock('../../circuit-breaker.js', () => ({
-  CircuitOpenError: class CircuitOpenError extends Error {
-    constructor() {
-      super('open');
-      this.name = 'CircuitOpenError';
-    }
-  },
-  getAllCircuitStates: () => ({}),
-  getUpstreamCircuit: () => ({
-    fetch: (...args: Parameters<typeof globalThis.fetch>) => globalThis.fetch(...args),
-    getState: () => 'closed' as const,
-    reset: () => {},
-  }),
-}));
-
 // Import the REAL clustering handler — do not mock ../handler so we exercise
 // the validation and the algorithm composition. app.ts imports the real
 // handler via ./clustering/handler.

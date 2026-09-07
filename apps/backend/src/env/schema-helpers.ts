@@ -7,20 +7,6 @@
 import { createPrivateKey } from 'node:crypto';
 import { z } from 'zod';
 
-export const STELLAR_ADDRESS_MESSAGE = 'must be a valid Stellar public key (G...)';
-
-/**
- * Circle's canonical USDC issuer account on Stellar mainnet. Used by
- * the boot-time tripwire below — a launch-runbook typo once shipped a
- * wrong issuer address, which makes the payment watcher silently
- * ignore every legitimate USDC deposit.
- */
-export const CANONICAL_MAINNET_USDC_ISSUER =
-  'GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN';
-
-/** Stellar mainnet (pubnet) network passphrase. */
-export const MAINNET_NETWORK_PASSPHRASE = 'Public Global Stellar Network ; September 2015';
-
 /**
  * Parses a process.env boolean the way operators actually write them.
  *

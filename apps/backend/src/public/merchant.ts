@@ -28,11 +28,9 @@
  *     user-facing pct a visitor sees.
  */
 import type { Context } from 'hono';
-import { and, eq } from 'drizzle-orm';
 import type { PublicMerchantDetail } from '@loop/shared';
 import { isSupportedCountryCode, merchantInCountry, merchantSlug } from '@loop/shared';
 import { db } from '../db/client.js';
-import { merchantCashbackConfigs } from '../db/schema.js';
 import { getMerchants } from '../merchants/sync.js';
 import { logger } from '../logger.js';
 
@@ -46,10 +44,6 @@ const lastKnownGood = new Map<string, PublicMerchantDetail>();
 /** Test-only reset. */
 export function __resetPublicMerchantCache(): void {
   lastKnownGood.clear();
-}
-
-interface ConfigRow {
-  userCashbackPct: string;
 }
 
 /**
@@ -83,24 +77,17 @@ function resolveMerchant(idOrSlug: string, country: string | null): ResolvedMerc
 }
 
 async function compute(resolved: ResolvedMerchant): Promise<PublicMerchantDetail> {
-  // Active config is 0 or 1 row per merchantId.
-  const rows = (await db
-    .select({ userCashbackPct: merchantCashbackConfigs.userCashbackPct })
-    .from(merchantCashbackConfigs)
-    .where(
-      and(
-        eq(merchantCashbackConfigs.merchantId, resolved.id),
-        eq(merchantCashbackConfigs.active, true),
-      ),
-    )
-    .limit(1)) as ConfigRow[];
+  // Active config is 0 or 1 doc per merchantId.
+  const config = await db
+    .collection('merchant_cashback_configs')
+    .findOne({ merchantId: resolved.id, active: true });
 
   return {
     id: resolved.id,
     name: resolved.name,
     slug: resolved.slug,
     logoUrl: resolved.logoUrl,
-    userCashbackPct: rows[0]?.userCashbackPct ?? null,
+    userCashbackPct: config !== null ? config.userCashbackPct.toFixed(2) : null,
     asOf: new Date().toISOString(),
   };
 }

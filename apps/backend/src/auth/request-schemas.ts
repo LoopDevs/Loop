@@ -20,7 +20,7 @@
  * — carry `.openapi()` and are registrable. Functionally identical z
  * for the handlers' `.parse()`.
  */
-import { z } from '../openapi-zod.js';
+import { z } from 'zod';
 
 export const PlatformEnum = z.enum(['web', 'ios', 'android']).default('web');
 

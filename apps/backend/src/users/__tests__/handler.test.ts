@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Context } from 'hono';
 import type { LoopAuthContext } from '../../auth/handler.js';
+import { db, __resetDbForTests } from '../../db/client.js';
+import type { OrderDoc, UserDoc } from '../../db/types.js';
 
 vi.mock('../../logger.js', () => ({
   logger: {
@@ -8,216 +10,25 @@ vi.mock('../../logger.js', () => ({
   },
 }));
 
-// DB mocks:
-//   select(...).from(...).where(...).limit(1)             → user-existence probe rows
-//     (A2-552: setHomeCurrency fallback — disambiguates 404 vs 409
-//      after a no-op UPDATE)
-//   select(...).from(...).where(...).orderBy(...).limit(N) → history rows
-//     (cashback-history path — chains a terminal .limit)
-//   update(...).set(...).where(...).returning()           → updated user rows
-// The select chain's `.where()` returns a shapeshifter leaf that
-// exposes `.limit` (user-existence probe + cashback-history) and
-// `.orderBy` (credits / cashback-history). `userExistsProbeRows`
-// routes `.limit()` output — the fallback probe sets it, the
-// cashback-history path leaves it `null` and reads `historyRows`
-// instead.
-//
-// The `query` surface fronts drizzle's relational builder — only
-// userCredits is exposed since that's what `toView` reaches for.
-const { selectChain, updateChain, queryObj, dbState } = vi.hoisted(() => {
-  const state: {
-    updatedUser: unknown;
-    userExistsProbeRows: unknown[] | null;
-    historyRows: unknown[];
-    historyThrow: Error | null;
-    homeBalanceMinor: bigint | null;
-    creditsRows: unknown[];
-    creditsThrow: Error | null;
-  } = {
-    updatedUser: null,
-    userExistsProbeRows: null,
-    historyRows: [],
-    historyThrow: null,
-    homeBalanceMinor: null,
-    creditsRows: [],
-    creditsThrow: null,
-  };
-  const sel: Record<string, ReturnType<typeof vi.fn>> = {};
-  sel['from'] = vi.fn(() => sel);
-  sel['where'] = vi.fn(() => {
-    const leaf: Record<string, unknown> = {};
-    // getUserCreditsHandler ends its chain on `.orderBy(...)` (no
-    // `.limit`). Return an awaitable that resolves to `creditsRows`
-    // for that path; the cashback-history path still chains to
-    // `.limit()` which returns `historyRows`.
-    leaf['orderBy'] = vi.fn(() => {
-      const orderByLeaf: Record<string, unknown> = {};
-      orderByLeaf['then'] = (resolve: (v: unknown[]) => void, reject: (err: unknown) => void) => {
-        if (state.creditsThrow !== null) {
-          reject(state.creditsThrow);
-          return;
-        }
-        try {
-          resolve(state.creditsRows);
-        } catch (err) {
-          reject(err);
-        }
-      };
-      orderByLeaf['limit'] = vi.fn(async () => {
-        if (state.historyThrow !== null) throw state.historyThrow;
-        return state.historyRows;
-      });
-      return orderByLeaf;
-    });
-    leaf['limit'] = vi.fn(async () =>
-      state.userExistsProbeRows !== null ? state.userExistsProbeRows : state.historyRows,
-    );
-    return leaf;
-  });
-  const upd: Record<string, ReturnType<typeof vi.fn>> = {};
-  upd['set'] = vi.fn(() => upd);
-  upd['where'] = vi.fn(() => upd);
-  upd['returning'] = vi.fn(async () => (state.updatedUser === null ? [] : [state.updatedUser]));
-  const query = {
-    userCredits: {
-      findFirst: vi.fn(async () =>
-        state.homeBalanceMinor === null ? undefined : { balanceMinor: state.homeBalanceMinor },
-      ),
-    },
-  };
-  return { selectChain: sel, updateChain: upd, queryObj: query, dbState: state };
-});
+import { getMeHandler, setHomeCurrencyHandler } from '../handler.js';
 
-// Hoisted state the mocked user resolvers read from.
-const { userState } = vi.hoisted(() => ({
-  userState: {
-    byId: null as unknown,
-    upsertResult: null as unknown,
-    upsertThrow: null as Error | null,
-    upsertCalls: [] as Array<{ ctxUserId: string; email: string | undefined }>,
-  },
-}));
-
-const { summaryState } = vi.hoisted(() => ({
-  summaryState: {
-    rows: [] as unknown[],
-    throwErr: null as Error | null,
-  },
-}));
-
-vi.mock('../../db/users.js', () => ({
-  getUserById: vi.fn(async () => userState.byId),
-  upsertUserFromCtx: vi.fn(async (args: { ctxUserId: string; email: string | undefined }) => {
-    userState.upsertCalls.push(args);
-    if (userState.upsertThrow !== null) throw userState.upsertThrow;
-    return userState.upsertResult;
-  }),
-}));
-// Cashback-summary handler runs a raw `db.execute(sql\`...\`)` so the
-// select/update chains aren't enough. Tests drive it via
-// `summaryState.rows` / `summaryState.throwErr`.
-vi.mock('../../db/client.js', () => ({
-  db: {
-    select: vi.fn(() => selectChain),
-    update: vi.fn(() => updateChain),
-    query: queryObj,
-    execute: vi.fn(async () => {
-      if (summaryState.throwErr !== null) throw summaryState.throwErr;
-      return summaryState.rows;
-    }),
-  },
-}));
-vi.mock('../../db/schema.js', () => ({
-  staffRoles: { userId: 'user_id', role: 'role' },
-  orders: { userId: 'user_id' },
-  users: { id: 'id' },
-  userCredits: {
-    userId: 'user_id',
-    currency: 'currency',
-    balanceMinor: 'balance_minor',
-    updatedAt: 'updated_at',
-  },
-  creditTransactions: {
-    userId: 'user_id',
-    createdAt: 'created_at',
-    id: 'id',
-  },
-  HOME_CURRENCIES: ['USD', 'GBP', 'EUR'] as const,
-  PAYOUT_STATES: ['pending', 'submitted', 'confirmed', 'failed'] as const,
-}));
-
-// Pending-payouts repo mock — the user-scoped handler calls into
-// `listPayoutsForUser`, so we stub it directly rather than stretch
-// the drizzle select chain to cover another shape. Tests drive
-// behaviour via `payoutState.rows` / `payoutState.calls`.
-const { payoutState } = vi.hoisted(() => ({
-  payoutState: {
-    rows: [] as unknown[],
-    calls: [] as Array<{
-      userId: string;
-      state?: string;
-      before?: Date;
-      limit?: number;
-    }>,
-    singleRow: null as unknown,
-    singleCalls: [] as Array<{ id: string; userId: string }>,
-    byOrderRow: null as unknown,
-    byOrderCalls: [] as Array<{ orderId: string; userId: string }>,
-  },
-}));
-vi.mock('../../credits/pending-payouts.js', () => ({
-  listPayoutsForUser: vi.fn(async (userId: string, opts: Record<string, unknown> = {}) => {
-    payoutState.calls.push({ userId, ...opts });
-    return payoutState.rows;
-  }),
-  getPayoutForUser: vi.fn(async (id: string, userId: string) => {
-    payoutState.singleCalls.push({ id, userId });
-    return payoutState.singleRow;
-  }),
-  getPayoutByOrderIdForUser: vi.fn(async (orderId: string, userId: string) => {
-    payoutState.byOrderCalls.push({ orderId, userId });
-    return payoutState.byOrderRow;
-  }),
-}));
-
-// A4-009: the handler used to decode CTX bearers via
-// `decodeJwtPayload` (unverified) until A2-550/A2-551 moved
-// identity to `resolveLoopAuthenticatedUser`. The orphan helper
-// has been deleted; tests no longer mock it. Identity is supplied
-// directly via the LoopAuthContext fixture in `makeCtx` below
-// (kind='loop' carries `userId` straight off the cryptographically-
-// verified Loop JWT).
-const { jwtState } = vi.hoisted(() => ({
-  jwtState: {
-    claims: null as Record<string, unknown> | null,
-  },
-}));
-
-import {
-  getCashbackHistoryHandler,
-  getCashbackSummaryHandler,
-  getMeHandler,
-  getUserCreditsHandler,
-  getUserPayoutByOrderHandler,
-  getUserPendingPayoutDetailHandler,
-  getUserPendingPayoutsHandler,
-  setHomeCurrencyHandler,
-  setStellarAddressHandler,
-} from '../handler.js';
-
-function makeCtx(
-  auth: LoopAuthContext | undefined,
-  body?: unknown,
-  query?: Record<string, string>,
-  params?: Record<string, string>,
-): Context {
+/**
+ * User profile handlers, run against the real in-memory document
+ * store. Identity resolution goes through the REAL
+ * `resolveLoopAuthenticatedUser` (A2-550/A2-551: the context's
+ * cryptographically-verified `auth.userId`, then a `users` lookup) —
+ * so these tests seed the store and supply a LoopAuthContext fixture,
+ * mirroring what `requireAuth` puts on the context in production.
+ */
+function makeCtx(auth: LoopAuthContext | undefined, body?: unknown): Context {
   const store = new Map<string, unknown>();
   if (auth !== undefined) store.set('auth', auth);
   return {
     req: {
-      json: async () => body,
-      query: (k: string) => query?.[k],
-      param: (k: string) => params?.[k],
+      json: async () => {
+        if (body === undefined) throw new Error('no body');
+        return body;
+      },
     },
     get: (k: string) => store.get(k),
     json: (responseBody: unknown, status?: number) =>
@@ -228,24 +39,61 @@ function makeCtx(
   } as unknown as Context;
 }
 
+const UID = '00000000-0000-4000-8000-000000000001';
+
+const loopAuth: LoopAuthContext = { kind: 'loop', userId: UID } as LoopAuthContext;
+const ctxAuth = { kind: 'ctx', token: 'ctx-bearer' } as unknown as LoopAuthContext;
+
+async function seedUser(overrides: Partial<UserDoc> = {}): Promise<UserDoc> {
+  const now = new Date('2026-04-01T00:00:00Z');
+  const doc: UserDoc = {
+    id: UID,
+    ctxUserId: 'ctx-123',
+    email: 'a@b.com',
+    tokenVersion: 0,
+    homeCurrency: 'USD',
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
+  };
+  await db.collection('users').insertOne(doc);
+  return doc;
+}
+
+async function seedOrder(overrides: Partial<OrderDoc> = {}): Promise<OrderDoc> {
+  const now = new Date();
+  const doc: OrderDoc = {
+    id: overrides.id ?? 'o-1',
+    userId: UID,
+    merchantId: 'm-1',
+    faceValueMinor: 1000,
+    currency: 'USD',
+    chargeMinor: 950,
+    chargeCurrency: 'USD',
+    userCashbackMinor: 0,
+    expectedCommissionMinor: null,
+    ctxOrderId: null,
+    ctxPaymentId: null,
+    paymentCryptoCurrency: null,
+    redeemCode: null,
+    redeemPin: null,
+    redeemUrl: null,
+    redemptionBackfillAttempts: 0,
+    redemptionBackfillLastAttemptAt: null,
+    state: 'fulfilled',
+    failureReason: null,
+    idempotencyKey: null,
+    createdAt: now,
+    fulfilledAt: now,
+    failedAt: null,
+    ...overrides,
+  };
+  await db.collection('orders').insertOne(doc);
+  return doc;
+}
+
 beforeEach(() => {
-  userState.byId = null;
-  userState.upsertResult = null;
-  userState.upsertThrow = null;
-  userState.upsertCalls = [];
-  jwtState.claims = null;
-  dbState.updatedUser = null;
-  dbState.userExistsProbeRows = null;
-  dbState.historyRows = [];
-  dbState.historyThrow = null;
-  dbState.homeBalanceMinor = null;
-  dbState.creditsThrow = null;
-  payoutState.rows = [];
-  payoutState.calls = [];
-  payoutState.singleRow = null;
-  payoutState.singleCalls = [];
-  payoutState.byOrderRow = null;
-  payoutState.byOrderCalls = [];
+  __resetDbForTests();
 });
 
 describe('getMeHandler', () => {
@@ -254,144 +102,50 @@ describe('getMeHandler', () => {
     expect(res.status).toBe(401);
   });
 
-  it('resolves a Loop-native bearer via getUserById and returns the profile view', async () => {
-    userState.byId = {
-      id: 'loop-user-1',
-      email: 'a@b.com',
-      isAdmin: false,
-      staffRole: null,
-      homeCurrency: 'GBP',
-      stellarAddress: null,
-      ctxUserId: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-    const res = await getMeHandler(
-      makeCtx({
-        kind: 'loop',
-        userId: 'loop-user-1',
-        email: 'a@b.com',
-        bearerToken: 'loop-jwt',
-      }),
-    );
+  it('resolves a Loop-native bearer via the users collection and returns the profile view', async () => {
+    await seedUser();
+    const res = await getMeHandler(makeCtx(loopAuth));
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
-    expect(body).toEqual({
-      id: 'loop-user-1',
-      email: 'a@b.com',
-      isAdmin: false,
-      staffRole: null,
-      homeCurrency: 'GBP',
-      stellarAddress: null,
-      homeCurrencyBalanceMinor: '0',
-    });
+    expect(body).toEqual({ id: UID, email: 'a@b.com', homeCurrency: 'USD' });
   });
 
   it('401 when the Loop bearer resolves no user row (deleted or unknown)', async () => {
-    userState.byId = null;
-    const res = await getMeHandler(
-      makeCtx({
-        kind: 'loop',
-        userId: 'vanished-user',
-        email: 'x@y.com',
-        bearerToken: 'loop-jwt',
-      }),
-    );
+    const res = await getMeHandler(makeCtx(loopAuth));
     expect(res.status).toBe(401);
   });
 
-  // A2-550 / A2-551 regression probe: CTX pass-through bearers are no
-  // longer trusted for identity resolution. Previously the handler
-  // used `decodeJwtPayload(bearer).sub` (unverified) to look up the
-  // user — an attacker who could craft any string that base64-decoded
-  // to `{"sub":"<target-user>"}` was treated as that user. The fix
-  // requires a cryptographically-verified Loop-signed token. CTX
-  // pass-through is rejected with 401, including the attack case where
-  // the bearer's payload names another user's id.
   it('A2-550: rejects CTX pass-through bearers with 401 (forged-sub attack)', async () => {
-    jwtState.claims = { sub: 'some-victim-loop-uuid', email: 'victim@example.com' };
-    const res = await getMeHandler(makeCtx({ kind: 'ctx', bearerToken: 'forged-jwt' }));
+    await seedUser();
+    const res = await getMeHandler(makeCtx(ctxAuth));
     expect(res.status).toBe(401);
-    // And the upsert path is never even reached — identity is resolved
-    // solely from the verified Loop-token context.
-    expect(userState.upsertCalls).toEqual([]);
   });
 
-  it('omits the ctxUserId and timestamps from the view — only surface id/email/isAdmin/homeCurrency', async () => {
-    userState.byId = {
-      id: 'u',
-      email: 'a@b.com',
-      isAdmin: false,
-      staffRole: null,
-      homeCurrency: 'EUR',
-      stellarAddress: null,
-      ctxUserId: 'should-not-leak',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-    const res = await getMeHandler(
-      makeCtx({ kind: 'loop', userId: 'u', email: 'a@b.com', bearerToken: 't' }),
-    );
+  it('omits ctxUserId, tokenVersion, and timestamps from the view — only id/email/homeCurrency surface', async () => {
+    await seedUser();
+    const res = await getMeHandler(makeCtx(loopAuth));
     const body = (await res.json()) as Record<string, unknown>;
-    expect(Object.keys(body).sort()).toEqual([
-      'email',
-      'homeCurrency',
-      'homeCurrencyBalanceMinor',
-      'id',
-      'isAdmin',
-      'staffRole',
-      'stellarAddress',
-    ]);
-  });
-
-  it('surfaces homeCurrencyBalanceMinor as a bigint-string when the user has accrued cashback', async () => {
-    userState.byId = {
-      id: 'loop-user-1',
-      email: 'a@b.com',
-      isAdmin: false,
-      staffRole: null,
-      homeCurrency: 'GBP',
-      stellarAddress: null,
-      ctxUserId: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-    dbState.homeBalanceMinor = 12345n;
-    const res = await getMeHandler(
-      makeCtx({ kind: 'loop', userId: 'loop-user-1', email: 'a@b.com', bearerToken: 't' }),
-    );
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as Record<string, unknown>;
-    expect(body['homeCurrencyBalanceMinor']).toBe('12345');
+    expect(Object.keys(body).sort()).toEqual(['email', 'homeCurrency', 'id']);
+    expect(JSON.stringify(body)).not.toContain('ctx-123');
   });
 });
 
 describe('setHomeCurrencyHandler', () => {
-  const LOOP_AUTH: LoopAuthContext = {
-    kind: 'loop',
-    userId: 'user-uuid',
-    email: 'a@b.com',
-    bearerToken: 'loop-jwt',
-  };
-  const baseUser = {
-    id: 'user-uuid',
-    email: 'a@b.com',
-    isAdmin: false,
-    staffRole: null,
-    homeCurrency: 'USD',
-    stellarAddress: null,
-    ctxUserId: null,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  };
-
   it('400 when body is malformed (no currency)', async () => {
-    const res = await setHomeCurrencyHandler(makeCtx(LOOP_AUTH, {}));
+    await seedUser();
+    const res = await setHomeCurrencyHandler(makeCtx(loopAuth, {}));
     expect(res.status).toBe(400);
   });
 
   it('400 when currency is not in the enum', async () => {
-    const res = await setHomeCurrencyHandler(makeCtx(LOOP_AUTH, { currency: 'JPY' }));
+    await seedUser();
+    const res = await setHomeCurrencyHandler(makeCtx(loopAuth, { currency: 'JPY' }));
+    expect(res.status).toBe(400);
+  });
+
+  it('400 when the body is not JSON at all', async () => {
+    await seedUser();
+    const res = await setHomeCurrencyHandler(makeCtx(loopAuth, undefined));
     expect(res.status).toBe(400);
   });
 
@@ -400,667 +154,60 @@ describe('setHomeCurrencyHandler', () => {
     expect(res.status).toBe(401);
   });
 
-  it('happy path — order-less user gets home_currency written and returns the new view', async () => {
-    userState.byId = { ...baseUser, homeCurrency: 'USD' };
-    dbState.updatedUser = { ...baseUser, homeCurrency: 'GBP' };
-    const res = await setHomeCurrencyHandler(makeCtx(LOOP_AUTH, { currency: 'GBP' }));
+  it('401 for a CTX pass-through bearer', async () => {
+    await seedUser();
+    const res = await setHomeCurrencyHandler(makeCtx(ctxAuth, { currency: 'GBP' }));
+    expect(res.status).toBe(401);
+  });
+
+  it('happy path — order-less user gets homeCurrency written and returns the new view', async () => {
+    await seedUser({ homeCurrency: 'USD' });
+    const res = await setHomeCurrencyHandler(makeCtx(loopAuth, { currency: 'GBP' }));
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
     expect(body['homeCurrency']).toBe('GBP');
+    // Persisted, not just echoed.
+    const stored = await db.collection('users').findOne({ id: UID });
+    expect(stored?.homeCurrency).toBe('GBP');
   });
 
-  // A2-552: the UPDATE's NOT EXISTS guard blocks the write when the
-  // user already has orders. The mock leaves `updatedUser = null` so
-  // the guarded UPDATE reports "0 rows updated"; the fallback probe
-  // finds the user row still exists → 409 HOME_CURRENCY_LOCKED.
-  it('409 HOME_CURRENCY_LOCKED when the guarded UPDATE matches no rows and the user still exists', async () => {
-    userState.byId = { ...baseUser, homeCurrency: 'USD' };
-    dbState.updatedUser = null;
-    dbState.userExistsProbeRows = [{ id: 'user-uuid' }];
-    const res = await setHomeCurrencyHandler(makeCtx(LOOP_AUTH, { currency: 'GBP' }));
+  it('409 HOME_CURRENCY_LOCKED once the user has any order (first-time-only write)', async () => {
+    await seedUser({ homeCurrency: 'USD' });
+    await seedOrder();
+    const res = await setHomeCurrencyHandler(makeCtx(loopAuth, { currency: 'GBP' }));
     expect(res.status).toBe(409);
-    const body = (await res.json()) as { code: string };
-    expect(body.code).toBe('HOME_CURRENCY_LOCKED');
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body['code']).toBe('HOME_CURRENCY_LOCKED');
+    // The write did NOT land.
+    const stored = await db.collection('users').findOne({ id: UID });
+    expect(stored?.homeCurrency).toBe('USD');
   });
 
-  it('short-circuits when the requested currency already matches (no update, no probe)', async () => {
-    userState.byId = { ...baseUser, homeCurrency: 'GBP' };
-    // If the handler fell through to the UPDATE path, .returning() would
-    // return [] and the existence-probe fallback would fire. Instead the
-    // short-circuit returns the existing view as-is.
-    dbState.updatedUser = null;
-    const res = await setHomeCurrencyHandler(makeCtx(LOOP_AUTH, { currency: 'GBP' }));
+  it('short-circuits when the requested currency already matches — no write, even with orders present', async () => {
+    const seeded = await seedUser({ homeCurrency: 'GBP' });
+    // An order exists, but the no-op path must still succeed so the
+    // client can call this unconditionally from onboarding.
+    await seedOrder();
+    const res = await setHomeCurrencyHandler(makeCtx(loopAuth, { currency: 'GBP' }));
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
     expect(body['homeCurrency']).toBe('GBP');
+    // No-op: updatedAt untouched proves no write happened.
+    const stored = await db.collection('users').findOne({ id: UID });
+    expect(stored?.updatedAt).toEqual(seeded.updatedAt);
   });
 
-  // A2-552: the fallback probe distinguishes "locked" from "vanished".
-  // Empty probe rows → user row gone → 404 rather than 409.
   it('404 when the user row disappears between resolve and update (race with deletion)', async () => {
-    userState.byId = { ...baseUser, homeCurrency: 'USD' };
-    dbState.updatedUser = null;
-    dbState.userExistsProbeRows = [];
-    const res = await setHomeCurrencyHandler(makeCtx(LOOP_AUTH, { currency: 'GBP' }));
+    await seedUser({ homeCurrency: 'USD' });
+    // Simulate the race: the resolve sees the user, then the doc
+    // vanishes before the guarded update runs.
+    const users = db.collection('users');
+    const realUpdateOne = users.updateOne.bind(users);
+    vi.spyOn(users, 'updateOne').mockImplementationOnce(async (filter, update, options) => {
+      await users.deleteMany({ id: UID });
+      return realUpdateOne(filter, update, options);
+    });
+    const res = await setHomeCurrencyHandler(makeCtx(loopAuth, { currency: 'GBP' }));
     expect(res.status).toBe(404);
-  });
-});
-
-describe('setStellarAddressHandler', () => {
-  const LOOP_AUTH: LoopAuthContext = {
-    kind: 'loop',
-    userId: 'user-uuid',
-    email: 'a@b.com',
-    bearerToken: 'loop-jwt',
-  };
-  const baseUser = {
-    id: 'user-uuid',
-    email: 'a@b.com',
-    isAdmin: false,
-    staffRole: null,
-    homeCurrency: 'USD',
-    stellarAddress: null as string | null,
-    ctxUserId: null,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  };
-  const VALID_ADDRESS = 'G' + 'A'.repeat(55);
-
-  it('400 when body is missing', async () => {
-    const res = await setStellarAddressHandler(makeCtx(LOOP_AUTH, {}));
-    expect(res.status).toBe(400);
-  });
-
-  it('400 when address is not a valid Stellar pubkey', async () => {
-    const res = await setStellarAddressHandler(makeCtx(LOOP_AUTH, { address: 'not-a-pubkey' }));
-    expect(res.status).toBe(400);
-  });
-
-  it('401 when no auth on the context', async () => {
-    const res = await setStellarAddressHandler(makeCtx(undefined, { address: VALID_ADDRESS }));
-    expect(res.status).toBe(401);
-  });
-
-  it('happy path — writes the address and returns the updated view', async () => {
-    userState.byId = { ...baseUser };
-    dbState.updatedUser = { ...baseUser, stellarAddress: VALID_ADDRESS };
-    const res = await setStellarAddressHandler(makeCtx(LOOP_AUTH, { address: VALID_ADDRESS }));
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as Record<string, unknown>;
-    expect(body['stellarAddress']).toBe(VALID_ADDRESS);
-  });
-
-  it('accepts null explicitly — unlinks the address', async () => {
-    userState.byId = { ...baseUser, stellarAddress: VALID_ADDRESS };
-    dbState.updatedUser = { ...baseUser, stellarAddress: null };
-    const res = await setStellarAddressHandler(makeCtx(LOOP_AUTH, { address: null }));
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as Record<string, unknown>;
-    expect(body['stellarAddress']).toBeNull();
-  });
-
-  it('short-circuits when the address already matches — no-op update', async () => {
-    userState.byId = { ...baseUser, stellarAddress: VALID_ADDRESS };
-    // Updated user intentionally null — the short-circuit path returns
-    // the existing view before .returning() is consulted.
-    dbState.updatedUser = null;
-    const res = await setStellarAddressHandler(makeCtx(LOOP_AUTH, { address: VALID_ADDRESS }));
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as Record<string, unknown>;
-    expect(body['stellarAddress']).toBe(VALID_ADDRESS);
-  });
-
-  it('relinking to a different address is allowed (not order-locked like home currency)', async () => {
-    const prev = 'G' + 'B'.repeat(55);
-    userState.byId = { ...baseUser, stellarAddress: prev };
-    dbState.updatedUser = { ...baseUser, stellarAddress: VALID_ADDRESS };
-    const res = await setStellarAddressHandler(makeCtx(LOOP_AUTH, { address: VALID_ADDRESS }));
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as Record<string, unknown>;
-    expect(body['stellarAddress']).toBe(VALID_ADDRESS);
-  });
-
-  it('404 when the user row disappears between resolve and update (race)', async () => {
-    userState.byId = { ...baseUser };
-    dbState.updatedUser = null;
-    const res = await setStellarAddressHandler(makeCtx(LOOP_AUTH, { address: VALID_ADDRESS }));
-    expect(res.status).toBe(404);
-  });
-});
-
-describe('getCashbackHistoryHandler', () => {
-  const LOOP_AUTH: LoopAuthContext = {
-    kind: 'loop',
-    userId: 'user-uuid',
-    email: 'a@b.com',
-    bearerToken: 'loop-jwt',
-  };
-  const baseUser = {
-    id: 'user-uuid',
-    email: 'a@b.com',
-    isAdmin: false,
-    staffRole: null,
-    homeCurrency: 'USD',
-    stellarAddress: null,
-    ctxUserId: null,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  };
-  const sampleRow = {
-    id: 'tx-1',
-    type: 'cashback',
-    amountMinor: 250n,
-    currency: 'USD',
-    referenceType: 'order',
-    referenceId: 'ord-1',
-    createdAt: new Date('2026-04-01T12:00:00Z'),
-  };
-
-  it('401 when no auth is on the context', async () => {
-    const res = await getCashbackHistoryHandler(makeCtx(undefined));
-    expect(res.status).toBe(401);
-  });
-
-  it('happy path — returns entries in response envelope with bigint amount as string', async () => {
-    userState.byId = baseUser;
-    dbState.historyRows = [sampleRow];
-    const res = await getCashbackHistoryHandler(makeCtx(LOOP_AUTH));
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { entries: Array<Record<string, unknown>> };
-    expect(body.entries).toHaveLength(1);
-    expect(body.entries[0]).toEqual({
-      id: 'tx-1',
-      type: 'cashback',
-      amountMinor: '250',
-      currency: 'USD',
-      referenceType: 'order',
-      referenceId: 'ord-1',
-      createdAt: '2026-04-01T12:00:00.000Z',
-    });
-  });
-
-  it('returns an empty entries array when the user has no ledger rows', async () => {
-    userState.byId = baseUser;
-    dbState.historyRows = [];
-    const res = await getCashbackHistoryHandler(makeCtx(LOOP_AUTH));
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { entries: unknown[] };
-    expect(body.entries).toEqual([]);
-  });
-
-  it('400 when ?before is not a parseable ISO-8601 timestamp', async () => {
-    userState.byId = baseUser;
-    const res = await getCashbackHistoryHandler(
-      makeCtx(LOOP_AUTH, undefined, { before: 'not-a-date' }),
-    );
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { code: string };
-    expect(body.code).toBe('VALIDATION_ERROR');
-  });
-
-  it('accepts a valid ?before and still returns the rows', async () => {
-    userState.byId = baseUser;
-    dbState.historyRows = [sampleRow];
-    const res = await getCashbackHistoryHandler(
-      makeCtx(LOOP_AUTH, undefined, { before: '2026-04-15T00:00:00Z' }),
-    );
-    expect(res.status).toBe(200);
-  });
-
-  it('caps ?limit at 100 and floors at 1 — malformed values fall back to the default', async () => {
-    userState.byId = baseUser;
-    dbState.historyRows = [];
-    for (const limit of ['0', '-5', '9999', 'not-a-number']) {
-      const res = await getCashbackHistoryHandler(makeCtx(LOOP_AUTH, undefined, { limit }));
-      expect(res.status).toBe(200);
-    }
-  });
-
-  it('A2-550: rejects CTX pass-through bearers with 401', async () => {
-    jwtState.claims = { sub: 'some-victim', email: 'v@x.com' };
-    const res = await getCashbackHistoryHandler(makeCtx({ kind: 'ctx', bearerToken: 't' }));
-    expect(res.status).toBe(401);
-  });
-
-  it('500s with the structured INTERNAL_ERROR envelope when the ledger query throws', async () => {
-    userState.byId = baseUser;
-    dbState.historyThrow = new Error('postgres unreachable');
-    const res = await getCashbackHistoryHandler(makeCtx(LOOP_AUTH));
-    expect(res.status).toBe(500);
-    const body = (await res.json()) as { code: string; message: string };
-    expect(body.code).toBe('INTERNAL_ERROR');
-    expect(body.message).toBe('Failed to load cashback history');
-  });
-});
-
-describe('getUserPendingPayoutsHandler', () => {
-  const LOOP_AUTH: LoopAuthContext = {
-    kind: 'loop',
-    userId: 'user-uuid',
-    email: 'a@b.com',
-    bearerToken: 'loop-jwt',
-  };
-  const baseUser = {
-    id: 'user-uuid',
-    email: 'a@b.com',
-    isAdmin: false,
-    staffRole: null,
-    homeCurrency: 'GBP',
-    stellarAddress: null,
-    ctxUserId: null,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  };
-  const sampleRow = {
-    id: 'pay-1',
-    userId: 'user-uuid',
-    orderId: 'ord-1',
-    assetCode: 'GBPLOOP',
-    assetIssuer: 'GISSUER',
-    amountStroops: 12345n,
-    state: 'submitted',
-    txHash: null,
-    attempts: 1,
-    createdAt: new Date('2026-04-20T10:00:00Z'),
-    submittedAt: new Date('2026-04-20T10:01:00Z'),
-    confirmedAt: null,
-    failedAt: null,
-  };
-
-  it('401 when no auth is on the context', async () => {
-    const res = await getUserPendingPayoutsHandler(makeCtx(undefined));
-    expect(res.status).toBe(401);
-  });
-
-  it('happy path — forwards userId to the repo and shapes rows to JSON', async () => {
-    userState.byId = baseUser;
-    payoutState.rows = [sampleRow];
-    const res = await getUserPendingPayoutsHandler(makeCtx(LOOP_AUTH));
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { payouts: Array<Record<string, unknown>> };
-    expect(body.payouts).toHaveLength(1);
-    expect(body.payouts[0]).toEqual({
-      id: 'pay-1',
-      orderId: 'ord-1',
-      assetCode: 'GBPLOOP',
-      assetIssuer: 'GISSUER',
-      amountStroops: '12345',
-      state: 'submitted',
-      txHash: null,
-      attempts: 1,
-      createdAt: '2026-04-20T10:00:00.000Z',
-      submittedAt: '2026-04-20T10:01:00.000Z',
-      confirmedAt: null,
-      failedAt: null,
-    });
-    // userId is scoped to the authenticated caller — no cross-user leakage.
-    expect(payoutState.calls[0]?.userId).toBe('user-uuid');
-  });
-
-  it('rejects an unknown ?state with 400', async () => {
-    userState.byId = baseUser;
-    const res = await getUserPendingPayoutsHandler(
-      makeCtx(LOOP_AUTH, undefined, { state: 'bogus' }),
-    );
-    expect(res.status).toBe(400);
-  });
-
-  it('forwards a valid ?state filter to the repo', async () => {
-    userState.byId = baseUser;
-    await getUserPendingPayoutsHandler(makeCtx(LOOP_AUTH, undefined, { state: 'failed' }));
-    expect(payoutState.calls[0]?.state).toBe('failed');
-  });
-
-  it('rejects an invalid ?before timestamp with 400', async () => {
-    userState.byId = baseUser;
-    const res = await getUserPendingPayoutsHandler(
-      makeCtx(LOOP_AUTH, undefined, { before: 'not-a-date' }),
-    );
-    expect(res.status).toBe(400);
-  });
-
-  it('clamps ?limit — malformed values fall back, huge values cap at 100', async () => {
-    userState.byId = baseUser;
-    await getUserPendingPayoutsHandler(makeCtx(LOOP_AUTH, undefined, { limit: 'nope' }));
-    expect(payoutState.calls[0]?.limit).toBe(20);
-    payoutState.calls = [];
-    await getUserPendingPayoutsHandler(makeCtx(LOOP_AUTH, undefined, { limit: '9999' }));
-    expect(payoutState.calls[0]?.limit).toBe(100);
-  });
-
-  it('A2-550: rejects CTX pass-through bearers with 401', async () => {
-    jwtState.claims = { sub: 'some-victim', email: 'v@x.com' };
-    const res = await getUserPendingPayoutsHandler(makeCtx({ kind: 'ctx', bearerToken: 't' }));
-    expect(res.status).toBe(401);
-  });
-});
-
-describe('getUserCreditsHandler', () => {
-  const LOOP_AUTH: LoopAuthContext = {
-    kind: 'loop',
-    userId: 'user-uuid',
-    email: 'a@b.com',
-    bearerToken: 'loop-jwt',
-  };
-  const baseUser = {
-    id: 'user-uuid',
-    email: 'a@b.com',
-    isAdmin: false,
-    staffRole: null,
-    homeCurrency: 'GBP',
-    stellarAddress: null,
-    ctxUserId: null,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  };
-
-  beforeEach(() => {
-    userState.byId = baseUser;
-    userState.upsertThrow = null;
-    dbState.creditsRows = [];
-  });
-
-  it('401 when there is no auth context', async () => {
-    const res = await getUserCreditsHandler(makeCtx(undefined));
-    expect(res.status).toBe(401);
-  });
-
-  it('returns an empty list when the user has no ledger entries', async () => {
-    const res = await getUserCreditsHandler(makeCtx(LOOP_AUTH));
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { credits: unknown[] };
-    expect(body.credits).toEqual([]);
-  });
-
-  it('serialises bigint balances and Date timestamps', async () => {
-    dbState.creditsRows = [
-      {
-        currency: 'EUR',
-        balanceMinor: 12_345n,
-        updatedAt: new Date('2026-04-10T09:00:00Z'),
-      },
-      {
-        currency: 'GBP',
-        balanceMinor: 890_000n,
-        updatedAt: new Date('2026-04-20T14:00:00Z'),
-      },
-    ];
-    const res = await getUserCreditsHandler(makeCtx(LOOP_AUTH));
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      credits: Array<Record<string, unknown>>;
-    };
-    expect(body.credits).toHaveLength(2);
-    expect(body.credits[0]).toEqual({
-      currency: 'EUR',
-      balanceMinor: '12345',
-      updatedAt: '2026-04-10T09:00:00.000Z',
-    });
-    expect(body.credits[1]!['balanceMinor']).toBe('890000');
-  });
-
-  it('A2-550: rejects CTX pass-through bearers with 401', async () => {
-    jwtState.claims = { sub: 'some-victim', email: 'v@x.com' };
-    const res = await getUserCreditsHandler(makeCtx({ kind: 'ctx', bearerToken: 't' }));
-    expect(res.status).toBe(401);
-  });
-
-  it('500s with the structured INTERNAL_ERROR envelope when the credits query throws', async () => {
-    dbState.creditsThrow = new Error('postgres unreachable');
-    const res = await getUserCreditsHandler(makeCtx(LOOP_AUTH));
-    expect(res.status).toBe(500);
-    const body = (await res.json()) as { code: string; message: string };
-    expect(body.code).toBe('INTERNAL_ERROR');
-    expect(body.message).toBe('Failed to load credits');
-  });
-});
-
-describe('getUserPendingPayoutDetailHandler', () => {
-  const LOOP_AUTH: LoopAuthContext = {
-    kind: 'loop',
-    userId: 'user-uuid',
-    email: 'a@b.com',
-    bearerToken: 'loop-jwt',
-  };
-  const validId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
-  const baseUser = {
-    id: 'user-uuid',
-    email: 'a@b.com',
-    isAdmin: false,
-    staffRole: null,
-    homeCurrency: 'GBP',
-    stellarAddress: null,
-    ctxUserId: null,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  };
-  const sampleRow = {
-    id: validId,
-    userId: 'user-uuid',
-    orderId: 'ord-1',
-    assetCode: 'GBPLOOP',
-    assetIssuer: 'GISSUER',
-    amountStroops: 12_345n,
-    state: 'submitted',
-    txHash: null,
-    attempts: 1,
-    createdAt: new Date('2026-04-20T10:00:00Z'),
-    submittedAt: new Date('2026-04-20T10:01:00Z'),
-    confirmedAt: null,
-    failedAt: null,
-  };
-
-  beforeEach(() => {
-    userState.byId = baseUser;
-  });
-
-  it('400 when id is missing', async () => {
-    const res = await getUserPendingPayoutDetailHandler(
-      makeCtx(LOOP_AUTH, undefined, undefined, {}),
-    );
-    expect(res.status).toBe(400);
-  });
-
-  it('400 when id is not a uuid', async () => {
-    const res = await getUserPendingPayoutDetailHandler(
-      makeCtx(LOOP_AUTH, undefined, undefined, { id: 'not-a-uuid' }),
-    );
-    expect(res.status).toBe(400);
-  });
-
-  it('401 when no auth is on the context', async () => {
-    const res = await getUserPendingPayoutDetailHandler(
-      makeCtx(undefined, undefined, undefined, { id: validId }),
-    );
-    expect(res.status).toBe(401);
-  });
-
-  it('404 when the row is not owned by the caller', async () => {
-    payoutState.singleRow = null;
-    const res = await getUserPendingPayoutDetailHandler(
-      makeCtx(LOOP_AUTH, undefined, undefined, { id: validId }),
-    );
-    expect(res.status).toBe(404);
-    expect(payoutState.singleCalls[0]).toEqual({ id: validId, userId: 'user-uuid' });
-  });
-
-  it('returns the view on hit', async () => {
-    payoutState.singleRow = sampleRow;
-    const res = await getUserPendingPayoutDetailHandler(
-      makeCtx(LOOP_AUTH, undefined, undefined, { id: validId }),
-    );
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as Record<string, unknown>;
-    expect(body).toMatchObject({
-      id: validId,
-      orderId: 'ord-1',
-      amountStroops: '12345',
-      state: 'submitted',
-      submittedAt: '2026-04-20T10:01:00.000Z',
-      confirmedAt: null,
-    });
-  });
-
-  it('A2-550: rejects CTX pass-through bearers with 401', async () => {
-    jwtState.claims = { sub: 'some-victim', email: 'v@x.com' };
-    const res = await getUserPendingPayoutDetailHandler(
-      makeCtx({ kind: 'ctx', bearerToken: 't' }, undefined, undefined, { id: validId }),
-    );
-    expect(res.status).toBe(401);
-  });
-});
-
-describe('getCashbackSummaryHandler', () => {
-  const LOOP_AUTH: LoopAuthContext = {
-    kind: 'loop',
-    userId: 'user-uuid',
-    email: 'a@b.com',
-    bearerToken: 'loop-jwt',
-  };
-  const baseUser = {
-    id: 'user-uuid',
-    email: 'a@b.com',
-    isAdmin: false,
-    staffRole: null,
-    homeCurrency: 'GBP',
-    stellarAddress: null,
-    ctxUserId: null,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  };
-
-  beforeEach(() => {
-    userState.byId = baseUser;
-    userState.upsertThrow = null;
-    summaryState.rows = [];
-    summaryState.throwErr = null;
-  });
-
-  it('401 when there is no auth context', async () => {
-    const res = await getCashbackSummaryHandler(makeCtx(undefined));
-    expect(res.status).toBe(401);
-  });
-
-  it('returns zeroed totals when the user has no cashback ledger rows', async () => {
-    summaryState.rows = [];
-    const res = await getCashbackSummaryHandler(makeCtx(LOOP_AUTH));
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as Record<string, unknown>;
-    expect(body).toEqual({ currency: 'GBP', lifetimeMinor: '0', thisMonthMinor: '0' });
-  });
-
-  it('normalises bigint / string / number aggregates into bigint-safe strings', async () => {
-    summaryState.rows = [{ lifetimeMinor: '123450', thisMonthMinor: 5000n }];
-    const res = await getCashbackSummaryHandler(makeCtx(LOOP_AUTH));
-    const body = (await res.json()) as Record<string, unknown>;
-    expect(body).toEqual({
-      currency: 'GBP',
-      lifetimeMinor: '123450',
-      thisMonthMinor: '5000',
-    });
-  });
-
-  it('accepts the `{ rows }` envelope that node-postgres returns', async () => {
-    summaryState.rows = {
-      rows: [{ lifetimeMinor: '777', thisMonthMinor: '0' }],
-    } as unknown as unknown[];
-    const res = await getCashbackSummaryHandler(makeCtx(LOOP_AUTH));
-    const body = (await res.json()) as Record<string, unknown>;
-    expect(body['lifetimeMinor']).toBe('777');
-  });
-
-  it('500 when the aggregate query throws', async () => {
-    summaryState.throwErr = new Error('db exploded');
-    const res = await getCashbackSummaryHandler(makeCtx(LOOP_AUTH));
-    expect(res.status).toBe(500);
-  });
-});
-
-describe('getUserPayoutByOrderHandler', () => {
-  const LOOP_AUTH: LoopAuthContext = {
-    kind: 'loop',
-    userId: 'user-uuid',
-    email: 'a@b.com',
-    bearerToken: 'loop-jwt',
-  };
-  const validOrderId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
-  const baseUser = {
-    id: 'user-uuid',
-    email: 'a@b.com',
-    isAdmin: false,
-    staffRole: null,
-    homeCurrency: 'GBP',
-    stellarAddress: null,
-    ctxUserId: null,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  };
-  const sampleRow = {
-    id: 'payout-id',
-    userId: 'user-uuid',
-    orderId: validOrderId,
-    assetCode: 'USDLOOP',
-    assetIssuer: 'GISSUER',
-    amountStroops: 25_000n,
-    state: 'confirmed',
-    txHash: 'abcdef0123456789',
-    attempts: 1,
-    createdAt: new Date('2026-04-20T10:00:00Z'),
-    submittedAt: new Date('2026-04-20T10:01:00Z'),
-    confirmedAt: new Date('2026-04-20T10:02:00Z'),
-    failedAt: null,
-  };
-
-  beforeEach(() => {
-    userState.byId = baseUser;
-  });
-
-  it('400 when orderId is missing', async () => {
-    const res = await getUserPayoutByOrderHandler(makeCtx(LOOP_AUTH, undefined, undefined, {}));
-    expect(res.status).toBe(400);
-  });
-
-  it('400 when orderId is not a uuid', async () => {
-    const res = await getUserPayoutByOrderHandler(
-      makeCtx(LOOP_AUTH, undefined, undefined, { orderId: 'not-a-uuid' }),
-    );
-    expect(res.status).toBe(400);
-  });
-
-  it('401 when no auth is on the context', async () => {
-    const res = await getUserPayoutByOrderHandler(
-      makeCtx(undefined, undefined, undefined, { orderId: validOrderId }),
-    );
-    expect(res.status).toBe(401);
-  });
-
-  it('404 when the order has no payout row (or belongs to another user)', async () => {
-    payoutState.byOrderRow = null;
-    const res = await getUserPayoutByOrderHandler(
-      makeCtx(LOOP_AUTH, undefined, undefined, { orderId: validOrderId }),
-    );
-    expect(res.status).toBe(404);
-    expect(payoutState.byOrderCalls[0]).toEqual({
-      orderId: validOrderId,
-      userId: 'user-uuid',
-    });
-  });
-
-  it('returns the view shape on hit with tx hash + confirmed timestamp', async () => {
-    payoutState.byOrderRow = sampleRow;
-    const res = await getUserPayoutByOrderHandler(
-      makeCtx(LOOP_AUTH, undefined, undefined, { orderId: validOrderId }),
-    );
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as Record<string, unknown>;
-    expect(body).toMatchObject({
-      id: 'payout-id',
-      orderId: validOrderId,
-      assetCode: 'USDLOOP',
-      amountStroops: '25000',
-      state: 'confirmed',
-      txHash: 'abcdef0123456789',
-      confirmedAt: '2026-04-20T10:02:00.000Z',
-    });
   });
 });

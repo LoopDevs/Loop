@@ -37,7 +37,6 @@
  */
 import type { Hono } from 'hono';
 import { rateLimit } from '../middleware/rate-limit.js';
-import { killSwitch } from '../middleware/kill-switch.js';
 import { privateNoStoreResponse } from '../middleware/cache-control.js';
 import { requireAuth } from '../auth/handler.js';
 import { listOrdersHandler } from '../orders/list-handler.js';
@@ -66,7 +65,6 @@ export function mountOrderRoutes(app: Hono): void {
   // but we also keep semantically related routes co-located.
   app.post(
     '/api/orders/loop',
-    killSwitch('orders-loop'),
     rateLimit('POST /api/orders/loop', 10, 60_000),
     loopCreateOrderHandler,
   );

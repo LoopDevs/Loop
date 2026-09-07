@@ -28,9 +28,7 @@
  * Single query with FILTER-ed COUNT + SUM — one round-trip, no N+1.
  */
 import type { Context } from 'hono';
-import { sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { orders } from '../db/schema.js';
 import type { User } from '../db/users.js';
 import { resolveLoopAuthenticatedUser } from '../auth/authenticated-user.js';
 import { logger } from '../logger.js';
@@ -49,33 +47,12 @@ export interface UserOrdersSummary {
   totalSpentMinor: string;
 }
 
-interface SummaryRow extends Record<string, unknown> {
-  totalOrders: string | number | null;
-  fulfilledCount: string | number | null;
-  pendingCount: string | number | null;
-  failedCount: string | number | null;
-  totalSpentMinor: string | number | bigint | null;
-}
-
 /**
  * A2-550 / A2-551 fix: identity resolution now requires a verified
  * Loop-signed token. See `apps/backend/src/auth/authenticated-user.ts`.
  */
 async function resolveCallingUser(c: Context): Promise<User | null> {
   return await resolveLoopAuthenticatedUser(c);
-}
-
-function toNumber(value: string | number | null): number {
-  if (value === null) return 0;
-  if (typeof value === 'number') return value;
-  return Number.parseInt(value, 10);
-}
-
-function toStringBigint(value: string | number | bigint | null): string {
-  if (value === null) return '0';
-  if (typeof value === 'bigint') return value.toString();
-  if (typeof value === 'number') return Math.trunc(value).toString();
-  return value;
 }
 
 export async function getUserOrdersSummaryHandler(c: Context): Promise<Response> {
@@ -91,36 +68,34 @@ export async function getUserOrdersSummaryHandler(c: Context): Promise<Response>
   }
 
   try {
-    const result = await db.execute<SummaryRow>(sql`
-      SELECT
-        COUNT(*)::int AS "totalOrders",
-        COUNT(*) FILTER (WHERE ${orders.state} = 'fulfilled')::int AS "fulfilledCount",
-        COUNT(*) FILTER (
-          WHERE ${orders.state} IN ('pending_payment', 'paid', 'procuring')
-        )::int AS "pendingCount",
-        COUNT(*) FILTER (
-          WHERE ${orders.state} IN ('failed', 'expired')
-        )::int AS "failedCount",
-        COALESCE(
-          SUM(${orders.chargeMinor}) FILTER (WHERE ${orders.state} = 'fulfilled'),
-          0
-        )::bigint AS "totalSpentMinor"
-      FROM ${orders}
-      WHERE ${orders.userId} = ${user.id}
-        AND ${orders.chargeCurrency} = ${user.homeCurrency}
-    `);
-    const rows: SummaryRow[] = Array.isArray(result)
-      ? (result as SummaryRow[])
-      : ((result as { rows?: SummaryRow[] }).rows ?? []);
-    const row = rows[0];
+    // One filtered scan, bucketed in code — the per-user order count
+    // is small by construction.
+    const rows = await db
+      .collection('orders')
+      .findMany({ userId: user.id, chargeCurrency: user.homeCurrency });
+    let fulfilledCount = 0;
+    let pendingCount = 0;
+    let failedCount = 0;
+    let totalSpentMinor = 0;
+    for (const order of rows) {
+      if (order.state === 'fulfilled') {
+        fulfilledCount++;
+        totalSpentMinor += order.chargeMinor;
+      } else if (order.state === 'unpaid' || order.state === 'paid') {
+        pendingCount++;
+      } else {
+        // rejected / refunded / expired — "didn't succeed" states.
+        failedCount++;
+      }
+    }
 
     return c.json<UserOrdersSummary>({
       currency: user.homeCurrency,
-      totalOrders: toNumber(row?.totalOrders ?? 0),
-      fulfilledCount: toNumber(row?.fulfilledCount ?? 0),
-      pendingCount: toNumber(row?.pendingCount ?? 0),
-      failedCount: toNumber(row?.failedCount ?? 0),
-      totalSpentMinor: toStringBigint(row?.totalSpentMinor ?? null),
+      totalOrders: rows.length,
+      fulfilledCount,
+      pendingCount,
+      failedCount,
+      totalSpentMinor: String(totalSpentMinor),
     });
   } catch (err) {
     log.error({ err }, 'Orders-summary query failed');

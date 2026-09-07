@@ -1,6 +1,6 @@
 /**
  * Refresh-token repository (ADR 013). Backs the `refresh_tokens`
- * table: persists each minted refresh, rotates on use, supports
+ * collection: persists each minted refresh, rotates on use, supports
  * revoke-by-user for bulk sign-out.
  *
  * The plaintext refresh JWT is never stored — we persist SHA-256 of
@@ -10,11 +10,11 @@
  * signature verifies.
  */
 import { createHash } from 'node:crypto';
-import { and, eq, isNull, isNotNull, gt, lt, or, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { refreshTokens, users } from '../db/schema.js';
+import { bumpUserTokenVersion } from '../db/users.js';
+import type { RefreshTokenDoc } from '../db/types.js';
 
-export type RefreshTokenRow = typeof refreshTokens.$inferSelect;
+export type RefreshTokenRow = RefreshTokenDoc;
 
 /** SHA-256 hex of the full refresh-token string. */
 export function hashRefreshToken(token: string): string {
@@ -31,11 +31,15 @@ export async function recordRefreshToken(args: {
   token: string;
   expiresAt: Date;
 }): Promise<void> {
-  await db.insert(refreshTokens).values({
+  await db.collection('refresh_tokens').insertOne({
     jti: args.jti,
     userId: args.userId,
     tokenHash: hashRefreshToken(args.token),
     expiresAt: args.expiresAt,
+    revokedAt: null,
+    replacedByJti: null,
+    lastUsedAt: null,
+    createdAt: new Date(),
   });
 }
 
@@ -55,14 +59,10 @@ export async function findLiveRefreshToken(args: {
   now?: Date;
 }): Promise<RefreshTokenRow | null> {
   const now = args.now ?? new Date();
-  const row = await db.query.refreshTokens.findFirst({
-    where: and(
-      eq(refreshTokens.jti, args.jti),
-      isNull(refreshTokens.revokedAt),
-      gt(refreshTokens.expiresAt, now),
-    ),
-  });
-  if (row === undefined) return null;
+  const row = await db
+    .collection('refresh_tokens')
+    .findOne({ jti: args.jti, revokedAt: null, expiresAt: { $gt: now } });
+  if (row === null) return null;
   if (row.tokenHash !== hashRefreshToken(args.token)) return null;
   return row;
 }
@@ -78,26 +78,18 @@ export async function findLiveRefreshToken(args: {
  * the reason-for-rejection and driving the revoke decision.
  */
 export async function findRefreshTokenRecord(jti: string): Promise<RefreshTokenRow | null> {
-  const row = await db.query.refreshTokens.findFirst({
-    where: eq(refreshTokens.jti, jti),
-  });
-  return row ?? null;
+  return db.collection('refresh_tokens').findOne({ jti });
 }
 
 /**
  * Revokes a single refresh token by jti. Sole production caller is the
  * logout handler — rotation goes through `tryRevokeIfLive` (A4-098),
- * not this. `revoked_at` is the terminal marker: setting it invalidates
- * the token (`findLiveRefreshToken` filters on `revoked_at IS NULL`).
+ * not this. `revokedAt` is the terminal marker.
  *
- * COR-11: the rotation link `replaced_by_jti` is (re)written ONLY when
- * the caller passes an explicit successor. When omitted it is left
- * untouched, so an already-rotated row keeps the link to the token that
- * superseded it. Logout revokes with NO successor — coercing `?? null`
- * here CLOBBERED that link, destroying the rotation-chain audit lineage
- * (a stolen-token reuse could no longer be traced past the logout). The
- * revoke's actual effect (the token is invalidated) is unchanged: it is
- * carried entirely by `revoked_at`.
+ * COR-11: the rotation link `replacedByJti` is (re)written ONLY when
+ * the caller passes an explicit successor; when omitted it is left
+ * untouched, so an already-rotated row keeps the link to the token
+ * that superseded it (the rotation-chain audit lineage).
  */
 export async function revokeRefreshToken(args: {
   jti: string;
@@ -105,39 +97,29 @@ export async function revokeRefreshToken(args: {
   now?: Date;
 }): Promise<void> {
   const now = args.now ?? new Date();
-  await db
-    .update(refreshTokens)
-    .set({
-      revokedAt: now,
-      lastUsedAt: now,
-      // COR-11: touch `replaced_by_jti` only when a successor is
-      // explicitly supplied; omitting it preserves the existing
-      // rotation lineage rather than nulling it out.
-      ...(args.replacedByJti !== undefined ? { replacedByJti: args.replacedByJti } : {}),
-    })
-    .where(eq(refreshTokens.jti, args.jti));
+  await db.collection('refresh_tokens').updateOne(
+    { jti: args.jti },
+    {
+      $set: {
+        revokedAt: now,
+        lastUsedAt: now,
+        ...(args.replacedByJti !== undefined ? { replacedByJti: args.replacedByJti } : {}),
+      },
+    },
+  );
 }
 
 /**
  * A4-098: concurrency-safe single-shot revoke. Returns `true` only
- * if the row went from `revoked_at IS NULL` → `revoked_at = now()`
- * in this call; `false` if some other request already revoked it
- * (the rotation lost the race).
+ * if the row went from `revokedAt: null` → revoked in this call;
+ * `false` if some other request already revoked it (the rotation lost
+ * the race).
  *
  * Refresh-token rotation must look like:
  *   1. findLiveRefreshToken (read)
- *   2. mintTokenPair (sign only — the successor jti must exist for
- *      step 3, but NO row is written yet)
+ *   2. mintTokenPair (sign only — no row written yet)
  *   3. tryRevokeIfLive (compare-and-set; gate on this)
  *   4. persistMintedRefreshToken (insert successor — winners only)
- *
- * Earlier code did revoke as a non-conditional UPDATE after issuing
- * the new pair, so two parallel refresh requests with the same old
- * token both made it past step 1 and both inserted successors. A
- * later iteration gated on this CAS but still persisted the
- * successor row BEFORE it, so the losing request left an orphaned
- * live row behind. Now the loser's `tryRevokeIfLive` returns false
- * and the caller rejects the refresh without ever inserting a row.
  */
 export async function tryRevokeIfLive(args: {
   jti: string;
@@ -145,87 +127,61 @@ export async function tryRevokeIfLive(args: {
   now?: Date;
 }): Promise<boolean> {
   const now = args.now ?? new Date();
-  const rows = await db
-    .update(refreshTokens)
-    .set({
-      revokedAt: now,
-      replacedByJti: args.replacedByJti ?? null,
-      lastUsedAt: now,
-    })
-    .where(and(eq(refreshTokens.jti, args.jti), isNull(refreshTokens.revokedAt)))
-    .returning({ jti: refreshTokens.jti });
-  return rows.length === 1;
+  const updated = await db.collection('refresh_tokens').updateOne(
+    { jti: args.jti, revokedAt: null },
+    {
+      $set: {
+        revokedAt: now,
+        replacedByJti: args.replacedByJti ?? null,
+        lastUsedAt: now,
+      },
+    },
+  );
+  return updated !== null;
 }
 
 /**
  * Bulk revoke — every live refresh token for a user, AND (NS-09) a bump
- * of the user's `token_version` so their live ACCESS tokens die at the
- * same instant. Used by `DELETE /api/auth/session/all` (self sign-out),
- * `POST /api/admin/users/:id/revoke-sessions` (admin incident response),
+ * of the user's `tokenVersion` so their live ACCESS tokens die at the
+ * same instant. Used by `DELETE /api/auth/session/all` (self sign-out)
  * and the refresh-token-reuse family-revoke (A2-1608, a token-theft
- * signal). All three are "kill this user's sessions" events, so all
- * three must invalidate the access tokens too — not just the refresh
- * tokens.
- *
- * The refresh-row revoke and the token_version bump run in ONE
- * transaction so a partial failure can't leave the two revocation
- * mechanisms out of step (refresh tokens killed but access tokens still
- * live, or vice versa). The `+ 1` runs in the DB, so it composes with a
- * concurrent logout bump without a lost update.
+ * signal). Both are "kill this user's sessions" events, so both must
+ * invalidate the access tokens too — not just the refresh tokens.
  */
 export async function revokeAllRefreshTokensForUser(userId: string): Promise<void> {
   const now = new Date();
-  await db.transaction(async (tx) => {
-    await tx
-      .update(refreshTokens)
-      .set({ revokedAt: now })
-      .where(and(eq(refreshTokens.userId, userId), isNull(refreshTokens.revokedAt)));
-    // NS-09: bump the access-token revocation counter. Access tokens
-    // have no per-token DB row (unlike the refresh rows revoked above),
-    // so this per-user counter is their revocation — requireAuth rejects
-    // any access token whose `tv` claim no longer matches.
-    await tx
-      .update(users)
-      .set({ tokenVersion: sql`${users.tokenVersion} + 1`, updatedAt: sql`NOW()` })
-      .where(eq(users.id, userId));
-  });
+  await db
+    .collection('refresh_tokens')
+    .updateMany({ userId, revokedAt: null }, { $set: { revokedAt: now } });
+  // NS-09: bump the access-token revocation counter. Access tokens
+  // have no per-token row (unlike the refresh rows revoked above),
+  // so this per-user counter is their revocation — requireAuth rejects
+  // any access token whose `tv` claim no longer matches.
+  await bumpUserTokenVersion(userId);
 }
 
 /**
- * CF-26 / X-PRIV-08: the retention sweep the schema comment on
- * `refresh_tokens_expires` has promised all along but that never
- * existed. Deletes rows that are dead AND past the retention grace:
+ * CF-26 / X-PRIV-08: retention sweep. Deletes rows that are dead AND
+ * past the retention grace:
  *
- *   - `expires_at < now - retentionMs` — the token is past its refresh
+ *   - `expiresAt < now - retentionMs` — the token is past its refresh
  *     horizon; it can never authenticate again.
- *   - OR `revoked_at < now - retentionMs` — the token was rotated or
+ *   - OR `revokedAt < now - retentionMs` — the token was rotated or
  *     security-revoked long enough ago that the token-theft reuse
- *     signal (findRefreshTokenRecord distinguishing "revoked" from
- *     "never existed") is no longer actionable.
+ *     signal is no longer actionable.
  *
  * A row that is neither expired nor revoked is live and never touched.
  * The `retentionMs` grace keeps a just-rotated row around briefly so a
  * racing reuse attempt still trips the family-wide revoke (A2-1608)
- * rather than looking like a forged jti. Each row carries a
- * `token_hash` (PII-adjacent) + `user_id`, so leaving dead rows
- * forever is the same unbounded-growth problem as the OTP table.
- *
- * Uses the `refresh_tokens_expires` index for the expired-branch range
- * scan. Returns the number of rows deleted.
+ * rather than looking like a forged jti.
  */
 export async function purgeDeadRefreshTokens(args: {
   retentionMs: number;
   now?: Date;
 }): Promise<number> {
   const cutoff = new Date((args.now ?? new Date()).getTime() - args.retentionMs);
-  const deleted = await db
-    .delete(refreshTokens)
-    .where(
-      or(
-        lt(refreshTokens.expiresAt, cutoff),
-        and(isNotNull(refreshTokens.revokedAt), lt(refreshTokens.revokedAt, cutoff)),
-      ),
-    )
-    .returning({ jti: refreshTokens.jti });
-  return deleted.length;
+  const tokens = db.collection('refresh_tokens');
+  const expired = await tokens.deleteMany({ expiresAt: { $lt: cutoff } });
+  const revoked = await tokens.deleteMany({ revokedAt: { $lt: cutoff } });
+  return expired + revoked;
 }

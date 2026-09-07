@@ -65,12 +65,8 @@ jobs:
           # context, so fall back to the dispatched ref.
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # v1.6
-      # The API deploy runs the Drizzle migration chain as its Fly release
-      # command (apps/backend/fly.toml → migrate-cli). A failed migration
-      # aborts the release with a non-zero exit and the old machines keep
-      # serving — so a bad migration fails the deploy instead of taking
-      # prod down. `--remote-only` builds on Fly's builders (no Docker in
-      # CI). Build context is the repo root for the monorepo Dockerfile.
+      # `--remote-only` builds on Fly's builders (no Docker in CI).
+      # Build context is the repo root for the monorepo Dockerfile.
       - name: Deploy loopfinance-api
         run: >-
           flyctl deploy

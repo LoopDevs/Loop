@@ -54,17 +54,17 @@ vi.mock('../images/proxy.js', async (importOriginal) => {
   return { ...(orig as Record<string, unknown>), evictExpiredImageCache: vi.fn() };
 });
 
-// A4-034: /health now SELECT 1's the DB. Mock db.execute so the
-// integration suite (which has no live Postgres) sees a happy
-// probe by default; individual tests can override via the
-// dbExecuteMock if they want to exercise the degraded path.
-const dbExecuteMock = vi.hoisted(() => vi.fn(async () => [{ '?column?': 1 }]));
+// A4-034: /health probes the store with a cheap
+// `db.collection('users').count({})`. Mock at that shape so the
+// integration suite sees a happy probe by default; individual tests
+// can override via `dbCountMock` to exercise the degraded path.
+const dbCountMock = vi.hoisted(() => vi.fn(async () => 0));
 vi.mock('../db/client.js', async (importOriginal) => {
   const orig = (await importOriginal()) as Record<string, unknown>;
   return {
     ...orig,
     db: {
-      execute: dbExecuteMock,
+      collection: () => ({ count: dbCountMock }),
     },
   };
 });
@@ -95,56 +95,14 @@ const applyBinaryWatchdogAlertMock = vi.hoisted(() =>
     }) => Promise<boolean>
   >(async () => true),
 );
-vi.mock('../credits/vaults/vault-watchdog-alert.js', () => ({
+vi.mock('../discord/watchdog-alert.js', () => ({
   applyBinaryWatchdogAlert: applyBinaryWatchdogAlertMock,
 }));
 
-// Mock circuit breaker to pass through to global fetch (avoids cross-test state leaks).
-// A2-1305: also mirror the production circuit-breaker's CTX-request-id
-// capture so the X-Ctx-Request-Id round-trip integration test can
-// exercise the full middleware chain. Production circuit-breaker
-// reads the response's X-Request-Id (or X-Correlation-Id fallback)
-// and writes it onto the per-request AsyncLocalStorage store via
-// setCtxResponseRequestId — mirror that here so the integration
-// scope sees the same end-to-end behaviour as production.
-vi.mock('../circuit-breaker.js', async () => {
-  const { setCtxResponseRequestId } = await import('../request-context.js');
-  class CircuitOpenError extends Error {
-    constructor() {
-      super('Circuit breaker is open — upstream service unavailable');
-      this.name = 'CircuitOpenError';
-    }
-  }
-  const passThroughFetch = async (
-    ...args: Parameters<typeof globalThis.fetch>
-  ): Promise<Response> => {
-    const response = await globalThis.fetch(...args);
-    const ctxId = response.headers.get('X-Request-Id') ?? response.headers.get('X-Correlation-Id');
-    if (ctxId !== null && ctxId.length > 0) {
-      setCtxResponseRequestId(ctxId);
-    }
-    return response;
-  };
-  return {
-    CircuitOpenError,
-    getAllCircuitStates: () => ({}),
-    // ADR 051: ctx/api-fetch.ts builds its upstream breaker via
-    // createCircuitBreaker — mirror the pass-through shape so
-    // /health's getCtxApiHealth() read works in the integration app.
-    createCircuitBreaker: () => ({
-      fetch: passThroughFetch,
-      getState: () => 'closed' as const,
-      isAvailable: () => true,
-      reset: () => {},
-      forceOpen: () => {},
-    }),
-    getUpstreamCircuit: () => ({
-      fetch: passThroughFetch,
-      getState: () => 'closed' as const,
-      reset: () => {},
-    }),
-  };
-});
+// The proxy routes call the REAL `upstreamFetch`, which does the
+// A2-1305 request-id capture on top of the stubbed global fetch —
+// so the X-Ctx-Request-Id round-trip below exercises the production
+// path rather than a mock re-implementation of it.
 
 import {
   app,
@@ -605,11 +563,13 @@ describe('app-level middleware', () => {
 
     expect(res.status).toBe(200);
     expect(res.headers.get('X-Ctx-Request-Id')).toBe('ctx-req-abc123');
-    // Outbound side of the round-trip (`circuit-breaker.ts` stamping
-    // our own X-Request-Id onto the CTX call) is covered by
-    // `circuit-breaker.test.ts` directly. The integration mock
-    // bypasses wrappedFetch so we can't assert on it here without
-    // re-implementing the logic in two places.
+
+    // Outbound side of the same round-trip: `upstreamFetch` stamps our
+    // own request id onto the CTX call. Now assertable here because the
+    // handler runs the real helper against the stubbed global fetch.
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const outbound = new Headers(init.headers);
+    expect(outbound.get('X-Request-Id')).toBeTruthy();
   });
 
   it('A2-1305: omits X-Ctx-Request-Id when no CTX call happened', async () => {
@@ -653,34 +613,6 @@ describe('app-level middleware', () => {
     expect(csp).toContain("form-action 'none'");
   });
 
-  it('/openapi.json returns a valid OpenAPI 3.1 spec with our routes', async () => {
-    const res = await app.request('/openapi.json');
-    expect(res.status).toBe(200);
-    expect(res.headers.get('Content-Type')).toContain('application/json');
-    const body = (await res.json()) as {
-      openapi: string;
-      info: { title: string; version: string };
-      paths: Record<string, unknown>;
-      components: { securitySchemes?: Record<string, unknown> };
-    };
-    expect(body.openapi).toBe('3.1.0');
-    expect(body.info.title).toBe('Loop API');
-    // Sample a handful of endpoints — full coverage is tested at the
-    // schema layer; this just confirms the spec actually reaches them.
-    expect(body.paths['/health']).toBeDefined();
-    expect(body.paths['/api/auth/verify-otp']).toBeDefined();
-    expect(body.paths['/api/orders']).toBeDefined();
-    expect(body.paths['/api/clusters']).toBeDefined();
-    // Bearer auth scheme is registered once and referenced by secured ops.
-    expect(body.components.securitySchemes?.bearerAuth).toBeDefined();
-  });
-
-  it('/openapi.json is private and auth-varying', async () => {
-    const res = await app.request('/openapi.json');
-    expect(res.headers.get('Cache-Control')).toBe('private, no-store');
-    expect(res.headers.get('Vary')).toBe('Authorization');
-  });
-
   it('/metrics labels unmatched routes as NOT_FOUND (audit A-022)', async () => {
     // Hit several random paths. Without the fix, each distinct path would
     // create a separate metric key and balloon cardinality; with the fix,
@@ -708,7 +640,7 @@ describe('app-level middleware', () => {
     );
   });
 
-  it('/metrics exposes Prometheus-format counters and circuit state', async () => {
+  it('/metrics exposes Prometheus-format counters', async () => {
     // Drive one request through so requestsTotal has an entry, then scrape.
     mockFetch.mockResolvedValueOnce(new Response('ok', { status: 200 }));
     await app.request('/health');
@@ -722,7 +654,6 @@ describe('app-level middleware', () => {
     const body = await res.text();
     expect(body).toContain('# TYPE loop_rate_limit_hits_total counter');
     expect(body).toContain('# TYPE loop_requests_total counter');
-    expect(body).toContain('# TYPE loop_circuit_state gauge');
     // The health request just counted above should appear.
     expect(body).toMatch(/loop_requests_total\{method="GET",route="\/health",status="200"\}/);
   });
@@ -825,15 +756,13 @@ describe('app-level middleware', () => {
 
   it('/metrics emits exactly one HELP line per metric (audit A-016)', async () => {
     // Prometheus exposition format requires at most one HELP line per
-    // metric. We briefly emitted two for loop_circuit_state (one for the
-    // description, one for the state-value mapping) which some scrapers
-    // rejected. This test locks in the "exactly one" invariant.
+    // metric — some scrapers reject a metric that declares two. This
+    // test locks in the "exactly one" invariant across the surface.
     const res = await app.request('/metrics');
     const body = await res.text();
     for (const metric of [
       'loop_rate_limit_hits_total',
       'loop_requests_total',
-      'loop_circuit_state',
       'loop_worker_last_lead_tick_timestamp_ms',
       'loop_worker_stale',
       'loop_catalog_loaded_timestamp_ms',

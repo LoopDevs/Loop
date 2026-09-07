@@ -10,7 +10,7 @@
  * drift. `z` comes from `../openapi-zod.js` so `.openapi()` is available
  * (see that module). Same schema-only pattern as `request-schemas.ts`.
  */
-import { z } from '../openapi-zod.js';
+import { z } from 'zod';
 
 export const SocialLoginBody = z.object({
   idToken: z.string().min(1),

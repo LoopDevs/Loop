@@ -68,25 +68,6 @@ vi.mock('../../clustering/handler.js', () => ({
   ),
 }));
 
-// Bypass circuit breaker — tests exercise auth handler logic, not circuit semantics.
-vi.mock('../../circuit-breaker.js', () => {
-  class CircuitOpenError extends Error {
-    constructor() {
-      super('open');
-      this.name = 'CircuitOpenError';
-    }
-  }
-  return {
-    CircuitOpenError,
-    getAllCircuitStates: () => ({}),
-    getUpstreamCircuit: () => ({
-      fetch: (...args: Parameters<typeof globalThis.fetch>) => globalThis.fetch(...args),
-      getState: () => 'closed' as const,
-      reset: () => {},
-    }),
-  };
-});
-
 import { app } from '../../app.js';
 
 const mockFetch = vi.fn();
@@ -380,9 +361,11 @@ describe('DELETE /api/auth/session', () => {
     const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
     expect(url).toContain('/logout');
     expect(init.method).toBe('POST');
-    const headers = init.headers as Record<string, string>;
-    expect(headers['Authorization']).toBe('Bearer ctx-access-token');
-    expect(headers['X-Client-Id']).toBe('loopweb');
+    // `upstreamFetch` normalises init.headers to a Headers instance
+    // when it stamps the outbound X-Request-Id.
+    const headers = new Headers(init.headers);
+    expect(headers.get('Authorization')).toBe('Bearer ctx-access-token');
+    expect(headers.get('X-Client-Id')).toBe('loopweb');
     expect(init.body).toBeUndefined();
   });
 

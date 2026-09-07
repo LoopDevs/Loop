@@ -26,11 +26,10 @@
  * (see the function's safety note).
  */
 import { createHash } from 'node:crypto';
-import { lt } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { socialIdTokenUses } from '../db/schema.js';
+import { isUniqueViolation } from '../db/errors.js';
 import { logger } from '../logger.js';
-import type { SocialProvider } from '../db/schema.js';
+import type { SocialProvider } from '../db/types.js';
 
 const log = logger.child({ component: 'id-token-replay' });
 
@@ -52,21 +51,22 @@ export async function consumeIdToken(args: {
   const tokenHash = createHash('sha256').update(args.token).digest('hex');
   const expiresAt = new Date(args.expSeconds * 1000);
   try {
-    const inserted = await db
-      .insert(socialIdTokenUses)
-      .values({ tokenHash, provider: args.provider, expiresAt })
-      .onConflictDoNothing({ target: socialIdTokenUses.tokenHash })
-      .returning({ tokenHash: socialIdTokenUses.tokenHash });
-    if (inserted.length === 0) {
+    await db.collection('social_id_token_uses').insertOne({
+      tokenHash,
+      provider: args.provider,
+      expiresAt,
+      createdAt: new Date(),
+    });
+    return true;
+  } catch (err) {
+    if (isUniqueViolation(err)) {
       log.warn({ provider: args.provider }, 'Social id_token replay rejected');
       return false;
     }
-    return true;
-  } catch (err) {
-    // A DB error is operational, not a replay — fail closed so an
-    // attacker can't ride a transient Postgres blip into a replay
-    // window. The auth handler surfaces this as a 503.
-    log.error({ err, provider: args.provider }, 'id-token replay-guard DB error');
+    // A store error is operational, not a replay — fail closed so an
+    // attacker can't ride a transient outage into a replay window.
+    // The auth handler surfaces this as a 503.
+    log.error({ err, provider: args.provider }, 'id-token replay-guard store error');
     throw err;
   }
 }
@@ -102,9 +102,5 @@ export async function purgeExpiredIdTokenUses(args: {
   now?: Date;
 }): Promise<number> {
   const cutoff = new Date((args.now ?? new Date()).getTime() - args.retentionMs);
-  const deleted = await db
-    .delete(socialIdTokenUses)
-    .where(lt(socialIdTokenUses.expiresAt, cutoff))
-    .returning({ tokenHash: socialIdTokenUses.tokenHash });
-  return deleted.length;
+  return db.collection('social_id_token_uses').deleteMany({ expiresAt: { $lt: cutoff } });
 }

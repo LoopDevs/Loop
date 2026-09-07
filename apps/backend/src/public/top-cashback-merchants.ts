@@ -20,14 +20,12 @@
  *     `max-age=60` on the fallback path.
  */
 import type { Context } from 'hono';
-import { desc, eq, sql } from 'drizzle-orm';
 // Response shape lives in `@loop/shared` alongside the web's consumer
 // (ADR 019 single-source rule). Re-exported below for existing backend
 // callers that import the symbol relative to this module.
 import type { PublicTopCashbackMerchantsResponse, TopCashbackMerchant } from '@loop/shared';
 import { isSupportedCountryCode, merchantInCountry, merchantSlug } from '@loop/shared';
 import { db } from '../db/client.js';
-import { merchantCashbackConfigs } from '../db/schema.js';
 import { getMerchants } from '../merchants/sync.js';
 import { logger } from '../logger.js';
 
@@ -61,18 +59,13 @@ async function compute(
   limit: number,
   country: string | null,
 ): Promise<PublicTopCashbackMerchantsResponse> {
-  const rows = (await db
-    .select({
-      merchantId: merchantCashbackConfigs.merchantId,
-      userCashbackPct: merchantCashbackConfigs.userCashbackPct,
-    })
-    .from(merchantCashbackConfigs)
-    .where(eq(merchantCashbackConfigs.active, true))
-    // Drizzle surfaces `user_cashback_pct` as a string; sort on an
-    // explicit numeric cast so the ordering can never degrade to
-    // lexicographic ("9.50" ranking above "10.00") regardless of how
-    // the column is typed at the SQL layer.
-    .orderBy(desc(sql`${merchantCashbackConfigs.userCashbackPct}::numeric`))) as ConfigRow[];
+  const configs = await db
+    .collection('merchant_cashback_configs')
+    .findMany({ active: true }, { sort: [['userCashbackPct', 'desc']] });
+  const rows: ConfigRow[] = configs.map((cfg) => ({
+    merchantId: cfg.merchantId,
+    userCashbackPct: cfg.userCashbackPct.toFixed(2),
+  }));
 
   const { merchantsById } = getMerchants();
 

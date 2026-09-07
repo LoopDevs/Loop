@@ -4,14 +4,9 @@
  * redemption-backfill.test.ts (which covers the sweeper tick);
  * this covers the per-order eligibility gates, the no-cap /
  * no-backoff contract, and the attempt bookkeeping shared with the
- * sweeper.
+ * sweeper. Runs against the real in-memory document store.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-
-vi.hoisted(() => {
-  process.env['GIFT_CARD_API_BASE_URL'] = 'https://ctx.test';
-  process.env['DATABASE_URL'] ??= 'postgres://placeholder@localhost/test';
-});
 
 vi.mock('../../logger.js', () => ({
   logger: {
@@ -36,42 +31,14 @@ vi.mock('../../ctx/api-fetch.js', () => {
       this.name = 'CtxUnavailableError';
     }
   }
-  return { CtxUnavailableError };
+  class CtxRateLimitedError extends Error {
+    readonly retryAfterMs: number | null = null;
+  }
+  return { CtxUnavailableError, CtxRateLimitedError };
 });
 
-// db mock — awaiting the select chain resolves the stashed row;
-// update chain records `.set()` payloads, resolves a configurable
-// returning().
-const { dbMock, dbState } = vi.hoisted(() => {
-  const s = {
-    rows: [] as unknown[],
-    updates: [] as Array<Record<string, unknown>>,
-    updateMatches: true,
-    lastSet: null as Record<string, unknown> | null,
-  };
-  const selectChain: Record<string, unknown> = {};
-  selectChain['from'] = vi.fn(() => selectChain);
-  selectChain['where'] = vi.fn(() => selectChain);
-  selectChain['then'] = (resolve: (rows: unknown[]) => void) => Promise.resolve(resolve(s.rows));
-  const updateChain: Record<string, unknown> = {};
-  updateChain['set'] = vi.fn((vals: Record<string, unknown>) => {
-    s.lastSet = vals;
-    return updateChain;
-  });
-  updateChain['where'] = vi.fn(() => updateChain);
-  updateChain['returning'] = vi.fn(async () => {
-    if (s.lastSet !== null) s.updates.push(s.lastSet);
-    s.lastSet = null;
-    return s.updateMatches ? [{ id: 'updated' }] : [];
-  });
-  const m = {
-    select: vi.fn(() => selectChain),
-    update: vi.fn(() => updateChain),
-  };
-  return { dbMock: m, dbState: s };
-});
-vi.mock('../../db/client.js', () => ({ db: dbMock }));
-
+import { db, __resetDbForTests } from '../../db/client.js';
+import type { OrderDoc, OrderState } from '../../db/types.js';
 import { CtxUnavailableError } from '../../ctx/api-fetch.js';
 import {
   refetchOrderRedemption,
@@ -81,62 +48,83 @@ import {
 const NOW = 1_900_000_000_000;
 const ORDER_ID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 
-function makeRow(overrides: Partial<Record<string, unknown>> = {}): Record<string, unknown> {
-  return {
+async function seedRow(
+  overrides: Partial<{
+    state: OrderState;
+    ctxOrderId: string | null;
+    redeemCode: string | null;
+    redeemUrl: string | null;
+    attempts: number;
+  }> = {},
+): Promise<void> {
+  await db.collection('orders').insertOne({
     id: ORDER_ID,
     userId: 'user-1',
     merchantId: 'merch-1',
-    state: 'fulfilled',
-    ctxOrderId: 'ctx-1',
-    fulfilledAt: new Date(NOW - 60 * 60 * 1000),
-    redeemCode: null,
+    faceValueMinor: 1000,
+    currency: 'USD',
+    chargeMinor: 1000,
+    chargeCurrency: 'USD',
+    userCashbackMinor: 0,
+    expectedCommissionMinor: null,
+    ctxOrderId: overrides.ctxOrderId !== undefined ? overrides.ctxOrderId : 'ctx-1',
+    ctxPaymentId: null,
+    paymentCryptoCurrency: 'XLM',
+    redeemCode: overrides.redeemCode ?? null,
     redeemPin: null,
-    redeemUrl: null,
-    attempts: 0,
-    ...overrides,
-  };
+    redeemUrl: overrides.redeemUrl ?? null,
+    redemptionBackfillAttempts: overrides.attempts ?? 0,
+    redemptionBackfillLastAttemptAt: null,
+    state: overrides.state ?? 'fulfilled',
+    failureReason: null,
+    idempotencyKey: null,
+    createdAt: new Date(NOW - 2 * 60 * 60 * 1000),
+    fulfilledAt: new Date(NOW - 60 * 60 * 1000),
+    failedAt: null,
+  });
+}
+
+async function getRow(): Promise<OrderDoc | null> {
+  return db.collection('orders').findOne({ id: ORDER_ID });
 }
 
 beforeEach(() => {
+  __resetDbForTests();
   fetchRedemptionMock.mockReset();
   notifyExhaustedMock.mockReset();
-  dbState.rows = [];
-  dbState.updates = [];
-  dbState.updateMatches = true;
-  dbState.lastSet = null;
 });
 
 describe('refetchOrderRedemption — eligibility gates', () => {
-  it('order_not_found when no row matches', async () => {
+  it('order_not_found when no doc matches', async () => {
     const out = await refetchOrderRedemption(ORDER_ID, NOW);
     expect(out).toEqual({ kind: 'order_not_found' });
     expect(fetchRedemptionMock).not.toHaveBeenCalled();
   });
 
   it.each([
-    [{ state: 'paid' }, 'not_fulfilled'],
+    [{ state: 'paid' as const }, 'not_fulfilled'],
     [{ ctxOrderId: null }, 'no_ctx_order_id'],
     [{ redeemCode: 'CODE' }, 'already_present'],
     [{ redeemUrl: 'https://x' }, 'already_present'],
   ])('not_eligible %o → %s', async (overrides, reason) => {
-    dbState.rows = [makeRow(overrides as Record<string, unknown>)];
+    await seedRow(overrides);
     const out = await refetchOrderRedemption(ORDER_ID, NOW);
     expect(out).toEqual({ kind: 'not_eligible', reason });
     expect(fetchRedemptionMock).not.toHaveBeenCalled();
   });
 
   it('ctx_unavailable maps the CTX-unavailable error (no attempt burned)', async () => {
-    dbState.rows = [makeRow()];
+    await seedRow();
     fetchRedemptionMock.mockRejectedValue(new CtxUnavailableError('pool down'));
     const out = await refetchOrderRedemption(ORDER_ID, NOW);
     expect(out).toEqual({ kind: 'ctx_unavailable' });
-    expect(dbState.updates).toHaveLength(0);
+    expect((await getRow())!.redemptionBackfillAttempts).toBe(0);
   });
 });
 
 describe('refetchOrderRedemption — recovery + bookkeeping', () => {
   it('persists a recovered payload through the idempotent guards', async () => {
-    dbState.rows = [makeRow({ attempts: 3 })];
+    await seedRow({ attempts: 3 });
     fetchRedemptionMock.mockResolvedValue({ code: 'CODE', pin: null, url: null });
     const out = await refetchOrderRedemption(ORDER_ID, NOW);
     expect(out).toEqual({
@@ -146,35 +134,42 @@ describe('refetchOrderRedemption — recovery + bookkeeping', () => {
       hasPin: false,
       hasUrl: false,
     });
-    expect(dbState.updates).toHaveLength(1);
-    expect(dbState.updates[0]).toMatchObject({
-      redeemCode: 'CODE',
-      redemptionBackfillAttempts: 4,
-    });
+    const stored = (await getRow())!;
+    expect(stored.redeemCode).toBe('CODE'); // no envelope key in this env → plaintext
+    expect(stored.redemptionBackfillAttempts).toBe(4);
   });
 
   it('losing the persist race still reports recovered (concurrent writer won)', async () => {
-    dbState.rows = [makeRow({ attempts: 3 })];
-    dbState.updateMatches = false;
+    await seedRow({ attempts: 3 });
+    // The guarded persist misses because a concurrent writer landed a
+    // payload between the eligibility read and the write.
+    const orders = db.collection('orders');
+    const realUpdateOne = orders.updateOne.bind(orders);
+    vi.spyOn(orders, 'updateOne').mockImplementationOnce(async (filter, update, options) => {
+      await realUpdateOne({ id: ORDER_ID }, { $set: { redeemCode: 'RACED-IN' } });
+      return realUpdateOne(filter, update, options);
+    });
     fetchRedemptionMock.mockResolvedValue({ code: 'CODE', pin: null, url: null });
     const out = await refetchOrderRedemption(ORDER_ID, NOW);
     expect(out).toMatchObject({ kind: 'recovered', attempts: 3 });
+    // The concurrent writer's payload survives.
+    expect((await getRow())!.redeemCode).toBe('RACED-IN');
   });
 
   it('still_empty bumps the attempts counter', async () => {
-    dbState.rows = [makeRow({ attempts: 4 })];
+    await seedRow({ attempts: 4 });
     fetchRedemptionMock.mockResolvedValue({ code: null, pin: null, url: null });
     const out = await refetchOrderRedemption(ORDER_ID, NOW);
     expect(out).toMatchObject({ kind: 'still_empty', attempts: 5 });
-    expect(dbState.updates[0]).toMatchObject({ redemptionBackfillAttempts: 5 });
+    expect((await getRow())!.redemptionBackfillAttempts).toBe(5);
     expect(notifyExhaustedMock).not.toHaveBeenCalled();
   });
 
   it('runs past the sweeper cap without re-paging ops (no-cap contract)', async () => {
     // attempts already AT the cap — the sweeper would never pick
-    // this row; the admin action must still drive it, and the bump
+    // this doc; the admin action must still drive it, and the bump
     // to cap+1 must not re-fire the exhaustion page.
-    dbState.rows = [makeRow({ attempts: REDEMPTION_BACKFILL_MAX_ATTEMPTS })];
+    await seedRow({ attempts: REDEMPTION_BACKFILL_MAX_ATTEMPTS });
     fetchRedemptionMock.mockResolvedValue({ code: null, pin: null, url: null });
     const out = await refetchOrderRedemption(ORDER_ID, NOW);
     expect(out).toMatchObject({
@@ -185,7 +180,7 @@ describe('refetchOrderRedemption — recovery + bookkeeping', () => {
   });
 
   it('pages ops exactly when the bump crosses the cap (parity with the sweeper)', async () => {
-    dbState.rows = [makeRow({ attempts: REDEMPTION_BACKFILL_MAX_ATTEMPTS - 1 })];
+    await seedRow({ attempts: REDEMPTION_BACKFILL_MAX_ATTEMPTS - 1 });
     fetchRedemptionMock.mockResolvedValue({ code: null, pin: null, url: null });
     await refetchOrderRedemption(ORDER_ID, NOW);
     expect(notifyExhaustedMock).toHaveBeenCalledOnce();

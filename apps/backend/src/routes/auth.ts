@@ -35,7 +35,6 @@
  */
 import type { Hono } from 'hono';
 import { rateLimit } from '../middleware/rate-limit.js';
-import { killSwitch } from '../middleware/kill-switch.js';
 import { noStoreResponse } from '../middleware/cache-control.js';
 import {
   requestOtpHandler,
@@ -56,7 +55,6 @@ export function mountAuthRoutes(app: Hono): void {
 
   app.post(
     '/api/auth/request-otp',
-    killSwitch('auth'),
     rateLimit('POST /api/auth/request-otp', 5, 60_000),
     requestOtpHandler,
   );
@@ -65,7 +63,6 @@ export function mountAuthRoutes(app: Hono): void {
   // lockout/expiry happens first.
   app.post(
     '/api/auth/verify-otp',
-    killSwitch('auth'),
     rateLimit('POST /api/auth/verify-otp', 10, 60_000),
     verifyOtpHandler,
   );
@@ -79,13 +76,11 @@ export function mountAuthRoutes(app: Hono): void {
   // Loop JWT pair on success.
   app.post(
     '/api/auth/social/google',
-    killSwitch('auth'),
     rateLimit('POST /api/auth/social/google', 10, 60_000),
     googleSocialLoginHandler,
   );
   app.post(
     '/api/auth/social/apple',
-    killSwitch('auth'),
     rateLimit('POST /api/auth/social/apple', 10, 60_000),
     appleSocialLoginHandler,
   );

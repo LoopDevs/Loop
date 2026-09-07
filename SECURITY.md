@@ -45,8 +45,8 @@ When reporting, please include:
   idempotency / reason / audit contract, CTX-operator pool
   takeover, OTP / JWT signature bypass.
 - **Medium** — persistent XSS in authenticated surfaces, information
-  disclosure, authn/z downgrade, rate-limit or circuit-breaker
-  bypass leading to resource exhaustion.
+  disclosure, authn/z downgrade, rate-limit bypass leading to
+  resource exhaustion.
 - **Low** — non-exploitable information disclosure, outdated
   dependencies without a reachable path, content-security-policy
   gaps on unauth routes.

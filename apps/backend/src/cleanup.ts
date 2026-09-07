@@ -6,14 +6,6 @@
  * - `evictExpiredImageCache` — drops decoded image blobs whose
  *   TTL has passed (`./images/proxy.js`). 7-day TTL; hourly is
  *   plenty.
- * - `sweepStaleIdempotencyKeys` (A2-500, ADR-017, NS-03) — deletes
- *   admin-write idempotency snapshots past the AUDIT RETENTION window
- *   (`LOOP_ADMIN_AUDIT_RETENTION_DAYS`, ~7 years — NOT the 24h replay
- *   TTL; this table doubles as the durable admin money-move audit
- *   trail). Fire-and-forget — a sweep failure can be retried next
- *   hour; the read-time 24h replay gate in `lookupIdempotencyKey`
- *   keeps replay semantics correct independently of the sweep.
- *
  * **Per-minute tick** (`runRateLimitSweep`, A4-016):
  * - `sweepExpiredRateLimits` — drops per-IP per-route rate-limit
  *   entries whose 60s window has elapsed. Bucket entries are
@@ -31,7 +23,6 @@
 import { env } from './env.js';
 import { evictExpiredImageCache } from './images/proxy.js';
 import { sweepExpiredRateLimits } from './middleware/rate-limit.js';
-import { sweepStaleIdempotencyKeys } from './admin/idempotency.js';
 
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 // A4-016: rate-limit windows are 60s; sweep at the same cadence
@@ -48,7 +39,6 @@ export function runCleanup(): void {
   // tick; running it again here is a harmless no-op (idempotent
   // O(n) walk over the map, n bounded by the cap).
   sweepExpiredRateLimits();
-  void sweepStaleIdempotencyKeys();
 }
 
 /**

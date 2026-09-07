@@ -2,8 +2,7 @@ import type { Context } from 'hono';
 import { z } from 'zod';
 import { env } from '../env.js';
 import { logger } from '../logger.js';
-import { getUpstreamCircuit, CircuitOpenError } from '../circuit-breaker.js';
-import { upstreamUrl } from '../upstream.js';
+import { upstreamUrl, upstreamFetch } from '../upstream.js';
 import { scrubUpstreamBody } from '../upstream-body-scrub.js';
 import { nativeRequestOtpHandler, nativeVerifyOtpHandler, nativeRefreshHandler } from './native.js';
 // A2-803 (auth slice): request-body schemas live in the shared
@@ -64,7 +63,7 @@ export async function requestOtpHandler(c: Context): Promise<Response> {
   }
 
   try {
-    const response = await getUpstreamCircuit('login').fetch(upstreamUrl('/login'), {
+    const response = await upstreamFetch(upstreamUrl('/login'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -91,23 +90,17 @@ export async function requestOtpHandler(c: Context): Promise<Response> {
 
     return c.json({ message: 'Verification code sent' });
   } catch (err) {
-    if (err instanceof CircuitOpenError) {
-      // A2-558: the enumeration-defense envelope above flattens every
-      // upstream outcome (200 success, 4xx "no such user") into a
-      // uniform `{ message: 'Verification code sent' }`. A 503 here
-      // would re-open that sidechannel — an attacker probing the
-      // endpoint could distinguish "circuit open" (service down)
-      // from "any other state". Return the same generic 200 envelope
-      // so the response shape is invariant w.r.t. backend state.
-      // Log so ops still sees the circuit-open event.
-      log.warn('request-otp upstream circuit open — returning generic 200 envelope');
-      return c.json({ message: 'Verification code sent' });
-    }
     log.error({ err }, 'Auth proxy error');
-    // Same rationale as the CircuitOpen branch above — an INTERNAL
-    // 500 would also leak the backend state to an enumeration
-    // probe. Collapse to the generic 200. Users who genuinely typed
-    // their email will just not receive a code; logs catch the error.
+    // A2-558: the enumeration-defense envelope above flattens every
+    // upstream outcome (200 success, 4xx "no such user") into a
+    // uniform `{ message: 'Verification code sent' }`. Surfacing a
+    // distinct status here — an INTERNAL 500, or anything else keyed
+    // to why the upstream call failed — would re-open that
+    // sidechannel: an attacker probing the endpoint could
+    // distinguish "upstream down" from "any other state". Collapse
+    // to the generic 200 so the response shape is invariant w.r.t.
+    // backend state. Users who genuinely typed their email will just
+    // not receive a code; logs catch the error.
     return c.json({ message: 'Verification code sent' });
   }
 }
@@ -131,7 +124,7 @@ export async function verifyOtpHandler(c: Context): Promise<Response> {
   }
 
   try {
-    const response = await getUpstreamCircuit('verify-email').fetch(upstreamUrl('/verify-email'), {
+    const response = await upstreamFetch(upstreamUrl('/verify-email'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -176,12 +169,6 @@ export async function verifyOtpHandler(c: Context): Promise<Response> {
     }
     return c.json(validated.data);
   } catch (err) {
-    if (err instanceof CircuitOpenError) {
-      return c.json(
-        { code: 'SERVICE_UNAVAILABLE', message: 'Service temporarily unavailable' },
-        503,
-      );
-    }
     log.error({ err }, 'Verify proxy error');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Verification failed' }, 500);
   }
@@ -207,18 +194,15 @@ export async function refreshHandler(c: Context): Promise<Response> {
   }
 
   try {
-    const response = await getUpstreamCircuit('refresh-token').fetch(
-      upstreamUrl('/refresh-token'),
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          refreshToken: parsed.data.refreshToken,
-          clientId: clientIdForPlatform(parsed.data.platform),
-        }),
-        signal: AbortSignal.timeout(15_000),
-      },
-    );
+    const response = await upstreamFetch(upstreamUrl('/refresh-token'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        refreshToken: parsed.data.refreshToken,
+        clientId: clientIdForPlatform(parsed.data.platform),
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
 
     if (!response.ok) {
       // 400/401/403 → refresh token is genuinely invalid/expired; the client
@@ -257,12 +241,6 @@ export async function refreshHandler(c: Context): Promise<Response> {
     }
     return c.json(validated.data);
   } catch (err) {
-    if (err instanceof CircuitOpenError) {
-      return c.json(
-        { code: 'SERVICE_UNAVAILABLE', message: 'Service temporarily unavailable' },
-        503,
-      );
-    }
     log.error({ err }, 'Refresh proxy error');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Token refresh failed' }, 500);
   }

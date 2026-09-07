@@ -1,72 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-
-const { dbMock, state, deleteSpy, transactionSpy } = vi.hoisted(() => {
-  const s: {
-    findFirstResult: unknown;
-    insertCalls: unknown[];
-    updateSetArgs: unknown[];
-    /** Rows the next `.returning()` resolves with (CAS win/lose). */
-    returningRows: unknown[];
-  } = { findFirstResult: null, insertCalls: [], updateSetArgs: [], returningRows: [] };
-  const m: Record<string, ReturnType<typeof vi.fn>> = {};
-  m['insert'] = vi.fn(() => m);
-  m['values'] = vi.fn((v: unknown) => {
-    s.insertCalls.push(v);
-    return m;
-  });
-  m['update'] = vi.fn(() => m);
-  const deleteSpy = vi.fn(() => m);
-  m['delete'] = deleteSpy;
-  // NS-09: revokeAllRefreshTokensForUser now wraps the refresh-row
-  // revoke AND the token_version bump in one transaction. The tx handle
-  // is the same chainable `m`, so both `.set()` calls land in
-  // `state.updateSetArgs` just like a non-transactional update.
-  const transactionSpy = vi.fn(async (cb: (tx: typeof m) => Promise<void>) => {
-    await cb(m);
-  });
-  m['transaction'] = transactionSpy;
-  m['set'] = vi.fn((v: unknown) => {
-    s.updateSetArgs.push(v);
-    return m;
-  });
-  // Drizzle's update chain is awaitable directly (`await ...where()`)
-  // AND chainable into `.returning()` (used by tryRevokeIfLive's
-  // compare-and-set). Mirror both shapes: a thenable that resolves
-  // `[]`, carrying a `returning` that resolves `state.returningRows`.
-  m['where'] = vi.fn(() => ({
-    returning: vi.fn(async () => s.returningRows),
-    then: (
-      onFulfilled?: (value: unknown[]) => unknown,
-      onRejected?: (reason: unknown) => unknown,
-    ) => Promise.resolve<unknown[]>([]).then(onFulfilled, onRejected),
-  }));
-  const query = {
-    refreshTokens: {
-      findFirst: vi.fn(async () => s.findFirstResult),
-    },
-  };
-  return { dbMock: { ...m, query }, state: s, deleteSpy, transactionSpy };
-});
-
-vi.mock('../../db/client.js', () => ({ db: dbMock }));
-vi.mock('../../db/schema.js', () => ({
-  refreshTokens: {
-    jti: 'jti',
-    userId: 'userId',
-    tokenHash: 'tokenHash',
-    expiresAt: 'expiresAt',
-    revokedAt: 'revokedAt',
-    replacedByJti: 'replacedByJti',
-    lastUsedAt: 'lastUsedAt',
-  },
-  // NS-09: revokeAllRefreshTokensForUser also bumps users.token_version.
-  users: {
-    id: 'id',
-    tokenVersion: 'tokenVersion',
-    updatedAt: 'updatedAt',
-  },
-}));
-
+import { describe, it, expect, beforeEach } from 'vitest';
+import { db, __resetDbForTests } from '../../db/client.js';
+import type { UserDoc } from '../../db/types.js';
 import {
   hashRefreshToken,
   recordRefreshToken,
@@ -78,18 +12,32 @@ import {
   purgeDeadRefreshTokens,
 } from '../refresh-tokens.js';
 
+/**
+ * Refresh-token repository (ADR 013), against the real in-memory
+ * document store — the live-row predicate, the rotation CAS, the
+ * COR-11 lineage preservation, and the retention sweep all run for
+ * real.
+ */
 beforeEach(() => {
-  state.findFirstResult = null;
-  state.insertCalls = [];
-  state.updateSetArgs = [];
-  state.returningRows = [];
-  for (const [k, v] of Object.entries(dbMock)) {
-    if (k === 'query') continue;
-    if (typeof v === 'function' && 'mockClear' in v) {
-      (v as unknown as { mockClear: () => void }).mockClear();
-    }
-  }
+  __resetDbForTests();
 });
+
+const FUTURE = new Date(Date.now() + 60_000);
+
+async function seedUser(id: string): Promise<UserDoc> {
+  const now = new Date();
+  const doc: UserDoc = {
+    id,
+    ctxUserId: null,
+    email: `${id}@test.local`,
+    tokenVersion: 0,
+    homeCurrency: 'USD',
+    createdAt: now,
+    updatedAt: now,
+  };
+  await db.collection('users').insertOne(doc);
+  return doc;
+}
 
 describe('hashRefreshToken', () => {
   it('is deterministic + 64-char hex', () => {
@@ -102,70 +50,91 @@ describe('hashRefreshToken', () => {
 
 describe('recordRefreshToken', () => {
   it('inserts the hash, never the plaintext token', async () => {
-    const expiresAt = new Date(Date.now() + 60_000);
     await recordRefreshToken({
       jti: 'jti-1',
       userId: 'user-uuid',
       token: 'super-secret-token',
-      expiresAt,
+      expiresAt: FUTURE,
     });
-    expect(state.insertCalls).toHaveLength(1);
-    const values = state.insertCalls[0] as Record<string, unknown>;
-    expect(values['jti']).toBe('jti-1');
-    expect(values['userId']).toBe('user-uuid');
-    expect(values['tokenHash']).toBe(hashRefreshToken('super-secret-token'));
-    expect(values['tokenHash']).not.toBe('super-secret-token');
+    const row = await db.collection('refresh_tokens').findOne({ jti: 'jti-1' });
+    expect(row).not.toBeNull();
+    expect(row?.userId).toBe('user-uuid');
+    expect(row?.tokenHash).toBe(hashRefreshToken('super-secret-token'));
+    expect(row?.tokenHash).not.toBe('super-secret-token');
+    expect(row?.revokedAt).toBeNull();
+    expect(row?.replacedByJti).toBeNull();
   });
 });
 
 describe('findLiveRefreshToken', () => {
-  it('returns null when no row matches the jti + live predicates', async () => {
-    state.findFirstResult = undefined;
-    const r = await findLiveRefreshToken({ jti: 'missing', token: 'anything' });
-    expect(r).toBeNull();
+  it('returns null when no row matches the jti', async () => {
+    expect(await findLiveRefreshToken({ jti: 'missing', token: 'anything' })).toBeNull();
   });
 
   it('returns null when the row exists but the hash does not match', async () => {
-    state.findFirstResult = {
-      jti: 'jti-1',
-      tokenHash: hashRefreshToken('real-token'),
-    };
-    const r = await findLiveRefreshToken({ jti: 'jti-1', token: 'different-token' });
-    expect(r).toBeNull();
-  });
-
-  it('returns the row when jti + hash match', async () => {
-    const row = {
+    await recordRefreshToken({
       jti: 'jti-1',
       userId: 'u-1',
-      tokenHash: hashRefreshToken('real-token'),
-    };
-    state.findFirstResult = row;
+      token: 'real-token',
+      expiresAt: FUTURE,
+    });
+    expect(await findLiveRefreshToken({ jti: 'jti-1', token: 'different-token' })).toBeNull();
+  });
+
+  it('returns null for a revoked or expired row (live predicate)', async () => {
+    await recordRefreshToken({
+      jti: 'jti-revoked',
+      userId: 'u-1',
+      token: 'tok-r',
+      expiresAt: FUTURE,
+    });
+    await revokeRefreshToken({ jti: 'jti-revoked' });
+    expect(await findLiveRefreshToken({ jti: 'jti-revoked', token: 'tok-r' })).toBeNull();
+
+    await recordRefreshToken({
+      jti: 'jti-expired',
+      userId: 'u-1',
+      token: 'tok-e',
+      expiresAt: new Date(Date.now() - 1000),
+    });
+    expect(await findLiveRefreshToken({ jti: 'jti-expired', token: 'tok-e' })).toBeNull();
+  });
+
+  it('returns the row when jti + hash match and the row is live', async () => {
+    await recordRefreshToken({
+      jti: 'jti-1',
+      userId: 'u-1',
+      token: 'real-token',
+      expiresAt: FUTURE,
+    });
     const r = await findLiveRefreshToken({ jti: 'jti-1', token: 'real-token' });
-    expect(r).toBe(row);
+    expect(r?.jti).toBe('jti-1');
+    expect(r?.userId).toBe('u-1');
   });
 });
 
 describe('revokeRefreshToken', () => {
   it('sets revokedAt, replacedByJti, and lastUsedAt', async () => {
+    await recordRefreshToken({ jti: 'jti-1', userId: 'u-1', token: 't', expiresAt: FUTURE });
     await revokeRefreshToken({ jti: 'jti-1', replacedByJti: 'jti-2' });
-    expect(state.updateSetArgs).toHaveLength(1);
-    const s = state.updateSetArgs[0] as Record<string, unknown>;
-    expect(s['revokedAt']).toBeInstanceOf(Date);
-    expect(s['replacedByJti']).toBe('jti-2');
-    expect(s['lastUsedAt']).toBeInstanceOf(Date);
+    const row = await db.collection('refresh_tokens').findOne({ jti: 'jti-1' });
+    expect(row?.revokedAt).toBeInstanceOf(Date);
+    expect(row?.replacedByJti).toBe('jti-2');
+    expect(row?.lastUsedAt).toBeInstanceOf(Date);
   });
 
   it('COR-11: does NOT write replacedByJti when omitted — preserves rotation-chain lineage', async () => {
-    await revokeRefreshToken({ jti: 'jti-1' });
-    const s = state.updateSetArgs[0] as Record<string, unknown>;
+    // An already-rotated row carrying its successor link.
+    await recordRefreshToken({ jti: 'jti-1', userId: 'u-1', token: 't', expiresAt: FUTURE });
+    await revokeRefreshToken({ jti: 'jti-1', replacedByJti: 'jti-successor' });
     // Logout revokes by jti with no successor. The update must leave
-    // `replaced_by_jti` untouched, or an already-rotated row's link is
-    // clobbered and the audit chain dead-ends at the logout (COR-11).
-    expect('replacedByJti' in s).toBe(false);
+    // `replacedByJti` untouched, or the audit chain dead-ends (COR-11).
+    await revokeRefreshToken({ jti: 'jti-1' });
+    const row = await db.collection('refresh_tokens').findOne({ jti: 'jti-1' });
+    expect(row?.replacedByJti).toBe('jti-successor');
     // Still a genuine revoke: the terminal marker + last-used stamp.
-    expect(s['revokedAt']).toBeInstanceOf(Date);
-    expect(s['lastUsedAt']).toBeInstanceOf(Date);
+    expect(row?.revokedAt).toBeInstanceOf(Date);
+    expect(row?.lastUsedAt).toBeInstanceOf(Date);
   });
 });
 
@@ -174,93 +143,132 @@ describe('findRefreshTokenRecord', () => {
     // findLiveRefreshToken filters revoked rows out; the reuse
     // detector needs the raw record to distinguish "revoked → theft
     // signal" from "never existed → forged".
-    const revokedRow = {
+    await recordRefreshToken({
       jti: 'jti-1',
       userId: 'user-uuid',
-      tokenHash: hashRefreshToken('rotated-out-token'),
-      revokedAt: new Date(),
-      replacedByJti: 'jti-2',
-    };
-    state.findFirstResult = revokedRow;
+      token: 'rotated-out-token',
+      expiresAt: FUTURE,
+    });
+    await revokeRefreshToken({ jti: 'jti-1', replacedByJti: 'jti-2' });
     const r = await findRefreshTokenRecord('jti-1');
-    expect(r).toBe(revokedRow);
+    expect(r?.revokedAt).toBeInstanceOf(Date);
+    expect(r?.replacedByJti).toBe('jti-2');
   });
 
   it('returns null when the jti never existed (forged / cleaned-up token)', async () => {
-    state.findFirstResult = undefined;
-    const r = await findRefreshTokenRecord('never-issued');
-    expect(r).toBeNull();
+    expect(await findRefreshTokenRecord('never-issued')).toBeNull();
   });
 });
 
 describe('tryRevokeIfLive', () => {
   it('CAS win: returns true when the conditional update revoked the row, stamping successor metadata', async () => {
-    // The UPDATE ... WHERE revoked_at IS NULL ... RETURNING hit the
-    // (still-live) row — this caller owns the rotation.
-    state.returningRows = [{ jti: 'jti-old' }];
+    await recordRefreshToken({ jti: 'jti-old', userId: 'u-1', token: 't', expiresAt: FUTURE });
     const won = await tryRevokeIfLive({ jti: 'jti-old', replacedByJti: 'jti-new' });
     expect(won).toBe(true);
-    expect(state.updateSetArgs).toHaveLength(1);
-    const set = state.updateSetArgs[0] as Record<string, unknown>;
-    expect(set['revokedAt']).toBeInstanceOf(Date);
-    expect(set['replacedByJti']).toBe('jti-new');
-    expect(set['lastUsedAt']).toBeInstanceOf(Date);
+    const row = await db.collection('refresh_tokens').findOne({ jti: 'jti-old' });
+    expect(row?.revokedAt).toBeInstanceOf(Date);
+    expect(row?.replacedByJti).toBe('jti-new');
+    expect(row?.lastUsedAt).toBeInstanceOf(Date);
   });
 
   it('CAS lose: returns false when a concurrent rotation already revoked the row', async () => {
-    // RETURNING came back empty — `revoked_at IS NULL` no longer
-    // matched, i.e. another request won the race first.
-    state.returningRows = [];
-    const won = await tryRevokeIfLive({ jti: 'jti-old', replacedByJti: 'jti-new' });
-    expect(won).toBe(false);
+    await recordRefreshToken({ jti: 'jti-old', userId: 'u-1', token: 't', expiresAt: FUTURE });
+    expect(await tryRevokeIfLive({ jti: 'jti-old', replacedByJti: 'jti-a' })).toBe(true);
+    // The `revokedAt: null` predicate no longer matches — the second
+    // rotation lost the race and must not clobber the first's link.
+    expect(await tryRevokeIfLive({ jti: 'jti-old', replacedByJti: 'jti-b' })).toBe(false);
+    const row = await db.collection('refresh_tokens').findOne({ jti: 'jti-old' });
+    expect(row?.replacedByJti).toBe('jti-a');
   });
 
   it('allows replacedByJti to be omitted (null)', async () => {
-    state.returningRows = [{ jti: 'jti-old' }];
+    await recordRefreshToken({ jti: 'jti-old', userId: 'u-1', token: 't', expiresAt: FUTURE });
     const won = await tryRevokeIfLive({ jti: 'jti-old' });
     expect(won).toBe(true);
-    const set = state.updateSetArgs[0] as Record<string, unknown>;
-    expect(set['replacedByJti']).toBeNull();
+    const row = await db.collection('refresh_tokens').findOne({ jti: 'jti-old' });
+    expect(row?.replacedByJti).toBeNull();
   });
 
   it('honours an explicit `now` for the revocation timestamp', async () => {
     const now = new Date('2026-06-11T00:00:00Z');
-    state.returningRows = [{ jti: 'jti-old' }];
+    await recordRefreshToken({ jti: 'jti-old', userId: 'u-1', token: 't', expiresAt: FUTURE });
     await tryRevokeIfLive({ jti: 'jti-old', now });
-    const set = state.updateSetArgs[0] as Record<string, unknown>;
-    expect(set['revokedAt']).toBe(now);
-    expect(set['lastUsedAt']).toBe(now);
+    const row = await db.collection('refresh_tokens').findOne({ jti: 'jti-old' });
+    expect(row?.revokedAt).toEqual(now);
+    expect(row?.lastUsedAt).toEqual(now);
   });
 });
 
 describe('revokeAllRefreshTokensForUser', () => {
-  it('revokes the live refresh rows AND bumps the user token_version (NS-09)', async () => {
+  it('revokes every live refresh row AND bumps the user tokenVersion (NS-09)', async () => {
+    await seedUser('user-uuid');
+    await recordRefreshToken({ jti: 'jti-1', userId: 'user-uuid', token: 'a', expiresAt: FUTURE });
+    await recordRefreshToken({ jti: 'jti-2', userId: 'user-uuid', token: 'b', expiresAt: FUTURE });
+    // Another user's session must survive.
+    await recordRefreshToken({ jti: 'jti-x', userId: 'other-user', token: 'c', expiresAt: FUTURE });
+
     await revokeAllRefreshTokensForUser('user-uuid');
-    // Two updates in one transaction: (1) revoke the live refresh rows,
-    // (2) NS-09 — bump token_version so the user's live access tokens die
-    // alongside their refresh tokens.
-    expect(transactionSpy).toHaveBeenCalledOnce();
-    expect(state.updateSetArgs).toHaveLength(2);
-    const refreshSet = state.updateSetArgs[0] as Record<string, unknown>;
-    expect(refreshSet['revokedAt']).toBeInstanceOf(Date);
-    const userSet = state.updateSetArgs[1] as Record<string, unknown>;
-    // The token_version bump is present (an atomic `+ 1` SQL expression,
-    // not a plain value) — this is the access-token revocation half.
-    expect(userSet['tokenVersion']).toBeDefined();
+
+    const mine = await db.collection('refresh_tokens').findMany({ userId: 'user-uuid' });
+    expect(mine.every((r) => r.revokedAt instanceof Date)).toBe(true);
+    const other = await db.collection('refresh_tokens').findOne({ jti: 'jti-x' });
+    expect(other?.revokedAt).toBeNull();
+    // NS-09: the access-token revocation half — the per-user counter
+    // moved, so live access tokens die alongside the refresh tokens.
+    const user = await db.collection('users').findOne({ id: 'user-uuid' });
+    expect(user?.tokenVersion).toBe(1);
   });
 });
 
 describe('purgeDeadRefreshTokens', () => {
-  it('issues a delete and returns the count of reaped rows', async () => {
-    // RETURNING from the DELETE — two dead rows reclaimed.
-    state.returningRows = [{ jti: 'jti-dead-1' }, { jti: 'jti-dead-2' }];
-    const n = await purgeDeadRefreshTokens({ retentionMs: 30 * 24 * 60 * 60 * 1000 });
-    expect(deleteSpy).toHaveBeenCalled();
+  const NOW = new Date('2026-07-01T00:00:00Z');
+  const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
+  it('reaps long-expired and long-revoked rows, returning the count', async () => {
+    // Dead row 1: expired past the grace.
+    await recordRefreshToken({
+      jti: 'jti-dead-1',
+      userId: 'u-1',
+      token: 'a',
+      expiresAt: new Date(NOW.getTime() - RETENTION_MS - 1000),
+    });
+    // Dead row 2: revoked past the grace (expiry still ahead).
+    await recordRefreshToken({
+      jti: 'jti-dead-2',
+      userId: 'u-1',
+      token: 'b',
+      expiresAt: new Date(NOW.getTime() + 60_000),
+    });
+    await revokeRefreshToken({
+      jti: 'jti-dead-2',
+      now: new Date(NOW.getTime() - RETENTION_MS - 1000),
+    });
+    // Live row: neither expired nor revoked — never touched.
+    await recordRefreshToken({
+      jti: 'jti-live',
+      userId: 'u-1',
+      token: 'c',
+      expiresAt: new Date(NOW.getTime() + 60_000),
+    });
+    // Recently-revoked row inside the grace: kept so a racing reuse
+    // attempt still trips the family-wide revoke (A2-1608).
+    await recordRefreshToken({
+      jti: 'jti-recent',
+      userId: 'u-1',
+      token: 'd',
+      expiresAt: new Date(NOW.getTime() + 60_000),
+    });
+    await revokeRefreshToken({ jti: 'jti-recent', now: new Date(NOW.getTime() - 1000) });
+
+    const n = await purgeDeadRefreshTokens({ retentionMs: RETENTION_MS, now: NOW });
     expect(n).toBe(2);
+    expect(await db.collection('refresh_tokens').findOne({ jti: 'jti-dead-1' })).toBeNull();
+    expect(await db.collection('refresh_tokens').findOne({ jti: 'jti-dead-2' })).toBeNull();
+    expect(await db.collection('refresh_tokens').findOne({ jti: 'jti-live' })).not.toBeNull();
+    expect(await db.collection('refresh_tokens').findOne({ jti: 'jti-recent' })).not.toBeNull();
   });
 
   it('returns 0 when no dead rows were past the retention grace', async () => {
-    state.returningRows = [];
     const n = await purgeDeadRefreshTokens({ retentionMs: 1000 });
     expect(n).toBe(0);
   });

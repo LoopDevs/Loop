@@ -21,9 +21,7 @@
  * existing test suite keep importing from the historical path.
  */
 import type { Context } from 'hono';
-import { and, eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { merchantCashbackConfigs } from '../db/schema.js';
 import { logger } from '../logger.js';
 import { getMerchants } from './sync.js';
 
@@ -52,13 +50,12 @@ export async function merchantsCashbackRatesHandler(c: Context): Promise<Respons
   // don't pin the degraded answer for long.
   let rows: Array<{ merchantId: string; userCashbackPct: string }>;
   try {
-    rows = await db
-      .select({
-        merchantId: merchantCashbackConfigs.merchantId,
-        userCashbackPct: merchantCashbackConfigs.userCashbackPct,
-      })
-      .from(merchantCashbackConfigs)
-      .where(eq(merchantCashbackConfigs.active, true));
+    const configs = await db.collection('merchant_cashback_configs').findMany({ active: true });
+    // Wire shape stays the historical numeric(5,2) string.
+    rows = configs.map((c2) => ({
+      merchantId: c2.merchantId,
+      userCashbackPct: c2.userCashbackPct.toFixed(2),
+    }));
   } catch (err) {
     log.warn({ err }, 'merchant-cashback-rates DB read failed — serving empty');
     c.header('Cache-Control', 'public, max-age=60');
@@ -121,12 +118,10 @@ export async function merchantCashbackRateHandler(c: Context): Promise<Response>
   // badge rather than showing a 500 on a public, CDN-cached path.
   let row: { userCashbackPct: string } | undefined;
   try {
-    row = await db.query.merchantCashbackConfigs.findFirst({
-      where: and(
-        eq(merchantCashbackConfigs.merchantId, id),
-        eq(merchantCashbackConfigs.active, true),
-      ),
-    });
+    const config = await db
+      .collection('merchant_cashback_configs')
+      .findOne({ merchantId: id, active: true });
+    row = config !== null ? { userCashbackPct: config.userCashbackPct.toFixed(2) } : undefined;
   } catch (err) {
     log.warn({ err, merchantId: id }, 'merchant-cashback-rate DB read failed — serving null');
     c.header('Cache-Control', 'public, max-age=60');

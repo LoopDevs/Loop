@@ -83,7 +83,7 @@ const applyBinaryWatchdogAlertMock = vi.hoisted(() =>
     }) => Promise<boolean>
   >(async () => true),
 );
-vi.mock('../credits/vaults/vault-watchdog-alert.js', () => ({
+vi.mock('../discord/watchdog-alert.js', () => ({
   applyBinaryWatchdogAlert: applyBinaryWatchdogAlertMock,
 }));
 
@@ -106,16 +106,22 @@ vi.mock('../middleware/fleet-size.js', () => ({
   currentFleetSizeSource: () => fleetSizeState.source,
 }));
 
-vi.mock('../upstream.js', () => ({
+vi.mock('../upstream.js', async (importOriginal) => ({
+  ...((await importOriginal()) as Record<string, unknown>),
   upstreamUrl: (path: string) => `https://upstream.example.com${path}`,
 }));
 
+// `probeDb` does a cheap `db.collection('users').count({})`. Stub at
+// that shape so `dbState.shouldFail` can drive the unreachable branch
+// without standing up a store.
 vi.mock('../db/client.js', () => ({
   db: {
-    execute: async () => {
-      if (dbState.shouldFail) throw new Error('db down');
-      return [];
-    },
+    collection: () => ({
+      count: async () => {
+        if (dbState.shouldFail) throw new Error('db down');
+        return 0;
+      },
+    }),
   },
 }));
 
@@ -192,8 +198,7 @@ async function driveHealthTransitionToDegraded(): Promise<void> {
 }
 
 describe('healthHandler', () => {
-  it('200 healthy when everything is up and the CTX breaker is closed', async () => {
-    ctxApiHealthMock.mockReturnValue({ configured: true, state: 'closed' });
+  it('200 healthy when everything is up', async () => {
     const { ctx } = makeCtx();
     const res = await healthHandler(ctx);
     expect(res.status).toBe(200);
@@ -258,55 +263,27 @@ describe('healthHandler', () => {
     });
   });
 
-  // CF2-01 (2026-06-30 cold audit): the CTX-upstream circuit-breaker
-  // state was previously invisible to /health entirely. These pin the
-  // exposure and its SOFT (not critical) classification — a CTX
-  // outage shouldn't cycle this backend instance, since the breaker
-  // recovers on its own schedule and cycling the machine wouldn't fix
-  // an upstream CTX outage.
+  // `getCtxApiHealth()` reports constants now that the CTX-upstream
+  // breaker it used to read is gone, so `ctxApiDown` can no longer
+  // become true. What's left to pin is that the fields the shared
+  // `TreasurySnapshot` type and the admin UI read are still present
+  // and still report healthy. Live CTX reachability is covered by the
+  // `upstreamReachable` probe cases elsewhere in this file.
   describe('CTX upstream exposure', () => {
-    it('surfaces the credential + breaker state in the response body', async () => {
-      ctxApiHealthMock.mockReturnValue({ configured: true, state: 'half_open' });
+    it('surfaces the credential state in the response body', async () => {
       const { ctx } = makeCtx();
       const res = await healthHandler(ctx);
       const body = (await res.json()) as { ctxApi: { configured: boolean; state: string } };
-      expect(body.ctxApi).toEqual({ configured: true, state: 'half_open' });
+      expect(body.ctxApi).toEqual({ configured: true, state: 'closed' });
     });
 
-    it('flags ctxApiDown as a SOFT degraded reason (200, not 503) when the breaker is OPEN', async () => {
-      ctxApiHealthMock.mockReturnValue({ configured: true, state: 'open' });
+    it('never flags ctxApiDown', async () => {
       const { ctx } = makeCtx();
       const res = await healthHandler(ctx);
-      // Soft-degraded, not critical — does NOT return 503 / cycle the machine.
       expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        status: string;
-        ctxApiDown: boolean;
-        softDegraded: boolean;
-        criticalDegraded: boolean;
-        softDegradedReasons: string[];
-      };
-      expect(body.status).toBe('degraded');
-      expect(body.ctxApiDown).toBe(true);
-      expect(body.softDegraded).toBe(true);
-      expect(body.criticalDegraded).toBe(false);
-      expect(body.softDegradedReasons).toContain('ctx_api_down');
-    });
-
-    it('does not flag down while the breaker is half-open (probe in flight)', async () => {
-      ctxApiHealthMock.mockReturnValue({ configured: true, state: 'half_open' });
-      const { ctx } = makeCtx();
-      const res = await healthHandler(ctx);
-      const body = (await res.json()) as { ctxApiDown: boolean };
+      const body = (await res.json()) as { ctxApiDown: boolean; softDegradedReasons: string[] };
       expect(body.ctxApiDown).toBe(false);
-    });
-
-    it('unconfigured credentials do not falsely report down', async () => {
-      ctxApiHealthMock.mockReturnValue({ configured: false, state: 'closed' });
-      const { ctx } = makeCtx();
-      const res = await healthHandler(ctx);
-      const body = (await res.json()) as { ctxApiDown: boolean };
-      expect(body.ctxApiDown).toBe(false);
+      expect(body.softDegradedReasons).not.toContain('ctx_api_down');
     });
   });
 

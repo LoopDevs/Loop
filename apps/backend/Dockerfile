@@ -56,14 +56,7 @@ COPY apps/backend/package.json apps/backend/
 # Install production deps only
 RUN npm ci --omit=dev --ignore-scripts
 
-# Copy bundled output. A4-023: tsup `onSuccess` already copies
-# `src/db/migrations` into `dist/migrations`, so the production
-# image gets `_journal.json` + SQL files via this single COPY.
-# Drizzle's migrator resolves `migrationsFolder` relative to the
-# running script's directory (see db/client.ts `runMigrations`),
-# so `dist/migrations` lands where the Fly `release_command`
-# (`node apps/backend/dist/migrate-cli.js`) and boot-time
-# `runMigrations()` look.
+# Copy bundled output.
 COPY --from=builder /app/apps/backend/dist apps/backend/dist
 
 # GeoLite2-Country DB for /api/public/geo (ADR 033). Empty dir when not provisioned at

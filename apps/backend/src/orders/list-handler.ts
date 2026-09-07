@@ -44,8 +44,7 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
 import { logger } from '../logger.js';
-import { getUpstreamCircuit, CircuitOpenError } from '../circuit-breaker.js';
-import { upstreamUrl } from '../upstream.js';
+import { upstreamUrl, upstreamFetch } from '../upstream.js';
 import { scrubUpstreamBody } from '../upstream-body-scrub.js';
 import { notifyCtxSchemaDrift } from '../discord.js';
 import { mapStatus, summariseZodIssues, upstreamHeaders } from './handler-shared.js';
@@ -211,7 +210,7 @@ async function fetchUpstreamOrders(
     };
   }
 
-  const response = await getUpstreamCircuit('gift-cards').fetch(url.toString(), {
+  const response = await upstreamFetch(url.toString(), {
     headers,
     signal: AbortSignal.timeout(15_000),
   });
@@ -378,12 +377,6 @@ export async function listOrdersHandler(c: Context): Promise<Response> {
       },
     });
   } catch (err) {
-    if (err instanceof CircuitOpenError) {
-      return c.json(
-        { code: 'SERVICE_UNAVAILABLE', message: 'Service temporarily unavailable' },
-        503,
-      );
-    }
     log.error({ err }, 'Order list proxy error');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to fetch orders' }, 500);
   }

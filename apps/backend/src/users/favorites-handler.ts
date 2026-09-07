@@ -21,10 +21,8 @@
  * our catalog is a guaranteed UX dead-end and would let attackers
  * pin garbage strings.
  */
-import { createHash } from 'node:crypto';
 import type { Context } from 'hono';
 import { z } from 'zod';
-import { and, desc, eq, sql } from 'drizzle-orm';
 import type {
   AddFavoriteResult,
   FavoriteMerchantView,
@@ -32,7 +30,7 @@ import type {
   RemoveFavoriteResult,
 } from '@loop/shared';
 import { db } from '../db/client.js';
-import { userFavoriteMerchants } from '../db/schema.js';
+import { isUniqueViolation } from '../db/errors.js';
 import { getMerchants } from '../merchants/sync.js';
 import { logger } from '../logger.js';
 import { resolveCallingUser } from './handler.js';
@@ -40,29 +38,6 @@ import { resolveCallingUser } from './handler.js';
 const log = logger.child({ handler: 'user-favorites' });
 
 const MAX_FAVORITES_PER_USER = 50;
-
-/**
- * FT-11: per-user advisory-lock key for the add-favourite critical
- * section. sha256(namespaced userId) → signed int64 — the same
- * derivation `orders/redeem.ts` (`redeemFenceLockKey`) and
- * `admin/idempotency.ts` (`idempotencyLockKey`) use for their
- * `pg_advisory_*_lock` keys. Namespaced with a `loop:favorites:` prefix
- * so a favourite lock can never collide with another subsystem's
- * per-entity lock on the same raw id.
- */
-function favoritesLockKey(userId: string): bigint {
-  const digest = createHash('sha256').update(`loop:favorites:${userId}`).digest();
-  const raw =
-    (BigInt(digest[0]!) << 56n) |
-    (BigInt(digest[1]!) << 48n) |
-    (BigInt(digest[2]!) << 40n) |
-    (BigInt(digest[3]!) << 32n) |
-    (BigInt(digest[4]!) << 24n) |
-    (BigInt(digest[5]!) << 16n) |
-    (BigInt(digest[6]!) << 8n) |
-    BigInt(digest[7]!);
-  return BigInt.asIntN(64, raw);
-}
 
 // `text` columns make merchant_id arbitrary length; cap it at the
 // boundary so a request with a 1MB id can't reach the DB at all. The
@@ -98,13 +73,8 @@ export async function listFavoritesHandler(c: Context): Promise<Response> {
   }
 
   const rows = await db
-    .select({
-      merchantId: userFavoriteMerchants.merchantId,
-      createdAt: userFavoriteMerchants.createdAt,
-    })
-    .from(userFavoriteMerchants)
-    .where(eq(userFavoriteMerchants.userId, user.id))
-    .orderBy(desc(userFavoriteMerchants.createdAt));
+    .collection('user_favorite_merchants')
+    .findMany({ userId: user.id }, { sort: [['createdAt', 'desc']] });
 
   const { merchantsById } = getMerchants();
   const favorites: FavoriteMerchantView[] = rows.map((row) => ({
@@ -155,71 +125,43 @@ export async function addFavoriteHandler(c: Context): Promise<Response> {
     );
   }
 
-  // Cap-check + insert in a txn so two concurrent adds at the
-  // boundary can't race past the cap.
-  const result = await db.transaction(async (tx) => {
-    // FT-11: serialise concurrent adds for THIS user so the cap-check
-    // and the insert are one atomic critical section. A plain
-    // transaction under READ COMMITTED does NOT close the race: two
-    // concurrent adds of DIFFERENT merchants each snapshot count=49,
-    // each pass the `< MAX_FAVORITES_PER_USER` check, and each insert —
-    // landing 51 rows. The (user_id, merchant_id) PK only stops a
-    // duplicate of the SAME merchant, and on that race the loser's
-    // INSERT raises a 23505 that aborts the txn into a 500 rather than
-    // the idempotent `added:false` replay this handler promises. A
-    // transaction-scoped advisory lock keyed on the user (auto-released
-    // at COMMIT/ROLLBACK) makes the read-then-write serial per user
-    // without touching other users — same `pg_advisory_xact_lock` idiom
-    // as `admin/idempotency.ts`'s `withIdempotencyGuard`.
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(${favoritesLockKey(user.id)})`);
-
-    const existing = await tx
-      .select({
-        merchantId: userFavoriteMerchants.merchantId,
-        createdAt: userFavoriteMerchants.createdAt,
-      })
-      .from(userFavoriteMerchants)
-      .where(
-        and(
-          eq(userFavoriteMerchants.userId, user.id),
-          eq(userFavoriteMerchants.merchantId, parsed.data.merchantId),
-        ),
-      );
-    if (existing[0] !== undefined) {
-      return { kind: 'replay' as const, row: existing[0] };
-    }
-
-    const countRows = await tx
-      .select({ count: sql<string>`count(*)::text` })
-      .from(userFavoriteMerchants)
-      .where(eq(userFavoriteMerchants.userId, user.id));
-    const count = Number(countRows[0]?.count ?? '0');
-    if (count >= MAX_FAVORITES_PER_USER) {
-      return { kind: 'cap_exceeded' as const, count };
-    }
-
-    const inserted = await tx
-      .insert(userFavoriteMerchants)
-      .values({ userId: user.id, merchantId: parsed.data.merchantId })
-      .returning({
-        merchantId: userFavoriteMerchants.merchantId,
-        createdAt: userFavoriteMerchants.createdAt,
-      });
-    if (inserted[0] === undefined) {
-      throw new Error('insert returned no row');
-    }
-    return { kind: 'added' as const, row: inserted[0] };
+  // Cap-check + insert. Node's single-threaded execution makes the
+  // read-then-insert effectively serial per process; the
+  // (userId, merchantId) unique spec still backstops a duplicate of
+  // the same merchant, replayed as `added: false`.
+  const favorites = db.collection('user_favorite_merchants');
+  const existing = await favorites.findOne({
+    userId: user.id,
+    merchantId: parsed.data.merchantId,
   });
-
-  if (result.kind === 'cap_exceeded') {
-    return c.json(
-      {
-        code: 'FAVORITES_LIMIT_EXCEEDED',
-        message: `You can favourite at most ${MAX_FAVORITES_PER_USER} merchants. Remove one to add another.`,
-      },
-      409,
-    );
+  let result: { kind: 'replay' | 'added'; row: { merchantId: string; createdAt: Date } };
+  if (existing !== null) {
+    result = { kind: 'replay', row: existing };
+  } else {
+    const count = await favorites.count({ userId: user.id });
+    if (count >= MAX_FAVORITES_PER_USER) {
+      return c.json(
+        {
+          code: 'FAVORITES_LIMIT_EXCEEDED',
+          message: `You can favourite at most ${MAX_FAVORITES_PER_USER} merchants. Remove one to add another.`,
+        },
+        409,
+      );
+    }
+    const row = { userId: user.id, merchantId: parsed.data.merchantId, createdAt: new Date() };
+    try {
+      await favorites.insertOne(row);
+      result = { kind: 'added', row };
+    } catch (err) {
+      if (!isUniqueViolation(err)) throw err;
+      const raced = await favorites.findOne({
+        userId: user.id,
+        merchantId: parsed.data.merchantId,
+      });
+      result = { kind: 'replay', row: raced ?? row };
+    }
   }
+
   return c.json<AddFavoriteResult>({
     merchantId: result.row.merchantId,
     createdAt: result.row.createdAt.toISOString(),
@@ -250,17 +192,11 @@ export async function removeFavoriteHandler(c: Context): Promise<Response> {
   }
 
   const deleted = await db
-    .delete(userFavoriteMerchants)
-    .where(
-      and(
-        eq(userFavoriteMerchants.userId, user.id),
-        eq(userFavoriteMerchants.merchantId, merchantId),
-      ),
-    )
-    .returning({ merchantId: userFavoriteMerchants.merchantId });
+    .collection('user_favorite_merchants')
+    .deleteMany({ userId: user.id, merchantId });
 
   return c.json<RemoveFavoriteResult>({
     merchantId,
-    removed: deleted[0] !== undefined,
+    removed: deleted > 0,
   });
 }

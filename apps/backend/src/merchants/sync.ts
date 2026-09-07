@@ -3,8 +3,7 @@ import { merchantSlug } from '@loop/shared';
 import type { z } from 'zod';
 import { logger } from '../logger.js';
 import { env } from '../env.js';
-import { getUpstreamCircuit } from '../circuit-breaker.js';
-import { upstreamUrl } from '../upstream.js';
+import { upstreamUrl, upstreamFetch } from '../upstream.js';
 import { notifyCtxSchemaDrift } from '../discord.js';
 import { loadCatalogSnapshot, saveCatalogSnapshot } from '../ctx/catalog-snapshots.js';
 import {
@@ -298,7 +297,7 @@ async function refreshMerchantsInternal(opts: { rethrow?: boolean } = {}): Promi
       url.searchParams.set('page', String(page));
       url.searchParams.set('perPage', String(PER_PAGE));
 
-      const response = await getUpstreamCircuit('merchants').fetch(url.toString(), {
+      const response = await upstreamFetch(url.toString(), {
         headers: authHeaders,
         signal: AbortSignal.timeout(30_000),
       });

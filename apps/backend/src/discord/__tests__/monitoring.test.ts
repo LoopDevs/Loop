@@ -54,10 +54,6 @@ vi.mock('../monitoring-ctx-schema-drift.js', () => ({
   notifyCtxSchemaDrift: vi.fn(),
   __resetCtxSchemaDriftDedupForTests: vi.fn(),
 }));
-vi.mock('../monitoring-circuit-breaker.js', () => ({
-  notifyCircuitBreaker: vi.fn(),
-  __resetCircuitNotifyDedupForTests: vi.fn(),
-}));
 
 import {
   notifyHealthChange,
@@ -224,13 +220,13 @@ describe('notifyPegBreakOnFulfillment', () => {
 });
 
 describe('notifyCtxCredentialInvalid (CF-13 / ADR 051)', () => {
-  it('emits red naming the rejected API key + breaker forced OPEN', () => {
+  it('emits red naming the rejected API key + the retryable posture', () => {
     notifyCtxCredentialInvalid();
     const e = lastEmbed();
     expect(e.title).toBe('🔴 CTX API Key Rejected (401)');
     expect(e.color).toBe(0xe74c3c);
     expect(e.description).toContain('GIFT_CARD_API_KEY');
-    expect(e.description).toContain('forced OPEN');
+    expect(e.description).toContain('retryable');
   });
 
   it('dedups within the 10-minute window', () => {

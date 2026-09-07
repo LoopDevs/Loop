@@ -1,14 +1,14 @@
 /**
- * Real-postgres integration tests for the per-email OTP attempt
- * counter (hardening B5). The unit suite mocks this repo; these pin
- * the actual fixed-window / lockout / reset SQL semantics that the
- * mock can't exercise.
+ * Integration tests for the per-email OTP attempt counter (hardening
+ * B5). The unit suite mocks this repo; these pin the actual
+ * fixed-window / lockout / reset store semantics that the mock can't
+ * exercise.
  *
- * Runs under `vitest.integration.config.ts` (LOOP_E2E_DB=1 + a real
- * `loop_test` postgres).
+ * Runs under `vitest.integration.config.ts` against the ephemeral
+ * in-memory document store — no external database required.
  */
-import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
-import { ensureMigrated, truncateAllTables } from './db-test-setup.js';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { __resetDbForTests } from '../../db/client.js';
 import {
   isEmailOtpLocked,
   registerFailedOtpAttempt,
@@ -22,12 +22,8 @@ import {
 const EMAIL = 'brute@example.com';
 const T0 = new Date('2026-07-03T00:00:00Z');
 
-beforeAll(async () => {
-  await ensureMigrated();
-});
-
-beforeEach(async () => {
-  await truncateAllTables();
+beforeEach(() => {
+  __resetDbForTests();
 });
 
 describe('registerFailedOtpAttempt / isEmailOtpLocked', () => {

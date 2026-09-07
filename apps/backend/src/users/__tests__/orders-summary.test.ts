@@ -1,40 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Context } from 'hono';
 import type { LoopAuthContext } from '../../auth/handler.js';
-
-const state = vi.hoisted(() => ({
-  rows: [] as Array<Record<string, unknown>>,
-  throwErr: null as Error | null,
-}));
-
-vi.mock('../../db/client.js', () => ({
-  db: {
-    execute: vi.fn(async () => {
-      if (state.throwErr !== null) throw state.throwErr;
-      return state.rows;
-    }),
-  },
-}));
-
-vi.mock('../../db/schema.js', () => ({
-  orders: {
-    userId: 'orders.user_id',
-    state: 'orders.state',
-    chargeMinor: 'orders.charge_minor',
-    chargeCurrency: 'orders.charge_currency',
-  },
-}));
-
-const { userState } = vi.hoisted(() => ({
-  userState: {
-    byId: null as unknown,
-  },
-}));
-
-vi.mock('../../db/users.js', () => ({
-  getUserById: vi.fn(async () => userState.byId),
-  upsertUserFromCtx: vi.fn(async () => userState.byId),
-}));
+import { randomUUID } from 'node:crypto';
 
 vi.mock('../../logger.js', () => ({
   logger: {
@@ -42,25 +9,22 @@ vi.mock('../../logger.js', () => ({
   },
 }));
 
+import { db, __resetDbForTests } from '../../db/client.js';
+import type { OrderState, UserDoc } from '../../db/types.js';
 import { getUserOrdersSummaryHandler } from '../orders-summary.js';
 
-const baseUser = {
-  id: 'user-uuid',
-  email: 'a@b.com',
-  isAdmin: false,
-  homeCurrency: 'GBP',
-  stellarAddress: null,
-  ctxUserId: null,
-  createdAt: new Date(),
-  updatedAt: new Date(),
-};
-
+/**
+ * `GET /api/users/me/orders/summary` — the compact 5-number header —
+ * against the real in-memory document store: bucket semantics
+ * (pending = unpaid|paid, failed = rejected|refunded|expired),
+ * fulfilled-only spend, and the home-currency lock.
+ */
 const LOOP_AUTH: LoopAuthContext = {
   kind: 'loop',
   userId: 'user-uuid',
   email: 'a@b.com',
   bearerToken: 'loop-jwt',
-};
+} as LoopAuthContext;
 
 function makeCtx(auth: LoopAuthContext | undefined): Context {
   const store = new Map<string, unknown>();
@@ -79,10 +43,57 @@ function makeCtx(auth: LoopAuthContext | undefined): Context {
   } as unknown as Context;
 }
 
+async function seedUser(): Promise<UserDoc> {
+  const now = new Date();
+  const doc: UserDoc = {
+    id: 'user-uuid',
+    ctxUserId: null,
+    email: 'a@b.com',
+    tokenVersion: 0,
+    homeCurrency: 'GBP',
+    createdAt: now,
+    updatedAt: now,
+  };
+  await db.collection('users').insertOne(doc);
+  return doc;
+}
+
+async function seedOrder(args: {
+  state: OrderState;
+  chargeMinor?: number;
+  chargeCurrency?: string;
+  userId?: string;
+}): Promise<void> {
+  const now = new Date();
+  await db.collection('orders').insertOne({
+    id: randomUUID(),
+    userId: args.userId ?? 'user-uuid',
+    merchantId: 'm-1',
+    faceValueMinor: args.chargeMinor ?? 1000,
+    currency: args.chargeCurrency ?? 'GBP',
+    chargeMinor: args.chargeMinor ?? 1000,
+    chargeCurrency: args.chargeCurrency ?? 'GBP',
+    userCashbackMinor: 0,
+    expectedCommissionMinor: null,
+    ctxOrderId: null,
+    ctxPaymentId: null,
+    paymentCryptoCurrency: 'XLM',
+    redeemCode: null,
+    redeemPin: null,
+    redeemUrl: null,
+    redemptionBackfillAttempts: 0,
+    redemptionBackfillLastAttemptAt: null,
+    state: args.state,
+    failureReason: null,
+    idempotencyKey: null,
+    createdAt: now,
+    fulfilledAt: null,
+    failedAt: null,
+  });
+}
+
 beforeEach(() => {
-  state.rows = [];
-  state.throwErr = null;
-  userState.byId = baseUser;
+  __resetDbForTests();
 });
 
 describe('getUserOrdersSummaryHandler', () => {
@@ -92,7 +103,7 @@ describe('getUserOrdersSummaryHandler', () => {
   });
 
   it('returns zeros when the user has no orders', async () => {
-    state.rows = [];
+    await seedUser();
     const res = await getUserOrdersSummaryHandler(makeCtx(LOOP_AUTH));
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
@@ -106,63 +117,50 @@ describe('getUserOrdersSummaryHandler', () => {
     });
   });
 
-  it('returns the 5-number summary from the aggregate row', async () => {
-    state.rows = [
-      {
-        totalOrders: 12,
-        fulfilledCount: 7,
-        pendingCount: 3,
-        failedCount: 2,
-        totalSpentMinor: 35000n,
-      },
-    ];
+  it('buckets the states and sums fulfilled spend only', async () => {
+    await seedUser();
+    // Fulfilled: counted + spend.
+    await seedOrder({ state: 'fulfilled', chargeMinor: 20_000 });
+    await seedOrder({ state: 'fulfilled', chargeMinor: 15_000 });
+    // In-flight bucket: unpaid + paid.
+    await seedOrder({ state: 'unpaid', chargeMinor: 9_999 });
+    await seedOrder({ state: 'paid', chargeMinor: 9_999 });
+    // Didn't-succeed bucket: rejected + refunded + expired.
+    await seedOrder({ state: 'rejected' });
+    await seedOrder({ state: 'refunded' });
+    await seedOrder({ state: 'expired' });
+
     const res = await getUserOrdersSummaryHandler(makeCtx(LOOP_AUTH));
     const body = (await res.json()) as Record<string, unknown>;
     expect(body).toEqual({
       currency: 'GBP',
-      totalOrders: 12,
-      fulfilledCount: 7,
-      pendingCount: 3,
-      failedCount: 2,
+      totalOrders: 7,
+      fulfilledCount: 2,
+      pendingCount: 2,
+      failedCount: 3,
+      // Pending / failed orders never count toward lifetime spend.
       totalSpentMinor: '35000',
     });
   });
 
-  it('normalises string / number / bigint amount shapes end-to-end', async () => {
-    state.rows = [
-      {
-        totalOrders: '5',
-        fulfilledCount: '3',
-        pendingCount: '1',
-        failedCount: '1',
-        totalSpentMinor: '12500',
-      },
-    ];
+  it('is home-currency locked — other-currency and other-user orders are excluded', async () => {
+    await seedUser();
+    await seedOrder({ state: 'fulfilled', chargeMinor: 5_000 });
+    // Cross-currency order (support-mediated region flip) — excluded.
+    await seedOrder({ state: 'fulfilled', chargeMinor: 7_000, chargeCurrency: 'USD' });
+    // Another user's order — excluded.
+    await seedOrder({ state: 'fulfilled', chargeMinor: 9_000, userId: 'other-user' });
+
     const res = await getUserOrdersSummaryHandler(makeCtx(LOOP_AUTH));
     const body = (await res.json()) as Record<string, unknown>;
-    expect(body['totalOrders']).toBe(5);
-    expect(body['totalSpentMinor']).toBe('12500');
-  });
-
-  it('handles postgres-js { rows: [...] } return shape', async () => {
-    state.rows = {
-      rows: [
-        {
-          totalOrders: 1,
-          fulfilledCount: 1,
-          pendingCount: 0,
-          failedCount: 0,
-          totalSpentMinor: 10_000n,
-        },
-      ],
-    } as unknown as typeof state.rows;
-    const res = await getUserOrdersSummaryHandler(makeCtx(LOOP_AUTH));
-    const body = (await res.json()) as { totalOrders: number };
-    expect(body.totalOrders).toBe(1);
+    expect(body['totalOrders']).toBe(1);
+    expect(body['totalSpentMinor']).toBe('5000');
   });
 
   it('500 when the query throws', async () => {
-    state.throwErr = new Error('db exploded');
+    await seedUser();
+    const orders = db.collection('orders');
+    vi.spyOn(orders, 'findMany').mockRejectedValueOnce(new Error('db exploded'));
     const res = await getUserOrdersSummaryHandler(makeCtx(LOOP_AUTH));
     expect(res.status).toBe(500);
   });

@@ -15,14 +15,6 @@
  * of a transform, which is exactly what the wire contract is.
  */
 import { z } from 'zod';
-import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
-
-// `extendZodWithOpenApi(z)` patches `.openapi(...)` onto every zod
-// schema's prototype. It's idempotent and only mutates the prototype
-// — calling it from this module ensures the schema below carries
-// `.openapi` even when this module loads before the openapi entry
-// point's own `extendZodWithOpenApi(z)` call.
-extendZodWithOpenApi(z);
 
 /**
  * Body schema for `POST /api/orders/loop` (ADR 052 ctx-backed create).
@@ -36,26 +28,14 @@ export const LoopCreateOrderBody = z.object({
   amountMinor: z
     .union([z.number().int().positive(), z.string().regex(/^\d+$/)])
     .transform((v) => BigInt(v))
-    .refine((v) => v > 0n, { message: 'amountMinor must be positive' })
-    .openapi({
-      description:
-        'Gift-card face value in the catalog currency, minor units. Number OR digit-string so BigInt values survive the wire.',
-    }),
+    .refine((v) => v > 0n, { message: 'amountMinor must be positive' }),
   currency: z
     .string()
     .length(3)
-    .transform((v) => v.toUpperCase())
-    .openapi({
-      description:
-        'Gift-card catalog currency — ISO 4217 three-letter code, uppercase. One of the home currencies (USD/GBP/EUR) or an ADR-035 extended display market (AED/INR/SAR/AUD/MXN).',
-    }),
+    .transform((v) => v.toUpperCase()),
   cryptoCurrency: z
     .string()
     .min(1)
     .max(32)
-    .transform((v) => v.toUpperCase())
-    .openapi({
-      description:
-        'Chain-qualified CTX payment currency the customer chose (e.g. XLM, DASH, ETH.USDT). Validated against the server allowlist (`GET /api/config` → ctxPaymentCurrencies).',
-    }),
+    .transform((v) => v.toUpperCase()),
 });

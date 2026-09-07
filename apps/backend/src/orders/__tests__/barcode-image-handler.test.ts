@@ -22,13 +22,6 @@ vi.mock('../handler-shared.js', () => ({
   upstreamHeaders: mockUpstreamHeaders,
 }));
 
-vi.mock('../../circuit-breaker.js', () => ({
-  CircuitOpenError: class CircuitOpenError extends Error {},
-  getUpstreamCircuit: () => ({
-    fetch: (...args: Parameters<typeof globalThis.fetch>) => globalThis.fetch(...args),
-  }),
-}));
-
 // The image transport/transform layer is proven in images/__tests__ —
 // here it's mocked so the handler's resolution + authz mapping is what's
 // under test.

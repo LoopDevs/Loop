@@ -17,41 +17,34 @@ const state = vi.hoisted(() => ({
   merchants: new Map<string, FakeMerchant>(),
 }));
 
-const orderByMock = vi.fn(async () => {
-  if (state.throwErr !== null) throw state.throwErr;
-  return state.configRows;
-});
-const whereMock = vi.fn(() => ({ orderBy: orderByMock }));
-const fromMock = vi.fn(() => ({ where: whereMock }));
-const selectMock = vi.fn(() => ({ from: fromMock }));
+// The handler pulls every active config, sorted by pct DESC, via
+// `db.collection('merchant_cashback_configs').findMany(...)` and calls
+// `.toFixed(2)` on the numeric pct. The mock honours the sort option
+// against the historical string fixtures (parsed to numbers) so the
+// ranking behaviour is still exercised.
+const findManyMock = vi.fn(
+  async (_filter: unknown, options?: { sort?: ReadonlyArray<readonly [string, string]> }) => {
+    if (state.throwErr !== null) throw state.throwErr;
+    const docs = state.configRows.map((row) => ({
+      merchantId: row.merchantId,
+      userCashbackPct: Number.parseFloat(row.userCashbackPct),
+      active: true,
+    }));
+    const [sortEntry] = options?.sort ?? [];
+    if (sortEntry !== undefined && sortEntry[0] === 'userCashbackPct') {
+      docs.sort((a, b) =>
+        sortEntry[1] === 'desc'
+          ? b.userCashbackPct - a.userCashbackPct
+          : a.userCashbackPct - b.userCashbackPct,
+      );
+    }
+    return docs;
+  },
+);
 
 vi.mock('../../db/client.js', () => ({
-  db: { select: () => selectMock() },
+  db: { collection: () => ({ findMany: findManyMock }) },
 }));
-
-vi.mock('../../db/schema.js', () => ({
-  merchantCashbackConfigs: {
-    merchantId: 'merchant_cashback_configs.merchant_id',
-    userCashbackPct: 'merchant_cashback_configs.user_cashback_pct',
-    active: 'merchant_cashback_configs.active',
-  },
-}));
-
-vi.mock('drizzle-orm', async () => {
-  const actual = (await vi.importActual('drizzle-orm')) as Record<string, unknown>;
-  return {
-    ...actual,
-    eq: (col: unknown, value: unknown) => ({ __eq: true, col, value }),
-    desc: (col: unknown) => ({ __desc: true, col }),
-    // Tagged-template recorder so the numeric-cast test below can
-    // assert what the orderBy fragment was built from.
-    sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({
-      __sql: true,
-      text: strings.join('?'),
-      values,
-    }),
-  };
-});
 
 vi.mock('../../merchants/sync.js', () => ({
   getMerchants: () => ({ merchantsById: state.merchants }),
@@ -186,20 +179,22 @@ describe('publicTopCashbackMerchantsHandler', () => {
     expect(tiny.merchants).toHaveLength(1);
   });
 
-  it('orders by user_cashback_pct cast to ::numeric so "9.50" never outranks "10.00"', async () => {
-    // The column reaches the driver as a string (drizzle numeric
-    // mapping) — an explicit ::numeric cast in the ORDER BY pins the
-    // sort to numeric semantics instead of trusting the column type.
-    await publicTopCashbackMerchantsHandler(makeCtx());
-    const calls = orderByMock.mock.calls as unknown[][];
-    const arg = calls[calls.length - 1]![0] as {
-      __desc: boolean;
-      col: { __sql: boolean; text: string; values: unknown[] };
-    };
-    expect(arg.__desc).toBe(true);
-    expect(arg.col.__sql).toBe(true);
-    expect(arg.col.text).toContain('::numeric');
-    expect(arg.col.values).toContain('merchant_cashback_configs.user_cashback_pct');
+  it('sorts numerically so "9.50" never outranks "10.00" (the old string-sort trap)', async () => {
+    // The pct is stored as a real number in the document store; this
+    // pins the numeric-ordering behaviour the old ::numeric SQL cast
+    // existed to guarantee — lexicographically "9.50" > "10.00", so a
+    // string sort would rank them backwards.
+    state.merchants = new Map([
+      ['m-ten', { id: 'm-ten', name: 'Ten', enabled: true }],
+      ['m-nine', { id: 'm-nine', name: 'Nine', enabled: true }],
+    ]);
+    state.configRows = [
+      { merchantId: 'm-nine', userCashbackPct: '9.50' },
+      { merchantId: 'm-ten', userCashbackPct: '10.00' },
+    ];
+    const res = await publicTopCashbackMerchantsHandler(makeCtx());
+    const body = (await res.json()) as { merchants: Array<{ id: string }> };
+    expect(body.merchants.map((m) => m.id)).toEqual(['m-ten', 'm-nine']);
   });
 
   it('never 500s — DB throws serve empty list on bootstrap with max-age=60', async () => {

@@ -48,10 +48,12 @@ vi.mock('../../clustering/handler.js', () => ({
 // Mock the db client. Handlers that historically don't touch the DB
 // are unaffected; the cashback-rate handlers drive their lookups
 // through this stub.
-//   - `findFirst` serves the per-merchant GET, returning
-//     `dbState.cashbackConfig` or undefined.
-//   - `select().from().where()` serves the bulk GET — resolves to
-//     an array of `dbState.bulkConfigs` rows.
+//   - `findOne` serves the per-merchant GET, returning a doc built
+//     from `dbState.cashbackConfig` or null.
+//   - `findMany` serves the bulk GET — resolves docs built from
+//     `dbState.bulkConfigs` rows.
+// Both handlers call `.toFixed(2)` on the stored numeric pct, so the
+// mock parses the historical string fixtures into doc-shaped numbers.
 const { dbState } = vi.hoisted(() => ({
   dbState: {
     cashbackConfig: null as { userCashbackPct: string; active: boolean } | null,
@@ -61,41 +63,32 @@ const { dbState } = vi.hoisted(() => ({
 }));
 vi.mock('../../db/client.js', () => ({
   db: {
-    query: {
-      merchantCashbackConfigs: {
-        findFirst: vi.fn(async () => {
-          dbState.findFirstCalls += 1;
-          return dbState.cashbackConfig ?? undefined;
-        }),
-      },
-    },
-    select: vi.fn(() => ({
-      from: vi.fn(() => ({
-        where: vi.fn(async () => dbState.bulkConfigs),
-      })),
+    collection: vi.fn(() => ({
+      findOne: vi.fn(async () => {
+        dbState.findFirstCalls += 1;
+        if (dbState.cashbackConfig === null || !dbState.cashbackConfig.active) return null;
+        return {
+          userCashbackPct: Number.parseFloat(dbState.cashbackConfig.userCashbackPct),
+          active: dbState.cashbackConfig.active,
+        };
+      }),
+      findMany: vi.fn(async () =>
+        dbState.bulkConfigs.map((row) => ({
+          merchantId: row.merchantId,
+          userCashbackPct: Number.parseFloat(row.userCashbackPct),
+          active: true,
+        })),
+      ),
     })),
   },
 }));
-vi.mock('../../circuit-breaker.js', () => ({
-  CircuitOpenError: class CircuitOpenError extends Error {
-    constructor() {
-      super('open');
-      this.name = 'CircuitOpenError';
-    }
-  },
-  getAllCircuitStates: () => ({}),
-  // /api/merchants/:id proxies CTX for long-form content enrichment;
-  // in tests we short-circuit the upstream call so the handler falls
-  // through to the cached baseline. A real upstream fetch would
-  // actually hit http://test-upstream.local/ and hang.
-  getUpstreamCircuit: () => ({
-    fetch: async () => {
-      throw new Error('upstream disabled in tests');
-    },
-    getState: () => 'closed' as const,
-    reset: () => {},
-  }),
-}));
+// /api/merchants/:id proxies CTX for long-form content enrichment;
+// in tests we fail the upstream call so the handler falls through to
+// the cached baseline. Leaving `fetch` unstubbed would actually hit
+// http://test-upstream.local/ and hang.
+vi.stubGlobal('fetch', async () => {
+  throw new Error('upstream disabled in tests');
+});
 
 import { app } from '../../app.js';
 

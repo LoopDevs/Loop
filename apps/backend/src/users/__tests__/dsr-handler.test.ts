@@ -198,15 +198,6 @@ describe('dsrDeleteHandler', () => {
     expect(body).toEqual({ ok: true });
   });
 
-  it('returns 409 PENDING_PAYOUTS when a payout is mid-flight', async () => {
-    state.deleteResult = { ok: false, blockedBy: 'pending_payouts' };
-    const res = await dsrDeleteHandler(makeCtx());
-    expect(res.status).toBe(409);
-    const body = (await res.json()) as { code: string; message: string };
-    expect(body.code).toBe('PENDING_PAYOUTS');
-    expect(body.message).toContain('cashback payout');
-  });
-
   it('returns 409 IN_FLIGHT_ORDERS when an order is mid-fulfilment', async () => {
     state.deleteResult = { ok: false, blockedBy: 'in_flight_orders' };
     const res = await dsrDeleteHandler(makeCtx());
@@ -214,25 +205,6 @@ describe('dsrDeleteHandler', () => {
     const body = (await res.json()) as { code: string; message: string };
     expect(body.code).toBe('IN_FLIGHT_ORDERS');
     expect(body.message).toContain('mid-fulfilment');
-  });
-
-  it('A4-078: returns 409 FAILED_UNCOMPENSATED_WITHDRAWALS with a contact-support message', async () => {
-    state.deleteResult = { ok: false, blockedBy: 'failed_uncompensated_withdrawals' };
-    const res = await dsrDeleteHandler(makeCtx());
-    expect(res.status).toBe(409);
-    const body = (await res.json()) as { code: string; message: string };
-    expect(body.code).toBe('FAILED_UNCOMPENSATED_WITHDRAWALS');
-    expect(body.message).toContain('contact support');
-    expect(body.message).toContain('failed withdrawal');
-  });
-
-  it('PLAT-30-03: returns 409 BALANCE_NOT_ZERO when a cashback balance is outstanding', async () => {
-    state.deleteResult = { ok: false, blockedBy: 'non_zero_credit_balance' };
-    const res = await dsrDeleteHandler(makeCtx());
-    expect(res.status).toBe(409);
-    const body = (await res.json()) as { code: string; message: string };
-    expect(body.code).toBe('BALANCE_NOT_ZERO');
-    expect(body.message).toContain('cashback balance');
   });
 
   it('500s when the anonymisation helper throws', async () => {

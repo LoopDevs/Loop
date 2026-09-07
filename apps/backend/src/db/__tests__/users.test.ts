@@ -1,251 +1,167 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { db, __resetDbForTests } from '../client.js';
+import { UniqueViolationError } from '../errors.js';
+import {
+  upsertUserFromCtx,
+  getUserById,
+  getUserCtxUserId,
+  setUserCtxUserId,
+  getUserTokenVersion,
+  bumpUserTokenVersion,
+  findOrCreateUserByEmail,
+} from '../users.js';
+import type { UserDoc } from '../types.js';
 
-// Hoisted so it runs before `env.ts` is imported — env.ts validates
-// process.env at module-load and the allowlist is built once from it.
-vi.hoisted(() => {
-  process.env['ADMIN_CTX_USER_IDS'] = 'ctx-admin-1, ctx-admin-2';
-  // CF-30: native-auth admin allowlist (case-insensitive, with a
-  // mixed-case entry to prove normalization).
-  process.env['ADMIN_EMAILS'] = 'Admin@Loop.com, ops@loop.com';
-});
-
-const { dbMock, returned, findFirstMock, updateChain } = vi.hoisted(() => {
-  const state = { row: null as unknown };
-  const m: Record<string, ReturnType<typeof vi.fn>> = {};
-  m['insert'] = vi.fn(() => m);
-  m['values'] = vi.fn(() => m);
-  m['onConflictDoUpdate'] = vi.fn(() => m);
-  m['onConflictDoNothing'] = vi.fn(() => m);
-  m['returning'] = vi.fn(async () => [state.row]);
-  m['query'] = vi.fn(() => m) as unknown as ReturnType<typeof vi.fn>;
-  const findFirst = vi.fn(async (_args: unknown) => state.row ?? null);
-  // CF-30 config-parity reconcile path: db.update().set().where().returning().
-  // Separate chain object so its `returning` is independent of the
-  // insert chain's. `setCall` captures the values passed to .set().
-  const u: { setCall: unknown; returns: unknown } = { setCall: null, returns: null };
-  m['update'] = vi.fn(() => ({
-    set: vi.fn((v: unknown) => {
-      u.setCall = v;
-      return {
-        where: vi.fn(() => ({ returning: vi.fn(async () => [u.returns]) })),
-      };
-    }),
-  })) as unknown as ReturnType<typeof vi.fn>;
-  return {
-    dbMock: m,
-    returned: state,
-    findFirstMock: findFirst,
-    updateChain: u,
-  };
-});
-
-vi.mock('../client.js', () => ({
-  db: {
-    insert: dbMock['insert'],
-    update: dbMock['update'],
-    query: {
-      users: {
-        findFirst: findFirstMock,
-      },
-    },
-  },
-}));
-vi.mock('../schema.js', () => ({
-  users: {
-    id: 'id',
-    ctxUserId: 'ctxUserId',
-    email: 'email',
-  },
-}));
-
-import { upsertUserFromCtx, getUserById, findOrCreateUserByEmail, isAdminEmail } from '../users.js';
-
+/**
+ * Users repository, run against the real in-memory document store —
+ * no mocks. `__resetDbForTests()` swaps in a fresh empty store per
+ * test, so each case starts from an empty `users` collection.
+ */
 beforeEach(() => {
-  for (const fn of Object.values(dbMock)) {
-    if (typeof fn === 'function' && 'mockClear' in fn) fn.mockClear();
-  }
-  findFirstMock.mockClear();
-  returned.row = null;
-  updateChain.setCall = null;
-  updateChain.returns = null;
+  __resetDbForTests();
 });
+
+/** Seeds a user doc directly, bypassing the repo under test. */
+async function seedUser(overrides: Partial<UserDoc> = {}): Promise<UserDoc> {
+  const now = new Date();
+  const doc: UserDoc = {
+    id: overrides.id ?? 'uuid-seed',
+    ctxUserId: null,
+    email: 'seed@b.com',
+    tokenVersion: 0,
+    homeCurrency: 'USD',
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
+  };
+  await db.collection('users').insertOne(doc);
+  return doc;
+}
 
 describe('upsertUserFromCtx', () => {
-  it('flags allowlisted CTX user ids as admin', async () => {
-    returned.row = {
-      id: 'uuid-1',
-      ctxUserId: 'ctx-admin-1',
-      email: 'a@b.com',
-      isAdmin: true,
-    };
-    const user = await upsertUserFromCtx({ ctxUserId: 'ctx-admin-1', email: 'a@b.com' });
-    expect(user.isAdmin).toBe(true);
-    expect(dbMock['values']!).toHaveBeenCalledWith(
-      expect.objectContaining({
-        ctxUserId: 'ctx-admin-1',
-        email: 'a@b.com',
-        isAdmin: true,
-      }),
-    );
+  it('inserts a fresh row (with defaults) for an unknown CTX user id', async () => {
+    const user = await upsertUserFromCtx({ ctxUserId: 'ctx-1', email: 'a@b.com' });
+    expect(user.ctxUserId).toBe('ctx-1');
+    expect(user.email).toBe('a@b.com');
+    expect(user.tokenVersion).toBe(0);
+    expect(user.homeCurrency).toBe('USD');
+    // The row is really persisted, not just returned.
+    const stored = await db.collection('users').findOne({ ctxUserId: 'ctx-1' });
+    expect(stored?.id).toBe(user.id);
   });
 
-  it('non-allowlisted users are inserted with isAdmin=false', async () => {
-    returned.row = { id: 'uuid-2', ctxUserId: 'someone-else', email: '', isAdmin: false };
-    await upsertUserFromCtx({ ctxUserId: 'someone-else', email: undefined });
-    expect(dbMock['values']!).toHaveBeenCalledWith(
-      expect.objectContaining({ isAdmin: false, email: '' }),
-    );
+  it('stores an empty-string email when the token carried none', async () => {
+    const user = await upsertUserFromCtx({ ctxUserId: 'ctx-2', email: undefined });
+    expect(user.email).toBe('');
   });
 
-  it('throws when the insert returns no row', async () => {
-    returned.row = undefined;
-    await expect(upsertUserFromCtx({ ctxUserId: 'ctx-admin-2', email: undefined })).rejects.toThrow(
-      /no row returned/,
-    );
+  it('returns the existing row (same id) on a repeat upsert', async () => {
+    const first = await upsertUserFromCtx({ ctxUserId: 'ctx-3', email: 'a@b.com' });
+    const second = await upsertUserFromCtx({ ctxUserId: 'ctx-3', email: 'a@b.com' });
+    expect(second.id).toBe(first.id);
+    expect(await db.collection('users').count({ ctxUserId: 'ctx-3' })).toBe(1);
+  });
+
+  it('refreshes the stored email only when the token actually carried one', async () => {
+    await upsertUserFromCtx({ ctxUserId: 'ctx-4', email: '' });
+    // Later request has the email claim → fix-up.
+    const fixed = await upsertUserFromCtx({ ctxUserId: 'ctx-4', email: 'now@b.com' });
+    expect(fixed.email).toBe('now@b.com');
+    // A subsequent email-less token must NOT blank it back out.
+    const kept = await upsertUserFromCtx({ ctxUserId: 'ctx-4', email: undefined });
+    expect(kept.email).toBe('now@b.com');
   });
 });
 
 describe('getUserById', () => {
   it('returns the row when found', async () => {
-    returned.row = { id: 'uuid-3', ctxUserId: 'ctx', email: '', isAdmin: false };
+    const seeded = await seedUser({ id: 'uuid-3' });
     const row = await getUserById('uuid-3');
-    expect(row).toEqual(returned.row);
+    expect(row).toEqual(seeded);
   });
 
-  it('returns null when findFirst resolves to undefined', async () => {
-    returned.row = undefined;
-    const row = await getUserById('missing');
-    expect(row).toBeNull();
+  it('returns null when no such user exists', async () => {
+    expect(await getUserById('missing')).toBeNull();
+  });
+});
+
+describe('getUserCtxUserId / setUserCtxUserId', () => {
+  it('reads back the CTX mapping (null when unmapped, null for a missing user)', async () => {
+    await seedUser({ id: 'uuid-c1', ctxUserId: null });
+    expect(await getUserCtxUserId('uuid-c1')).toBeNull();
+    expect(await getUserCtxUserId('missing')).toBeNull();
+  });
+
+  it('records the provisioned CTX id exactly once — first write wins', async () => {
+    await seedUser({ id: 'uuid-c2', ctxUserId: null });
+    expect(await setUserCtxUserId('uuid-c2', 'ctx-prov-1')).toBe(true);
+    // A concurrent provision (or a legacy mapping) must never clobber.
+    expect(await setUserCtxUserId('uuid-c2', 'ctx-prov-2')).toBe(false);
+    expect(await getUserCtxUserId('uuid-c2')).toBe('ctx-prov-1');
+  });
+
+  it('returns false for a missing user', async () => {
+    expect(await setUserCtxUserId('missing', 'ctx-x')).toBe(false);
+  });
+});
+
+describe('NS-09: token-version counter', () => {
+  it('reads the current counter, failing closed (null) for a missing user', async () => {
+    await seedUser({ id: 'uuid-t1', tokenVersion: 3 });
+    expect(await getUserTokenVersion('uuid-t1')).toBe(3);
+    expect(await getUserTokenVersion('deleted-user')).toBeNull();
+  });
+
+  it('bumpUserTokenVersion increments atomically so all prior access tokens die', async () => {
+    await seedUser({ id: 'uuid-t2', tokenVersion: 0 });
+    await bumpUserTokenVersion('uuid-t2');
+    await bumpUserTokenVersion('uuid-t2');
+    expect(await getUserTokenVersion('uuid-t2')).toBe(2);
   });
 });
 
 describe('findOrCreateUserByEmail', () => {
-  it('returns the existing row when the email is already known', async () => {
-    returned.row = {
-      id: 'uuid-e1',
-      ctxUserId: null,
-      email: 'a@b.com',
-      isAdmin: false,
-    };
+  it('returns the existing row when the (normalised) email is already known', async () => {
+    const seeded = await seedUser({ id: 'uuid-e1', email: 'a@b.com' });
     const user = await findOrCreateUserByEmail('A@B.COM');
-    expect(user.id).toBe('uuid-e1');
-    // No insert path taken.
-    expect(dbMock['insert']!).not.toHaveBeenCalled();
+    expect(user.id).toBe(seeded.id);
+    expect(await db.collection('users').count()).toBe(1);
   });
 
-  it('inserts and returns a fresh row when the email is unknown', async () => {
-    returned.row = null;
-    const inserted = {
-      id: 'uuid-e2',
-      ctxUserId: null,
-      email: 'new@b.com',
-      isAdmin: false,
-    };
-    dbMock['returning']!.mockResolvedValueOnce([inserted]);
-    const user = await findOrCreateUserByEmail('new@B.com');
-    expect(user).toEqual(inserted);
-    expect(dbMock['values']!).toHaveBeenCalledWith(expect.objectContaining({ email: 'new@b.com' }));
-    // A2-706: INSERT uses onConflictDoNothing to absorb the signup
-    // race when two concurrent verify-otp calls target the same
-    // brand-new email.
-    expect(dbMock['onConflictDoNothing']!).toHaveBeenCalled();
+  it('inserts a fresh row with a lowercased/trimmed email when unknown', async () => {
+    const user = await findOrCreateUserByEmail('  New@B.com ');
+    expect(user.email).toBe('new@b.com');
+    expect(user.ctxUserId).toBeNull();
+    expect(user.tokenVersion).toBe(0);
+    const stored = await db.collection('users').findOne({ email: 'new@b.com' });
+    expect(stored?.id).toBe(user.id);
   });
 
-  it('A2-706: re-selects the raced row when ON CONFLICT DO NOTHING absorbs the insert', async () => {
-    // Concurrent signup scenario:
-    //  1. findFirst → null (row not yet visible)
-    //  2. INSERT ... ON CONFLICT DO NOTHING → [] (losing side)
-    //  3. findFirst → the row the winning caller inserted
-    const winningRow = {
-      id: 'uuid-e3',
-      ctxUserId: null,
-      email: 'raced@b.com',
-      isAdmin: false,
-    };
-    findFirstMock.mockResolvedValueOnce(null); // first pre-insert SELECT
-    findFirstMock.mockResolvedValueOnce(winningRow); // re-SELECT after conflict
-    dbMock['returning']!.mockResolvedValueOnce([]); // conflict — no row returned
-    const user = await findOrCreateUserByEmail('RACED@b.com');
-    expect(user).toEqual(winningRow);
-    expect(findFirstMock).toHaveBeenCalledTimes(2);
-  });
-
-  it('throws when both the insert and the re-select return no row', async () => {
-    // Pathological: conflict happens but the re-SELECT still misses
-    // (could only occur if the row was deleted between steps 2 and 3).
-    findFirstMock.mockResolvedValueOnce(null);
-    findFirstMock.mockResolvedValueOnce(null);
-    dbMock['returning']!.mockResolvedValueOnce([]);
-    await expect(findOrCreateUserByEmail('x@y.com')).rejects.toThrow(
-      /no row returned after conflict/,
-    );
-  });
-});
-
-describe('CF-30: isAdminEmail (native-auth admin allowlist)', () => {
-  it('returns true for an allowlisted email (case-insensitive)', () => {
-    // ADMIN_EMAILS = 'Admin@Loop.com, ops@loop.com'.
-    expect(isAdminEmail('admin@loop.com')).toBe(true);
-    expect(isAdminEmail('ADMIN@LOOP.COM')).toBe(true);
-    expect(isAdminEmail(' ops@loop.com ')).toBe(true);
-  });
-
-  it('returns false for a non-allowlisted email', () => {
-    expect(isAdminEmail('nobody@loop.com')).toBe(false);
-    expect(isAdminEmail('admin@evil.com')).toBe(false);
-  });
-});
-
-describe('CF-30: findOrCreateUserByEmail honours the native admin allowlist', () => {
-  it('grants isAdmin=true on insert for an allowlisted (verified) email', async () => {
-    returned.row = null; // no existing row → insert path
-    const inserted = { id: 'uuid-a1', ctxUserId: null, email: 'admin@loop.com', isAdmin: true };
-    dbMock['returning']!.mockResolvedValueOnce([inserted]);
-    const user = await findOrCreateUserByEmail('Admin@Loop.com');
-    expect(user.isAdmin).toBe(true);
-    expect(dbMock['values']!).toHaveBeenCalledWith(
-      expect.objectContaining({ email: 'admin@loop.com', isAdmin: true }),
-    );
-  });
-
-  it('grants isAdmin=false on insert for a non-allowlisted email', async () => {
-    returned.row = null;
-    const inserted = { id: 'uuid-a2', ctxUserId: null, email: 'user@loop.com', isAdmin: false };
-    dbMock['returning']!.mockResolvedValueOnce([inserted]);
-    await findOrCreateUserByEmail('user@loop.com');
-    expect(dbMock['values']!).toHaveBeenCalledWith(expect.objectContaining({ isAdmin: false }));
-  });
-
-  it('config-parity reconcile: promotes a pre-existing non-admin row when the email is now allowlisted', async () => {
-    // Row created before the grant was deployed (isAdmin=false), email
-    // now on the allowlist → reconcile flips it to true on next login.
-    returned.row = { id: 'uuid-a3', ctxUserId: null, email: 'ops@loop.com', isAdmin: false };
-    updateChain.returns = { id: 'uuid-a3', ctxUserId: null, email: 'ops@loop.com', isAdmin: true };
-    const user = await findOrCreateUserByEmail('ops@loop.com');
-    expect(user.isAdmin).toBe(true);
-    expect(dbMock['update']!).toHaveBeenCalled();
-    expect(updateChain.setCall).toEqual(expect.objectContaining({ isAdmin: true }));
-    // No insert — the row already existed.
-    expect(dbMock['insert']!).not.toHaveBeenCalled();
-  });
-
-  it('config-parity reconcile: demotes a pre-existing admin row when the email is no longer allowlisted', async () => {
-    returned.row = { id: 'uuid-a4', ctxUserId: null, email: 'stale@loop.com', isAdmin: true };
-    updateChain.returns = {
-      id: 'uuid-a4',
-      ctxUserId: null,
-      email: 'stale@loop.com',
-      isAdmin: false,
-    };
-    const user = await findOrCreateUserByEmail('stale@loop.com');
-    expect(user.isAdmin).toBe(false);
-    expect(updateChain.setCall).toEqual(expect.objectContaining({ isAdmin: false }));
-  });
-
-  it('no reconcile write when the existing row already matches the allowlist', async () => {
-    returned.row = { id: 'uuid-a5', ctxUserId: null, email: 'admin@loop.com', isAdmin: true };
-    const user = await findOrCreateUserByEmail('admin@loop.com');
-    expect(user.isAdmin).toBe(true);
-    expect(dbMock['update']!).not.toHaveBeenCalled();
+  it('A2-706: the losing side of a signup race re-selects the winner instead of throwing', async () => {
+    // Concurrent-signup scenario: the pre-insert lookup misses, but by
+    // the time this caller's insert lands the winner's row exists and
+    // the insert trips the unique spec. Simulated by stubbing the
+    // collection's insertOne to land the winner's row and then throw
+    // the driver's UniqueViolationError — the repo must recover by
+    // returning the winner's row, not surface the error.
+    const users = db.collection('users');
+    const realInsert = users.insertOne.bind(users);
+    const insertSpy = vi.spyOn(users, 'insertOne').mockImplementationOnce(async () => {
+      const now = new Date();
+      await realInsert({
+        id: 'uuid-winner',
+        ctxUserId: null,
+        email: 'raced@b.com',
+        tokenVersion: 0,
+        homeCurrency: 'USD',
+        createdAt: now,
+        updatedAt: now,
+      });
+      throw new UniqueViolationError('users', ['email']);
+    });
+    const user = await findOrCreateUserByEmail('raced@b.com');
+    expect(insertSpy).toHaveBeenCalledTimes(1);
+    expect(user.id).toBe('uuid-winner');
+    expect(await db.collection('users').count({ email: 'raced@b.com' })).toBe(1);
   });
 });

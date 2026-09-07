@@ -35,10 +35,8 @@
  *   - No PII, no commercial-terms (wholesale/margin) fields.
  */
 import type { Context } from 'hono';
-import { and, eq } from 'drizzle-orm';
 import { merchantSlug } from '@loop/shared';
 import { db } from '../db/client.js';
-import { merchantCashbackConfigs } from '../db/schema.js';
 import { getMerchants } from '../merchants/sync.js';
 import { logger } from '../logger.js';
 
@@ -166,17 +164,10 @@ export async function publicCashbackPreviewHandler(c: Context): Promise<Response
 
   let cashbackPct: string | null = null;
   try {
-    const rows = (await db
-      .select({ userCashbackPct: merchantCashbackConfigs.userCashbackPct })
-      .from(merchantCashbackConfigs)
-      .where(
-        and(
-          eq(merchantCashbackConfigs.merchantId, resolved.id),
-          eq(merchantCashbackConfigs.active, true),
-        ),
-      )
-      .limit(1)) as Array<{ userCashbackPct: string }>;
-    cashbackPct = rows[0]?.userCashbackPct ?? null;
+    const config = await db
+      .collection('merchant_cashback_configs')
+      .findOne({ merchantId: resolved.id, active: true });
+    cashbackPct = config !== null ? config.userCashbackPct.toFixed(2) : null;
   } catch (err) {
     // Ledger-side failure → serve a soft "no cashback" response
     // rather than 500 per ADR 020 never-500. Cache short so we

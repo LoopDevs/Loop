@@ -1,93 +1,33 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 
 /**
  * CF-25 / X-PRIV-03 persistence test: proves the redeem code + PIN are
- * ciphertext *on disk* (the value handed to the DB `.set()`) but
+ * ciphertext *at rest* (the value stored in the document store) but
  * recoverable via the read-path decrypt. Exercises the real
- * `markOrderFulfilled` write through a captured db chain, with the
- * envelope key set.
+ * `markOrderFulfilled` write against the real in-memory store, with
+ * the envelope key set.
  */
-
-// `envState` MUST be built inside `vi.hoisted` (not a bare top-level
-// `const`): ES module imports link/evaluate their full transitive
-// graph BEFORE the importing file's own top-level statements run, so
-// `import { markOrderFulfilled } from '../transitions.js'` below
-// pulls in `credits/vaults/vault-emissions.js` -> `runtime-health.js`
-// (ADR 031 V3), which reads `env.LOOP_AUTH_NATIVE_ENABLED` at ITS OWN
-// module top level — that read would hit `envState` in its TDZ if
-// `envState` were still a plain `const` positioned "before" this
-// `vi.mock` call in source order. `vi.hoisted` runs before any import
-// is linked (even before regular `import` bindings resolve, so it
-// can't call `randomBytes` itself — the real key is generated below
-// as a normal top-level `const` and assigned into `envState` in
-// `beforeEach`, exactly as this file already did before this fix).
 const { envState } = vi.hoisted(() => ({
   envState: { LOOP_REDEEM_ENCRYPTION_KEY: undefined as string | undefined },
 }));
-vi.mock('../../env.js', () => ({
-  get env() {
-    return envState;
-  },
-}));
+// Partial env mock: only the redeem key is per-test mutable — the rest
+// of the real (test-setup) env stays intact so logger/db keep booting.
+vi.mock('../../env.js', async (importActual) => {
+  const actual = (await importActual()) as { env: Record<string, unknown> };
+  return {
+    ...actual,
+    get env() {
+      return { ...actual.env, ...envState };
+    },
+  };
+});
 
 // 32-byte key, assigned into `envState` in `beforeEach` below.
 const KEY_B64 = randomBytes(32).toString('base64');
 
-// Minimal chainable db mock that records the order-update `.set()`
-// payload. The fulfillment txn also inserts ledger rows + looks up the
-// user; we stub those to no-ops since this test only cares about the
-// order update's redeem fields.
-const { dbMock, state } = vi.hoisted(() => {
-  const s: { updateSet: Record<string, unknown> | undefined } = { updateSet: undefined };
-  const chain: Record<string, unknown> = {};
-  chain['update'] = vi.fn(() => chain);
-  chain['set'] = vi.fn((v: Record<string, unknown>) => {
-    s.updateSet = v;
-    return chain;
-  });
-  chain['where'] = vi.fn(() => chain);
-  chain['returning'] = vi.fn(async () => [
-    {
-      id: 'o-1',
-      userId: 'u-1',
-      merchantId: 'm-1',
-      currency: 'USD',
-      chargeCurrency: 'USD',
-      userCashbackMinor: 0n, // 0 → skips ledger writes, keeps the test focused
-      faceValueMinor: 1_000n,
-      chargeMinor: 1_000n,
-      state: 'fulfilled',
-    },
-  ]);
-  chain['insert'] = vi.fn(() => chain);
-  chain['values'] = vi.fn(() => chain);
-  chain['onConflictDoUpdate'] = vi.fn(() => chain);
-  chain['onConflictDoNothing'] = vi.fn(() => chain);
-  chain['select'] = vi.fn(() => chain);
-  chain['from'] = vi.fn(() => chain);
-  chain['transaction'] = vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb(chain));
-  return { dbMock: chain, state: s };
-});
-vi.mock('../../db/client.js', () => ({ db: dbMock }));
-vi.mock('../../db/schema.js', () => ({
-  orders: { id: 'id', state: 'state', __name: 'orders' },
-  creditTransactions: { __name: 'creditTransactions' },
-  userCredits: { __name: 'userCredits' },
-  users: { id: 'id', __name: 'users' },
-  pendingPayouts: { orderId: 'order_id', __name: 'pendingPayouts' },
-  HOME_CURRENCIES: ['USD', 'GBP', 'EUR'] as const,
-}));
-vi.mock('../../logger.js', () => ({
-  logger: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }) },
-}));
-vi.mock('../../discord.js', () => ({
-  notifyPegBreakOnFulfillment: vi.fn(),
-}));
-vi.mock('../../credits/payout-builder.js', () => ({
-  buildPayoutIntent: () => ({ kind: 'skip', reason: 'no_cashback' }),
-}));
-
+import { db, __resetDbForTests } from '../../db/client.js';
+import type { OrderDoc } from '../../db/types.js';
 import { markOrderFulfilled } from '../transitions.js';
 import {
   decryptRedeemField,
@@ -97,14 +37,51 @@ import {
 } from '../redeem-crypto.js';
 
 beforeEach(() => {
-  state.updateSet = undefined;
+  __resetDbForTests();
   envState.LOOP_REDEEM_ENCRYPTION_KEY = KEY_B64;
   resetRedeemKeyCache();
 });
 
+/** Seeds a paid mirror doc ready to fulfil; returns its id. */
+async function seedPaidOrder(): Promise<string> {
+  const id = randomUUID();
+  const now = new Date();
+  await db.collection('orders').insertOne({
+    id,
+    userId: 'u-1',
+    merchantId: 'm-1',
+    faceValueMinor: 1000,
+    currency: 'USD',
+    chargeMinor: 1000,
+    chargeCurrency: 'USD',
+    userCashbackMinor: 0,
+    expectedCommissionMinor: null,
+    ctxOrderId: null,
+    ctxPaymentId: null,
+    paymentCryptoCurrency: 'XLM',
+    redeemCode: null,
+    redeemPin: null,
+    redeemUrl: null,
+    redemptionBackfillAttempts: 0,
+    redemptionBackfillLastAttemptAt: null,
+    state: 'paid',
+    failureReason: null,
+    idempotencyKey: null,
+    createdAt: now,
+    fulfilledAt: null,
+    failedAt: null,
+  });
+  return id;
+}
+
+async function getOrder(id: string): Promise<OrderDoc | null> {
+  return db.collection('orders').findOne({ id });
+}
+
 describe('markOrderFulfilled — redeem secrets encrypted at rest', () => {
   it('persists code + PIN as ciphertext but leaves the URL plaintext', async () => {
-    await markOrderFulfilled('o-1', {
+    const id = await seedPaidOrder();
+    await markOrderFulfilled(id, {
       redemption: {
         code: 'PLAINTEXT-GIFT-CODE',
         pin: '4242',
@@ -112,12 +89,11 @@ describe('markOrderFulfilled — redeem secrets encrypted at rest', () => {
       },
     });
 
-    const set = state.updateSet!;
-    const storedCode = set['redeemCode'] as string;
-    const storedPin = set['redeemPin'] as string;
-    const storedUrl = set['redeemUrl'] as string | null;
+    const stored = (await getOrder(id))!;
+    const storedCode = stored.redeemCode as string;
+    const storedPin = stored.redeemPin as string;
 
-    // On disk: code + PIN are enveloped ciphertext, not the plaintext.
+    // At rest: code + PIN are enveloped ciphertext, not the plaintext.
     expect(isEncryptedRedeemField(storedCode)).toBe(true);
     expect(storedCode.startsWith(REDEEM_ENVELOPE_PREFIX)).toBe(true);
     expect(storedCode).not.toContain('PLAINTEXT-GIFT-CODE');
@@ -125,7 +101,7 @@ describe('markOrderFulfilled — redeem secrets encrypted at rest', () => {
     expect(storedPin).not.toContain('4242');
 
     // URL stays plaintext (it's the landing page, not the secret).
-    expect(storedUrl).toBe('https://merchant.example/redeem/abc');
+    expect(stored.redeemUrl).toBe('https://merchant.example/redeem/abc');
 
     // The read path recovers the originals.
     expect(decryptRedeemField(storedCode)).toBe('PLAINTEXT-GIFT-CODE');
@@ -133,22 +109,24 @@ describe('markOrderFulfilled — redeem secrets encrypted at rest', () => {
   });
 
   it('persists NULLs unchanged when there is no redemption payload', async () => {
-    await markOrderFulfilled('o-1', {});
-    const set = state.updateSet!;
-    expect(set['redeemCode']).toBeNull();
-    expect(set['redeemPin']).toBeNull();
-    expect(set['redeemUrl']).toBeNull();
+    const id = await seedPaidOrder();
+    await markOrderFulfilled(id, {});
+    const stored = (await getOrder(id))!;
+    expect(stored.redeemCode).toBeNull();
+    expect(stored.redeemPin).toBeNull();
+    expect(stored.redeemUrl).toBeNull();
   });
 
   it('with the key unset, stores plaintext (ships dark — backward compatible)', async () => {
     envState.LOOP_REDEEM_ENCRYPTION_KEY = undefined;
     resetRedeemKeyCache();
-    await markOrderFulfilled('o-1', {
+    const id = await seedPaidOrder();
+    await markOrderFulfilled(id, {
       redemption: { code: 'DARK-MODE-CODE', pin: '9999', url: null },
     });
-    const set = state.updateSet!;
-    expect(set['redeemCode']).toBe('DARK-MODE-CODE');
-    expect(set['redeemPin']).toBe('9999');
-    expect(isEncryptedRedeemField(set['redeemCode'] as string)).toBe(false);
+    const stored = (await getOrder(id))!;
+    expect(stored.redeemCode).toBe('DARK-MODE-CODE');
+    expect(stored.redeemPin).toBe('9999');
+    expect(isEncryptedRedeemField(stored.redeemCode as string)).toBe(false);
   });
 });

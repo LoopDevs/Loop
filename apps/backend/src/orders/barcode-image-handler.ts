@@ -26,8 +26,7 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
 import { logger } from '../logger.js';
-import { getUpstreamCircuit, CircuitOpenError } from '../circuit-breaker.js';
-import { upstreamUrl } from '../upstream.js';
+import { upstreamUrl, upstreamFetch } from '../upstream.js';
 import { scrubUpstreamBody } from '../upstream-body-scrub.js';
 import { upstreamHeaders } from './handler-shared.js';
 import { extractBarcodeImageUrl } from './barcode-fields.js';
@@ -59,13 +58,10 @@ export async function orderBarcodeImageHandler(c: Context): Promise<Response> {
   }
 
   try {
-    const response = await getUpstreamCircuit('gift-cards').fetch(
-      upstreamUrl(`/gift-cards/${orderId}`),
-      {
-        headers,
-        signal: AbortSignal.timeout(15_000),
-      },
-    );
+    const response = await upstreamFetch(upstreamUrl(`/gift-cards/${orderId}`), {
+      headers,
+      signal: AbortSignal.timeout(15_000),
+    });
 
     if (response.status === 404) {
       return c.json({ code: 'NOT_FOUND', message: 'Order not found' }, 404);
@@ -112,12 +108,6 @@ export async function orderBarcodeImageHandler(c: Context): Promise<Response> {
     }
     return imageResponse(result.data, result.mimeType, 'private');
   } catch (err) {
-    if (err instanceof CircuitOpenError) {
-      return c.json(
-        { code: 'SERVICE_UNAVAILABLE', message: 'Service temporarily unavailable' },
-        503,
-      );
-    }
     log.error({ err, orderId }, 'Barcode image proxy error');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to fetch barcode image' }, 500);
   }

@@ -1,39 +1,28 @@
 /**
  * Idempotency helpers for the order repository (A2-2003).
  *
- * Lifted out of `apps/backend/src/orders/repo.ts` so the
- * idempotency primitives — error type, lookup, post-insert
- * conflict resolver — live in their own focused module separate
- * from `createOrder` and the cashback-split pinning in the
- * parent file:
- *
  *   - `IdempotentOrderConflictError` — thrown by `createOrder`
  *     when the (userId, idempotencyKey) pair already exists.
  *     Carries the prior order so the caller can build a replay
- *     response without a second SELECT round-trip.
+ *     response without a second lookup round-trip.
  *   - `findOrderByIdempotencyKey(userId, key)` — pre-write
- *     lookup the handler does to short-circuit a repeat request
- *     without holding any locks.
+ *     lookup the handler does to short-circuit a repeat request.
  *   - `maybeFetchIdempotentConflict(args, err)` — post-insert
- *     conflict resolver. Recognises the partial-unique-index
- *     violation, fetches the prior row, returns null on any
- *     other shape of failure so the original exception bubbles.
+ *     conflict resolver. Recognises the unique-spec violation,
+ *     fetches the prior doc, returns null on any other shape of
+ *     failure so the original exception bubbles.
  *
  * Re-exported from `repo.ts` so the existing import paths used
- * by `loop-handler.ts` and the test suite keep resolving
- * unchanged.
+ * by `loop-handler.ts` and the test suite keep resolving.
  */
-import { and, eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { orders } from '../db/schema.js';
+import { isUniqueViolation } from '../db/errors.js';
 import type { Order } from './repo.js';
 
 /**
  * A2-2003: thrown by `createOrder` when the (userId, idempotencyKey)
  * pair already exists. Carries the prior order so the caller can
- * build a replay response without a second SELECT round-trip — the
- * row was returned by the same SQL roundtrip that detected the
- * violation, courtesy of the post-insert lookup in the catch arm.
+ * build a replay response without a second lookup.
  */
 export class IdempotentOrderConflictError extends Error {
   readonly existing: Order;
@@ -47,44 +36,21 @@ export class IdempotentOrderConflictError extends Error {
 /**
  * A2-2003: lookup the prior order for a given (userId, idempotencyKey)
  * pair. Returns null on miss. Called by the handler before the write
- * so a repeat request short-circuits without holding any locks; the
- * unique-index race is caught by `IdempotentOrderConflictError` from
- * the insert path.
+ * so a repeat request short-circuits; the unique-spec race is caught
+ * by `IdempotentOrderConflictError` from the insert path.
  */
 export async function findOrderByIdempotencyKey(
   userId: string,
   idempotencyKey: string,
 ): Promise<Order | null> {
-  const row = await db.query.orders.findFirst({
-    where: and(eq(orders.userId, userId), eq(orders.idempotencyKey, idempotencyKey)),
-  });
-  return row ?? null;
+  return db.collection('orders').findOne({ userId, idempotencyKey });
 }
 
 /**
- * Inspects an INSERT failure for the (user_id, idempotency_key)
- * partial-unique-index violation that the A2-2003 race produces:
- *
- *   - the caller passed an `idempotencyKey`, and
- *   - the error walks back to a postgres-js `PostgresError` with
- *     `code='23505'` (unique_violation) and `constraint_name`
- *     equal to `orders_user_idempotency_unique`.
- *
- * **A4-026:** the prior implementation matched on
- * `err.message.includes('orders_user_idempotency_unique')`. Drizzle
- * wraps the raw `PostgresError` in a `DrizzleQueryError`, and the
- * wrapper format isn't part of either library's stable contract —
- * a Drizzle / postgres-js upgrade that changed the wrapper's
- * `.toString()` output would silently turn a duplicate-Idempotency-
- * Key conflict into a 500 + a stranded order row + (for credit
- * orders) a stranded debit. Walk the cause chain for the SQLSTATE +
- * constraint_name, matching the pattern used by
- * `credits/refunds.ts:isDuplicateRefund` and
- * `credits/emissions.ts:isDuplicateEmission`.
- *
- * Re-fetches the prior order so the caller can build the replay
- * response. Returns null when the failure was something else
- * (CHECK violation, FK violation, connection error) — the original
+ * Inspects an insert failure for the (userId, idempotencyKey)
+ * unique-spec violation that the A2-2003 race produces. Re-fetches
+ * the prior order so the caller can build the replay response.
+ * Returns null when the failure was something else — the original
  * exception bubbles unchanged.
  */
 export async function maybeFetchIdempotentConflict(
@@ -92,24 +58,6 @@ export async function maybeFetchIdempotentConflict(
   err: unknown,
 ): Promise<Order | null> {
   if (args.idempotencyKey === undefined) return null;
-  if (!isOrderIdempotencyConflict(err)) return null;
-  return await findOrderByIdempotencyKey(args.userId, args.idempotencyKey);
-}
-
-/**
- * A4-026: walks the cause chain (Drizzle's `DrizzleQueryError` wraps
- * postgres-js's `PostgresError`) for the
- * `orders_user_idempotency_unique` partial-unique-index violation.
- * Cap the walk depth at 4 to bound the cost on a non-matching error.
- */
-function isOrderIdempotencyConflict(err: unknown): boolean {
-  let cur: unknown = err;
-  for (let depth = 0; depth < 4 && cur instanceof Error; depth++) {
-    const e = cur as Error & { code?: string; constraint_name?: string };
-    if (e.code === '23505' && e.constraint_name === 'orders_user_idempotency_unique') {
-      return true;
-    }
-    cur = (e as { cause?: unknown }).cause;
-  }
-  return false;
+  if (!isUniqueViolation(err)) return null;
+  return findOrderByIdempotencyKey(args.userId, args.idempotencyKey);
 }

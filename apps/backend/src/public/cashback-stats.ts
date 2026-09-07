@@ -36,7 +36,6 @@
  * shape is unchanged.
  */
 import type { Context } from 'hono';
-import { sql } from 'drizzle-orm';
 // Response shape lives in `@loop/shared` alongside the web's consumer
 // (ADR 019 single-source rule). Re-exported below for existing backend
 // imports that reference the symbol relative to this module.
@@ -64,69 +63,25 @@ const COMPUTE_TTL_MS = 5 * 60 * 1000;
 // Reset on process restart; fallback-to-zero is the bootstrap state.
 let cache: { value: PublicCashbackStats; computedAt: number } | null = null;
 
-interface UsersRow {
-  n: string | number;
-}
-interface OrdersRow {
-  n: string | number;
-}
-interface CashbackRow {
-  currency: string;
-  amount_minor: string | number | bigint;
-}
-
-function toNumber(value: string | number | bigint): number {
-  if (typeof value === 'number') return value;
-  if (typeof value === 'bigint') return Number(value);
-  return Number.parseInt(value, 10);
-}
-function toStringBigint(value: string | number | bigint): string {
-  if (typeof value === 'bigint') return value.toString();
-  if (typeof value === 'number') return Math.trunc(value).toString();
-  return value;
-}
-
-function rowsOf<T>(result: unknown): T[] {
-  return (Array.isArray(result) ? (result as T[]) : ((result as { rows?: T[] }).rows ?? [])) as T[];
-}
-
 async function computeStats(): Promise<PublicCashbackStats> {
-  // CF-29 / PERF-001: the three aggregates are independent reads — run
-  // them concurrently rather than awaiting each in series. The
-  // `type='cashback'` predicates are served by the
-  // `credit_transactions(type, created_at)` index (migration 0036).
-  const [usersResult, ordersResult, cashbackResult] = await Promise.all([
-    // COUNT(DISTINCT user_id) WHERE type = 'cashback'. One row back.
-    db.execute(sql`
-      SELECT COUNT(DISTINCT user_id)::text AS n
-      FROM credit_transactions
-      WHERE type = 'cashback'
-    `),
-    db.execute(sql`
-      SELECT COUNT(*)::text AS n FROM orders WHERE state = 'fulfilled'
-    `),
-    db.execute(sql`
-      SELECT
-        currency,
-        COALESCE(SUM(amount_minor), 0)::bigint AS amount_minor
-      FROM credit_transactions
-      WHERE type = 'cashback'
-      GROUP BY currency
-      ORDER BY currency ASC
-    `),
-  ]);
-
-  const usersRows = rowsOf<UsersRow>(usersResult);
-  const ordersRows = rowsOf<OrdersRow>(ordersResult);
-  const cashbackRows = rowsOf<CashbackRow>(cashbackResult);
-
+  // ADR 052: cashback is the per-order checkout discount pinned on the
+  // order doc (`userCashbackMinor`), so all three aggregates come from
+  // one fulfilled-orders scan.
+  const fulfilled = await db.collection('orders').findMany({ state: 'fulfilled' });
+  const usersWithCashback = new Set<string>();
+  const totals = new Map<string, number>();
+  for (const order of fulfilled) {
+    if (order.userCashbackMinor > 0) {
+      usersWithCashback.add(order.userId);
+      totals.set(order.currency, (totals.get(order.currency) ?? 0) + order.userCashbackMinor);
+    }
+  }
   return {
-    totalUsersWithCashback: toNumber(usersRows[0]?.n ?? 0),
-    fulfilledOrders: toNumber(ordersRows[0]?.n ?? 0),
-    totalCashbackByCurrency: cashbackRows.map((r) => ({
-      currency: r.currency,
-      amountMinor: toStringBigint(r.amount_minor),
-    })),
+    totalUsersWithCashback: usersWithCashback.size,
+    fulfilledOrders: fulfilled.length,
+    totalCashbackByCurrency: [...totals.entries()]
+      .sort(([a], [b]) => (a < b ? -1 : 1))
+      .map(([currency, amountMinor]) => ({ currency, amountMinor: String(amountMinor) })),
     asOf: new Date().toISOString(),
   };
 }

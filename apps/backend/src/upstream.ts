@@ -1,4 +1,5 @@
 import { env } from './env.js';
+import { getCurrentRequestId, setCtxResponseRequestId } from './request-context.js';
 
 /**
  * Builds a full URL to the upstream CTX API.
@@ -45,4 +46,48 @@ export function upstreamUrl(path: string): string {
   }
   const base = env.GIFT_CARD_API_BASE_URL.replace(/\/$/, '');
   return `${base}${path}`;
+}
+
+/**
+ * `fetch` for the CTX-proxy routes (auth, orders, merchants,
+ * clustering), carrying the A2-1305 request-id correlation in both
+ * directions:
+ *
+ *   - outbound: stamps our ambient `X-Request-Id` onto the CTX call so
+ *     CTX logs their handling against our id. A caller that sets the
+ *     header explicitly wins — it is assumed to know what it's doing.
+ *     Only attached inside a real request (a boot-time sync or a
+ *     scheduled worker has no ambient context).
+ *   - inbound: captures CTX's own `X-Request-Id` — or `X-Correlation-Id`,
+ *     depending on which CTX edge served the response — into the
+ *     per-request store, where the post-handler middleware reads it and
+ *     echoes it to the client as `X-Ctx-Request-Id`.
+ *
+ * `ctx/api-fetch.ts::ctxFetch` is the API-key-authenticated sibling for
+ * server-to-server calls: it builds the credential headers and its own
+ * timeout, then dispatches through here, so the correlation lives in
+ * one place for both paths.
+ *
+ * Timeouts are the caller's job — every proxy call site passes its own
+ * `AbortSignal.timeout(...)` sized to that endpoint.
+ */
+export async function upstreamFetch(url: string | URL, init?: RequestInit): Promise<Response> {
+  const requestId = getCurrentRequestId();
+  let outboundInit = init;
+  if (requestId !== undefined) {
+    const headers = new Headers(init?.headers);
+    if (!headers.has('X-Request-Id')) {
+      headers.set('X-Request-Id', requestId);
+      outboundInit = { ...init, headers };
+    }
+  }
+
+  const response = await fetch(url, outboundInit);
+
+  const ctxId = response.headers.get('X-Request-Id') ?? response.headers.get('X-Correlation-Id');
+  if (ctxId !== null && ctxId.length > 0) {
+    setCtxResponseRequestId(ctxId);
+  }
+
+  return response;
 }

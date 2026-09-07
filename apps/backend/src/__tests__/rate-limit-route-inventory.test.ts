@@ -88,7 +88,6 @@ const UNLIMITED_ALLOWLIST = new Set<string>([
   // the scraper before any attacker; the unauthenticated path is a
   // constant-time token compare + 404.
   'GET /metrics',
-  'GET /openapi.json',
   // Test-only endpoints: mounted only when NODE_ENV=test AND
   // LOOP_TEST_ENDPOINTS_SECRET is configured (AUDIT-2-E defense-in-
   // depth — see test-endpoints.ts) — they do not exist in production
@@ -125,7 +124,7 @@ describe('hardening C6 — every route declares a rate limit', () => {
   }
 
   it('finds a non-trivial route table (walk is not vacuous)', () => {
-    expect(routeGroups().length).toBeGreaterThan(50);
+    expect(routeGroups().length).toBeGreaterThan(40);
   });
 
   it('every concrete mount carries a named rateLimit gate or an allowlisted reason', () => {

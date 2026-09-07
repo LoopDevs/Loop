@@ -17,7 +17,7 @@
  *
  * Context shape: sets `c.get('requestId')` to the freshly-minted
  * UUID — same key Hono's middleware uses, so downstream readers
- * (access-log, request-context AsyncLocalStorage, circuit-breaker
+ * (access-log, request-context AsyncLocalStorage, `ctxFetch`
  * outbound propagation) keep working without changes.
  *
  * Outbound header: `X-Request-Id: <uuid>` so clients can still

@@ -22,10 +22,8 @@
  * grid below.
  */
 import type { Context } from 'hono';
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { RecentlyPurchasedMerchantView, RecentlyPurchasedResponse } from '@loop/shared';
 import { db } from '../db/client.js';
-import { orders } from '../db/schema.js';
 import { getMerchants } from '../merchants/sync.js';
 import { logger } from '../logger.js';
 import { resolveCallingUser } from './handler.js';
@@ -36,7 +34,7 @@ const DEFAULT_LIMIT = 8;
 const MIN_LIMIT = 1;
 const MAX_LIMIT = 20;
 
-const PURCHASED_STATES = ['paid', 'procuring', 'fulfilled'] as const;
+const PURCHASED_STATES = ['paid', 'fulfilled'] as const;
 
 // RecentlyPurchasedMerchantView and RecentlyPurchasedResponse are now the
 // single source of truth from @loop/shared
@@ -69,22 +67,27 @@ export async function listRecentlyPurchasedHandler(c: Context): Promise<Response
   // WHERE + ORDER BY; the partial-index hot-paths under
   // `orders_pending_payment` / `orders_fulfilled_*` aren't relevant
   // here — we want the broader purchased-states cut.
-  const rows = await db
-    .select({
-      merchantId: orders.merchantId,
-      lastPurchasedAt: sql<Date>`MAX(${orders.createdAt})`.as('last_purchased_at'),
-      orderCount: sql<string>`count(*)::text`,
-    })
-    .from(orders)
-    .where(
-      and(
-        eq(orders.userId, user.id),
-        inArray(orders.state, PURCHASED_STATES as unknown as string[]),
-      ),
-    )
-    .groupBy(orders.merchantId)
-    .orderBy(desc(sql`MAX(${orders.createdAt})`))
-    .limit(limit);
+  const qualifying = await db
+    .collection('orders')
+    .findMany({ userId: user.id, state: { $in: [...PURCHASED_STATES] } });
+  const byMerchant = new Map<string, { lastPurchasedAt: Date; orderCount: number }>();
+  for (const order of qualifying) {
+    const entry = byMerchant.get(order.merchantId);
+    if (entry === undefined) {
+      byMerchant.set(order.merchantId, { lastPurchasedAt: order.createdAt, orderCount: 1 });
+    } else {
+      entry.orderCount++;
+      if (order.createdAt > entry.lastPurchasedAt) entry.lastPurchasedAt = order.createdAt;
+    }
+  }
+  const rows = [...byMerchant.entries()]
+    .map(([merchantId, agg]) => ({
+      merchantId,
+      lastPurchasedAt: agg.lastPurchasedAt,
+      orderCount: String(agg.orderCount),
+    }))
+    .sort((a, b) => b.lastPurchasedAt.getTime() - a.lastPurchasedAt.getTime())
+    .slice(0, limit);
 
   const { merchantsById } = getMerchants();
   const merchants: RecentlyPurchasedMerchantView[] = rows.map((row) => ({
