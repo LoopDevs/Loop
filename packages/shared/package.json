@@ -20,7 +20,7 @@
     "vitest": "4.1.5"
   },
   "dependencies": {
-    "@bufbuild/protobuf": "2.12.0"
+    "@bufbuild/protobuf": "2.14.1"
   },
   "engines": {
     "node": ">=22.0.0"
