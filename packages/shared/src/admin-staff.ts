@@ -1,7 +1,7 @@
 /**
  * Staff-role wire shapes (ADR 037).
  *
- * The `staff_roles` table replaces the binary `users.is_admin`
+ * The `staff_roles` collection replaces the binary `users.isAdmin`
  * trust model: 'admin' keeps everything (money writes still
  * step-up-gated per ADR 028); 'support' gets the read views plus
  * the three delivery-unsticking actions and a 404 on everything
@@ -10,7 +10,7 @@
  * backend + openapi compile against one definition.
  */
 
-/** Runtime enum — pinned to the `staff_roles_role_known` DB CHECK. */
+/** Runtime enum — the accepted values of a `staff_roles` row's role. */
 export const STAFF_ROLES = ['admin', 'support'] as const;
 
 export type StaffRole = (typeof STAFF_ROLES)[number];
@@ -19,8 +19,8 @@ export type StaffRole = (typeof STAFF_ROLES)[number];
  * One staff member in `GET /api/admin/staff`.
  *
  * `source` distinguishes a real `staff_roles` row from the
- * deprecated `users.is_admin` shim (a CTX-allowlist admin who has
- * no row yet — ADR 037 §1). Legacy entries have no grant metadata.
+ * deprecated `users.isAdmin` shim (a config-allowlist admin who has
+ * no row yet — ADR 037 §1). Shim entries have no grant metadata.
  */
 export interface AdminStaffEntry {
   userId: string;
@@ -29,7 +29,7 @@ export interface AdminStaffEntry {
   source: 'staff_roles' | 'legacy_is_admin';
   /** ISO-8601; null for `legacy_is_admin` entries. */
   grantedAt: string | null;
-  /** Null for the migration-0039 seed rows and legacy entries. */
+  /** Null for shim entries, which nobody granted. */
   grantedByUserId: string | null;
   /** Grantor's email when resolvable; null otherwise. */
   grantedByEmail: string | null;

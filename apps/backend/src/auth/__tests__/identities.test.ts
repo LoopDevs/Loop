@@ -20,6 +20,7 @@ async function seedUser(overrides: Partial<UserDoc> = {}): Promise<UserDoc> {
     email: 'seed@b.com',
     tokenVersion: 0,
     homeCurrency: 'USD',
+    isAdmin: false,
     createdAt: now,
     updatedAt: now,
     ...overrides,

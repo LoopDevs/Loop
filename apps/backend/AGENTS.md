@@ -16,8 +16,11 @@ src/
 │   ├── mongo-store.ts  ← DB_DRIVER=mongo driver (official mongodb client)
 │   ├── client.ts       ← `db` singleton, initDb/closeDb, withSingleFlight
 │   ├── errors.ts       ← isUniqueViolation
-│   └── users.ts        ← User repo helpers (find-or-create, token version)
+│   ├── keyed-lock.ts   ← Serialises multi-doc read-modify-writes (was an advisory lock)
+│   ├── staff-roles.ts  ← ADR 037 staff grants + the last-admin invariant
+│   └── users.ts        ← User repo helpers (find-or-create, token version, admin shim)
 ├── auth/               ← Loop-native OTP + social login + refresh rotation + purge sweep
+├── admin/              ← ADR 017/028/037 admin surface: staff roles, step-up, idempotency
 ├── orders/             ← ADR 052 order mirror: create at CTX, ws/sweep transitions,
 │                          redemption backfill, redeem-secret crypto
 ├── merchants/          ← In-memory catalog synced from CTX + ws maintainer + cashback rates
@@ -29,7 +32,7 @@ src/
 ├── webhooks/           ← HMAC verify helper
 ├── discord/            ← Webhook notifiers + in-process watchdog alert gate
 ├── middleware/         ← CORS, rate limit, cache-control, request-id, body limit, …
-└── routes/             ← Route mounts per domain (auth, orders, merchants, users, public, misc)
+└── routes/             ← Route mounts per domain (auth, orders, merchants, users, admin, …)
 ```
 
 ## Key patterns

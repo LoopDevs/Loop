@@ -52,6 +52,7 @@ async function seedUser(overrides: Partial<UserDoc> = {}): Promise<UserDoc> {
     email: 'a@b.com',
     tokenVersion: 0,
     homeCurrency: 'USD',
+    isAdmin: false,
     createdAt: now,
     updatedAt: now,
     ...overrides,
@@ -107,7 +108,13 @@ describe('getMeHandler', () => {
     const res = await getMeHandler(makeCtx(loopAuth));
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
-    expect(body).toEqual({ id: UID, email: 'a@b.com', homeCurrency: 'USD' });
+    expect(body).toEqual({
+      id: UID,
+      email: 'a@b.com',
+      homeCurrency: 'USD',
+      staffRole: null,
+      isAdmin: false,
+    });
   });
 
   it('401 when the Loop bearer resolves no user row (deleted or unknown)', async () => {
@@ -121,12 +128,45 @@ describe('getMeHandler', () => {
     expect(res.status).toBe(401);
   });
 
-  it('omits ctxUserId, tokenVersion, and timestamps from the view — only id/email/homeCurrency surface', async () => {
+  it('omits ctxUserId, tokenVersion, and timestamps from the view — only the profile + staff tier surface', async () => {
     await seedUser();
     const res = await getMeHandler(makeCtx(loopAuth));
     const body = (await res.json()) as Record<string, unknown>;
-    expect(Object.keys(body).sort()).toEqual(['email', 'homeCurrency', 'id']);
+    expect(Object.keys(body).sort()).toEqual([
+      'email',
+      'homeCurrency',
+      'id',
+      'isAdmin',
+      'staffRole',
+    ]);
     expect(JSON.stringify(body)).not.toContain('ctx-123');
+  });
+
+  // ADR 037: the web admin shell gates its navigation on `staffRole`,
+  // so a staff member whose row says 'admin' must see it here — the
+  // shim (`users.isAdmin`) only decides when there is no row.
+  it('reports the staff tier from a staff_roles row', async () => {
+    await seedUser();
+    await db.collection('staff_roles').insertOne({
+      userId: UID,
+      role: 'support',
+      grantedAt: new Date(),
+      grantedByUserId: null,
+      reason: null,
+    });
+    const res = await getMeHandler(makeCtx(loopAuth));
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body['staffRole']).toBe('support');
+    // isAdmin is the 'admin'-only compat shim — support is not admin.
+    expect(body['isAdmin']).toBe(false);
+  });
+
+  it('falls back to the users.isAdmin allowlist shim when there is no row', async () => {
+    await seedUser({ isAdmin: true });
+    const res = await getMeHandler(makeCtx(loopAuth));
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body['staffRole']).toBe('admin');
+    expect(body['isAdmin']).toBe(true);
   });
 });
 

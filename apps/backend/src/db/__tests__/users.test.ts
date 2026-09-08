@@ -1,4 +1,22 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import type * as ConfigModule from '../../config/index.js';
+
+// The admin bootstrap allowlist is re-read on every upsert, so the
+// tests below drive it at runtime rather than through the fixture file.
+const { adminState } = vi.hoisted(() => ({
+  adminState: { emails: [] as string[], ctxUserIds: [] as string[] },
+}));
+
+vi.mock('../../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
+  return {
+    ...actual,
+    get config() {
+      return { ...actual.config, admin: { ...actual.config.admin, ...adminState } };
+    },
+  };
+});
+
 import { db, __resetDbForTests } from '../client.js';
 import { UniqueViolationError } from '../errors.js';
 import {
@@ -9,6 +27,7 @@ import {
   getUserTokenVersion,
   bumpUserTokenVersion,
   findOrCreateUserByEmail,
+  isAllowlistedAdmin,
 } from '../users.js';
 import type { UserDoc } from '../types.js';
 
@@ -19,6 +38,8 @@ import type { UserDoc } from '../types.js';
  */
 beforeEach(() => {
   __resetDbForTests();
+  adminState.emails = [];
+  adminState.ctxUserIds = [];
 });
 
 /** Seeds a user doc directly, bypassing the repo under test. */
@@ -30,6 +51,7 @@ async function seedUser(overrides: Partial<UserDoc> = {}): Promise<UserDoc> {
     email: 'seed@b.com',
     tokenVersion: 0,
     homeCurrency: 'USD',
+    isAdmin: false,
     createdAt: now,
     updatedAt: now,
     ...overrides,
@@ -154,6 +176,7 @@ describe('findOrCreateUserByEmail', () => {
         email: 'raced@b.com',
         tokenVersion: 0,
         homeCurrency: 'USD',
+        isAdmin: false,
         createdAt: now,
         updatedAt: now,
       });
@@ -163,5 +186,72 @@ describe('findOrCreateUserByEmail', () => {
     expect(insertSpy).toHaveBeenCalledTimes(1);
     expect(user.id).toBe('uuid-winner');
     expect(await db.collection('users').count({ email: 'raced@b.com' })).toBe(1);
+  });
+});
+
+/**
+ * The `admin.emails` / `admin.ctxUserIds` bootstrap allowlist. This is
+ * the only route to the FIRST admin — before one exists there is
+ * nobody to grant a `staff_roles` row — so the cases that matter are
+ * that it is evaluated against an already-verified identity, and that
+ * it is RE-evaluated on every upsert so a config edit lands without a
+ * manual database touch.
+ */
+describe('isAllowlistedAdmin', () => {
+  it('matches an email case-insensitively and ignores surrounding whitespace', () => {
+    adminState.emails = ['  Ops@Loop.TEST '];
+    expect(isAllowlistedAdmin({ email: 'ops@loop.test', ctxUserId: null })).toBe(true);
+  });
+
+  it('matches a CTX user id exactly', () => {
+    adminState.ctxUserIds = ['ctx-42'];
+    expect(isAllowlistedAdmin({ email: null, ctxUserId: 'ctx-42' })).toBe(true);
+    expect(isAllowlistedAdmin({ email: null, ctxUserId: 'ctx-4' })).toBe(false);
+  });
+
+  it('never matches on an empty or absent identity', () => {
+    // An empty allowlist entry paired with an empty email must not
+    // silently promote every user who has no email on their row.
+    adminState.emails = [''];
+    adminState.ctxUserIds = [''];
+    expect(isAllowlistedAdmin({ email: '', ctxUserId: '' })).toBe(false);
+    expect(isAllowlistedAdmin({ email: undefined, ctxUserId: undefined })).toBe(false);
+  });
+});
+
+describe('admin allowlist at upsert', () => {
+  it('flags a new Loop-native user whose verified email is allowlisted', async () => {
+    adminState.emails = ['boss@loop.test'];
+    const user = await findOrCreateUserByEmail('boss@loop.test');
+    expect(user.isAdmin).toBe(true);
+  });
+
+  it('promotes an existing user on their next login after a config edit', async () => {
+    const before = await findOrCreateUserByEmail('boss@loop.test');
+    expect(before.isAdmin).toBe(false);
+
+    adminState.emails = ['boss@loop.test'];
+    const after = await findOrCreateUserByEmail('boss@loop.test');
+    expect(after.isAdmin).toBe(true);
+    expect(after.id).toBe(before.id);
+  });
+
+  it('demotes on the next login once the entry is removed', async () => {
+    adminState.emails = ['boss@loop.test'];
+    await findOrCreateUserByEmail('boss@loop.test');
+
+    adminState.emails = [];
+    const after = await findOrCreateUserByEmail('boss@loop.test');
+    expect(after.isAdmin).toBe(false);
+  });
+
+  it('flags a CTX-path user from the ctxUserIds allowlist, and re-derives on the next upsert', async () => {
+    adminState.ctxUserIds = ['ctx-boss'];
+    const created = await upsertUserFromCtx({ ctxUserId: 'ctx-boss', email: 'b@loop.test' });
+    expect(created.isAdmin).toBe(true);
+
+    adminState.ctxUserIds = [];
+    const refreshed = await upsertUserFromCtx({ ctxUserId: 'ctx-boss', email: 'b@loop.test' });
+    expect(refreshed.isAdmin).toBe(false);
   });
 });

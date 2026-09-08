@@ -32,6 +32,7 @@ async function seedUser(id: string): Promise<UserDoc> {
     email: `${id}@test.local`,
     tokenVersion: 0,
     homeCurrency: 'USD',
+    isAdmin: false,
     createdAt: now,
     updatedAt: now,
   };

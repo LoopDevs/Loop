@@ -117,6 +117,7 @@ async function seedUser(): Promise<{ userId: string; email: string }> {
     email,
     tokenVersion: 0,
     homeCurrency: 'USD',
+    isAdmin: false,
     createdAt: now,
     updatedAt: now,
   });

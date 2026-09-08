@@ -6,6 +6,15 @@
  * - `evictExpiredImageCache` — drops decoded image blobs whose
  *   TTL has passed (`./images/proxy.js`). 7-day TTL; hourly is
  *   plenty.
+ * - `sweepStaleIdempotencyKeys` — drops admin-write snapshots past
+ *   the `admin.auditRetentionDays` window (NS-03). Years-long by
+ *   default, so almost every tick is a no-op; hourly costs nothing
+ *   and means retention doesn't wait on a restart.
+ * - `purgeExpiredAdminStepUpConsumptions` — drops single-use step-up
+ *   markers whose token expired long ago (SEC-02-stepup). A dead
+ *   token can no longer verify, so its marker can never block a live
+ *   replay; the row carries `sub`, so keeping it forever would be an
+ *   unbounded PII store with no retention basis.
  * **Per-minute tick** (`runRateLimitSweep`, A4-016):
  * - `sweepExpiredRateLimits` — drops per-IP per-route rate-limit
  *   entries whose 60s window has elapsed. Bucket entries are
@@ -23,6 +32,18 @@
 import { config } from './config/index.js';
 import { evictExpiredImageCache } from './images/proxy.js';
 import { sweepExpiredRateLimits } from './middleware/rate-limit.js';
+import { sweepStaleIdempotencyKeys } from './admin/idempotency.js';
+import { purgeExpiredAdminStepUpConsumptions } from './auth/admin-step-up.js';
+import { logger } from './logger.js';
+
+const log = logger.child({ area: 'cleanup' });
+
+/**
+ * How long a spent step-up marker outlives its token's `exp`. A day is
+ * far past the 5-minute TTL, so no live replay can slip through, while
+ * leaving a comfortable forensic window on "which step-up was spent".
+ */
+const STEP_UP_CONSUMPTION_RETENTION_MS = 24 * 60 * 60 * 1000;
 
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 // A4-016: rate-limit windows are 60s; sweep at the same cadence
@@ -39,6 +60,31 @@ export function runCleanup(): void {
   // tick; running it again here is a harmless no-op (idempotent
   // O(n) walk over the map, n bounded by the cap).
   sweepExpiredRateLimits();
+  // The two store-backed sweeps are fire-and-forget: this tick is
+  // sync (its callers drive it directly in tests), and a retention
+  // sweep failing is a log line, never a reason to skip the rest.
+  void runAdminRetentionSweeps();
+}
+
+/**
+ * The admin-surface retention sweeps. Exported separately from
+ * `runCleanup` so a test can await them instead of racing the
+ * fire-and-forget call above.
+ */
+export async function runAdminRetentionSweeps(): Promise<void> {
+  try {
+    await sweepStaleIdempotencyKeys();
+  } catch (err) {
+    log.error({ err }, 'Admin idempotency retention sweep failed');
+  }
+  try {
+    const deleted = await purgeExpiredAdminStepUpConsumptions({
+      retentionMs: STEP_UP_CONSUMPTION_RETENTION_MS,
+    });
+    if (deleted > 0) log.info({ deletedCount: deleted }, 'Swept spent admin step-up markers');
+  } catch (err) {
+    log.error({ err }, 'Admin step-up consumption sweep failed');
+  }
 }
 
 /**

@@ -20,6 +20,7 @@ import { mountOrderRoutes } from './routes/orders.js';
 import { mountMiscRoutes } from './routes/misc.js';
 import { mountPublicRoutes } from './routes/public.js';
 import { mountUserRoutes } from './routes/users.js';
+import { mountAdminRoutes } from './routes/admin.js';
 import { mountWellKnownRoutes } from './routes/well-known.js';
 
 export const app = new Hono();
@@ -193,6 +194,12 @@ mountOrderRoutes(app);
 // mount-order constraint between them (cache-control before auth
 // so 401s also get `private, no-store`) is the contract.
 mountUserRoutes(app);
+
+// `/api/admin/*` route mounts live in `./routes/admin.ts`. Bundles
+// cache-control + requireAuth + the `requireStaff('support')` blanket
+// + the read-audit middleware because their mount ORDER is the
+// contract (see that module's docstring).
+mountAdminRoutes(app);
 
 // ─── 404 fallback ────────────────────────────────────────────────────────────
 

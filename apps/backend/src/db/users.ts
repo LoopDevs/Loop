@@ -1,9 +1,40 @@
 import { randomUUID } from 'node:crypto';
+import { config } from '../config/index.js';
 import { db } from './client.js';
 import { isUniqueViolation } from './errors.js';
 import type { UserDoc } from './types.js';
 
 export type User = UserDoc;
+
+/**
+ * The `admin.emails` / `admin.ctxUserIds` bootstrap allowlist (see
+ * `config/sections/admin.ts` for why it is config and not a DB write).
+ *
+ * Evaluated on every upsert, so the answer always reflects the file
+ * currently deployed: adding an entry promotes on the target's next
+ * login, removing one demotes on theirs. Both sides are matched
+ * against an identity the caller has already proved — an OTP- or
+ * provider-verified email, or the `ctxUserId` on their row — never a
+ * client-supplied claim.
+ *
+ * Recomputing the flag cannot clobber a durable ADR 037 grant: the
+ * flag is only the shim `requireStaff` falls back to when the user has
+ * no `staff_roles` row, and a row always wins.
+ */
+export function isAllowlistedAdmin(args: {
+  email: string | null | undefined;
+  ctxUserId: string | null | undefined;
+}): boolean {
+  const { emails, ctxUserIds } = config.admin;
+  if (args.email !== null && args.email !== undefined && args.email !== '') {
+    const needle = args.email.toLowerCase().trim();
+    if (emails.some((e) => e.toLowerCase().trim() === needle)) return true;
+  }
+  if (args.ctxUserId !== null && args.ctxUserId !== undefined && args.ctxUserId !== '') {
+    if (ctxUserIds.includes(args.ctxUserId)) return true;
+  }
+  return false;
+}
 
 /**
  * Upsert a Loop user from a CTX identity. Called from `requireAuth` on
@@ -17,12 +48,16 @@ export async function upsertUserFromCtx(args: {
 }): Promise<User> {
   const users = db.collection('users');
   const now = new Date();
+  const isAdmin = isAllowlistedAdmin({ email: args.email, ctxUserId: args.ctxUserId });
   const updated = await users.updateOne(
     { ctxUserId: args.ctxUserId },
     {
       $set: {
         // Only refresh the email when the token actually carried one.
         ...(args.email !== undefined && args.email !== '' ? { email: args.email } : {}),
+        // Re-derived from the config allowlist on every request, so a
+        // grant or a revocation lands on the next one.
+        isAdmin,
         updatedAt: now,
       },
     },
@@ -34,6 +69,7 @@ export async function upsertUserFromCtx(args: {
     email: args.email ?? '',
     tokenVersion: 0,
     homeCurrency: 'USD',
+    isAdmin,
     createdAt: now,
     updatedAt: now,
   };
@@ -110,7 +146,16 @@ export async function findOrCreateUserByEmail(email: string): Promise<User> {
   const users = db.collection('users');
   const normalised = email.toLowerCase().trim();
   const existing = await users.findOne({ email: normalised });
-  if (existing !== null) return existing;
+  if (existing !== null) {
+    // Re-derive the allowlist shim on every login so a config change
+    // takes effect without a manual DB touch — see `isAllowlistedAdmin`.
+    const isAdmin = isAllowlistedAdmin({ email: normalised, ctxUserId: existing.ctxUserId });
+    if (isAdmin === existing.isAdmin) return existing;
+    return (
+      (await users.updateOne({ id: existing.id }, { $set: { isAdmin, updatedAt: new Date() } })) ??
+      existing
+    );
+  }
   const now = new Date();
   const doc: UserDoc = {
     id: randomUUID(),
@@ -118,6 +163,7 @@ export async function findOrCreateUserByEmail(email: string): Promise<User> {
     email: normalised,
     tokenVersion: 0,
     homeCurrency: 'USD',
+    isAdmin: isAllowlistedAdmin({ email: normalised, ctxUserId: null }),
     createdAt: now,
     updatedAt: now,
   };

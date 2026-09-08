@@ -646,6 +646,45 @@ describe('parseConfig', () => {
   });
 });
 
+describe('admin', () => {
+  it('defaults to no allowlist, no step-up key, and financial-grade audit retention', () => {
+    const cfg = parse(base);
+    expect(cfg.admin.emails).toEqual([]);
+    expect(cfg.admin.ctxUserIds).toEqual([]);
+    expect(cfg.admin.stepUp.signingKey).toBeUndefined();
+    expect(cfg.admin.auditRetentionDays).toBe(2557);
+  });
+
+  it('accepts allowlists as lists', () => {
+    const cfg = parse({
+      ...base,
+      admin: { emails: ['a@loop.test', 'b@loop.test'], ctxUserIds: ['ctx-1'] },
+    });
+    expect(cfg.admin.emails).toEqual(['a@loop.test', 'b@loop.test']);
+    expect(cfg.admin.ctxUserIds).toEqual(['ctx-1']);
+  });
+
+  it('rejects a non-address in the email allowlist', () => {
+    // A typo here silently grants nobody, which is a security-relevant
+    // no-op an operator would not notice — so fail the boot instead.
+    expect(() => parse({ ...base, admin: { emails: ['not-an-email'] } })).toThrow(
+      /admin\.emails\.0/,
+    );
+  });
+
+  it('rejects a step-up signing key with too little entropy', () => {
+    expect(() => parse({ ...base, admin: { stepUp: { signingKey: 'short' } } })).toThrow(
+      /admin\.stepUp\.signingKey/,
+    );
+  });
+
+  it('rejects a non-positive audit retention', () => {
+    expect(() => parse({ ...base, admin: { auditRetentionDays: 0 } })).toThrow(
+      /admin\.auditRetentionDays/,
+    );
+  });
+});
+
 /**
  * The production postures that are unsafe enough to refuse the boot
  * over. Each has an explicit `unsafe:` opt-out where a deliberate

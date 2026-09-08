@@ -1,13 +1,14 @@
 # Unit-test configuration fixture.
 #
-# `src/config.ts` validates the config file at module load, so any test
-# that imports backend code needs a valid file to exist first.
+# `src/config/index.ts` validates the config file at module load, so
+# any test that imports backend code needs a valid file to exist first.
 # `src/__tests__/vitest-env-setup.ts` points `CONFIG_PATH` here before
 # test-file import resolution happens.
 #
 # Placeholders only — no test needs a real upstream or database, and
-# tests that exercise a specific setting either mock `../config.js` or
-# call `parseConfig()` with a synthetic document.
+# tests that exercise a specific setting either mock
+# `../config/index.js` or call `parseConfig()` with a synthetic
+# document.
 #
 # Committed on purpose: it contains nothing secret.
 
@@ -26,3 +27,11 @@ database:
   driver: memory
   # Empty path → ephemeral store, no filesystem writes from a test run.
   jsonPath: ''
+
+admin:
+  # A step-up signing key is present so the admin-write gates take
+  # their real code path (401 STEP_UP_REQUIRED / consume-and-burn)
+  # rather than the unconfigured 503 short-circuit. Tests that want the
+  # unconfigured behaviour override the setting in their config mock.
+  stepUp:
+    signingKey: admin-step-up-test-signing-key-32c!

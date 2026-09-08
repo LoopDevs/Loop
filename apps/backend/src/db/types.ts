@@ -17,7 +17,7 @@
  *     bigint columns never approached 2^53 at Loop's scale).
  *   - Nullable fields are explicit `null`, never omitted.
  */
-import type { HomeCurrency, OrderState } from '@loop/shared';
+import type { HomeCurrency, OrderState, StaffRole } from '@loop/shared';
 
 export type { HomeCurrency, OrderState };
 
@@ -38,6 +38,14 @@ export interface UserDoc {
    */
   tokenVersion: number;
   homeCurrency: HomeCurrency;
+  /**
+   * ADR 037 legacy shim. Recomputed from the `admin.emails` /
+   * `admin.ctxUserIds` allowlist on every upsert, so it reflects the
+   * config file rather than a durable grant. `requireStaff` prefers a
+   * `staff_roles` row and only falls back to this when none exists —
+   * see `db/staff-roles.ts` for why the grant/revoke writes mirror it.
+   */
+  isAdmin: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -179,6 +187,53 @@ export interface CtxCatalogSnapshotDoc {
   updatedAt: Date;
 }
 
+/**
+ * Durable staff grants (ADR 037). One row per staff member; absence
+ * means "not staff", and the `users.isAdmin` allowlist shim is the
+ * only other way to be one. `role` is the shared `StaffRole` union
+ * ('admin' | 'support') — admin ⊇ support.
+ */
+export interface StaffRoleDoc {
+  userId: string;
+  role: StaffRole;
+  grantedAt: Date;
+  grantedByUserId: string | null;
+  reason: string | null;
+}
+
+/**
+ * ADR 017 admin-write idempotency snapshots — and, past the 24h replay
+ * window, the durable audit trail of every applied admin mutation
+ * (NS-03). A row exists only if its write committed, so this doubles
+ * as the "what did admins actually do" record; retention is governed
+ * by `admin.auditRetentionDays`, not by the replay TTL.
+ */
+export interface AdminIdempotencyKeyDoc {
+  adminUserId: string;
+  key: string;
+  method: string;
+  path: string;
+  status: number;
+  /** The response body, serialised, replayed verbatim on a repeat. */
+  responseBody: string;
+  createdAt: Date;
+}
+
+/**
+ * SEC-02-stepup single-use ledger. One row per step-up token actually
+ * spent; the insert is what makes a token single-use, so a replay
+ * collides on `jti` and is refused. Rows are swept once their `exp`
+ * has long passed — a dead token can no longer verify, so its marker
+ * cannot block a live replay.
+ */
+export interface AdminStepUpConsumptionDoc {
+  jti: string;
+  sub: string;
+  scope: string;
+  expiresAt: Date;
+  consumedAt: Date;
+}
+
 /** Collection name → document type. The single registry both drivers key off. */
 export interface CollectionDocs {
   users: UserDoc;
@@ -191,6 +246,9 @@ export interface CollectionDocs {
   user_favorite_merchants: UserFavoriteMerchantDoc;
   merchant_cashback_configs: MerchantCashbackConfigDoc;
   ctx_catalog_snapshots: CtxCatalogSnapshotDoc;
+  staff_roles: StaffRoleDoc;
+  admin_idempotency_keys: AdminIdempotencyKeyDoc;
+  admin_step_up_consumptions: AdminStepUpConsumptionDoc;
 }
 
 export type CollectionName = keyof CollectionDocs;
@@ -214,4 +272,7 @@ export const COLLECTION_SPECS: {
   user_favorite_merchants: { uniques: [['userId', 'merchantId']] },
   merchant_cashback_configs: { uniques: [['merchantId']] },
   ctx_catalog_snapshots: { uniques: [['name']] },
+  staff_roles: { uniques: [['userId']] },
+  admin_idempotency_keys: { uniques: [['adminUserId', 'key']] },
+  admin_step_up_consumptions: { uniques: [['jti']] },
 };

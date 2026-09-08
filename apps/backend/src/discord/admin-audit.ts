@@ -1,0 +1,132 @@
+/**
+ * Admin-audit channel Discord notifiers — fires to
+ * `observability.discord.adminAuditWebhook`. Two signals that read
+ * together as the admin-action audit trail:
+ *
+ *   1. **Admin write** (`notifyAdminAudit`) — generic ADR
+ *      017/018 mutation log. Every staff-role grant, cashback-config
+ *      edit, order redrive, etc. emits one of these AFTER the write
+ *      commits. Actor id last-8-chars only; idempotency-
+ *      key first-32-chars only; reason verbatim (truncated to
+ *      `FIELD_VALUE_MAX`); replayed flag pulled from the
+ *      idempotency-store hit.
+ *   2. **Admin bulk read** (`notifyAdminBulkRead`) — A2-2008.
+ *      Single-row drills aren't logged here (the access log is
+ *      authoritative for line-item reads); CSV exports + large
+ *      full-lists are. Discord post is the human-visible "someone
+ *      is exporting right now" signal that's hard to ignore on a
+ *      shared channel.
+ *
+ * Pulled out of `discord.ts` so the per-channel surfaces are
+ * traceable to one file each. Shared infrastructure
+ * (`sendWebhook`, `truncate`, `escapeMarkdown`, colour constants)
+ * lives in `./shared.ts`.
+ */
+import { config } from '../config/index.js';
+import { BLUE, FIELD_VALUE_MAX, GREEN, escapeMarkdown, sendWebhook, truncate } from './shared.js';
+
+/**
+ * Notify: admin write action (ADR 017/018). Called fire-and-forget
+ * AFTER the DB commit of every admin mutation. Actor id truncated
+ * to the last 8 chars so the embed doesn't expose a full uuid; the
+ * full id is still on the `admin_idempotency_keys` audit row. A2-511: actor email
+ * dropped from the embed — the tail-id convention is the Discord-
+ * side identifier, and admin emails are reserved for the ledger
+ * row (where they're useful) rather than the webhook feed (where
+ * they aren't).
+ */
+export function notifyAdminAudit(args: {
+  actorUserId: string;
+  endpoint: string;
+  targetUserId?: string;
+  amountMinor?: string;
+  currency?: string;
+  reason: string;
+  idempotencyKey: string;
+  replayed: boolean;
+}): void {
+  const actorTail = args.actorUserId.slice(-8);
+  const fields: Array<{ name: string; value: string; inline?: boolean }> = [
+    { name: 'Actor', value: `\`${actorTail}\``, inline: true },
+    { name: 'Endpoint', value: `\`${escapeMarkdown(args.endpoint)}\``, inline: true },
+  ];
+  if (args.targetUserId !== undefined) {
+    fields.push({
+      name: 'Target user',
+      value: `\`${args.targetUserId.slice(-8)}\``,
+      inline: true,
+    });
+  }
+  if (args.amountMinor !== undefined && args.currency !== undefined) {
+    fields.push({
+      name: 'Amount (minor)',
+      value: `${escapeMarkdown(args.amountMinor)} ${escapeMarkdown(args.currency)}`,
+      inline: true,
+    });
+  }
+  fields.push({
+    name: 'Reason',
+    value: truncate(escapeMarkdown(args.reason), FIELD_VALUE_MAX),
+    inline: false,
+  });
+  fields.push({
+    name: 'Idempotency-Key',
+    value: `\`${escapeMarkdown(args.idempotencyKey).slice(0, 32)}\``,
+    inline: true,
+  });
+  if (args.replayed) {
+    fields.push({ name: 'Replayed', value: 'yes', inline: true });
+  }
+  void sendWebhook(config.observability.discord.adminAuditWebhook, {
+    title: args.replayed ? '🔁 Admin write (replayed)' : '🛠️ Admin write',
+    color: args.replayed ? BLUE : GREEN,
+    fields,
+  });
+}
+
+/**
+ * A2-2008: bulk-read audit notification. Admin reads are a separate
+ * surface from admin writes — logging every single-row drill would
+ * flood the channel — but bulk exports (CSV downloads, full-list
+ * pulls past a row threshold) are a high-PII surface where a
+ * malicious or mis-targeted admin can exfiltrate user data without
+ * leaving a trace.
+ *
+ * Fires on:
+ *   - any `GET /api/admin/*.csv` 200 response
+ *   - CF-10: admin GETs whose JSON list body returns a bulk row count
+ *     past the middleware threshold (cursor-walking PII pulls)
+ *
+ * The Pino access log (server-side, ships off-host via Fly logflow)
+ * is the line-item read audit; this Discord post is the human-visible
+ * "someone's running an export right now" signal.
+ */
+export function notifyAdminBulkRead(args: {
+  actorUserId: string;
+  endpoint: string;
+  /** Optional query string (truncated) for context. */
+  queryString?: string;
+  /** CF-10: row count for a bulk JSON list read (omitted for CSV exports). */
+  rowCount?: number;
+}): void {
+  const actorTail = args.actorUserId.slice(-8);
+  const fields: Array<{ name: string; value: string; inline?: boolean }> = [
+    { name: 'Actor', value: `\`${actorTail}\``, inline: true },
+    { name: 'Endpoint', value: `\`${escapeMarkdown(args.endpoint)}\``, inline: true },
+  ];
+  if (args.rowCount !== undefined) {
+    fields.push({ name: 'Rows', value: `${args.rowCount}`, inline: true });
+  }
+  if (args.queryString !== undefined && args.queryString.length > 0) {
+    fields.push({
+      name: 'Query',
+      value: `\`${truncate(escapeMarkdown(args.queryString), 200)}\``,
+      inline: false,
+    });
+  }
+  void sendWebhook(config.observability.discord.adminAuditWebhook, {
+    title: '📤 Admin bulk read',
+    color: BLUE,
+    fields,
+  });
+}

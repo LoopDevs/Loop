@@ -7,6 +7,10 @@ import { BLUE, escapeMarkdown, sendWebhook } from './discord/shared.js';
 // working without re-targeting their imports.
 export { notifyOrderCreated, notifyOrderFulfilled } from './discord/orders.js';
 
+// ADR 017/018 admin action trail. Lives in `./discord/admin-audit.ts`;
+// re-exported here so admin handlers import notifiers from one place.
+export { notifyAdminAudit, notifyAdminBulkRead } from './discord/admin-audit.js';
+
 // Monitoring-channel notifiers (covering health, payouts, asset
 // drift, stuck-row sweepers, redemption backfill, upstream contract,
 // circuit breaker — plus dedup-state test seams) live in
@@ -48,11 +52,11 @@ export {
 } from './discord/monitoring.js';
 
 /**
- * Discord channels the backend posts to. Mirrors the two webhooks
- * under `observability.discord` — keeping this as a closed union
- * means adding a new channel is a type-level change.
+ * Discord channels the backend posts to. Mirrors the webhooks under
+ * `observability.discord` — keeping this as a closed union means
+ * adding a new channel is a type-level change.
  */
-export type DiscordChannel = 'orders' | 'monitoring';
+export type DiscordChannel = 'orders' | 'monitoring' | 'admin-audit';
 
 /**
  * Resolves the raw webhook URL for a given channel. Centralised so
@@ -65,6 +69,8 @@ function webhookUrlFor(channel: DiscordChannel): string | undefined {
       return config.observability.discord.ordersWebhook;
     case 'monitoring':
       return config.observability.discord.monitoringWebhook;
+    case 'admin-audit':
+      return config.observability.discord.adminAuditWebhook;
   }
 }
 

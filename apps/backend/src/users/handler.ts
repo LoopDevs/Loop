@@ -13,10 +13,11 @@
  */
 import type { Context } from 'hono';
 import { z } from 'zod';
-import { HOME_CURRENCIES } from '@loop/shared';
+import { HOME_CURRENCIES, type StaffRole } from '@loop/shared';
 import { db } from '../db/client.js';
 import { resolveLoopAuthenticatedUser } from '../auth/authenticated-user.js';
 import { type User } from '../db/users.js';
+import { getStaffRole } from '../db/staff-roles.js';
 import { logger } from '../logger.js';
 
 const log = logger.child({ handler: 'users' });
@@ -26,13 +27,49 @@ export interface UserMeView {
   email: string;
   /** ADR 015 — USD / GBP / EUR. Drives order denomination. */
   homeCurrency: string;
+  /**
+   * ADR 037 — the caller's staff tier, or null for an ordinary user.
+   * This is what the web admin shell gates its navigation on: without
+   * it every session renders as non-staff and `/admin` is unreachable
+   * even for someone the backend would let through.
+   */
+  staffRole: StaffRole | null;
+  /**
+   * Deprecated read-compat shim (ADR 037): true iff `staffRole` is
+   * `'admin'`. New gating should key off `staffRole`; this stays until
+   * the last client fallback retires.
+   */
+  isAdmin: boolean;
 }
 
-export function toView(row: User): UserMeView {
+/**
+ * Resolves the caller's effective staff tier the same way
+ * `requireStaff` does — a `staff_roles` row wins, and the
+ * config-allowlist `isAdmin` shim is the fallback when there is none.
+ *
+ * A lookup failure degrades to the shim rather than failing the
+ * request: `/api/users/me` is the profile endpoint every authenticated
+ * client polls, and a staff-role blip must not log the whole fleet out
+ * of their own account page.
+ */
+async function resolveStaffRoleFor(row: User): Promise<StaffRole | null> {
+  try {
+    const staffRow = await getStaffRole(row.id);
+    if (staffRow !== null) return staffRow.role;
+  } catch (err) {
+    log.warn({ err, userId: row.id }, 'staff_roles lookup failed — falling back to the shim');
+  }
+  return row.isAdmin ? 'admin' : null;
+}
+
+export async function toView(row: User): Promise<UserMeView> {
+  const staffRole = await resolveStaffRoleFor(row);
   return {
     id: row.id,
     email: row.email,
     homeCurrency: row.homeCurrency,
+    staffRole,
+    isAdmin: staffRole === 'admin',
   };
 }
 
@@ -56,7 +93,7 @@ export async function getMeHandler(c: Context): Promise<Response> {
   if (user === null) {
     return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
   }
-  return c.json<UserMeView>(toView(user));
+  return c.json<UserMeView>(await toView(user));
 }
 
 const SetHomeCurrencyBody = z.object({
@@ -94,7 +131,7 @@ export async function setHomeCurrencyHandler(c: Context): Promise<Response> {
   // currency. Lets the client call this endpoint unconditionally
   // from onboarding without first checking `GET /me`.
   if (user.homeCurrency === parsed.data.currency) {
-    return c.json<UserMeView>(toView(user));
+    return c.json<UserMeView>(await toView(user));
   }
 
   // Order guard — pricing history pins currency at order creation, so
@@ -119,7 +156,7 @@ export async function setHomeCurrencyHandler(c: Context): Promise<Response> {
   if (updated === null) {
     return c.json({ code: 'NOT_FOUND', message: 'User not found' }, 404);
   }
-  return c.json<UserMeView>(toView(updated));
+  return c.json<UserMeView>(await toView(updated));
 }
 
 // DSR handlers (2 functions covering data-subject-rights export +

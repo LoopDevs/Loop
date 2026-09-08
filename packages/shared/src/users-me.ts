@@ -31,12 +31,12 @@ export interface UserMeView {
   email: string;
   /**
    * Deprecated read-compat shim (ADR 037): true iff `staffRole` is
-   * `'admin'`. Kept until the CTX-seeded `users.isAdmin` column
-   * retires (ADR 013 Phase C); new gating should key off `staffRole`.
+   * `'admin'`. Kept until the config-allowlist `users.isAdmin` flag
+   * retires; new gating should key off `staffRole`.
    */
   isAdmin: boolean;
   /**
-   * ADR 037 staff role resolved from the `staff_roles` table —
+   * ADR 037 staff role resolved from the `staff_roles` collection —
    * `'admin'`, `'support'`, or `null` for regular users. The web
    * admin shell keys its role-aware nav + write-button visibility
    * off this field (falling back to `isAdmin` while the backend

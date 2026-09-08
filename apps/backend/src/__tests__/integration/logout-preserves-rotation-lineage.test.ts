@@ -89,6 +89,7 @@ async function seedChain(): Promise<{
     email: `cor11-${Date.now()}@test.local`,
     tokenVersion: 0,
     homeCurrency: 'USD',
+    isAdmin: false,
     createdAt: seededAt,
     updatedAt: seededAt,
   });

@@ -76,6 +76,11 @@ export const observabilitySchema = z
       .object({
         ordersWebhook: discordWebhookUrl.optional(),
         monitoringWebhook: discordWebhookUrl.optional(),
+        // ADR 017/018 — the admin action trail: one embed per admin
+        // mutation after it commits, plus the bulk-read tripwire
+        // (A2-2008 / CF-10). Kept on its own webhook so the channel it
+        // posts to can have a narrower audience than #monitoring.
+        adminAuditWebhook: discordWebhookUrl.optional(),
       })
       .prefault({}),
 

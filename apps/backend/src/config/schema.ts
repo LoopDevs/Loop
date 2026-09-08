@@ -16,6 +16,7 @@ import { serverSchema } from './sections/server.js';
 import { ctxSchema, catalogSchema } from './sections/ctx.js';
 import { databaseSchema } from './sections/database.js';
 import { authSchema, emailSchema } from './sections/auth.js';
+import { adminSchema } from './sections/admin.js';
 import { ordersSchema } from './sections/orders.js';
 import {
   rateLimitSchema,
@@ -39,6 +40,7 @@ export const ConfigSchema = z.object({
   catalog: catalogSchema,
   database: databaseSchema,
   auth: authSchema,
+  admin: adminSchema,
   email: emailSchema,
   orders: ordersSchema,
   rateLimit: rateLimitSchema,

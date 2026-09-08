@@ -1,5 +1,5 @@
 # Loop backend configuration — the authoritative reference for every
-# key `src/config.ts` declares.
+# key `src/config/schema.ts` declares.
 #
 # Copy this to `config.yaml` and fill it in:
 #
@@ -119,6 +119,35 @@ auth:
     purgeIntervalHours: 1
     retainDays: 30
 
+# ── Admin surface ───────────────────────────────────────────────────
+admin:
+  # Bootstrap allowlist. A Loop user whose VERIFIED email appears here
+  # is flagged admin every time they log in, which is how the first
+  # admin reaches /api/admin/* at all — before one exists there is
+  # nobody to grant anyone a staff role. Granting this way is a config
+  # edit plus a redeploy, deliberately heavier than the self-serve
+  # path; after the first admin, use PUT /api/admin/staff/:userId/role.
+  emails: []
+  # The same, for the legacy CTX-proxy auth path — matched on the
+  # user's ctxUserId, which Loop-native users don't carry. Retires with
+  # that path.
+  ctxUserIds: []
+  # ADR 028 — step-up auth for destructive admin writes. The admin
+  # re-presents an OTP, gets a 5-minute single-use token scoped to one
+  # action class, and sends it as X-Admin-Step-Up. A DIFFERENT key from
+  # auth.native.jwt on purpose: a bearer-key leak must not also mint
+  # step-ups. Unset → the gated endpoints fail closed with 503, so the
+  # surface ships disabled until you generate one.
+  stepUp:
+    # Min 32 chars — `openssl rand -base64 32`
+    signingKey:
+    # Keep the old key here for the 5-minute TTL after rotating.
+    previousSigningKey:
+  # How long applied admin writes stay in the audit tail. Separate from
+  # the 24h idempotency replay window: `admin_idempotency_keys` doubles
+  # as the durable record of every admin mutation. Default ~7 years.
+  auditRetentionDays: 2557
+
 # ── Transactional email ─────────────────────────────────────────────
 # Only the selected provider's keys are accepted. `console` is the
 # dev-only stub that logs OTPs to stdout; production refuses it whenever
@@ -172,6 +201,10 @@ observability:
   discord:
     ordersWebhook:
     monitoringWebhook:
+    # ADR 017/018 — one embed per admin mutation, plus the bulk-read
+    # tripwire. Its own webhook so the channel can have a narrower
+    # audience than #monitoring.
+    adminAuditWebhook:
   metrics:
     # When set, /metrics requires `Authorization: Bearer <token>`.
     # Min 16 chars. Unset → open in dev/test, 404 in production.
