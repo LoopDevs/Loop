@@ -7,23 +7,27 @@
  * guard membership / update-vs-null return contract.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type * as ConfigModule from '../../config/index.js';
 import { randomUUID } from 'node:crypto';
 import { db, __resetDbForTests } from '../../db/client.js';
 import type { OrderDoc, OrderState } from '../../db/types.js';
 
-const { envState } = vi.hoisted(() => ({
-  envState: { redeemKey: undefined as string | undefined },
+const { redeemState } = vi.hoisted(() => ({
+  redeemState: { key: undefined as string | undefined },
 }));
 
-// Partial env mock: only the redeem key is per-test mutable — the rest
-// of the real (test-setup) env stays intact so logger/db/client keep
-// booting normally.
-vi.mock('../../env.js', async (importActual) => {
-  const actual = (await importActual()) as { env: Record<string, unknown> };
+// Partial config mock: only the redeem key is per-test mutable — the
+// rest of the real (test-fixture) config stays intact so logger/db keep
+// booting.
+vi.mock('../../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
   return {
     ...actual,
-    get env() {
-      return { ...actual.env, LOOP_REDEEM_ENCRYPTION_KEY: envState.redeemKey };
+    get config() {
+      return {
+        ...actual.config,
+        orders: { ...actual.config.orders, redeem: { encryptionKey: redeemState.key } },
+      };
     },
   };
 });
@@ -39,7 +43,7 @@ import {
 
 beforeEach(() => {
   __resetDbForTests();
-  envState.redeemKey = undefined;
+  redeemState.key = undefined;
   resetRedeemKeyCache();
 });
 
@@ -118,7 +122,7 @@ describe('markOrderFulfilled', () => {
   });
 
   it('CF-25: encrypts code + pin at rest when the key is set, url stays plaintext', async () => {
-    envState.redeemKey = Buffer.alloc(32, 7).toString('base64');
+    redeemState.key = Buffer.alloc(32, 7).toString('base64');
     const id = await seedOrder('paid');
     await markOrderFulfilled(id, {
       redemption: { code: 'SECRET-CODE', pin: '9999', url: 'https://redeem.example/y' },

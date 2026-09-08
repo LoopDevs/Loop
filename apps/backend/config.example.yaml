@@ -1,0 +1,217 @@
+# Loop backend configuration — the authoritative reference for every
+# key `src/config.ts` declares.
+#
+# Copy this to `config.yaml` and fill it in:
+#
+#     cp config.example.yaml config.yaml
+#
+# `config.yaml` holds real secrets and is gitignored — never commit it.
+# This file must never contain a real secret either; every secret-bearing
+# key below is left empty on purpose.
+#
+# A key written with no value (`someKey:`) is treated exactly as if it
+# were absent, so you can leave the documented shape in place and fill in
+# only what you need. Keys marked REQUIRED have no default and the
+# backend refuses to boot without them.
+#
+# The file location comes from the `CONFIG_PATH` environment variable,
+# defaulting to `config.yaml` in the working directory. `CONFIG_PATH` and
+# `NODE_ENV` are the only two environment variables the backend reads —
+# everything else lives here.
+
+# Deployment environment: development | production | test.
+# `NODE_ENV` overrides this when set (vitest and other Node tooling set
+# it themselves, so the process environment has to win).
+env: development
+
+# ── HTTP listener ───────────────────────────────────────────────────
+server:
+  port: 8080
+  # trace | debug | info | warn | error | fatal | silent
+  logLevel: info
+  # Set true ONLY behind a trusted edge proxy that populates
+  # X-Forwarded-For (audit A-023) — otherwise clients can spoof their own
+  # IP and bypass every per-IP rate limit.
+  trustProxy: false
+
+# ── Upstream CTX: the gift-card supplier and payment processor ──────
+ctx:
+  # REQUIRED.
+  baseUrl: https://spend.ctx.com
+  # REQUIRED — operator API credentials. ADR 052: these authenticate
+  # every upstream surface, so the backend refuses to boot without them.
+  credentials:
+    key:
+    secret:
+  # Defaults come from @loop/shared DEFAULT_CLIENT_IDS. Override per
+  # deployment only alongside a matching web rebuild (audit A-018) —
+  # the backend warns at boot if these diverge from the shared default.
+  clientIds:
+    web: loopweb
+    ios: loopios
+    android: loopandroid
+  # ADR 052 — chain-qualified CTX payment currencies offered at checkout.
+  paymentCurrencies:
+    - XLM
+  userProvisioning:
+    # Create a CTX customer per Loop-native user under Loop's operator
+    # company, so procurement can act-as that customer. Set false only in
+    # an environment with no CTX-side Loop company.
+    enabled: true
+
+# ── Merchant catalog ────────────────────────────────────────────────
+catalog:
+  locationRefreshIntervalHours: 24
+  # CTX merchant IDs to exclude from the catalog entirely (A2-1922).
+  merchantDenylist: []
+  geoip:
+    # MaxMind GeoLite2-Country .mmdb (ADR 033), powering
+    # /api/public/geo. Unset → that endpoint returns the US default.
+    databasePath:
+
+# ── Document store ──────────────────────────────────────────────────
+# Only the selected driver's keys are accepted.
+database:
+  # memory: whole database in memory, hydrated from / flushed to jsonPath.
+  driver: memory
+  jsonPath: _data/db.json
+  # mongo: set driver to `mongo` and supply these instead.
+  # driver: mongo
+  # uri: mongodb://localhost:27017
+  # name: loop
+
+# ── Loop-native auth (ADR 013 / 014 / 030) ──────────────────────────
+auth:
+  native:
+    # The parent switch. When true, Loop sends OTP emails and mints its
+    # own JWTs; when false the legacy CTX-proxy path stays in place.
+    # Production requires true (R3-7) unless unsafe.allowLegacyProxyAuth
+    # is set. Enabling this requires at least one signing key below.
+    enabled: false
+    jwt:
+      # Symmetric secret, min 32 chars of real entropy.
+      # `openssl rand -base64 32`
+      hs256:
+        current:
+        # Keep the old key here for the access-token TTL after rotating.
+        previous:
+      # PKCS8 PEM RSA private key. When set, new JWTs sign RS256 and the
+      # public keys publish at /.well-known/jwks.json. Use a `|` block
+      # scalar for the multi-line PEM.
+      # `openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048`
+      rs256:
+        current:
+        # Keep the old key here for the refresh-token TTL (30 days)
+        # after rotating — both public keys serve in the JWKS.
+        previous:
+  # Social login (ADR 014). At least one Google client id activates the
+  # Google endpoint; the Apple service id activates the Apple endpoint.
+  social:
+    google:
+      web:
+      ios:
+      android:
+    apple:
+      serviceId:
+  # CF-26 / X-PRIV-07/08 — always-on purge of dead OTP and refresh-token
+  # rows. Both hold PII with no lawful basis to retain once dead.
+  retention:
+    purgeIntervalHours: 1
+    retainDays: 30
+
+# ── Transactional email ─────────────────────────────────────────────
+# Only the selected provider's keys are accepted. `console` is the
+# dev-only stub that logs OTPs to stdout; production refuses it whenever
+# auth.native.enabled is true.
+email:
+  provider: console
+  # provider: resend
+  # apiKey:            # https://resend.com, format `re_...`
+  from:
+    # Must be on a domain with DKIM/SPF verified at the provider.
+    address: noreply@loopfinance.io
+    name: Loop
+  # When set, OTP emails carry a reply_to so replies reach a monitored
+  # inbox instead of bouncing off the no-reply sender.
+  replyTo:
+
+# ── Orders and redemption ───────────────────────────────────────────
+orders:
+  redeem:
+    # 32 bytes as base64 or hex — `openssl rand -base64 32`. Encrypts
+    # gift-card redeem codes/PINs at rest (CF-25 / X-PRIV-03). REQUIRED
+    # in production (NS-10); unset in dev/test means plaintext storage
+    # and a boot warning.
+    encryptionKey:
+  # Fallback cashback split for merchants with no admin-set config
+  # (ADR 011). Percent of face value, max 2 decimals; the sum must not
+  # exceed 100 (boot-checked).
+  cashbackDefaults:
+    userCashbackPct: 0
+    loopMarginPct: 0
+
+# ── Rate limiting ───────────────────────────────────────────────────
+rateLimit:
+  # Master switch for every per-IP limiter. Production refuses to boot
+  # with this false (A2-1605) — it exists for e2e harnesses.
+  enabled: true
+  # Fallback per-machine divisor used only when live Fly `.internal` DNS
+  # fleet counting is unavailable (S4-4). 1 = no division.
+  machineCountEstimate: 1
+
+# ── Observability ───────────────────────────────────────────────────
+observability:
+  # Sentry `environment` tag. Distinct from `env:` above so a staging
+  # deployment can run as production but report as staging. Pair with
+  # VITE_LOOP_ENV on the web build. Unset → falls back to `env:`.
+  environmentTag:
+  sentry:
+    dsn:
+    # Git SHA or version+SHA, so Sentry can pivot to the deploy artifact.
+    release:
+  discord:
+    ordersWebhook:
+    monitoringWebhook:
+  metrics:
+    # When set, /metrics requires `Authorization: Bearer <token>`.
+    # Min 16 chars. Unset → open in dev/test, 404 in production.
+    bearerToken:
+
+# ── Mobile shells ───────────────────────────────────────────────────
+mobile:
+  # P2-14 forced-update floor, per platform (dotted numeric, e.g.
+  # "0.4.0"). Unset → no gate. Web is never gated.
+  minSupportedVersion:
+    ios:
+    android:
+  # M-3 deep-link domain verification. Each is unset until the matching
+  # native credential exists; the /.well-known endpoint 404s until then.
+  deepLinks:
+    apple:
+      teamId:
+    android:
+      # Colon-hex SHA-256 fingerprints — list both the debug and release
+      # keystore during rollout.
+      certFingerprints: []
+
+# ── Launch gating ───────────────────────────────────────────────────
+launch:
+  # Hide every Phase 2 cashback / wallet surface in the web + onboarding
+  # UI. Flipping to false is the Phase 2 cutover — server-side only.
+  phase1Only: false
+
+# ── Test-only ───────────────────────────────────────────────────────
+testing:
+  # AUDIT-2-E: second gate (with `env: test`) before the /__test__/*
+  # surface mounts. Min 16 chars. Production refuses to boot if set.
+  endpointsSecret:
+
+# ── Emergency opt-outs ──────────────────────────────────────────────
+# Each of these switches OFF a production safety check. For a
+# deliberate, audited rollback or staging deploy only.
+unsafe:
+  # R3-7: permit production to run the legacy CTX-proxy auth path.
+  allowLegacyProxyAuth: false
+  # NS-10: permit production to store gift-card redeem codes and PINs —
+  # spendable bearer secrets — as plaintext at rest.
+  allowPlaintextRedeemSecrets: false

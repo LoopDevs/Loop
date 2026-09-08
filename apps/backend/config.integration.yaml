@@ -1,0 +1,35 @@
+# Integration-suite configuration fixture.
+#
+# Mirrors `config.test.yaml` but turns on Loop-native auth with a
+# signing key, because the flow tests exercise the OTP → JWT → refresh
+# paths end to end.
+#
+# The suite runs entirely on the ephemeral in-memory document store — no
+# external database is required. Each test resets state via
+# `__resetDbForTests()` from `src/db/client.js`.
+#
+# Placeholders only, committed on purpose: the integration tests never
+# call out to CTX (order flows go through direct mock-fetch injection),
+# but the config schema requires the upstream values to be present.
+
+env: test
+
+server:
+  logLevel: silent
+
+ctx:
+  baseUrl: http://ctx.test.local
+  credentials:
+    key: integration-test-api-key
+    secret: integration-test-api-secret
+
+database:
+  driver: memory
+  jsonPath: ''
+
+auth:
+  native:
+    enabled: true
+    jwt:
+      hs256:
+        current: integration-test-loop-jwt-signing-key-32-chars-min

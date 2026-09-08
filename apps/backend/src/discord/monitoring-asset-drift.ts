@@ -20,7 +20,7 @@
  * commit and the send) is re-attempted on later ticks instead of
  * being lost forever.
  */
-import { env } from '../env.js';
+import { config } from '../config/index.js';
 import { GREEN, ORANGE, escapeMarkdown, sendWebhook } from './shared.js';
 
 /**
@@ -40,7 +40,7 @@ export function notifyAssetDrift(args: {
   ledgerLiabilityMinor: string;
 }): Promise<boolean> {
   const direction = args.driftStroops.startsWith('-') ? 'Settlement backlog' : 'Over-minted';
-  return sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+  return sendWebhook(config.observability.discord.monitoringWebhook, {
     title: '⚠️ Asset Drift Exceeded Threshold',
     description: `\`${escapeMarkdown(args.assetCode)}\` drift exceeds the configured threshold. Direction: **${direction}**.`,
     color: ORANGE,
@@ -76,7 +76,7 @@ export function notifyDriftFailedRows(args: {
   failedBurnStroops: string;
   failedInterestMintStroops: string;
 }): Promise<boolean> {
-  return sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+  return sendWebhook(config.observability.discord.monitoringWebhook, {
     title: '⚠️ Failed Money-Movement Rows Need Retry',
     description: `\`${escapeMarkdown(args.assetCode)}\` has terminally-failed burn / interest-mint payout rows. The drift equation counts these as in-flight, so drift stays neutral while the mirror diverges from chain — retry them via /admin/payouts?state=failed.`,
     color: ORANGE,
@@ -102,7 +102,7 @@ export function notifyDriftFailedRows(args: {
  * Sibling of `notifyDriftFailedRows` — closes the incident.
  */
 export function notifyDriftFailedRowsCleared(args: { assetCode: string }): Promise<boolean> {
-  return sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+  return sendWebhook(config.observability.discord.monitoringWebhook, {
     title: '🟢 Failed Money-Movement Rows Cleared',
     description: `\`${escapeMarkdown(args.assetCode)}\` no longer has failed burn / interest-mint payout rows.`,
     color: GREEN,
@@ -121,7 +121,7 @@ export function notifyAssetDriftRecovered(args: {
   driftStroops: string;
   thresholdStroops: string;
 }): Promise<boolean> {
-  return sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+  return sendWebhook(config.observability.discord.monitoringWebhook, {
     title: '🟢 Asset Drift Recovered',
     description: `\`${escapeMarkdown(args.assetCode)}\` drift is back within the configured threshold.`,
     color: GREEN,

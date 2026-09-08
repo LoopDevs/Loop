@@ -1,4 +1,4 @@
-import { env } from './env.js';
+import { config } from './config/index.js';
 import { BLUE, escapeMarkdown, sendWebhook } from './discord/shared.js';
 
 // Orders-channel notifiers (5 functions) live in `./discord/orders.ts`.
@@ -48,8 +48,8 @@ export {
 } from './discord/monitoring.js';
 
 /**
- * Discord channels the backend posts to. Mirrors the two
- * `DISCORD_WEBHOOK_*` env vars — keeping this as a closed union
+ * Discord channels the backend posts to. Mirrors the two webhooks
+ * under `observability.discord` — keeping this as a closed union
  * means adding a new channel is a type-level change.
  */
 export type DiscordChannel = 'orders' | 'monitoring';
@@ -62,9 +62,9 @@ export type DiscordChannel = 'orders' | 'monitoring';
 function webhookUrlFor(channel: DiscordChannel): string | undefined {
   switch (channel) {
     case 'orders':
-      return env.DISCORD_WEBHOOK_ORDERS;
+      return config.observability.discord.ordersWebhook;
     case 'monitoring':
-      return env.DISCORD_WEBHOOK_MONITORING;
+      return config.observability.discord.monitoringWebhook;
   }
 }
 

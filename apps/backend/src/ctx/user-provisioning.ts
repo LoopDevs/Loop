@@ -44,7 +44,7 @@
  * is scoped to Loop's company by CTX's operator auth itself.
  */
 import { z } from 'zod';
-import { env } from '../env.js';
+import { config } from '../config/index.js';
 import { logger } from '../logger.js';
 import { upstreamUrl } from '../upstream.js';
 import { scrubUpstreamBody } from '../upstream-body-scrub.js';
@@ -121,7 +121,7 @@ function escapeCtxRegex(value: string): string {
  * only remaining gate.
  */
 function provisioningConfigured(): boolean {
-  return env.CTX_USER_PROVISIONING_ENABLED;
+  return config.ctx.userProvisioning.enabled;
 }
 
 /**
@@ -163,8 +163,8 @@ export async function provisionCtxUser(user: ProvisionableUser): Promise<void> {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-Api-Key': env.GIFT_CARD_API_KEY,
-      'X-Api-Secret': env.GIFT_CARD_API_SECRET,
+      'X-Api-Key': config.ctx.credentials.key,
+      'X-Api-Secret': config.ctx.credentials.secret,
     },
     body: JSON.stringify({
       email: user.email,
@@ -336,9 +336,9 @@ export function ctxActAsHeaders(
 ): Record<string, string> | null {
   if (ctxUserId === null) return null;
   return {
-    'X-Api-Key': env.GIFT_CARD_API_KEY,
-    'X-Api-Secret': env.GIFT_CARD_API_SECRET,
+    'X-Api-Key': config.ctx.credentials.key,
+    'X-Api-Secret': config.ctx.credentials.secret,
     'X-User-Id': ctxUserId,
-    'X-Client-Id': clientId ?? env.CTX_CLIENT_ID_WEB,
+    'X-Client-Id': clientId ?? config.ctx.clientIds.web,
   };
 }

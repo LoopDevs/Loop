@@ -1,15 +1,25 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type * as ConfigModule from '../../config/index.js';
 import type { LookupAddress, LookupOptions } from 'node:dns';
 
 // Mirror proxy.test.ts's env/dns mocking so the guard can be exercised in
 // isolation. Default: production mode — the IP-range defence only runs
 // there (ADR 050: outside production the resolved-URL check is
 // deliberately permissive so local CTX file hosts work).
-const mockEnv = vi.hoisted(() => {
-  const obj: Record<string, unknown> = { NODE_ENV: 'production' };
-  return obj;
+// `ssrf-guard.ts` only branches on the deployment environment (private
+// ranges stay reachable in development).
+const { configState } = vi.hoisted(() => ({
+  configState: { env: 'production' as 'development' | 'production' | 'test' },
+}));
+vi.mock('../../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
+  return {
+    ...actual,
+    get config() {
+      return { ...actual.config, env: configState.env };
+    },
+  };
 });
-vi.mock('../../env.js', () => ({ env: mockEnv }));
 
 const mockDnsLookup = vi.hoisted(() => vi.fn());
 vi.mock('node:dns/promises', () => ({ lookup: mockDnsLookup }));
@@ -18,7 +28,7 @@ import { validateResolvedImageUrl, isPrivateOrReservedIp, ssrfSafeLookup } from 
 
 beforeEach(() => {
   mockDnsLookup.mockReset();
-  mockEnv.NODE_ENV = 'production';
+  configState.env = 'production';
 });
 
 // Promise wrapper around the node `LookupFunction` callback so tests can
@@ -167,20 +177,20 @@ describe('validateResolvedImageUrl — production pre-flight defence (ADR 050)',
 
 describe('validateResolvedImageUrl — permissive outside production (ADR 050)', () => {
   it('allows loopback/http URLs in development (local CTX file hosts)', async () => {
-    mockEnv.NODE_ENV = 'development';
+    configState.env = 'development';
     expect(await validateResolvedImageUrl('http://localhost:7777/files/abc/download')).toBeNull();
     expect(await validateResolvedImageUrl('http://127.0.0.1:9091/img.png')).toBeNull();
     expect(mockDnsLookup).not.toHaveBeenCalled();
   });
 
   it('still rejects non-http(s) schemes in every environment', async () => {
-    mockEnv.NODE_ENV = 'development';
+    configState.env = 'development';
     expect(await validateResolvedImageUrl('file:///etc/passwd')).toContain('HTTP(S)');
     expect(await validateResolvedImageUrl('not a url')).toBe('Invalid URL');
   });
 
   it('rejects plain http in production', async () => {
-    mockEnv.NODE_ENV = 'production';
+    configState.env = 'production';
     expect(await validateResolvedImageUrl('http://cdn.example.com/logo.png')).toContain('HTTPS');
   });
 });

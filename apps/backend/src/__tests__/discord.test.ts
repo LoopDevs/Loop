@@ -1,14 +1,27 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type * as ConfigModule from '../config/index.js';
 
-const mockEnv = vi.hoisted(() => ({
-  GIFT_CARD_API_BASE_URL: 'https://upstream.local',
-  NODE_ENV: 'test',
-  LOG_LEVEL: 'silent',
-  DISCORD_WEBHOOK_ORDERS: 'https://discord.test/orders-hook',
-  DISCORD_WEBHOOK_MONITORING: 'https://discord.test/monitoring-hook',
+// The two webhook URLs are the only settings `discord.ts` reads, and
+// each test flips them to exercise the configured/unconfigured
+// branches — so they live in a mutable object the mock reads per
+// access, over the real (test-fixture) config.
+const mockWebhooks = vi.hoisted(() => ({
+  ordersWebhook: 'https://discord.test/orders-hook' as string | undefined,
+  monitoringWebhook: 'https://discord.test/monitoring-hook' as string | undefined,
 }));
 
-vi.mock('../env.js', () => ({ env: mockEnv }));
+vi.mock('../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
+  return {
+    ...actual,
+    get config() {
+      return {
+        ...actual.config,
+        observability: { ...actual.config.observability, discord: mockWebhooks },
+      };
+    },
+  };
+});
 
 const mockLog = vi.hoisted(() => ({
   warn: vi.fn(),
@@ -40,11 +53,12 @@ beforeEach(() => {
   mockFetch.mockReset();
   mockLog.warn.mockReset();
   mockFetch.mockResolvedValue(new Response(null, { status: 204 }));
-  // Reset env to the default configured state. Individual tests may
-  // override (e.g. `''` for the "skips silently when not configured"
-  // branch); this resets so later siblings start clean regardless.
-  mockEnv.DISCORD_WEBHOOK_ORDERS = 'https://discord.test/orders-hook';
-  mockEnv.DISCORD_WEBHOOK_MONITORING = 'https://discord.test/monitoring-hook';
+  // Reset to the default configured state. Individual tests may
+  // override (e.g. `undefined` for the "skips silently when not
+  // configured" branch); this resets so later siblings start clean
+  // regardless.
+  mockWebhooks.ordersWebhook = 'https://discord.test/orders-hook';
+  mockWebhooks.monitoringWebhook = 'https://discord.test/monitoring-hook';
 });
 
 function lastBody(): { embeds: Array<Record<string, unknown>> } {
@@ -54,7 +68,7 @@ function lastBody(): { embeds: Array<Record<string, unknown>> } {
 
 describe('notifyOrderCreated', () => {
   it('skips silently when no webhook is configured', async () => {
-    mockEnv.DISCORD_WEBHOOK_ORDERS = '';
+    mockWebhooks.ordersWebhook = undefined;
     notifyOrderCreated({
       orderId: 'o1',
       merchantName: 'Acme',
@@ -64,7 +78,7 @@ describe('notifyOrderCreated', () => {
     });
     await new Promise((r) => setTimeout(r, 10));
     expect(mockFetch).not.toHaveBeenCalled();
-    mockEnv.DISCORD_WEBHOOK_ORDERS = 'https://discord.test/orders-hook';
+    mockWebhooks.ordersWebhook = 'https://discord.test/orders-hook';
   });
 
   it('sends an embed with formatted amount and XLM', async () => {

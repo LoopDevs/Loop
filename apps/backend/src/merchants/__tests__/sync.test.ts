@@ -1,23 +1,32 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type * as ConfigModule from '../../config/index.js';
 
 // A2-1922: env mock is mutable so tests can flip the denylist
 // per-scenario without resetting modules.
-const { envState } = vi.hoisted(() => ({
-  envState: {
-    GIFT_CARD_API_BASE_URL: 'http://test',
-    JWT_SECRET: 'test-secret-that-is-long-enough-32ch',
-    JWT_REFRESH_SECRET: 'test-refresh-secret-long-enough-32',
-    PORT: 8080,
-    LOG_LEVEL: 'silent',
-    LOCATION_REFRESH_INTERVAL_HOURS: 24,
-    EMAIL_FROM: 'test@test.com',
-    LOOP_MERCHANT_DENYLIST: undefined as string | undefined,
-    GIFT_CARD_API_KEY: 'test-key',
-    GIFT_CARD_API_SECRET: 'test-secret',
+const { configState } = vi.hoisted(() => ({
+  configState: {
+    ctx: {
+      baseUrl: 'http://test',
+      credentials: { key: 'test-key', secret: 'test-secret' },
+    },
+    // Per-test mutable: the denylist tests push slugs in here.
+    merchantDenylist: [] as string[],
   },
 }));
 
-vi.mock('../../env.js', () => ({ env: envState }));
+vi.mock('../../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
+  return {
+    ...actual,
+    get config() {
+      return {
+        ...actual.config,
+        ctx: { ...actual.config.ctx, ...configState.ctx },
+        catalog: { ...actual.config.catalog, merchantDenylist: configState.merchantDenylist },
+      };
+    },
+  };
+});
 
 // Stable warn spy so country-aware slug-collision tests can assert on it.
 const { warnSpy } = vi.hoisted(() => ({ warnSpy: vi.fn() }));
@@ -448,8 +457,7 @@ describe('refreshMerchants', () => {
   });
 
   it('maps operator-scoped rows: effective status + per-link discount override', async () => {
-    envState.GIFT_CARD_API_KEY = 'op-key';
-    envState.GIFT_CARD_API_SECRET = 'op-secret';
+    configState.ctx.credentials = { key: 'op-key', secret: 'op-secret' };
     try {
       mockFetch.mockResolvedValueOnce(
         new Response(
@@ -487,15 +495,14 @@ describe('refreshMerchants', () => {
       // Effective status is authoritative over the global flag.
       expect(store.merchantsById.has('m-link-off')).toBe(false);
     } finally {
-      envState.GIFT_CARD_API_KEY = 'test-key';
-      envState.GIFT_CARD_API_SECRET = 'test-secret';
+      configState.ctx.credentials = { key: 'test-key', secret: 'test-secret' };
     }
   });
 
   // A2-1922: denylist filter
-  describe('LOOP_MERCHANT_DENYLIST (A2-1922)', () => {
+  describe('catalog.merchantDenylist (A2-1922)', () => {
     it('drops denylisted merchants from the catalog before they enter the store', async () => {
-      envState.LOOP_MERCHANT_DENYLIST = 'merchant-2,merchant-3';
+      configState.merchantDenylist = ['merchant-2', 'merchant-3'];
       mockFetch.mockResolvedValueOnce(
         upstreamResponse(
           [
@@ -515,11 +522,11 @@ describe('refreshMerchants', () => {
       expect(ids).toContain('merchant-4');
       expect(ids).not.toContain('merchant-2');
       expect(ids).not.toContain('merchant-3');
-      envState.LOOP_MERCHANT_DENYLIST = undefined;
+      configState.merchantDenylist = [];
     });
 
-    it('treats absent / empty env as no-op (everything passes through)', async () => {
-      envState.LOOP_MERCHANT_DENYLIST = '';
+    it('treats an absent / empty list as a no-op (everything passes through)', async () => {
+      configState.merchantDenylist = [];
       mockFetch.mockResolvedValueOnce(
         upstreamResponse(
           [
@@ -535,11 +542,11 @@ describe('refreshMerchants', () => {
       const ids = getMerchants().merchants.map((m) => m.id);
       expect(ids).toContain('m-a');
       expect(ids).toContain('m-b');
-      envState.LOOP_MERCHANT_DENYLIST = undefined;
+      configState.merchantDenylist = [];
     });
 
     it('trims whitespace and ignores empty entries', async () => {
-      envState.LOOP_MERCHANT_DENYLIST = '  bad-1 , , bad-2 ,';
+      configState.merchantDenylist = ['  bad-1 ', '', ' bad-2 ', ''];
       mockFetch.mockResolvedValueOnce(
         upstreamResponse(
           [
@@ -555,7 +562,7 @@ describe('refreshMerchants', () => {
       await refreshMerchants();
       const ids = getMerchants().merchants.map((m) => m.id);
       expect(ids).toEqual(['good-1']);
-      envState.LOOP_MERCHANT_DENYLIST = undefined;
+      configState.merchantDenylist = [];
     });
   });
 

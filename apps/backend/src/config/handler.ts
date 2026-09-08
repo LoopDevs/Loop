@@ -10,7 +10,7 @@
  * has a bearer token. Never include anything sensitive here.
  */
 import type { Context } from 'hono';
-import { env } from '../env.js';
+import { config } from '../config/index.js';
 import { ctxPaymentCurrencies } from '../orders/loop-handler.js';
 
 export interface AppConfig {
@@ -69,23 +69,23 @@ export interface AppConfig {
 
 export function configHandler(c: Context): Response {
   const body: AppConfig = {
-    loopAuthNativeEnabled: env.LOOP_AUTH_NATIVE_ENABLED,
+    loopAuthNativeEnabled: config.auth.native.enabled,
     // ADR 052: ctx is the payment processor. The operator API creds
     // (the CTX create + status mirror transport) are boot-required
     // and the order-mirror machinery always runs, so native auth is
     // the only remaining gate.
-    loopOrdersEnabled: env.LOOP_AUTH_NATIVE_ENABLED,
+    loopOrdersEnabled: config.auth.native.enabled,
     ctxPaymentCurrencies: ctxPaymentCurrencies(),
-    phase1Only: env.LOOP_PHASE_1_ONLY,
+    phase1Only: config.launch.phase1Only,
     social: {
-      googleClientIdWeb: env.GOOGLE_OAUTH_CLIENT_ID_WEB ?? null,
-      googleClientIdIos: env.GOOGLE_OAUTH_CLIENT_ID_IOS ?? null,
-      googleClientIdAndroid: env.GOOGLE_OAUTH_CLIENT_ID_ANDROID ?? null,
-      appleServiceId: env.APPLE_SIGN_IN_SERVICE_ID ?? null,
+      googleClientIdWeb: config.auth.social.google.web ?? null,
+      googleClientIdIos: config.auth.social.google.ios ?? null,
+      googleClientIdAndroid: config.auth.social.google.android ?? null,
+      appleServiceId: config.auth.social.apple.serviceId ?? null,
     },
     minSupportedVersion: {
-      ios: env.MIN_SUPPORTED_APP_VERSION_IOS ?? null,
-      android: env.MIN_SUPPORTED_APP_VERSION_ANDROID ?? null,
+      ios: config.mobile.minSupportedVersion.ios ?? null,
+      android: config.mobile.minSupportedVersion.android ?? null,
     },
   };
   // 10-minute client cache is generous but safe — the operator

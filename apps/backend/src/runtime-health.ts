@@ -1,4 +1,4 @@
-import { env } from './env.js';
+import { config } from './config/index.js';
 
 export type RuntimeWorkerName =
   | 'asset_drift_watcher'
@@ -66,7 +66,7 @@ export interface RuntimeHealthSnapshot {
 const workerState = new Map<RuntimeWorkerName, MutableWorkerState>();
 
 const otpDeliveryState: OtpDeliveryState = {
-  enabled: Boolean(env.LOOP_AUTH_NATIVE_ENABLED),
+  enabled: Boolean(config.auth.native.enabled),
   lastSuccessAtMs: null,
   lastFailureAtMs: null,
   lastError: null,
@@ -278,7 +278,7 @@ export function getRuntimeHealthSnapshot(now: number = Date.now()): RuntimeHealt
 
 export function __resetRuntimeHealthForTests(): void {
   workerState.clear();
-  otpDeliveryState.enabled = Boolean(env.LOOP_AUTH_NATIVE_ENABLED);
+  otpDeliveryState.enabled = Boolean(config.auth.native.enabled);
   otpDeliveryState.lastSuccessAtMs = null;
   otpDeliveryState.lastFailureAtMs = null;
   otpDeliveryState.lastError = null;

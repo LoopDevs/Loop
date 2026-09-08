@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type * as ConfigModule from '../config/index.js';
 import type { Context } from 'hono';
 
 /**
@@ -18,19 +19,26 @@ import type { Context } from 'hono';
  * correctly, per request, to the budget/429 logic.
  */
 
-const { envState } = vi.hoisted(() => ({
-  envState: {
-    NODE_ENV: 'test' as string,
-    TRUST_PROXY: false,
-    DISABLE_RATE_LIMITING: false,
+const { configState } = vi.hoisted(() => ({
+  configState: {
+    trustProxy: false,
+    rateLimitEnabled: true,
   },
 }));
 
-vi.mock('../env.js', () => ({
-  get env() {
-    return envState;
-  },
-}));
+vi.mock('../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
+  return {
+    ...actual,
+    get config() {
+      return {
+        ...actual.config,
+        server: { ...actual.config.server, trustProxy: configState.trustProxy },
+        rateLimit: { ...actual.config.rateLimit, enabled: configState.rateLimitEnabled },
+      };
+    },
+  };
+});
 
 vi.mock('../logger.js', () => ({
   logger: {
@@ -80,8 +88,8 @@ function makeCtx(path = '/api/anything'): { ctx: Context; headers: Map<string, s
 
 beforeEach(() => {
   __resetRateLimitsForTests();
-  envState.TRUST_PROXY = false;
-  envState.DISABLE_RATE_LIMITING = false;
+  configState.trustProxy = false;
+  configState.rateLimitEnabled = true;
   fleetSizeState.estimate = 2;
   metricsMock.incrementRateLimitHit.mockReset();
 });
@@ -184,7 +192,7 @@ describe('rateLimit middleware', () => {
   });
 
   it('bypasses enforcement entirely when DISABLE_RATE_LIMITING is set', async () => {
-    envState.DISABLE_RATE_LIMITING = true;
+    configState.rateLimitEnabled = false;
     fleetSizeState.estimate = 1;
     const mw = rateLimit('test-route-e', 1, 60_000);
     const next = vi.fn(async () => {});

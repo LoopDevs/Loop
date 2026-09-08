@@ -1,10 +1,36 @@
 import { describe, it, expect, beforeAll, vi, afterEach } from 'vitest';
+import type * as ConfigModule from '../../config/index.js';
 import { createHmac } from 'node:crypto';
 
-// Env vars must be set before env.ts is loaded — tokens.ts consumes env
-// at module init.
-vi.hoisted(() => {
-  process.env['LOOP_JWT_SIGNING_KEY'] = 'jwt-test-signing-key-32-chars-min!!';
+// The signing keys are the only config these tests vary, so the mock
+// serves a mutable `jwt` block over the real (test-fixture) config.
+const { jwtState } = vi.hoisted(() => ({
+  jwtState: {
+    hs256: {
+      current: 'jwt-test-signing-key-32-chars-min!!' as string | undefined,
+      previous: undefined as string | undefined,
+    },
+    rs256: {
+      current: undefined as string | undefined,
+      previous: undefined as string | undefined,
+    },
+  },
+}));
+
+vi.mock('../../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
+  return {
+    ...actual,
+    get config() {
+      return {
+        ...actual.config,
+        auth: {
+          ...actual.config.auth,
+          native: { ...actual.config.auth.native, enabled: true, jwt: jwtState },
+        },
+      };
+    },
+  };
 });
 
 import {
@@ -268,9 +294,7 @@ describe('verifyLoopToken', () => {
     // Manually-crafted payload representing the pre-fix shape.
     // Signed with the test key so the signature is valid — the
     // rejection must come from the claim-shape check, not signature.
-    process.env['LOOP_JWT_SIGNING_KEY'] =
-      process.env['LOOP_JWT_SIGNING_KEY'] ?? 'jwt-test-key-x-variant-32-chars-min!';
-    const key = process.env['LOOP_JWT_SIGNING_KEY']!;
+    const key = jwtState.hs256.current!;
     const legacyPayload = {
       sub: 'u1',
       email: 'a@b.com',
@@ -302,15 +326,15 @@ describe('verifyLoopToken', () => {
     // PREVIOUS must equal the key that actually signed `token` above
     // (the top-of-file key) — the fallback path only succeeds if the
     // previous key matches what the token was really signed with.
-    process.env['LOOP_JWT_SIGNING_KEY_PREVIOUS'] = 'jwt-test-signing-key-32-chars-min!!';
-    process.env['LOOP_JWT_SIGNING_KEY'] = 'jwt-test-key-n-variant-32-chars-min!';
+    jwtState.hs256.previous = 'jwt-test-signing-key-32-chars-min!!';
+    jwtState.hs256.current = 'jwt-test-key-n-variant-32-chars-min!';
     const fresh = await import('../tokens.js');
     const result = fresh.verifyLoopToken(token, 'access');
     expect(result.ok).toBe(true);
-    // Reset env module state for the rest of the suite — MUST match the
-    // key the wire-format-back-compat fixture below was signed under.
-    process.env['LOOP_JWT_SIGNING_KEY'] = 'jwt-test-signing-key-32-chars-min!!';
-    delete process.env['LOOP_JWT_SIGNING_KEY_PREVIOUS'];
+    // Reset for the rest of the suite — MUST match the key the
+    // wire-format-back-compat fixture below was signed under.
+    jwtState.hs256.current = 'jwt-test-signing-key-32-chars-min!!';
+    jwtState.hs256.previous = undefined;
     vi.resetModules();
   });
 });
@@ -324,7 +348,7 @@ describe('wire-format back-compat (Track A.1 regression gate)', () => {
   //   token = header + '.' + payload + '.' + sig
   //
   // with key = 'jwt-test-signing-key-32-chars-min!!' (the test signing key
-  // set at the top of this file) and claims pinned to a far-future exp so
+  // the config mock at the top of this file serves) and claims pinned to a far-future exp so
   // the fixture doesn't drift on time. If a future change to signer.ts /
   // tokens.ts produces a different verify behaviour for this exact byte
   // sequence, this assertion fails — proving wire-format
@@ -339,7 +363,7 @@ describe('wire-format back-compat (Track A.1 regression gate)', () => {
   // wire-format property this fixture pins) are unchanged from the
   // original fixture — only the signature was recomputed, because the
   // original was signed under a low-entropy repeated-char key that the
-  // new signing-key entropy check (env.ts) now rejects. Regenerated via:
+  // new signing-key entropy check (config schema) now rejects. Regenerated via:
   //   createHmac('sha256', 'jwt-test-signing-key-32-chars-min!!')
   //     .update(header + '.' + payload).digest().toString('base64url')
   const FIXTURE_TOKEN =
@@ -383,13 +407,14 @@ describe('isLoopAuthConfigured', () => {
 });
 
 afterEach(() => {
-  // Keep env stable between tests — the rotation test fiddles with it.
-  // MUST match the key the wire-format-back-compat fixture was signed under.
-  process.env['LOOP_JWT_SIGNING_KEY'] = 'jwt-test-signing-key-32-chars-min!!';
-  delete process.env['LOOP_JWT_SIGNING_KEY_PREVIOUS'];
+  // Keep the keys stable between tests — the rotation test fiddles with
+  // them. MUST match the key the wire-format-back-compat fixture was
+  // signed under.
+  jwtState.hs256.current = 'jwt-test-signing-key-32-chars-min!!';
+  jwtState.hs256.previous = undefined;
 });
 
 beforeAll(() => {
-  // Sanity check: the suite's env vars reached this module.
-  expect(process.env['LOOP_JWT_SIGNING_KEY']).toBeDefined();
+  // Sanity check: the suite's mocked key reached this module.
+  expect(isLoopAuthConfigured()).toBe(true);
 });

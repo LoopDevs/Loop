@@ -3,7 +3,7 @@
  * exports:
  *
  * - `clientIpFor(c)` — resolves the IP the limiter keys on. When
- *   `env.TRUST_PROXY` is set we key on the spoof-proof
+ *   `config.server.trustProxy` is set we key on the spoof-proof
  *   `Fly-Client-IP` header (audit A-023, A2-1526, FT-08), NOT the
  *   client-controllable leftmost `X-Forwarded-For`. Exported so the
  *   trust-proxy tests can drive the predicate end-to-end without
@@ -12,7 +12,7 @@
  *   Returns 429 with `Retry-After` when the per-IP-per-route
  *   budget is exceeded, bumping `incrementRateLimitHit()` so the
  *   counter shows up on `/metrics`. Honours
- *   `env.DISABLE_RATE_LIMITING` as the e2e harness escape hatch.
+ *   `config.rateLimit.enabled` as the e2e harness escape hatch.
  * - `__resetRateLimitsForTests()` — clears the in-process map
  *   between vitest cases.
  *
@@ -34,7 +34,7 @@
  */
 import type { Context } from 'hono';
 import { getConnInfo } from '@hono/node-server/conninfo';
-import { env } from '../env.js';
+import { config } from '../config/index.js';
 import { incrementRateLimitHit } from '../metrics.js';
 import { currentFleetSizeEstimate } from './fleet-size.js';
 
@@ -59,12 +59,12 @@ const RATE_LIMIT_MAP_MAX = 10_000;
  * down that victim's request-otp budget and force the OTP lockout.
  *
  * Policy:
- *   - `env.TRUST_PROXY === true`: we're behind Fly's edge. Key on
+ *   - `config.server.trustProxy === true`: we're behind Fly's edge. Key on
  *     `Fly-Client-IP` — Fly overwrites it with the true edge-observed
  *     peer, so a client cannot forge it. `X-Forwarded-For` is NOT
  *     consulted at all. If `Fly-Client-IP` is somehow absent we fall
  *     through to the TCP socket peer — never to the spoofable XFF.
- *   - `env.TRUST_PROXY === false`: no trusted proxy in front of us.
+ *   - `config.server.trustProxy === false`: no trusted proxy in front of us.
  *     Use the TCP socket's remote address; ignore every forwarding
  *     header (a direct attacker could forge any of them, including
  *     `Fly-Client-IP`).
@@ -79,7 +79,7 @@ const RATE_LIMIT_MAP_MAX = 10_000;
 // observe the bucketing decision. The rate-limit middleware calls
 // this for every request.
 export function clientIpFor(c: Context): string {
-  if (env.TRUST_PROXY) {
+  if (config.server.trustProxy) {
     // Spoof-proof source: Fly's edge overwrites `Fly-Client-IP` with the
     // real peer it saw, so a client cannot forge it. We deliberately do
     // NOT read `X-Forwarded-For` — behind Fly its leftmost entry is
@@ -156,9 +156,9 @@ export function sweepExpiredRateLimits(now: number = Date.now()): void {
  *
  * `currentFleetSizeEstimate()` already applies the same
  * missing/invalid-estimate defense that used to live here directly
- * (many existing tests mock `env.js` with a hand-picked field subset
- * that predates `RATE_LIMIT_MACHINE_COUNT_ESTIMATE`, so it can be
- * `undefined` at runtime there): anything that isn't usable falls back
+ * (tests mock `config/index.js` with a hand-picked subset, so the
+ * estimate can be `undefined` at runtime there): anything that isn't
+ * usable falls back
  * to 1 (no division) rather than propagating `NaN`, which would make
  * `effectiveMaxRequests` `NaN` and `count > NaN` permanently `false` —
  * silently disabling the rate limiter entirely.
@@ -172,11 +172,11 @@ export function rateLimit(
     // Escape hatch for e2e test runs. The mocked-e2e suite drives
     // the purchase flow twice with Playwright retries, which
     // collides with the 5/min request-otp limit on a cold start.
-    // Setting DISABLE_RATE_LIMITING=1 lets the harness bypass the
+    // Setting `rateLimit.enabled: false` lets the harness bypass the
     // limiter without tripping the unit tests that explicitly
-    // verify the 429 path under NODE_ENV=test. Production never
-    // sets this flag.
-    if (env.DISABLE_RATE_LIMITING) {
+    // verify the 429 path under `env: test`. Production refuses to
+    // boot with it off (A2-1605).
+    if (!config.rateLimit.enabled) {
       await next();
       return;
     }

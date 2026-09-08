@@ -1,0 +1,28 @@
+# Unit-test configuration fixture.
+#
+# `src/config.ts` validates the config file at module load, so any test
+# that imports backend code needs a valid file to exist first.
+# `src/__tests__/vitest-env-setup.ts` points `CONFIG_PATH` here before
+# test-file import resolution happens.
+#
+# Placeholders only — no test needs a real upstream or database, and
+# tests that exercise a specific setting either mock `../config.js` or
+# call `parseConfig()` with a synthetic document.
+#
+# Committed on purpose: it contains nothing secret.
+
+env: test
+
+server:
+  logLevel: silent
+
+ctx:
+  baseUrl: https://placeholder-for-tests.local
+  credentials:
+    key: placeholder-api-key
+    secret: placeholder-api-secret
+
+database:
+  driver: memory
+  # Empty path → ephemeral store, no filesystem writes from a test run.
+  jsonPath: ''

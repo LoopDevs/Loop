@@ -4,15 +4,34 @@
  * redemption secrets), and the unpaid-order live CTX payment overlay.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type * as ConfigModule from '../../config/index.js';
 import type { Context } from 'hono';
 import type { LoopAuthContext } from '../../auth/handler.js';
 
-vi.hoisted(() => {
-  process.env['LOOP_AUTH_NATIVE_ENABLED'] = 'true';
-  process.env['LOOP_JWT_SIGNING_KEY'] ??= 'unit-test-loop-jwt-signing-key-32ch!';
-  // CF-25 / X-PRIV-03: fixed, valid 32-byte base64 key so the read
-  // handler decrypts on the way out.
-  process.env['LOOP_REDEEM_ENCRYPTION_KEY'] = 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=';
+const { configState } = vi.hoisted(() => ({
+  configState: { nativeAuthEnabled: true },
+}));
+
+vi.mock('../../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
+  return {
+    ...actual,
+    get config() {
+      return {
+        ...actual.config,
+        auth: {
+          ...actual.config.auth,
+          native: { ...actual.config.auth.native, enabled: configState.nativeAuthEnabled },
+        },
+        orders: {
+          ...actual.config.orders,
+          // CF-25 / X-PRIV-03: fixed, valid 32-byte base64 key so the
+          // read handler decrypts on the way out.
+          redeem: { encryptionKey: 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=' },
+        },
+      };
+    },
+  };
 });
 
 vi.mock('../../logger.js', () => ({
@@ -120,7 +139,7 @@ beforeEach(() => {
   ctxState.card = null;
   ctxState.payment = null;
   ctxState.cardThrows = false;
-  process.env['LOOP_AUTH_NATIVE_ENABLED'] = 'true';
+  configState.nativeAuthEnabled = true;
   resetRedeemKeyCache();
 });
 

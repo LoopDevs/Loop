@@ -33,7 +33,7 @@
 import { lookup } from 'node:dns/promises';
 import net from 'node:net';
 import type { LookupFunction } from 'node:net';
-import { env } from '../env.js';
+import { config } from '../config/index.js';
 
 /**
  * Validates a SERVER-RESOLVED image URL before the proxy fetches it.
@@ -76,7 +76,7 @@ export async function validateResolvedImageUrl(rawUrl: string): Promise<string |
     return 'Only HTTP(S) URLs are supported';
   }
 
-  if (env.NODE_ENV !== 'production') return null;
+  if (config.env !== 'production') return null;
 
   if (protocol !== 'https:') {
     return 'Only HTTPS URLs are allowed';

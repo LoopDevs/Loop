@@ -1,0 +1,45 @@
+# Mocked-CTX e2e configuration fixture (`playwright.mocked.config.ts`).
+#
+# The Playwright webServer entry points `CONFIG_PATH` here so the suite
+# never picks up a developer's local `config.yaml` — which would send
+# the backend at the real upstream instead of the mock-CTX fixture on
+# :9091, and bind the wrong port.
+#
+# Loop-native auth is deliberately left OFF: the home page has a
+# `loopAuthNativeEnabled` branch, so turning it on would change
+# SSR-vs-CSR rendering and cause a hydration mismatch in the existing
+# CTX-proxy tests. A future flywheel-via-UI suite gets its own fixture.
+#
+# Placeholders only — committed on purpose.
+
+env: test
+
+server:
+  port: 8081
+  logLevel: warn
+
+ctx:
+  baseUrl: http://localhost:9091
+  # The ws merchant maintainer (merchants/ws-maintainer.ts) only starts
+  # when the operator API creds are present — mock-ctx ignores their
+  # values, so any non-empty pair lights it up.
+  credentials:
+    key: mock-api-key
+    secret: mock-api-secret
+
+database:
+  driver: memory
+  # Empty path → ephemeral store, no filesystem writes from an e2e run.
+  jsonPath: ''
+
+rateLimit:
+  # The suite runs its handful of tests with Playwright retries=2 in CI,
+  # hitting /api/auth/request-otp more times in a cold window than the
+  # 5/min limit allows.
+  enabled: false
+
+testing:
+  # AUDIT-2-E: the required second control (alongside `env: test`) before
+  # test-endpoints.ts mounts `/__test__/*`. Must match the header value
+  # `resetMock()` sends in tests/e2e-mocked/purchase-flow.test.ts.
+  endpointsSecret: loop-mocked-e2e-test-endpoints-secret

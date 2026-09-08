@@ -14,7 +14,7 @@
  */
 import type { Context } from 'hono';
 import { z } from 'zod';
-import { env } from '../env.js';
+import { config } from '../config/index.js';
 import { logger } from '../logger.js';
 import { upstreamUrl, upstreamFetch } from '../upstream.js';
 import { verifyLoopToken, isLoopAuthConfigured } from './tokens.js';
@@ -26,9 +26,9 @@ const log = logger.child({ handler: 'auth' });
 
 /** Maps platform to the upstream CTX client ID. */
 function clientIdForPlatform(platform: 'web' | 'ios' | 'android'): string {
-  if (platform === 'ios') return env.CTX_CLIENT_ID_IOS;
-  if (platform === 'android') return env.CTX_CLIENT_ID_ANDROID;
-  return env.CTX_CLIENT_ID_WEB;
+  if (platform === 'ios') return config.ctx.clientIds.ios;
+  if (platform === 'android') return config.ctx.clientIds.android;
+  return config.ctx.clientIds.web;
 }
 
 const LogoutBody = z.object({

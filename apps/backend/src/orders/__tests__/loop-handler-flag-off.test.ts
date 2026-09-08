@@ -1,22 +1,30 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Context } from 'hono';
+import type * as ConfigModule from '../../config/index.js';
 
 /**
  * Feature-flag-off coverage for `loopCreateOrderHandler` lives in its
- * own file: `env.ts` validates `LOOP_AUTH_NATIVE_ENABLED` at module
- * load, so flipping the flag requires a fresh module graph. Doing
- * that with `vi.resetModules()` inside `loop-handler.test.ts` (the
- * flag-on suite) corrupted the shared module registry for tests that
- * ran after it — keeping this variant isolated means the flag value
- * is set once, before any import resolves, and never needs resetting.
+ * own file so the flag is pinned off for the whole module graph, with
+ * no per-test toggling to leak into a sibling case. The flag-on suite
+ * is `loop-handler.test.ts`.
  */
-vi.hoisted(() => {
-  process.env['LOOP_AUTH_NATIVE_ENABLED'] = 'false';
+vi.mock('../../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
+  return {
+    ...actual,
+    config: {
+      ...actual.config,
+      auth: {
+        ...actual.config.auth,
+        native: { ...actual.config.auth.native, enabled: false },
+      },
+    },
+  };
 });
 
 // The handler returns 404 before touching the DB, but its module
 // graph imports the db client at load time — stub it so this file
-// never constructs a real postgres pool.
+// never constructs a store.
 vi.mock('../../db/client.js', () => ({ db: {} }));
 vi.mock('../../logger.js', () => ({
   logger: {
@@ -27,7 +35,7 @@ vi.mock('../../logger.js', () => ({
 import { loopCreateOrderHandler } from '../loop-handler.js';
 
 describe('loopCreateOrderHandler — feature flag off', () => {
-  it('returns 404 when LOOP_AUTH_NATIVE_ENABLED is false', async () => {
+  it('returns 404 when auth.native.enabled is false', async () => {
     const store = new Map<string, unknown>();
     const ctx = {
       req: { json: async () => ({}) },

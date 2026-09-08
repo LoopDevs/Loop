@@ -41,10 +41,10 @@
  *
  * ── Key-unset behaviour ───────────────────────────────────────────
  *
- * If `LOOP_REDEEM_ENCRYPTION_KEY` is unset, `encryptRedeemField`
+ * If `orders.redeem.encryptionKey` is unset, `encryptRedeemField`
  * returns the plaintext unchanged. NS-10: this dev/test-only fallback
  * is a convenience for local work — PRODUCTION now fails closed at
- * boot when the key is unset (`env.ts` parseEnv throws), so a prod
+ * boot when the key is unset (`config/index.ts` throws), so a prod
  * write never reaches the plaintext-passthrough branch. In dev/test
  * `index.ts` logs a single boot warn while the key is unset so the
  * dark state is visible. Once the key is set, new writes are encrypted
@@ -54,7 +54,7 @@
  * reusing the SAME `enc:v1:` discriminator to stay idempotent.
  */
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
-import { env } from '../env.js';
+import { config } from '../config/index.js';
 
 /** Tag prefix identifying an AES-256-GCM v1 envelope. */
 export const REDEEM_ENVELOPE_PREFIX = 'enc:v1:';
@@ -84,7 +84,7 @@ let cachedKey: Buffer | null | undefined;
 
 export function resolveRedeemKey(): Buffer | null {
   if (cachedKey !== undefined) return cachedKey;
-  const raw = env.LOOP_REDEEM_ENCRYPTION_KEY;
+  const raw = config.orders.redeem.encryptionKey;
   if (raw === undefined || raw === '') {
     cachedKey = null;
     return null;
@@ -101,8 +101,8 @@ export function resetRedeemKeyCache(): void {
 
 function decodeKey(raw: string): Buffer {
   // Try hex first when the string is unambiguously hex (64 hex chars);
-  // otherwise treat as base64 / base64url. env.ts already validated
-  // that the decoded length is 32 bytes, so this should not throw in
+  // otherwise treat as base64 / base64url. The config schema already
+  // validated that the decoded length is 32 bytes, so this should not throw in
   // production — but guard anyway for the direct-call path.
   let buf: Buffer;
   if (/^[0-9a-fA-F]{64}$/.test(raw)) {

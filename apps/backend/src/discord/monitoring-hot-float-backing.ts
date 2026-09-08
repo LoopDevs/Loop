@@ -19,7 +19,7 @@
  * Re-exported through `discord/monitoring.ts` (and the top-level
  * `discord.ts` barrel).
  */
-import { env } from '../env.js';
+import { config } from '../config/index.js';
 import { scrubUpstreamBody } from '../upstream-body-scrub.js';
 import { DESCRIPTION_MAX, ORANGE, RED, escapeMarkdown, sendWebhook, truncate } from './shared.js';
 
@@ -43,7 +43,7 @@ export function notifyHotFloatBackingShortfall(
   args: HotFloatBackingShortfallArgs,
 ): Promise<boolean> {
   if (args.state === 'error') {
-    return sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+    return sendWebhook(config.observability.discord.monitoringWebhook, {
       title: '🔴 Hot-Float Backing Reconciliation — check failed',
       // The raw message can carry internals (a URL / secret that surfaced
       // in the thrown error) — scrub then escape it exactly as
@@ -66,7 +66,7 @@ export function notifyHotFloatBackingShortfall(
       ],
     });
   }
-  return sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+  return sendWebhook(config.observability.discord.monitoringWebhook, {
     title: '🛑 Hot-Float USDC Backing Shortfall',
     description: `\`${escapeMarkdown(args.underlyingAssetCode)}\` (${escapeMarkdown(args.network)}): the RECORDED hot-float balance solvency counts as backing exceeds the operator's ACTUAL on-chain USDC beyond tolerance — the float may be partially UNBACKED. Triage /api/admin/treasury and the vault_hot_float rows before treating the float as solvent backing.`,
     color: ORANGE,

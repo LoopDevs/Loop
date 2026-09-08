@@ -1,6 +1,6 @@
 import { serve } from '@hono/node-server';
 import { flush as sentryFlush } from '@sentry/hono/node';
-import { env } from './env.js';
+import { config } from './config/index.js';
 import { logger } from './logger.js';
 import { app, stopCleanupInterval, stopFleetSizeEstimator } from './app.js';
 import { startLocationRefresh, stopLocationRefresh } from './clustering/data-store.js';
@@ -17,34 +17,21 @@ import { startRedemptionBackfill, stopRedemptionBackfill } from './orders/redemp
 import { startAuthRowPurge, stopAuthRowPurge } from './auth/auth-row-purge.js';
 import { getGeoDbStatus } from './public/geo.js';
 
-// A4-093: production gate for loop-native auth. The OTP send path
-// requires a real email provider; today only the `console` provider
-// exists (logs OTPs to stdout — refused in production by getEmailProvider).
-// If an operator flips LOOP_AUTH_NATIVE_ENABLED=true in production
-// without setting EMAIL_PROVIDER to a real provider, every OTP request
-// will land in the catch arm and return 200 (per A4-002) without
-// ever sending a code. Refuse to boot so the gap is loud rather than
-// a silent live-traffic outage.
-if (
-  env.NODE_ENV === 'production' &&
-  env.LOOP_AUTH_NATIVE_ENABLED &&
-  (process.env['EMAIL_PROVIDER'] === undefined || process.env['EMAIL_PROVIDER'] === 'console')
-) {
-  logger.error(
-    'LOOP_AUTH_NATIVE_ENABLED=true in production but EMAIL_PROVIDER is unset / console — no real provider implemented; OTP requests will fail silently. Refusing to boot.',
-  );
-  process.exit(1);
-}
+// The A4-093 production gate ("native auth enabled with no real email
+// provider — every OTP request silently fails while returning 200")
+// now lives in `config.ts` alongside the other boot guards, where it
+// fails config validation rather than needing a separate check here
+// against a raw `process.env` read.
 
 // CF-25 / X-PRIV-03 / NS-10: a single boot warn while gift-card
 // redeem-secret encryption is disabled. Codes + PINs are spendable
-// bearer instruments; without LOOP_REDEEM_ENCRYPTION_KEY they're
+// bearer instruments; without `orders.redeem.encryptionKey` they're
 // stored plaintext and any logical DB read yields spendable codes.
-// Production fails closed on an unset key in `env.ts`; this branch
+// Production fails closed on an unset key in `config.ts`; this branch
 // only ever fires in dev/test — where warn-and-allow is intentional.
-if (env.LOOP_REDEEM_ENCRYPTION_KEY === undefined || env.LOOP_REDEEM_ENCRYPTION_KEY === '') {
+if (config.orders.redeem.encryptionKey === undefined) {
   logger.warn(
-    'LOOP_REDEEM_ENCRYPTION_KEY is unset — gift-card redeem codes/PINs are stored PLAINTEXT at rest (CF-25 / X-PRIV-03). Set a 32-byte key (e.g. `openssl rand -base64 32`) to encrypt them with AES-256-GCM.',
+    'orders.redeem.encryptionKey is unset — gift-card redeem codes/PINs are stored PLAINTEXT at rest (CF-25 / X-PRIV-03). Set a 32-byte key (e.g. `openssl rand -base64 32`) to encrypt them with AES-256-GCM.',
   );
 }
 
@@ -58,7 +45,7 @@ if (geoDbStatus.stale) {
     { available: geoDbStatus.available, buildEpoch: geoDbStatus.buildEpoch },
     geoDbStatus.available
       ? `GeoLite2-Country .mmdb is stale (built ${geoDbStatus.ageDays} days ago) — refresh it.`
-      : 'MAXMIND_GEOLITE2_PATH is configured but the .mmdb failed to open — the `/` geo-redirect first-guess is falling back to the US default (ADR 034).',
+      : 'catalog.geoip.databasePath is configured but the .mmdb failed to open — the `/` geo-redirect first-guess is falling back to the US default (ADR 034).',
   );
 }
 
@@ -95,12 +82,12 @@ startRedemptionBackfill();
 // social id-token replay-guard rows past the retention grace so none
 // of these auth collections grow without bound. Always on.
 startAuthRowPurge({
-  intervalMs: env.LOOP_AUTH_ROW_PURGE_INTERVAL_HOURS * 60 * 60 * 1000,
+  intervalMs: config.auth.retention.purgeIntervalHours * 60 * 60 * 1000,
 });
 
-logger.info({ port: env.PORT }, 'Loop backend starting');
+logger.info({ port: config.server.port }, 'Loop backend starting');
 
-const server = serve({ fetch: app.fetch, port: env.PORT });
+const server = serve({ fetch: app.fetch, port: config.server.port });
 
 // Graceful shutdown — let in-flight requests complete before exiting.
 // Guarded so a second signal doesn't re-enter server.close or

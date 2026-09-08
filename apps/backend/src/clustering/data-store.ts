@@ -1,7 +1,7 @@
 import type { Location } from './algorithm.js';
 import { z } from 'zod';
 import { logger } from '../logger.js';
-import { env } from '../env.js';
+import { config } from '../config/index.js';
 import { upstreamUrl, upstreamFetch } from '../upstream.js';
 import { scrubUpstreamBody } from '../upstream-body-scrub.js';
 import { getMerchants } from '../merchants/sync.js';
@@ -148,8 +148,8 @@ export async function refreshLocations(): Promise<void> {
       url.searchParams.set('perPage', '1000');
 
       const headers: Record<string, string> = {
-        'X-Api-Key': env.GIFT_CARD_API_KEY,
-        'X-Api-Secret': env.GIFT_CARD_API_SECRET,
+        'X-Api-Key': config.ctx.credentials.key,
+        'X-Api-Secret': config.ctx.credentials.secret,
       };
 
       const response = await upstreamFetch(url.toString(), {
@@ -261,7 +261,7 @@ export async function startLocationRefresh(): Promise<void> {
   await warmStartLocationsFromSnapshot();
   void refreshLocations();
 
-  const intervalMs = env.LOCATION_REFRESH_INTERVAL_HOURS * 60 * 60 * 1000;
+  const intervalMs = config.catalog.locationRefreshIntervalHours * 60 * 60 * 1000;
   const staleMs = intervalMs * 2;
   refreshInterval = setInterval(() => {
     if (!hasWarnedStale && Date.now() - store.loadedAt > staleMs && store.locations.length > 0) {

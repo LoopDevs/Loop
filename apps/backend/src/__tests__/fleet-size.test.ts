@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type * as ConfigModule from '../config/index.js';
 
 /**
  * S4-4 (docs/readiness-backlog-2026-07-03.md): unit coverage for the
@@ -10,19 +11,34 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
  * interval's lifecycle (including that it's `.unref()`'d).
  */
 
-const { envState } = vi.hoisted(() => ({
-  envState: {
-    NODE_ENV: 'test' as string,
-    FLY_APP_NAME: undefined as string | undefined,
-    RATE_LIMIT_MACHINE_COUNT_ESTIMATE: 2 as number | undefined,
+// `FLY_APP_NAME` is deliberately NOT part of the config file — Fly
+// injects it into the machine, so `fleet-size.ts` reads it straight
+// from `process.env` and these tests set it there.
+const { configState } = vi.hoisted(() => ({
+  configState: {
+    env: 'test' as 'development' | 'production' | 'test',
+    // `number | undefined` so the defensiveness test below can simulate
+    // the value going missing at runtime; the schema itself defaults it.
+    machineCountEstimate: 2 as number | undefined,
   },
 }));
 
-vi.mock('../env.js', () => ({
-  get env() {
-    return envState;
-  },
-}));
+vi.mock('../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
+  return {
+    ...actual,
+    get config() {
+      return {
+        ...actual.config,
+        env: configState.env,
+        rateLimit: {
+          ...actual.config.rateLimit,
+          machineCountEstimate: configState.machineCountEstimate as number,
+        },
+      };
+    },
+  };
+});
 
 vi.mock('../logger.js', () => ({
   logger: {
@@ -57,9 +73,9 @@ import {
 } from '../middleware/fleet-size.js';
 
 beforeEach(() => {
-  envState.NODE_ENV = 'test';
-  envState.FLY_APP_NAME = undefined;
-  envState.RATE_LIMIT_MACHINE_COUNT_ESTIMATE = 2;
+  configState.env = 'test';
+  delete process.env['FLY_APP_NAME'];
+  configState.machineCountEstimate = 2;
   resolve6Mock.mockReset();
   __resetFleetSizeForTests();
   stopFleetSizeEstimator();
@@ -72,7 +88,7 @@ afterEach(() => {
 
 describe('refreshFleetSize', () => {
   it('is a no-op (and never calls DNS) when FLY_APP_NAME is unset', async () => {
-    envState.FLY_APP_NAME = undefined;
+    delete process.env['FLY_APP_NAME'];
     await refreshFleetSize();
     expect(resolve6Mock).not.toHaveBeenCalled();
     expect(currentFleetSizeEstimate()).toBe(2); // static fallback
@@ -80,7 +96,7 @@ describe('refreshFleetSize', () => {
   });
 
   it('uses the AAAA record count as the dynamic estimate on success', async () => {
-    envState.FLY_APP_NAME = 'loopfinance-api';
+    process.env['FLY_APP_NAME'] = 'loopfinance-api';
     resolve6Mock.mockResolvedValue(['fdaa:1::1', 'fdaa:1::2', 'fdaa:1::3']);
     await refreshFleetSize();
     expect(resolve6Mock).toHaveBeenCalledWith('loopfinance-api.internal');
@@ -89,21 +105,21 @@ describe('refreshFleetSize', () => {
   });
 
   it('clamps a record count above FLEET_SIZE_MAX', async () => {
-    envState.FLY_APP_NAME = 'loopfinance-api';
+    process.env['FLY_APP_NAME'] = 'loopfinance-api';
     resolve6Mock.mockResolvedValue(Array.from({ length: 200 }, (_, i) => `fdaa:1::${i}`));
     await refreshFleetSize();
     expect(currentFleetSizeEstimate()).toBe(FLEET_SIZE_MAX);
   });
 
   it('a single machine resolves to exactly FLEET_SIZE_MIN', async () => {
-    envState.FLY_APP_NAME = 'loopfinance-api';
+    process.env['FLY_APP_NAME'] = 'loopfinance-api';
     resolve6Mock.mockResolvedValue(['fdaa:1::1']);
     await refreshFleetSize();
     expect(currentFleetSizeEstimate()).toBe(FLEET_SIZE_MIN);
   });
 
   it('treats an empty AAAA response as a failure, not a valid 0 estimate (0 would violate the min-1 floor)', async () => {
-    envState.FLY_APP_NAME = 'loopfinance-api';
+    process.env['FLY_APP_NAME'] = 'loopfinance-api';
     resolve6Mock.mockResolvedValue([]);
     await refreshFleetSize();
     // No prior dynamic value, so this must fall back to static rather
@@ -113,7 +129,7 @@ describe('refreshFleetSize', () => {
   });
 
   it('never throws out of refreshFleetSize when DNS rejects', async () => {
-    envState.FLY_APP_NAME = 'loopfinance-api';
+    process.env['FLY_APP_NAME'] = 'loopfinance-api';
     resolve6Mock.mockRejectedValue(new Error('ENOTFOUND'));
     await expect(refreshFleetSize()).resolves.toBeUndefined();
   });
@@ -126,7 +142,7 @@ describe('grace-period fallback behaviour', () => {
   });
 
   it('keeps the last-good dynamic estimate on a subsequent DNS failure within the grace period', async () => {
-    envState.FLY_APP_NAME = 'loopfinance-api';
+    process.env['FLY_APP_NAME'] = 'loopfinance-api';
     resolve6Mock.mockResolvedValue(['a', 'b', 'c', 'd']); // 4 machines
     await refreshFleetSize();
     expect(currentFleetSizeEstimate()).toBe(4);
@@ -141,7 +157,7 @@ describe('grace-period fallback behaviour', () => {
   });
 
   it('reverts to the static fallback once the grace period elapses without a successful refresh', async () => {
-    envState.FLY_APP_NAME = 'loopfinance-api';
+    process.env['FLY_APP_NAME'] = 'loopfinance-api';
     resolve6Mock.mockResolvedValue(['a', 'b', 'c', 'd']); // 4 machines
     await refreshFleetSize();
     expect(currentFleetSizeEstimate()).toBe(4);
@@ -159,7 +175,7 @@ describe('grace-period fallback behaviour', () => {
     // keep serving the smaller (tighter) dynamic value forever nor
     // jump to something looser — the fallback is exactly the
     // documented static estimate.
-    envState.FLY_APP_NAME = 'loopfinance-api';
+    process.env['FLY_APP_NAME'] = 'loopfinance-api';
     resolve6Mock.mockResolvedValue(['a']);
     await refreshFleetSize();
     expect(currentFleetSizeEstimate()).toBe(1);
@@ -173,7 +189,7 @@ describe('rapid scale-up bias (CF2-10)', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-09T00:00:00.000Z'));
-    envState.FLY_APP_NAME = 'loopfinance-api';
+    process.env['FLY_APP_NAME'] = 'loopfinance-api';
   });
 
   it('holds the recent high-water fleet size through a transient trough so the divisor never briefly undercounts a scaling fleet', async () => {
@@ -227,7 +243,7 @@ describe('rapid scale-up bias (CF2-10)', () => {
 
 describe('static fallback defensiveness', () => {
   it('falls back to 1 when RATE_LIMIT_MACHINE_COUNT_ESTIMATE is undefined/non-numeric at runtime', () => {
-    envState.RATE_LIMIT_MACHINE_COUNT_ESTIMATE = undefined;
+    configState.machineCountEstimate = undefined;
     expect(currentFleetSizeEstimate()).toBe(1);
     expect(currentFleetSizeSource()).toBe('static');
   });
@@ -236,15 +252,15 @@ describe('static fallback defensiveness', () => {
 describe('startFleetSizeEstimator / stopFleetSizeEstimator lifecycle', () => {
   it('is a no-op under NODE_ENV=test (mirrors startCleanupInterval)', () => {
     const setIntervalSpy = vi.spyOn(global, 'setInterval');
-    envState.NODE_ENV = 'test';
+    configState.env = 'test';
     startFleetSizeEstimator();
     expect(setIntervalSpy).not.toHaveBeenCalled();
     setIntervalSpy.mockRestore();
   });
 
   it('runs an immediate refresh on start rather than waiting a full interval', async () => {
-    envState.NODE_ENV = 'production';
-    envState.FLY_APP_NAME = 'loopfinance-api';
+    configState.env = 'production';
+    process.env['FLY_APP_NAME'] = 'loopfinance-api';
     resolve6Mock.mockResolvedValue(['a', 'b']);
     startFleetSizeEstimator();
     // Flush the fire-and-forget refresh microtask queued synchronously
@@ -258,7 +274,7 @@ describe('startFleetSizeEstimator / stopFleetSizeEstimator lifecycle', () => {
     const setIntervalSpy = vi.spyOn(global, 'setInterval').mockReturnValue({
       unref: vi.fn(),
     } as unknown as NodeJS.Timeout);
-    envState.NODE_ENV = 'production';
+    configState.env = 'production';
     startFleetSizeEstimator();
     startFleetSizeEstimator();
     expect(setIntervalSpy).toHaveBeenCalledTimes(1);
@@ -268,7 +284,7 @@ describe('startFleetSizeEstimator / stopFleetSizeEstimator lifecycle', () => {
   it('registers the interval at FLEET_SIZE_REFRESH_MS and unrefs it so it cannot pin the event loop open', () => {
     const fakeTimer = { unref: vi.fn() } as unknown as NodeJS.Timeout;
     const setIntervalSpy = vi.spyOn(global, 'setInterval').mockReturnValue(fakeTimer);
-    envState.NODE_ENV = 'production';
+    configState.env = 'production';
     startFleetSizeEstimator();
     expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), FLEET_SIZE_REFRESH_MS);
     expect(fakeTimer.unref).toHaveBeenCalledOnce();
@@ -279,7 +295,7 @@ describe('startFleetSizeEstimator / stopFleetSizeEstimator lifecycle', () => {
     const fakeTimer = { unref: vi.fn() } as unknown as NodeJS.Timeout;
     const setIntervalSpy = vi.spyOn(global, 'setInterval').mockReturnValue(fakeTimer);
     const clearIntervalSpy = vi.spyOn(global, 'clearInterval');
-    envState.NODE_ENV = 'production';
+    configState.env = 'production';
     startFleetSizeEstimator();
     stopFleetSizeEstimator();
     stopFleetSizeEstimator();

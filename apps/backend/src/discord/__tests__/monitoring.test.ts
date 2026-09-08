@@ -12,20 +12,28 @@
  * a field, drop a redaction, or flip a color without CI catching it.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type * as ConfigModule from '../../config/index.js';
 
-const { sendWebhookMock, envMock, escapeMarkdownReal, truncateReal } = vi.hoisted(() => ({
+const { sendWebhookMock, discordMock, escapeMarkdownReal, truncateReal } = vi.hoisted(() => ({
   sendWebhookMock: vi.fn(),
-  envMock: { DISCORD_WEBHOOK_MONITORING: 'https://discord.example/monitoring' },
+  discordMock: { monitoringWebhook: 'https://discord.example/monitoring' as string | undefined },
   escapeMarkdownReal: (v: string): string => v.replace(/([\\`*_~|>[\]()])/g, '\\$1'),
   truncateReal: (v: string, max: number): string =>
     v.length <= max ? v : `${v.slice(0, max - 1)}…`,
 }));
 
-vi.mock('../../env.js', () => ({
-  get env() {
-    return envMock;
-  },
-}));
+vi.mock('../../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
+  return {
+    ...actual,
+    get config() {
+      return {
+        ...actual.config,
+        observability: { ...actual.config.observability, discord: discordMock },
+      };
+    },
+  };
+});
 
 vi.mock('../shared.js', () => ({
   sendWebhook: (url: string | undefined, embed: unknown) => sendWebhookMock(url, embed),
@@ -225,7 +233,7 @@ describe('notifyCtxCredentialInvalid (CF-13 / ADR 051)', () => {
     const e = lastEmbed();
     expect(e.title).toBe('🔴 CTX API Key Rejected (401)');
     expect(e.color).toBe(0xe74c3c);
-    expect(e.description).toContain('GIFT_CARD_API_KEY');
+    expect(e.description).toContain('ctx.credentials');
     expect(e.description).toContain('retryable');
   });
 

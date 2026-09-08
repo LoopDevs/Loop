@@ -18,7 +18,7 @@
  */
 import type { Context } from 'hono';
 import { logger } from '../logger.js';
-import { env } from '../env.js';
+import { config } from '../config/index.js';
 import { verifyIdToken, type VerifyIdTokenResult } from './id-token.js';
 import { consumeIdToken } from './id-token-replay.js';
 import { resolveOrCreateUserForIdentity } from './identities.js';
@@ -64,16 +64,16 @@ export interface SocialProviderConfig {
  * 401 with a generic "Invalid id_token" message so a probe can't
  * tell which check (iss / aud / expiry / signature) failed.
  */
-export function makeSocialLoginHandler(config: SocialProviderConfig) {
+export function makeSocialLoginHandler(providerConfig: SocialProviderConfig) {
   return async function socialLoginHandler(c: Context): Promise<Response> {
-    if (!env.LOOP_AUTH_NATIVE_ENABLED) {
+    if (!config.auth.native.enabled) {
       return c.json({ code: 'NOT_FOUND', message: 'Not found' }, 404);
     }
     if (!isLoopAuthConfigured()) {
       log.error('LOOP_AUTH_NATIVE_ENABLED without LOOP_JWT_SIGNING_KEY');
       return c.json({ code: 'INTERNAL_ERROR', message: 'Auth not configured' }, 500);
     }
-    const audiences = config.resolveAudiences();
+    const audiences = providerConfig.resolveAudiences();
     if (audiences.length === 0) {
       // Provider isn't configured in this deployment — 404 rather
       // than "configured but wrong aud" so a probe can't learn which
@@ -90,8 +90,8 @@ export function makeSocialLoginHandler(config: SocialProviderConfig) {
     try {
       verified = await verifyIdToken({
         token: parsed.data.idToken,
-        jwksUrl: config.jwksUrl,
-        expectedIssuers: config.expectedIssuers,
+        jwksUrl: providerConfig.jwksUrl,
+        expectedIssuers: providerConfig.expectedIssuers,
         expectedAudiences: audiences,
       });
     } catch (err) {
@@ -99,14 +99,20 @@ export function makeSocialLoginHandler(config: SocialProviderConfig) {
       // perfectly valid — we just can't reach the provider. 503
       // lets the client retry instead of the user thinking the
       // token was bad.
-      log.error({ err, provider: config.provider }, 'JWKS fetch failed during social verify');
+      log.error(
+        { err, provider: providerConfig.provider },
+        'JWKS fetch failed during social verify',
+      );
       return c.json(
         { code: 'SERVICE_UNAVAILABLE', message: 'Identity provider temporarily unavailable' },
         503,
       );
     }
     if (!verified.ok) {
-      log.warn({ reason: verified.reason, provider: config.provider }, 'Social id_token rejected');
+      log.warn(
+        { reason: verified.reason, provider: providerConfig.provider },
+        'Social id_token rejected',
+      );
       return c.json({ code: 'UNAUTHORIZED', message: 'Invalid id_token' }, 401);
     }
     const claims = verified.claims;
@@ -120,7 +126,7 @@ export function makeSocialLoginHandler(config: SocialProviderConfig) {
     try {
       firstUse = await consumeIdToken({
         token: parsed.data.idToken,
-        provider: config.provider,
+        provider: providerConfig.provider,
         expSeconds: claims.exp,
       });
     } catch {
@@ -142,7 +148,7 @@ export function makeSocialLoginHandler(config: SocialProviderConfig) {
     // email_verified=true (Apple has already validated deliverability).
     const email = typeof claims['email'] === 'string' ? claims['email'] : null;
     if (email === null) {
-      log.warn({ provider: config.provider }, 'Social id_token missing email claim');
+      log.warn({ provider: providerConfig.provider }, 'Social id_token missing email claim');
       return c.json({ code: 'UNAUTHORIZED', message: 'Provider did not share email' }, 401);
     }
     // Apple sometimes emits email_verified as a string "true"/"false";
@@ -153,13 +159,13 @@ export function makeSocialLoginHandler(config: SocialProviderConfig) {
     const raw = claims['email_verified'] as unknown;
     const emailVerified = raw === true || raw === 'true';
     if (!emailVerified) {
-      log.warn({ provider: config.provider }, 'Social id_token email_verified=false');
+      log.warn({ provider: providerConfig.provider }, 'Social id_token email_verified=false');
       return c.json({ code: 'UNAUTHORIZED', message: 'Email not verified by provider' }, 401);
     }
 
     try {
       const { user } = await resolveOrCreateUserForIdentity({
-        provider: config.provider,
+        provider: providerConfig.provider,
         providerSub: claims.sub,
         email,
       });
@@ -185,7 +191,7 @@ export function makeSocialLoginHandler(config: SocialProviderConfig) {
         email: user.email,
       });
     } catch (err) {
-      log.error({ err, provider: config.provider }, 'Social login failed unexpectedly');
+      log.error({ err, provider: providerConfig.provider }, 'Social login failed unexpectedly');
       return c.json({ code: 'INTERNAL_ERROR', message: 'Social sign-in failed' }, 500);
     }
   };
@@ -207,9 +213,9 @@ export const googleSocialLoginHandler = makeSocialLoginHandler({
   expectedIssuers: ['https://accounts.google.com', 'accounts.google.com'],
   resolveAudiences: () =>
     [
-      env.GOOGLE_OAUTH_CLIENT_ID_WEB,
-      env.GOOGLE_OAUTH_CLIENT_ID_IOS,
-      env.GOOGLE_OAUTH_CLIENT_ID_ANDROID,
+      config.auth.social.google.web,
+      config.auth.social.google.ios,
+      config.auth.social.google.android,
     ].filter((v): v is string => typeof v === 'string' && v.length > 0),
 });
 
@@ -223,5 +229,5 @@ export const appleSocialLoginHandler = makeSocialLoginHandler({
   jwksUrl: 'https://appleid.apple.com/auth/keys',
   expectedIssuers: ['https://appleid.apple.com'],
   resolveAudiences: () =>
-    env.APPLE_SIGN_IN_SERVICE_ID !== undefined ? [env.APPLE_SIGN_IN_SERVICE_ID] : [],
+    config.auth.social.apple.serviceId !== undefined ? [config.auth.social.apple.serviceId] : [],
 });

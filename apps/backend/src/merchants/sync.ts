@@ -2,7 +2,7 @@ import type { Merchant } from '@loop/shared';
 import { merchantSlug } from '@loop/shared';
 import type { z } from 'zod';
 import { logger } from '../logger.js';
-import { env } from '../env.js';
+import { config } from '../config/index.js';
 import { upstreamUrl, upstreamFetch } from '../upstream.js';
 import { notifyCtxSchemaDrift } from '../discord.js';
 import { loadCatalogSnapshot, saveCatalogSnapshot } from '../ctx/catalog-snapshots.js';
@@ -38,22 +38,20 @@ const MAX_PAGES = 100;
 const PER_PAGE = 100_000;
 
 /**
- * A2-1922: parse `LOOP_MERCHANT_DENYLIST` once per refresh tick. The
- * list is comma-separated CTX merchant IDs. Whitespace is trimmed;
- * empty entries are dropped. Returns an empty Set when the env var
- * is absent or empty. Read every refresh so an ops flip via
- * `fly secrets set LOOP_MERCHANT_DENYLIST=...` takes effect on the
- * next hourly tick (or sooner via a ws merchant event or the admin force-refresh button)
- * without a restart.
+ * A2-1922: build the denylist Set from `catalog.merchantDenylist` once
+ * per refresh tick. Whitespace is trimmed and empty entries dropped, so
+ * a sloppily-edited list still behaves. Returns an empty Set when the
+ * list is absent or empty.
+ *
+ * Rebuilt every tick rather than hoisted to module scope so that a
+ * future hot-reload of the config file takes effect on the next tick
+ * (or sooner via a ws merchant event or the admin force-refresh button)
+ * rather than needing a restart. Today `config` is read once at boot, so
+ * changing the list still requires a redeploy.
  */
 function readMerchantDenylist(): ReadonlySet<string> {
-  const raw = env.LOOP_MERCHANT_DENYLIST;
-  if (raw === undefined || raw.trim() === '') return new Set();
   return new Set(
-    raw
-      .split(',')
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0),
+    config.catalog.merchantDenylist.map((id) => id.trim()).filter((id) => id.length > 0),
   );
 }
 
@@ -287,8 +285,8 @@ async function refreshMerchantsInternal(opts: { rethrow?: boolean } = {}): Promi
   // `status` and any per-link discount override) — the same scope the
   // ws merchant topic and /locations use.
   const authHeaders: Record<string, string> = {
-    'X-Api-Key': env.GIFT_CARD_API_KEY,
-    'X-Api-Secret': env.GIFT_CARD_API_SECRET,
+    'X-Api-Key': config.ctx.credentials.key,
+    'X-Api-Secret': config.ctx.credentials.secret,
   };
 
   try {

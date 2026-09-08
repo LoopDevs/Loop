@@ -18,7 +18,7 @@
  */
 import type { Context } from 'hono';
 import { db } from '../db/client.js';
-import { env } from '../env.js';
+import { config } from '../config/index.js';
 import { logger } from '../logger.js';
 import type { LoopAuthContext } from '../auth/handler.js';
 import type { LoopOrderView, OrderState } from '@loop/shared';
@@ -88,7 +88,7 @@ export function orderToView(row: Order): LoopOrderView {
 }
 
 export async function loopGetOrderHandler(c: Context): Promise<Response> {
-  if (!env.LOOP_AUTH_NATIVE_ENABLED) {
+  if (!config.auth.native.enabled) {
     return c.json({ code: 'NOT_FOUND', message: 'Not found' }, 404);
   }
   const auth = c.get('auth') as LoopAuthContext | undefined;
@@ -127,7 +127,7 @@ export async function loopGetOrderHandler(c: Context): Promise<Response> {
 }
 
 export async function loopListOrdersHandler(c: Context): Promise<Response> {
-  if (!env.LOOP_AUTH_NATIVE_ENABLED) {
+  if (!config.auth.native.enabled) {
     return c.json({ code: 'NOT_FOUND', message: 'Not found' }, 404);
   }
   const auth = c.get('auth') as LoopAuthContext | undefined;

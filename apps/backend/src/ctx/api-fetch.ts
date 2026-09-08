@@ -2,7 +2,7 @@
  * CTX API-key fetch (ADR 051, retiring ADR 013's operator pool).
  *
  * Loop is a first-class operator in the CTX namespace: one API key
- * (`GIFT_CARD_API_KEY` / `GIFT_CARD_API_SECRET`) authenticates every
+ * (`ctx.credentials.key` / `ctx.credentials.secret`) authenticates every
  * server-to-server call, optionally narrowed to a customer via the
  * `X-User-Id` act-as header (attributed-operator-traffic contract).
  * This replaces the multi-bearer operator pool — there is no pool to
@@ -29,7 +29,7 @@
  * already re-attempt on their own cadence until CTX recovers.
  */
 import { notifyCtxCredentialInvalid } from '../discord.js';
-import { env } from '../env.js';
+import { config } from '../config/index.js';
 import { logger } from '../logger.js';
 import { upstreamFetch } from '../upstream.js';
 
@@ -100,9 +100,9 @@ export interface CtxApiCredentials {
  */
 export function ctxApiCredentials(): CtxApiCredentials {
   return {
-    apiKey: env.GIFT_CARD_API_KEY,
-    apiSecret: env.GIFT_CARD_API_SECRET,
-    clientId: env.CTX_CLIENT_ID_WEB,
+    apiKey: config.ctx.credentials.key,
+    apiSecret: config.ctx.credentials.secret,
+    clientId: config.ctx.clientIds.web,
   };
 }
 

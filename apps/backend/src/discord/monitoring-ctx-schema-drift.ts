@@ -12,7 +12,7 @@
  * the top-level `discord.ts` barrel) so existing import sites
  * keep working unchanged.
  */
-import { env } from '../env.js';
+import { config } from '../config/index.js';
 import {
   DESCRIPTION_MAX,
   FIELD_VALUE_MAX,
@@ -55,7 +55,7 @@ export function notifyCtxSchemaDrift(args: { surface: string; issuesSummary: str
     return;
   }
   ctxSchemaDriftLastNotified.set(args.surface, now);
-  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+  void sendWebhook(config.observability.discord.monitoringWebhook, {
     title: '⚠️ CTX schema drift detected',
     description: truncate(
       `Upstream CTX response no longer matches the expected schema for \`${escapeMarkdown(args.surface)}\`. Cross-check against the recorded fixture in \`apps/backend/src/__fixtures__/ctx/\` (A2-1706) and either update our schema or escalate to CTX.`,

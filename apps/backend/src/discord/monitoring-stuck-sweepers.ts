@@ -14,7 +14,7 @@
  * the top-level `discord.ts` barrel) so existing import sites
  * keep working unchanged.
  */
-import { env } from '../env.js';
+import { config } from '../config/index.js';
 import {
   DESCRIPTION_MAX,
   FIELD_VALUE_MAX,
@@ -48,7 +48,7 @@ export function notifyRedemptionBackfillExhausted(args: {
   attempts: number;
   fulfilledAtMs: number | null;
 }): void {
-  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+  void sendWebhook(config.observability.discord.monitoringWebhook, {
     title: '🔴 Redemption Backfill Exhausted',
     description: truncate(
       `A fulfilled order still has no redemption payload after ${args.attempts} backfill attempts. The user paid and CTX shows the order, but GET /gift-cards/:id keeps returning empty redemption fields. Open a CTX support ticket with the CTX order id below — see runbook redemption-backfill-exhausted.md.`,
@@ -93,7 +93,7 @@ export function notifyStuckPayouts(args: {
   payoutId: string | null;
   assetCode: string | null;
 }): Promise<boolean> {
-  return sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+  return sendWebhook(config.observability.discord.monitoringWebhook, {
     title: '🔴 Stuck Payout Backlog Detected',
     description: truncate(
       `One or more payout rows have exceeded the ${args.thresholdMinutes}-minute watchdog window. Check the payout worker, Horizon reachability, and operator funding before manually retrying anything.`,
@@ -146,7 +146,7 @@ export function notifyVaultEmissionFailed(args: {
   attempts: number;
   lastError: string | null;
 }): void {
-  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+  void sendWebhook(config.observability.discord.monitoringWebhook, {
     title: '🔴 Vault Emission Failed (terminal)',
     description: truncate(
       `A vault cashback emission reached \`failed\` after ${args.attempts} attempts and will NOT be auto-retried. The on-chain share transfer and/or the off-chain mirror credit for this order is incomplete — inspect the row and reconcile (see the vault-emission runbook; the admin re-drive endpoint is a follow-up).`,
@@ -211,7 +211,7 @@ export function notifyVaultRedemptionFailed(args: {
   attempts: number;
   lastError: string | null;
 }): void {
-  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+  void sendWebhook(config.observability.discord.monitoringWebhook, {
     title: '🔴 Vault Redemption Failed (terminal)',
     description: truncate(
       `A vault-share redemption reached \`failed\` after ${args.attempts} attempts and will NOT be auto-retried. The share collect, payout, and/or mirror debit for this ${args.sourceType} is incomplete — inspect the row and reconcile.`,
@@ -256,7 +256,7 @@ export function notifyVaultRedemptionsStuck(args: {
   vaultRedemptionId: string | null;
   assetCode: string | null;
 }): Promise<boolean> {
-  return sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+  return sendWebhook(config.observability.discord.monitoringWebhook, {
     title: '🔴 Stuck Vault Redemptions Detected',
     description: truncate(
       `One or more vault-share redemptions have sat in an in-flight state (\`collecting\`/\`redeemed\`) past the ${args.thresholdMinutes}-minute watchdog window. The sweep is not advancing them — check the vault-redemption sweep worker, Soroban RPC reachability, the wallet provider, and operator funding.`,
@@ -293,7 +293,7 @@ export function notifyVaultEmissionsStuck(args: {
   vaultEmissionId: string | null;
   assetCode: string | null;
 }): Promise<boolean> {
-  return sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+  return sendWebhook(config.observability.discord.monitoringWebhook, {
     title: '🔴 Stuck Vault Emissions Detected',
     description: truncate(
       `One or more vault cashback emissions have sat in an in-flight state (\`depositing\`/\`deposited\`/\`transferred\`) past the ${args.thresholdMinutes}-minute watchdog window. The sweep is not advancing them — check the vault-emission sweep worker, Soroban RPC reachability, and operator funding.`,
@@ -340,7 +340,7 @@ export function notifyWalletProvisioningStuck(args: {
   provisioning: string;
   attempts: number;
 }): void {
-  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+  void sendWebhook(config.observability.discord.monitoringWebhook, {
     title: '🔴 Wallet Provisioning Stuck',
     description: truncate(
       `A user's embedded-wallet provisioning is still incomplete after ${args.attempts} attempts — the sweeper has stopped retrying. Check the wallet provider dashboard, operator-account funding, and Horizon before re-driving. See runbook wallet-provisioning-stuck.md.`,

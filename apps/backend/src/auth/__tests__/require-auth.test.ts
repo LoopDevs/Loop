@@ -1,8 +1,36 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type * as ConfigModule from '../../config/index.js';
 import type { Context } from 'hono';
 
-vi.hoisted(() => {
-  process.env['LOOP_JWT_SIGNING_KEY'] = 'jwt-test-signing-key-32-chars-min!!';
+// requireAuth's Loop-token path needs a configured signer; everything
+// else comes from the real (test-fixture) config.
+const { jwtState } = vi.hoisted(() => ({
+  jwtState: {
+    hs256: {
+      current: 'jwt-test-signing-key-32-chars-min!!' as string | undefined,
+      previous: undefined as string | undefined,
+    },
+    rs256: {
+      current: undefined as string | undefined,
+      previous: undefined as string | undefined,
+    },
+  },
+}));
+
+vi.mock('../../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
+  return {
+    ...actual,
+    get config() {
+      return {
+        ...actual.config,
+        auth: {
+          ...actual.config.auth,
+          native: { ...actual.config.auth.native, enabled: true, jwt: jwtState },
+        },
+      };
+    },
+  };
 });
 
 vi.mock('../../logger.js', () => ({

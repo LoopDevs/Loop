@@ -1,9 +1,49 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type * as ConfigModule from '../index.js';
 import type { Context } from 'hono';
 
-vi.hoisted(() => {
-  // env.ts snapshots at module load — tests reset module state
-  // before touching these vars.
+/**
+ * The handler is a pure projection of `config`, so the mock serves a
+ * mutable subset of the settings it reads over the real (test-fixture)
+ * config, and each test assigns the ones it cares about.
+ */
+const { configState } = vi.hoisted(() => ({
+  configState: {
+    nativeAuthEnabled: false,
+    phase1Only: false,
+    google: {
+      web: undefined as string | undefined,
+      ios: undefined as string | undefined,
+      android: undefined as string | undefined,
+    },
+    apple: { serviceId: undefined as string | undefined },
+    minSupportedVersion: {
+      ios: undefined as string | undefined,
+      android: undefined as string | undefined,
+    },
+  },
+}));
+
+vi.mock('../index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
+  return {
+    ...actual,
+    get config() {
+      return {
+        ...actual.config,
+        auth: {
+          ...actual.config.auth,
+          native: { ...actual.config.auth.native, enabled: configState.nativeAuthEnabled },
+          social: { google: configState.google, apple: configState.apple },
+        },
+        launch: { phase1Only: configState.phase1Only },
+        mobile: {
+          ...actual.config.mobile,
+          minSupportedVersion: configState.minSupportedVersion,
+        },
+      };
+    },
+  };
 });
 
 function makeCtx(): { headers: Record<string, string>; ctx: Context } {
@@ -23,20 +63,22 @@ function makeCtx(): { headers: Record<string, string>; ctx: Context } {
   };
 }
 
-function clearEnv(): void {
-  delete process.env['LOOP_AUTH_NATIVE_ENABLED'];
-  delete process.env['LOOP_JWT_SIGNING_KEY'];
-  delete process.env['MIN_SUPPORTED_APP_VERSION_IOS'];
-  delete process.env['MIN_SUPPORTED_APP_VERSION_ANDROID'];
+/** Back to the all-defaults posture between tests. */
+function resetConfigState(): void {
+  configState.nativeAuthEnabled = false;
+  configState.phase1Only = false;
+  configState.google = { web: undefined, ios: undefined, android: undefined };
+  configState.apple = { serviceId: undefined };
+  configState.minSupportedVersion = { ios: undefined, android: undefined };
 }
 
 beforeEach(() => {
   vi.resetModules();
-  clearEnv();
+  resetConfigState();
 });
 
 afterEach(() => {
-  clearEnv();
+  resetConfigState();
   vi.resetModules();
 });
 
@@ -69,8 +111,12 @@ describe('configHandler', () => {
   });
 
   it('surfaces configured social client ids', async () => {
-    process.env['GOOGLE_OAUTH_CLIENT_ID_WEB'] = 'web-client.apps.googleusercontent.com';
-    process.env['APPLE_SIGN_IN_SERVICE_ID'] = 'io.loopfinance.app';
+    configState.google = {
+      web: 'web-client.apps.googleusercontent.com',
+      ios: undefined,
+      android: undefined,
+    };
+    configState.apple = { serviceId: 'io.loopfinance.app' };
     const { configHandler } = await import('../handler.js');
     const { ctx } = makeCtx();
     const body = (await configHandler(ctx).json()) as {
@@ -83,17 +129,13 @@ describe('configHandler', () => {
     expect(body.social.googleClientIdWeb).toBe('web-client.apps.googleusercontent.com');
     expect(body.social.googleClientIdIos).toBeNull();
     expect(body.social.appleServiceId).toBe('io.loopfinance.app');
-    delete process.env['GOOGLE_OAUTH_CLIENT_ID_WEB'];
-    delete process.env['APPLE_SIGN_IN_SERVICE_ID'];
   });
 
   // ADR 052: the operator API creds are boot-required and the
   // order-mirror machinery always runs, so native auth is the only
   // gate loopOrdersEnabled reflects.
-  it('sets loopOrdersEnabled with LOOP_AUTH_NATIVE_ENABLED alone', async () => {
-    process.env['LOOP_AUTH_NATIVE_ENABLED'] = 'true';
-    // Hardening B3: enabling native auth requires a signing key at parse.
-    process.env['LOOP_JWT_SIGNING_KEY'] = 'unit-test-loop-jwt-signing-key-32ch!';
+  it('sets loopOrdersEnabled with auth.native.enabled alone', async () => {
+    configState.nativeAuthEnabled = true;
     const { configHandler } = await import('../handler.js');
     const { ctx } = makeCtx();
     const body = (await configHandler(ctx).json()) as {
@@ -118,13 +160,12 @@ describe('configHandler', () => {
     expect(body.ctxPaymentCurrencies).toEqual(['XLM']);
   });
 
-  it('reflects LOOP_PHASE_1_ONLY independently of the loop-native flags', async () => {
-    process.env['LOOP_PHASE_1_ONLY'] = 'true';
+  it('reflects launch.phase1Only independently of the loop-native flags', async () => {
+    configState.phase1Only = true;
     const { configHandler } = await import('../handler.js');
     const { ctx } = makeCtx();
     const body = (await configHandler(ctx).json()) as { phase1Only: boolean };
     expect(body.phase1Only).toBe(true);
-    delete process.env['LOOP_PHASE_1_ONLY'];
   });
 
   it('defaults minSupportedVersion to null per platform when unset (no gate)', async () => {
@@ -137,8 +178,8 @@ describe('configHandler', () => {
   });
 
   it('surfaces per-platform minSupportedVersion floors independently', async () => {
-    process.env['MIN_SUPPORTED_APP_VERSION_IOS'] = '0.4.0';
     // Android floor left unset — must stay null (no gate on that platform).
+    configState.minSupportedVersion = { ios: '0.4.0', android: undefined };
     const { configHandler } = await import('../handler.js');
     const { ctx } = makeCtx();
     const body = (await configHandler(ctx).json()) as {

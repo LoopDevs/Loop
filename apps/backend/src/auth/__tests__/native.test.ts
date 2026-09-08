@@ -1,11 +1,38 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type * as ConfigModule from '../../config/index.js';
 import type { Context } from 'hono';
 import type * as OtpsModule from '../otps.js';
 
-// Loop JWTs are minted by the verify-otp + refresh handlers; set the
-// signing key so tokens.ts is configured when the test loads.
-vi.hoisted(() => {
-  process.env['LOOP_JWT_SIGNING_KEY'] = 'jwt-test-signing-key-32-chars-min!!';
+// Loop JWTs are minted by the verify-otp + refresh handlers, so the
+// config mock serves a signing key — everything else comes from the
+// real (test-fixture) config.
+const { jwtState } = vi.hoisted(() => ({
+  jwtState: {
+    hs256: {
+      current: 'jwt-test-signing-key-32-chars-min!!' as string | undefined,
+      previous: undefined as string | undefined,
+    },
+    rs256: {
+      current: undefined as string | undefined,
+      previous: undefined as string | undefined,
+    },
+  },
+}));
+
+vi.mock('../../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
+  return {
+    ...actual,
+    get config() {
+      return {
+        ...actual.config,
+        auth: {
+          ...actual.config.auth,
+          native: { ...actual.config.auth.native, enabled: true, jwt: jwtState },
+        },
+      };
+    },
+  };
 });
 
 const createOtpMock = vi.fn();

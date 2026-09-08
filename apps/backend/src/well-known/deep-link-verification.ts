@@ -29,7 +29,7 @@
  * all three host lists in sync.
  */
 import type { Context } from 'hono';
-import { env } from '../env.js';
+import { config } from '../config/index.js';
 
 const IOS_BUNDLE_ID = 'io.loopfinance.app';
 const ANDROID_PACKAGE_NAME = 'io.loopfinance.app';
@@ -55,7 +55,7 @@ const CACHE_CONTROL = 'public, max-age=300';
  * served.
  */
 function configuredAppleTeamId(): string | null {
-  const raw = env.APPLE_TEAM_ID;
+  const raw = config.mobile.deepLinks.apple.teamId;
   if (raw === undefined) return null;
   const trimmed = raw.trim();
   return /^[A-Za-z0-9]+$/.test(trimmed) ? trimmed : null;
@@ -69,10 +69,7 @@ function configuredAppleTeamId(): string | null {
  * file with an empty fingerprint list.
  */
 function configuredAndroidFingerprints(): string[] {
-  const raw = env.ANDROID_CERT_SHA256;
-  if (raw === undefined) return [];
-  return raw
-    .split(',')
+  return config.mobile.deepLinks.android.certFingerprints
     .map((fingerprint) => fingerprint.trim())
     .filter((fingerprint) => fingerprint.length > 0);
 }

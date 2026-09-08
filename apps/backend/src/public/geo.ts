@@ -2,7 +2,7 @@ import type { Context } from 'hono';
 import { open, type CountryResponse, type Reader } from 'maxmind';
 import { DEFAULT_REGION, regionForCountry, type GeoResponse } from '@loop/shared';
 
-import { env } from '../env.js';
+import { config } from '../config/index.js';
 import { clientIpFor } from '../middleware/rate-limit.js';
 
 /**
@@ -25,7 +25,7 @@ let readerPromise: Promise<Reader<CountryResponse> | null> | null = null;
 
 function geoReader(): Promise<Reader<CountryResponse> | null> {
   if (readerPromise === null) {
-    const dbPath = env.MAXMIND_GEOLITE2_PATH;
+    const dbPath = config.catalog.geoip.databasePath;
     readerPromise = dbPath
       ? open<CountryResponse>(dbPath).catch(() => null)
       : Promise.resolve(null);
@@ -60,7 +60,7 @@ export interface GeoDbStatus {
  * against `reader.metadata.buildEpoch` on every call, no re-open, no I/O.
  */
 export async function getGeoDbStatus(): Promise<GeoDbStatus> {
-  const dbPath = env.MAXMIND_GEOLITE2_PATH;
+  const dbPath = config.catalog.geoip.databasePath;
   if (!dbPath) {
     // Unconfigured, not broken — see the `stale` doc comment above.
     return { available: false, buildEpoch: null, ageDays: null, stale: false };

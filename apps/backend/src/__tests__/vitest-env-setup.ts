@@ -1,29 +1,22 @@
 /**
- * Vitest globalSetup — runs before `env.ts` is imported in any test.
+ * Vitest setup — runs before `config/index.ts` is imported in any test.
  *
- * `env.ts` validates `process.env` at module load, so tests that
- * import anything from the backend must have the required env vars
- * set first. The legacy pattern (prepend-set in each test file) is
- * error-prone and only coincidentally works because every test
- * imports `env.ts` transitively.
+ * `config/index.ts` reads and validates the config file at module load, so
+ * tests that import anything from the backend need a valid file to
+ * exist first. Point `CONFIG_PATH` at the committed placeholder fixture
+ * (`apps/backend/config.test.yaml`) rather than letting the loader fall
+ * back to `config.yaml` — a developer's real local config must never
+ * influence a test run.
  *
- * Running as `setupFiles` (not `globalSetup`) so the vars are set
- * in every worker process before test-file import resolution
- * happens. Placeholders — not real values — since tests don't need
- * a real upstream or database.
+ * Running as `setupFiles` (not `globalSetup`) so this lands in every
+ * worker process before test-file import resolution happens.
+ *
+ * Tests that need a *different* setting either mock `../config/index.js` or
+ * call `parseConfig()` with a synthetic document; neither needs this
+ * file to change.
  */
-if (!process.env['GIFT_CARD_API_BASE_URL']) {
-  process.env['GIFT_CARD_API_BASE_URL'] = 'https://placeholder-for-tests.local';
-}
-if (!process.env['GIFT_CARD_API_KEY']) {
-  process.env['GIFT_CARD_API_KEY'] = 'placeholder-api-key';
-}
-if (!process.env['GIFT_CARD_API_SECRET']) {
-  process.env['GIFT_CARD_API_SECRET'] = 'placeholder-api-secret';
-}
-if (!process.env['DATABASE_URL']) {
-  // Valid postgres URL shape — satisfies the zod `.url()` + protocol
-  // check in `env.ts`. No test actually opens a connection to this
-  // because the tests that do touch the DB mock the `db/client` module.
-  process.env['DATABASE_URL'] = 'postgres://placeholder:placeholder@localhost:5433/loop_test';
-}
+import { fileURLToPath } from 'node:url';
+
+// Absolute so the fixture resolves the same way regardless of which
+// directory vitest happens to run from.
+process.env['CONFIG_PATH'] ??= fileURLToPath(new URL('../../config.test.yaml', import.meta.url));

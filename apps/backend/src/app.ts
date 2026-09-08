@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { sentry, captureException } from '@sentry/hono/node';
-import { env } from './env.js';
+import { config } from './config/index.js';
 import { logger } from './logger.js';
 import { accessLogMiddleware } from './middleware/access-log.js';
 import { requestContextMiddleware } from './middleware/request-context.js';
@@ -27,9 +27,9 @@ export const app = new Hono();
 // Sentry middleware — captures request context, performance, and errors.
 // Init lives in `./instrument.ts` (loaded via Node `--import` per
 // @sentry/hono 10.51 split-init pattern); this just attaches the
-// per-request middleware. Gated on `SENTRY_DSN` so dev runs without
-// the env var don't pay the middleware cost.
-if (env.SENTRY_DSN) {
+// per-request middleware. Gated on `observability.sentry.dsn` so dev
+// runs without it don't pay the middleware cost.
+if (config.observability.sentry.dsn) {
   app.use(sentry(app));
 }
 
@@ -128,7 +128,8 @@ app.use('*', bodyLimitMiddleware);
 
 // `/metrics` (Prometheus exposition) handler lives in
 // `./observability-handlers.ts`, gated by `probeGateAllows`
-// (closed-by-default in production unless METRICS_BEARER_TOKEN is set).
+// (closed-by-default in production unless
+// `observability.metrics.bearerToken` is set).
 app.get('/metrics', metricsHandler);
 
 // ─── Test-only reset endpoint ─────────────────────────────────────────────────
@@ -136,7 +137,7 @@ app.get('/metrics', metricsHandler);
 // `/__test__/reset` (mocked-e2e harness rate-limit + probe-cache
 // reset hook) lives in `./test-endpoints.ts`. Gated on
 // `NODE_ENV=test` here so production can't mount it.
-if (env.NODE_ENV === 'test') {
+if (config.env === 'test') {
   mountTestEndpoints(app);
 }
 

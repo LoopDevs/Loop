@@ -11,6 +11,12 @@ dist/
 .env.local
 .env.*.local
 
+# Backend configuration — holds real secrets. `config.example.yaml` is
+# the committed reference; `config.yaml` is the local working copy.
+# The test fixtures (config.test.yaml, config.integration.yaml,
+# config.e2e.yaml) carry only placeholder values and ARE committed.
+config.yaml
+
 # Native build artefacts
 apps/mobile/ios/
 apps/mobile/android/

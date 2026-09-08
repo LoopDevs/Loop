@@ -102,7 +102,7 @@ export async function sendWebhook(
     if (!warnedUnconfigured) {
       warnedUnconfigured = true;
       log.warn(
-        'Discord webhook URL is not configured — notifications are being dropped, not delivered (set DISCORD_WEBHOOK_* to enable alerting)',
+        'Discord webhook URL is not configured — notifications are being dropped, not delivered (set observability.discord.* to enable alerting)',
       );
     }
     return false;

@@ -3,7 +3,7 @@ import https from 'node:https';
 import { Readable } from 'node:stream';
 import sharp from 'sharp';
 import type { Context } from 'hono';
-import { env } from '../env.js';
+import { config } from '../config/index.js';
 import { logger } from '../logger.js';
 import { getMerchants } from '../merchants/sync.js';
 import { getMapPinUrl } from '../clustering/data-store.js';
@@ -387,7 +387,7 @@ function upstreamImageFetch(rawUrl: string, init: UpstreamFetchInit): Promise<Re
       rawUrl,
       {
         method: 'GET',
-        ...(env.NODE_ENV === 'production' ? { lookup: ssrfSafeLookup } : {}),
+        ...(config.env === 'production' ? { lookup: ssrfSafeLookup } : {}),
         agent: false,
         signal: init.signal,
       },

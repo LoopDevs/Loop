@@ -30,7 +30,7 @@
  * next tick retries. See `docs/runbooks/dsr.md` for the manual
  * one-shot sweep.
  */
-import { env } from '../env.js';
+import { config } from '../config/index.js';
 import { logger } from '../logger.js';
 import { purgeExpiredOtps } from './otps.js';
 import { purgeDeadRefreshTokens } from './refresh-tokens.js';
@@ -78,7 +78,7 @@ export async function runAuthRowPurgeTick(args?: {
   retentionMs?: number;
   now?: Date;
 }): Promise<AuthRowPurgeTickResult> {
-  const retentionMs = args?.retentionMs ?? env.LOOP_AUTH_ROW_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+  const retentionMs = args?.retentionMs ?? config.auth.retention.retainDays * 24 * 60 * 60 * 1000;
   const now = args?.now;
   const otpsDeleted = await purgeExpiredOtps({ retentionMs, ...(now ? { now } : {}) });
   const refreshTokensDeleted = await purgeDeadRefreshTokens({
@@ -112,10 +112,10 @@ let purgeTimer: ReturnType<typeof setInterval> | null = null;
  */
 export function startAuthRowPurge(args?: { intervalMs?: number }): void {
   if (purgeTimer !== null) return;
-  const intervalMs = args?.intervalMs ?? env.LOOP_AUTH_ROW_PURGE_INTERVAL_HOURS * 60 * 60 * 1000;
+  const intervalMs = args?.intervalMs ?? config.auth.retention.purgeIntervalHours * 60 * 60 * 1000;
   markWorkerStarted('auth_row_purge', { staleAfterMs: Math.max(intervalMs * 3, 60_000) });
   log.info(
-    { intervalMs, retentionDays: env.LOOP_AUTH_ROW_RETENTION_DAYS },
+    { intervalMs, retentionDays: config.auth.retention.retainDays },
     'Starting auth-row purge sweeper',
   );
   const tick = async (): Promise<void> => {

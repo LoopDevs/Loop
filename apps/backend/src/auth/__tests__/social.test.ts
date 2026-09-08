@@ -1,13 +1,39 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type * as ConfigModule from '../../config/index.js';
 import type { Context } from 'hono';
 
-// env.ts snapshots at module load — set everything up-front.
-vi.hoisted(() => {
-  process.env['LOOP_AUTH_NATIVE_ENABLED'] = 'true';
-  process.env['LOOP_JWT_SIGNING_KEY'] = 'jwt-test-signing-key-32-chars-min!!';
-  process.env['GOOGLE_OAUTH_CLIENT_ID_WEB'] = 'google-web-client';
-  process.env['GOOGLE_OAUTH_CLIENT_ID_IOS'] = 'google-ios-client';
-  process.env['APPLE_SIGN_IN_SERVICE_ID'] = 'io.loopfinance.app';
+// The social handlers need native auth on, a signing key, and the
+// provider audiences; everything else comes from the real
+// (test-fixture) config.
+const { configState } = vi.hoisted(() => ({
+  configState: { nativeAuthEnabled: true },
+}));
+
+vi.mock('../../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
+  return {
+    ...actual,
+    get config() {
+      return {
+        ...actual.config,
+        auth: {
+          ...actual.config.auth,
+          native: {
+            ...actual.config.auth.native,
+            enabled: configState.nativeAuthEnabled,
+            jwt: {
+              hs256: { current: 'jwt-test-signing-key-32-chars-min!!', previous: undefined },
+              rs256: { current: undefined, previous: undefined },
+            },
+          },
+          social: {
+            google: { web: 'google-web-client', ios: 'google-ios-client', android: undefined },
+            apple: { serviceId: 'io.loopfinance.app' },
+          },
+        },
+      };
+    },
+  };
 });
 
 const verifyMock = vi.fn();
@@ -221,14 +247,13 @@ describe('provider not configured', () => {
 });
 
 describe('feature flag off', () => {
-  it('returns 404 when LOOP_AUTH_NATIVE_ENABLED is false at module load', async () => {
-    const prev = process.env['LOOP_AUTH_NATIVE_ENABLED'];
-    process.env['LOOP_AUTH_NATIVE_ENABLED'] = 'false';
-    vi.resetModules();
-    const fresh = await import('../social.js');
-    const res = await fresh.googleSocialLoginHandler(makeCtx({ idToken: 'x.y.z' }));
-    expect(res.status).toBe(404);
-    process.env['LOOP_AUTH_NATIVE_ENABLED'] = prev;
-    vi.resetModules();
+  it('returns 404 when auth.native.enabled is false', async () => {
+    configState.nativeAuthEnabled = false;
+    try {
+      const res = await googleSocialLoginHandler(makeCtx({ idToken: 'x.y.z' }));
+      expect(res.status).toBe(404);
+    } finally {
+      configState.nativeAuthEnabled = true;
+    }
   });
 });

@@ -8,10 +8,9 @@
  * arbitrary internet caller.
  *
  * Policy:
- * - When the matching env var is set (`METRICS_BEARER_TOKEN` /
- *   `OPENAPI_BEARER_TOKEN`), the caller must present
- *   `Authorization: Bearer <token>`. Otherwise the route 401s.
- * - When the env var is unset, the route stays open in
+ * - When the matching bearer token is configured, the caller must
+ *   present `Authorization: Bearer <token>`. Otherwise the route 401s.
+ * - When it is unset, the route stays open in
  *   `development` / `test` (local tooling + vitest convenience)
  *   and 404s in `production` — closed by default so a probe can't
  *   fingerprint us.
@@ -24,7 +23,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import type { Context } from 'hono';
-import { env } from '../env.js';
+import { config } from '../config/index.js';
 
 /**
  * Returns `true` if the request is allowed past the probe gate.
@@ -36,7 +35,7 @@ import { env } from '../env.js';
  */
 export function probeGateAllows(c: Context, expected: string | undefined): boolean {
   if (expected === undefined) {
-    return env.NODE_ENV !== 'production';
+    return config.env !== 'production';
   }
   const header = c.req.header('Authorization');
   if (header === undefined) return false;

@@ -1,14 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type * as ConfigModule from '../../config/index.js';
 
 // Env mock mirrors sync.test.ts's pattern.
-const { envState } = vi.hoisted(() => ({
-  envState: {
-    GIFT_CARD_API_BASE_URL: 'http://test',
-    GIFT_CARD_API_KEY: 'test-key',
-    GIFT_CARD_API_SECRET: 'test-secret',
+const { ctxState } = vi.hoisted(() => ({
+  ctxState: {
+    baseUrl: 'http://test',
+    credentials: { key: 'test-key', secret: 'test-secret' },
   },
 }));
-vi.mock('../../env.js', () => ({ env: envState }));
+vi.mock('../../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
+  return {
+    ...actual,
+    get config() {
+      return { ...actual.config, ctx: { ...actual.config.ctx, ...ctxState } };
+    },
+  };
+});
 
 vi.mock('../../logger.js', () => ({
   logger: { child: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() }) },

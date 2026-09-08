@@ -1,20 +1,67 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type * as ConfigModule from '../../config/index.js';
+import type { Config } from '../../config/index.js';
 
-vi.hoisted(() => {
-  // env.ts reads NODE_ENV at module load, so we fix it up-front. Tests
-  // that need to flip it toggle process.env + resetModules below.
-  process.env['NODE_ENV'] = 'test';
+/**
+ * `getEmailProvider()` reads the validated `config.email` union, so
+ * these tests drive it by mutating a hoisted override that the config
+ * mock re-reads on every access (the provider itself is cached, hence
+ * the `__resetEmailProviderForTests()` calls).
+ *
+ * The old "unknown provider" / "resend without an API key" cases are
+ * gone: the `email` section is a discriminated union now, so neither
+ * shape parses. Their coverage lives in `__tests__/config.test.ts`.
+ */
+const CONSOLE_EMAIL: Config['email'] = {
+  provider: 'console',
+  from: { address: 'noreply@loopfinance.io', name: 'Loop' },
+};
+
+const RESEND_EMAIL: Config['email'] = {
+  provider: 'resend',
+  apiKey: 're_test_xxxxxxxxxxxxxxxx',
+  from: { address: 'noreply@loopfinance.io', name: 'Loop' },
+};
+
+const { configState } = vi.hoisted(() => ({
+  configState: {
+    env: 'test' as 'development' | 'production' | 'test',
+    email: {
+      provider: 'console',
+      from: { address: 'noreply@loopfinance.io', name: 'Loop' },
+    } as Config['email'],
+    sentryDsn: undefined as string | undefined,
+  },
+}));
+
+vi.mock('../../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
+  return {
+    ...actual,
+    get config() {
+      return {
+        ...actual.config,
+        env: configState.env,
+        email: configState.email,
+        observability: {
+          ...actual.config.observability,
+          sentry: { ...actual.config.observability.sentry, dsn: configState.sentryDsn },
+        },
+      };
+    },
+  };
 });
 
 import { getEmailProvider, __resetEmailProviderForTests } from '../email.js';
 
 beforeEach(() => {
   __resetEmailProviderForTests();
-  delete process.env['EMAIL_PROVIDER'];
+  configState.env = 'test';
+  configState.email = CONSOLE_EMAIL;
+  configState.sentryDsn = undefined;
 });
 
 afterEach(() => {
-  delete process.env['EMAIL_PROVIDER'];
   __resetEmailProviderForTests();
 });
 
@@ -30,80 +77,36 @@ describe('getEmailProvider', () => {
     expect(a).toBe(b);
   });
 
-  it('throws on an unknown EMAIL_PROVIDER value', () => {
-    process.env['EMAIL_PROVIDER'] = 'sendgrid';
-    expect(() => getEmailProvider()).toThrow(/Unsupported EMAIL_PROVIDER/);
-  });
-
-  it('honours an explicit EMAIL_PROVIDER=console in non-production', () => {
-    process.env['EMAIL_PROVIDER'] = 'console';
+  it('honours an explicit provider: console in non-production', () => {
+    configState.email = CONSOLE_EMAIL;
     const p = getEmailProvider();
     expect(p.name).toBe('console');
   });
 
-  // A2-571 production-guard coverage. Loading env.ts in production
-  // requires a lot of other env vars (A-025 image-proxy allowlist,
-  // etc.) that aren't relevant to this test — instead we mock the env
-  // module so the production switch is the only variable under test.
-  it('A2-571: refuses EMAIL_PROVIDER=console in production (stub leaks plaintext OTPs)', async () => {
-    vi.resetModules();
-    vi.doMock('../../env.js', () => ({
-      env: { NODE_ENV: 'production', LOG_LEVEL: 'silent' },
-    }));
-    process.env['EMAIL_PROVIDER'] = 'console';
-    const { getEmailProvider: fresh, __resetEmailProviderForTests: freshReset } =
-      await import('../email.js');
-    freshReset();
-    expect(() => fresh()).toThrow(/not permitted in production/);
-    vi.doUnmock('../../env.js');
-    vi.resetModules();
+  // A2-571: the console stub logs plaintext OTPs, so it must never run
+  // in production — whether it arrived as the schema default or as an
+  // explicit `provider: console`.
+  it('A2-571: refuses provider: console in production (stub leaks plaintext OTPs)', () => {
+    configState.env = 'production';
+    configState.email = CONSOLE_EMAIL;
+    expect(() => getEmailProvider()).toThrow(/not permitted in production/);
   });
 
-  it('A2-571: refuses unset EMAIL_PROVIDER in production', async () => {
-    vi.resetModules();
-    vi.doMock('../../env.js', () => ({
-      env: { NODE_ENV: 'production', LOG_LEVEL: 'silent' },
-    }));
-    delete process.env['EMAIL_PROVIDER'];
-    const { getEmailProvider: fresh, __resetEmailProviderForTests: freshReset } =
-      await import('../email.js');
-    freshReset();
-    expect(() => fresh()).toThrow(/not permitted in production/);
-    vi.doUnmock('../../env.js');
-    vi.resetModules();
+  it('A2-571: refuses the defaulted console provider in production', () => {
+    configState.env = 'production';
+    expect(() => getEmailProvider()).toThrow(/not permitted in production/);
   });
 
-  it('throws when EMAIL_PROVIDER=resend but RESEND_API_KEY is missing', () => {
-    process.env['EMAIL_PROVIDER'] = 'resend';
-    delete process.env['RESEND_API_KEY'];
-    expect(() => getEmailProvider()).toThrow(/RESEND_API_KEY/);
-  });
-
-  it('returns the resend provider when EMAIL_PROVIDER=resend + RESEND_API_KEY is set', () => {
-    process.env['EMAIL_PROVIDER'] = 'resend';
-    process.env['RESEND_API_KEY'] = 're_test_xxxxxxxxxxxxxxxx';
+  it('returns the resend provider for provider: resend', () => {
+    configState.email = RESEND_EMAIL;
     const p = getEmailProvider();
     expect(p.name).toBe('resend');
-    delete process.env['RESEND_API_KEY'];
   });
 });
 
 describe('ResendEmailProvider.sendOtpEmail', () => {
   beforeEach(() => {
-    process.env['EMAIL_PROVIDER'] = 'resend';
-    process.env['RESEND_API_KEY'] = 're_test_xxxxxxxxxxxxxxxx';
-    delete process.env['EMAIL_FROM_ADDRESS'];
-    delete process.env['EMAIL_FROM_NAME'];
-    delete process.env['EMAIL_REPLY_TO_ADDRESS'];
-    __resetEmailProviderForTests();
-  });
-
-  afterEach(() => {
-    delete process.env['EMAIL_PROVIDER'];
-    delete process.env['RESEND_API_KEY'];
-    delete process.env['EMAIL_FROM_ADDRESS'];
-    delete process.env['EMAIL_FROM_NAME'];
-    delete process.env['EMAIL_REPLY_TO_ADDRESS'];
+    configState.email = RESEND_EMAIL;
     __resetEmailProviderForTests();
   });
 
@@ -142,7 +145,7 @@ describe('ResendEmailProvider.sendOtpEmail', () => {
     fetchSpy.mockRestore();
   });
 
-  it('omits reply_to from the body when EMAIL_REPLY_TO_ADDRESS is unset', async () => {
+  it('omits reply_to from the body when email.replyTo is unset', async () => {
     const fetchSpy = vi
       .spyOn(global, 'fetch')
       .mockResolvedValue(new Response('{}', { status: 200 }));
@@ -160,8 +163,8 @@ describe('ResendEmailProvider.sendOtpEmail', () => {
     fetchSpy.mockRestore();
   });
 
-  it('sends reply_to in the body when EMAIL_REPLY_TO_ADDRESS is set', async () => {
-    process.env['EMAIL_REPLY_TO_ADDRESS'] = 'hello@loopfinance.io';
+  it('sends reply_to in the body when email.replyTo is set', async () => {
+    configState.email = { ...RESEND_EMAIL, replyTo: 'hello@loopfinance.io' };
     __resetEmailProviderForTests();
     const fetchSpy = vi
       .spyOn(global, 'fetch')
@@ -177,9 +180,11 @@ describe('ResendEmailProvider.sendOtpEmail', () => {
     fetchSpy.mockRestore();
   });
 
-  it('honours EMAIL_FROM_ADDRESS + EMAIL_FROM_NAME overrides', async () => {
-    process.env['EMAIL_FROM_ADDRESS'] = 'auth@loopfinance.io';
-    process.env['EMAIL_FROM_NAME'] = 'Loop Finance';
+  it('honours email.from.address + email.from.name overrides', async () => {
+    configState.email = {
+      ...RESEND_EMAIL,
+      from: { address: 'auth@loopfinance.io', name: 'Loop Finance' },
+    };
     __resetEmailProviderForTests();
     const fetchSpy = vi
       .spyOn(global, 'fetch')
@@ -243,11 +248,11 @@ describe('ConsoleEmailProvider.sendOtpEmail', () => {
 
   // A2-1612: if @sentry/pino is configured, log records land in the
   // Sentry transport before Pino's REDACT_PATHS pass runs. Guard by
-  // checking SENTRY_DSN at the call site; raw code only in the
-  // no-Sentry (default dev) branch.
-  it('A2-1612: includes the raw code when SENTRY_DSN is unset', async () => {
+  // checking observability.sentry.dsn at the call site; raw code only
+  // in the no-Sentry (default dev) branch.
+  it('A2-1612: includes the raw code when the Sentry DSN is unset', async () => {
     vi.resetModules();
-    vi.doMock('../../env.js', () => ({ env: { NODE_ENV: 'test', SENTRY_DSN: undefined } }));
+    configState.sentryDsn = undefined;
     const loggerCalls: Array<[Record<string, unknown>, string]> = [];
     vi.doMock('../../logger.js', () => ({
       logger: {
@@ -273,15 +278,12 @@ describe('ConsoleEmailProvider.sendOtpEmail', () => {
     expect(loggerCalls[0]![0]['revealedDevOtpCode']).toBe('123456');
     expect(loggerCalls[0]![0]['code']).toBeUndefined();
     expect(loggerCalls[0]![1]).toMatch(/dev-only/);
-    vi.doUnmock('../../env.js');
     vi.doUnmock('../../logger.js');
   });
 
-  it('A2-1612: redacts the code when SENTRY_DSN is set (Sentry pre-redaction protection)', async () => {
+  it('A2-1612: redacts the code when the Sentry DSN is set (Sentry pre-redaction protection)', async () => {
     vi.resetModules();
-    vi.doMock('../../env.js', () => ({
-      env: { NODE_ENV: 'test', SENTRY_DSN: 'https://x@o.ingest.sentry.io/42' },
-    }));
+    configState.sentryDsn = 'https://x@o.ingest.sentry.io/42';
     const loggerCalls: Array<[Record<string, unknown>, string]> = [];
     vi.doMock('../../logger.js', () => ({
       logger: {
@@ -304,7 +306,6 @@ describe('ConsoleEmailProvider.sendOtpEmail', () => {
     expect(loggerCalls[0]![0]['code']).not.toBe('123456');
     expect(String(loggerCalls[0]![0]['code'])).toMatch(/REDACTED/);
     expect(loggerCalls[0]![1]).toMatch(/redacted/);
-    vi.doUnmock('../../env.js');
     vi.doUnmock('../../logger.js');
   });
 });

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type * as ConfigModule from '../../config/index.js';
 
 const {
   purgeExpiredOtps,
@@ -22,12 +23,19 @@ vi.mock('../../logger.js', () => ({
   },
 }));
 // Pin env so the default-retention math is deterministic.
-vi.mock('../../env.js', () => ({
-  env: {
-    LOOP_AUTH_ROW_RETENTION_DAYS: 30,
-    LOOP_AUTH_ROW_PURGE_INTERVAL_HOURS: 1,
-  },
-}));
+vi.mock('../../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
+  return {
+    ...actual,
+    config: {
+      ...actual.config,
+      auth: {
+        ...actual.config.auth,
+        retention: { purgeIntervalHours: 1, retainDays: 30 },
+      },
+    },
+  };
+});
 // runtime-health markers are fire-and-forget; stub them so the tick
 // doesn't touch the real registry.
 vi.mock('../../runtime-health.js', () => ({

@@ -24,7 +24,7 @@
  * working.
  */
 import type { Context } from 'hono';
-import { env } from '../env.js';
+import { config } from '../config/index.js';
 import { logger } from '../logger.js';
 import { verifyLoopToken, isLoopAuthConfigured } from './tokens.js';
 import { getUserTokenVersion } from '../db/users.js';
@@ -40,7 +40,11 @@ const log = logger.child({ handler: 'auth-middleware' });
  * by `clientIdForPlatform`.
  */
 function allowedClientIds(): ReadonlySet<string> {
-  return new Set([env.CTX_CLIENT_ID_WEB, env.CTX_CLIENT_ID_IOS, env.CTX_CLIENT_ID_ANDROID]);
+  return new Set([
+    config.ctx.clientIds.web,
+    config.ctx.clientIds.ios,
+    config.ctx.clientIds.android,
+  ]);
 }
 
 /**

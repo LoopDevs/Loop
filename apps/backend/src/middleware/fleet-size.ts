@@ -76,7 +76,7 @@
  * Recorded in docs/threat-model.md CF2-10.
  */
 import { resolve6 } from 'node:dns/promises';
-import { env } from '../env.js';
+import { config } from '../config/index.js';
 import { logger } from '../logger.js';
 
 const fleetSizeLog = logger.child({ component: 'fleet-size' });
@@ -142,13 +142,13 @@ let refreshTimer: NodeJS.Timeout | null = null;
 
 /**
  * The pre-existing static-divisor behaviour (CF2-10), unchanged:
- * defensive against a missing/invalid env value (some test suites
- * mock `env.js` with a hand-picked field subset — see the comment on
- * this same guard in `rate-limit.ts`'s history) so a bad value falls
- * back to 1 (no division) rather than propagating `NaN`.
+ * defensive against a missing/invalid value (some test suites mock
+ * `config/index.js` with a hand-picked subset — see the comment on
+ * this same guard in `rate-limit.ts`) so a bad value falls back to 1
+ * (no division) rather than propagating `NaN`.
  */
 function staticFallbackEstimate(): number {
-  const raw = env.RATE_LIMIT_MACHINE_COUNT_ESTIMATE;
+  const raw = config.rateLimit.machineCountEstimate;
   return typeof raw === 'number' && Number.isFinite(raw) && raw > 0 ? raw : 1;
 }
 
@@ -208,7 +208,12 @@ export function currentFleetSizeSource(now: number = Date.now()): 'dynamic' | 's
  * grace-period logic decide what to serve.
  */
 export async function refreshFleetSize(): Promise<void> {
-  const appName = env.FLY_APP_NAME;
+  // Read straight from the process environment rather than from
+  // `config`: Fly injects FLY_APP_NAME into every Machine at runtime, so
+  // no operator ever writes it and it has no place in a file operators
+  // author. It and CONFIG_PATH / NODE_ENV are the only environment
+  // variables the backend reads.
+  const appName = process.env['FLY_APP_NAME'];
   if (!appName) {
     // Not running on Fly (local dev, CI, another host) — there's no
     // `.internal` zone to query. Leave any prior dynamic value alone;
@@ -256,7 +261,7 @@ export async function refreshFleetSize(): Promise<void> {
  * down cleanly.
  */
 export function startFleetSizeEstimator(): void {
-  if (env.NODE_ENV === 'test') return;
+  if (config.env === 'test') return;
   if (refreshTimer !== null) return;
   // Kick off an immediate first refresh rather than waiting a full
   // interval for the first real estimate — otherwise every fresh boot

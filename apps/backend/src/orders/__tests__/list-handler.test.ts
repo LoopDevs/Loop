@@ -20,6 +20,7 @@
  *      for the client\'s page, and returned pending rows unfiltered.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type * as ConfigModule from '../../config/index.js';
 import type { Context } from 'hono';
 
 vi.mock('../../logger.js', () => ({
@@ -28,9 +29,16 @@ vi.mock('../../logger.js', () => ({
   },
 }));
 
-vi.mock('../../env.js', () => ({
-  env: { GIFT_CARD_API_BASE_URL: 'http://test-upstream.local' },
-}));
+vi.mock('../../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
+  return {
+    ...actual,
+    config: {
+      ...actual.config,
+      ctx: { ...actual.config.ctx, baseUrl: 'http://test-upstream.local' },
+    },
+  };
+});
 
 const { notifyCtxSchemaDrift } = vi.hoisted(() => ({ notifyCtxSchemaDrift: vi.fn() }));
 vi.mock('../../discord.js', () => ({ notifyCtxSchemaDrift }));

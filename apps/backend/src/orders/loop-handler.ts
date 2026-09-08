@@ -15,7 +15,7 @@
  * platform and rejects creates without it.
  */
 import type { Context } from 'hono';
-import { env } from '../env.js';
+import { config } from '../config/index.js';
 import { logger } from '../logger.js';
 import type { LoopAuthContext } from '../auth/require-auth.js';
 import type { CreateLoopOrderResponse, MerchantDenominations } from '@loop/shared';
@@ -58,13 +58,9 @@ export const ORDER_IDEMPOTENCY_KEY_MAX = 128;
 
 const CTX_CREATE_TIMEOUT_MS = 20_000;
 
-/** Chain-qualified CTX payment currencies Loop offers, from env. */
+/** Chain-qualified CTX payment currencies Loop offers, from config. */
 export function ctxPaymentCurrencies(): string[] {
-  const raw = env.LOOP_CTX_PAYMENT_CURRENCIES ?? 'XLM';
-  return raw
-    .split(',')
-    .map((s) => s.trim().toUpperCase())
-    .filter((s) => s.length > 0);
+  return config.ctx.paymentCurrencies.map((currency) => currency.trim().toUpperCase());
 }
 
 /**
@@ -196,7 +192,7 @@ async function captureOrderEconomics(orderId: string, ctxOrderId: string): Promi
 }
 
 export async function loopCreateOrderHandler(c: Context): Promise<Response> {
-  if (!env.LOOP_AUTH_NATIVE_ENABLED) {
+  if (!config.auth.native.enabled) {
     return c.json({ code: 'NOT_FOUND', message: 'Not found' }, 404);
   }
   const auth = c.get('auth') as LoopAuthContext | undefined;

@@ -26,7 +26,7 @@
  * the ws has no replay.
  */
 import { z } from 'zod';
-import { env } from '../env.js';
+import { config } from '../config/index.js';
 import { logger } from '../logger.js';
 import { CtxGiftCardSchema } from '../orders/ctx-order.js';
 import { applyCtxCardStatus, resolveOrderForCard } from '../orders/mirror-apply.js';
@@ -93,7 +93,7 @@ export function stopGiftcardWs(): void {
 }
 
 function wsUrl(): string {
-  const base = new URL(env.GIFT_CARD_API_BASE_URL);
+  const base = new URL(config.ctx.baseUrl);
   base.protocol = base.protocol === 'http:' ? 'ws:' : 'wss:';
   base.pathname = `${base.pathname.replace(/\/$/, '')}/ws`;
   return base.toString();
@@ -107,8 +107,8 @@ function connect(): void {
   try {
     ws = new WebSocket(wsUrl(), {
       headers: {
-        'X-Api-Key': env.GIFT_CARD_API_KEY,
-        'X-Api-Secret': env.GIFT_CARD_API_SECRET,
+        'X-Api-Key': config.ctx.credentials.key,
+        'X-Api-Secret': config.ctx.credentials.secret,
       },
     } as unknown as string[]);
   } catch (err) {

@@ -9,11 +9,12 @@
  * Keys are generated at runtime — never commit a PEM fixture.
  */
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
+import type * as ConfigModule from '../../config/index.js';
 import { generateKeyPairSync } from 'node:crypto';
 import { Hono } from 'hono';
 
 // Module scope (not vi.hoisted) is fine: the route module is only
-// ever imported dynamically inside appWithEnv, after the keys exist.
+// ever imported dynamically inside appWithKeys, after the keys exist.
 const gen = (): string =>
   generateKeyPairSync('rsa', { modulusLength: 2048 })
     .privateKey.export({ type: 'pkcs8', format: 'pem' })
@@ -21,21 +22,54 @@ const gen = (): string =>
 const CURRENT_PEM = gen();
 const PREVIOUS_PEM = gen();
 
-const MANAGED_KEYS = [
-  'LOOP_JWT_SIGNING_KEY',
-  'LOOP_JWT_SIGNING_KEY_PREVIOUS',
-  'LOOP_JWT_RSA_PRIVATE_KEY',
-  'LOOP_JWT_RSA_PRIVATE_KEY_PREVIOUS',
-  'DISABLE_RATE_LIMITING',
-] as const;
+/**
+ * The signing keys are the only config these tests vary. The mock
+ * serves a mutable `jwt` block over the real (test-fixture) config, so
+ * `loadWithKeys` below only has to assign into it.
+ */
+const { jwtState } = vi.hoisted(() => ({
+  jwtState: {
+    hs256: { current: undefined as string | undefined, previous: undefined as string | undefined },
+    rs256: { current: undefined as string | undefined, previous: undefined as string | undefined },
+  },
+}));
 
-/** Re-imports env + routes with exactly the given vars and mounts the app. */
-async function appWithEnv(
-  vars: Partial<Record<(typeof MANAGED_KEYS)[number], string>>,
-): Promise<Hono> {
+vi.mock('../../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
+  return {
+    ...actual,
+    get config() {
+      return {
+        ...actual.config,
+        auth: {
+          ...actual.config.auth,
+          native: { ...actual.config.auth.native, enabled: true, jwt: jwtState },
+        },
+      };
+    },
+  };
+});
+
+/** The signing keys `loadWithKeys` accepts, mirroring `auth.native.jwt`. */
+interface JwtKeys {
+  hs256?: string;
+  hs256Previous?: string;
+  rs256?: string;
+  rs256Previous?: string;
+}
+
+/** Applies exactly the given keys, clearing every slot not named. */
+function applyKeys(keys: JwtKeys): void {
+  jwtState.hs256.current = keys.hs256;
+  jwtState.hs256.previous = keys.hs256Previous;
+  jwtState.rs256.current = keys.rs256;
+  jwtState.rs256.previous = keys.rs256Previous;
+}
+
+/** Re-imports the routes with exactly the given keys and mounts the app. */
+async function appWithKeys(keys: JwtKeys): Promise<Hono> {
   vi.resetModules();
-  for (const k of MANAGED_KEYS) delete process.env[k];
-  for (const [k, v] of Object.entries(vars)) process.env[k] = v;
+  applyKeys(keys);
   const { mountWellKnownRoutes } = await import('../../routes/well-known.js');
   const app = new Hono();
   mountWellKnownRoutes(app);
@@ -47,15 +81,15 @@ beforeEach(() => {
 });
 
 afterAll(() => {
-  for (const k of MANAGED_KEYS) delete process.env[k];
+  applyKeys({});
   vi.resetModules();
 });
 
 describe('GET /.well-known/jwks.json', () => {
   it('serves a valid JWKS with both kids during a rotation window', async () => {
-    const app = await appWithEnv({
-      LOOP_JWT_RSA_PRIVATE_KEY: CURRENT_PEM,
-      LOOP_JWT_RSA_PRIVATE_KEY_PREVIOUS: PREVIOUS_PEM,
+    const app = await appWithKeys({
+      rs256: CURRENT_PEM,
+      rs256Previous: PREVIOUS_PEM,
     });
     const res = await app.request('/.well-known/jwks.json');
     expect(res.status).toBe(200);
@@ -76,9 +110,9 @@ describe('GET /.well-known/jwks.json', () => {
   });
 
   it('never leaks private-key material (no d/p/q/dp/dq/qi anywhere in the body)', async () => {
-    const app = await appWithEnv({
-      LOOP_JWT_RSA_PRIVATE_KEY: CURRENT_PEM,
-      LOOP_JWT_RSA_PRIVATE_KEY_PREVIOUS: PREVIOUS_PEM,
+    const app = await appWithKeys({
+      rs256: CURRENT_PEM,
+      rs256Previous: PREVIOUS_PEM,
     });
     const res = await app.request('/.well-known/jwks.json');
     const body = (await res.json()) as { keys: Array<Record<string, unknown>> };
@@ -91,13 +125,13 @@ describe('GET /.well-known/jwks.json', () => {
   });
 
   it('sets Cache-Control: public, max-age=3600', async () => {
-    const app = await appWithEnv({ LOOP_JWT_RSA_PRIVATE_KEY: CURRENT_PEM });
+    const app = await appWithKeys({ rs256: CURRENT_PEM });
     const res = await app.request('/.well-known/jwks.json');
     expect(res.headers.get('cache-control')).toBe('public, max-age=3600');
   });
 
   it('serves a valid empty JWKS when RS256 is unconfigured (pre-cutover deployment)', async () => {
-    const app = await appWithEnv({ LOOP_JWT_SIGNING_KEY: 'rs256-test-hs-signing-key-32ch!!' });
+    const app = await appWithKeys({ hs256: 'rs256-test-hs-signing-key-32ch!!' });
     const res = await app.request('/.well-known/jwks.json');
     expect(res.status).toBe(200);
     const body = (await res.json()) as { keys: unknown[] };
@@ -105,7 +139,7 @@ describe('GET /.well-known/jwks.json', () => {
   });
 
   it('rate-limits at 120/min per IP with a Retry-After on the 429', async () => {
-    const app = await appWithEnv({ LOOP_JWT_RSA_PRIVATE_KEY: CURRENT_PEM });
+    const app = await appWithKeys({ rs256: CURRENT_PEM });
     let lastStatus = 0;
     for (let i = 0; i < 120; i += 1) {
       lastStatus = (await app.request('/.well-known/jwks.json')).status;

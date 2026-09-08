@@ -14,25 +14,22 @@
  * inventory can't drift from what actually serves traffic.
  */
 import { describe, it, expect, vi } from 'vitest';
+import type * as ConfigModule from '../config/index.js';
 
-vi.mock('../env.js', () => ({
-  env: {
-    PORT: '8080',
-    NODE_ENV: 'test',
-    LOG_LEVEL: 'silent',
-    GIFT_CARD_API_BASE_URL: 'http://test-upstream.local',
-    LOCATION_REFRESH_INTERVAL_HOURS: 24,
-    CTX_CLIENT_ID_WEB: 'loopweb',
-    CTX_CLIENT_ID_IOS: 'loopios',
-    CTX_CLIENT_ID_ANDROID: 'loopandroid',
-    TRUST_PROXY: false,
-    // AUDIT-2-E: test-endpoints.ts now also requires this secret to
-    // mount `/__test__/*` at all — without it the two routes below
-    // wouldn't appear in `app.routes` and this inventory's assertions
-    // that they're present-but-unlimited would fail.
-    LOOP_TEST_ENDPOINTS_SECRET: 'rate-limit-inventory-test-secret',
-  },
-}));
+vi.mock('../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
+  return {
+    ...actual,
+    config: {
+      ...actual.config,
+      // AUDIT-2-E: test-endpoints.ts also requires this secret to mount
+      // `/__test__/*` at all — without it the two routes below wouldn't
+      // appear in `app.routes` and this inventory's assertions that
+      // they're present-but-unlimited would fail.
+      testing: { endpointsSecret: 'rate-limit-inventory-test-secret' },
+    },
+  };
+});
 
 vi.mock('../logger.js', () => ({
   logger: {

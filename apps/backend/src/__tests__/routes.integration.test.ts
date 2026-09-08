@@ -1,25 +1,25 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type * as ConfigModule from '../config/index.js';
 
-// Mock env before any other imports
-vi.mock('../env.js', () => ({
-  env: {
-    PORT: '8080',
-    NODE_ENV: 'test',
-    LOG_LEVEL: 'silent',
-    GIFT_CARD_API_BASE_URL: 'http://test-upstream.local',
-    LOCATION_REFRESH_INTERVAL_HOURS: 24,
-    // Mirror zod defaults so the A-036 X-Client-Id allowlist in
-    // requireAuth doesn't drop the default values.
-    CTX_CLIENT_ID_WEB: 'loopweb',
-    CTX_CLIENT_ID_IOS: 'loopios',
-    CTX_CLIENT_ID_ANDROID: 'loopandroid',
-    // Audit A-023 / FT-08 — the rate limiter keys on the client IP only when
-    // this is true; behind a trusted proxy it reads the spoof-proof
-    // `Fly-Client-IP` header. Integration tests inject Fly-Client-IP values,
-    // so enable trust.
-    TRUST_PROXY: true,
-  },
-}));
+// Take the real (test-fixture) config and change only what this suite
+// needs, before any other import pulls the module in.
+vi.mock('../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
+  return {
+    ...actual,
+    config: {
+      ...actual.config,
+      // The suite asserts on the exact upstream URLs the proxy routes
+      // build, so it pins the base rather than inheriting the fixture's.
+      ctx: { ...actual.config.ctx, baseUrl: 'http://test-upstream.local' },
+      // Audit A-023 / FT-08 — the rate limiter keys on the client IP only
+      // when this is true; behind a trusted proxy it reads the spoof-proof
+      // `Fly-Client-IP` header. Integration tests inject Fly-Client-IP
+      // values, so enable trust.
+      server: { ...actual.config.server, trustProxy: true },
+    },
+  };
+});
 
 // Mock logger to suppress output
 vi.mock('../logger.js', () => ({

@@ -16,7 +16,7 @@
  * send — an undelivered page is re-attempted on the next tick rather
  * than lost.
  */
-import { env } from '../env.js';
+import { config } from '../config/index.js';
 import { GREEN, ORANGE, escapeMarkdown, sendWebhook } from './shared.js';
 
 /**
@@ -40,7 +40,7 @@ export function notifyVaultShareDrift(args: {
   const direction = args.driftShares.startsWith('-')
     ? 'Off-chain tracks MORE than on-chain (possible stuck/lost transfer)'
     : 'On-chain holds MORE than off-chain tracks (possible unaccounted shares)';
-  return sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+  return sendWebhook(config.observability.discord.monitoringWebhook, {
     title: '⚠️ Vault Share-Count Drift Exceeded Threshold (INV-V1)',
     description: `\`${escapeMarkdown(args.assetCode)}\` (${escapeMarkdown(args.network)}) user-share drift exceeds the configured threshold. ${direction}.`,
     color: ORANGE,
@@ -70,7 +70,7 @@ export function notifyVaultShareDriftRecovered(args: {
   driftShares: string;
   thresholdShares: string;
 }): Promise<boolean> {
-  return sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+  return sendWebhook(config.observability.discord.monitoringWebhook, {
     title: '🟢 Vault Share-Count Drift Recovered (INV-V1)',
     description: `\`${escapeMarkdown(args.assetCode)}\` (${escapeMarkdown(args.network)}) user-share drift is back within the configured threshold.`,
     color: GREEN,
@@ -103,7 +103,7 @@ export function notifyVaultSolvencyBreach(args: {
   breachStroops: string;
   thresholdStroops: string;
 }): Promise<boolean> {
-  return sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+  return sendWebhook(config.observability.discord.monitoringWebhook, {
     title: '🛑 Vault Solvency Breach (INV-V2)',
     description: `\`${escapeMarkdown(args.assetCode)}\` (${escapeMarkdown(args.network)}): off-chain USD liability exceeds vault-redeemable backing + hot float beyond tolerance.`,
     color: ORANGE,
@@ -136,7 +136,7 @@ export function notifyVaultSolvencyRecovered(args: {
   assetCode: string;
   network: string;
 }): Promise<boolean> {
-  return sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+  return sendWebhook(config.observability.discord.monitoringWebhook, {
     title: '🟢 Vault Solvency Breach Recovered (INV-V2)',
     description: `\`${escapeMarkdown(args.assetCode)}\` (${escapeMarkdown(args.network)}) is back within its solvency tolerance.`,
     color: GREEN,
@@ -169,7 +169,7 @@ export function notifyVaultFloatDesync(args: {
   shareDelta: string;
   thresholdShares: string;
 }): Promise<boolean> {
-  return sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+  return sendWebhook(config.observability.discord.monitoringWebhook, {
     title: '⚠️ Vault Hot-Float Reconciliation Drift',
     description: `\`${escapeMarkdown(args.assetCode)}\` (${escapeMarkdown(args.network)}): the operator's on-chain vault-share balance disagrees with the float/emission bookkeeping beyond tolerance.`,
     color: ORANGE,

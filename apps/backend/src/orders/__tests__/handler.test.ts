@@ -1,20 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type * as ConfigModule from '../../config/index.js';
 
 // Mock env before any other imports
-vi.mock('../../env.js', () => ({
-  env: {
-    PORT: '8080',
-    NODE_ENV: 'test',
-    LOG_LEVEL: 'silent',
-    GIFT_CARD_API_BASE_URL: 'http://test-upstream.local',
-    LOCATION_REFRESH_INTERVAL_HOURS: 24,
-    // Match the zod defaults so the A-036 X-Client-Id allowlist
-    // in `requireAuth` includes `loopweb`/`loopios`/`loopandroid`.
-    CTX_CLIENT_ID_WEB: 'loopweb',
-    CTX_CLIENT_ID_IOS: 'loopios',
-    CTX_CLIENT_ID_ANDROID: 'loopandroid',
-  },
-}));
+vi.mock('../../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
+  return {
+    ...actual,
+    config: {
+      ...actual.config,
+      ctx: { ...actual.config.ctx, baseUrl: 'http://test-upstream.local' },
+    },
+  };
+});
 
 // Mock logger to suppress output
 vi.mock('../../logger.js', () => ({

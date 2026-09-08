@@ -1,20 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type * as ConfigModule from '../../config/index.js';
 
-// vi.hoisted runs in the hoisted scope so mockEnv is available to vi.mock factories
-const mockEnv = vi.hoisted(() => {
-  const obj: Record<string, unknown> = {
-    PORT: '8080',
-    NODE_ENV: 'development',
-    LOG_LEVEL: 'silent',
-    GIFT_CARD_API_BASE_URL: 'http://test-upstream.local',
-    LOCATION_REFRESH_INTERVAL_HOURS: 24,
-  };
-  return obj;
-});
-
-vi.mock('../../env.js', () => ({
-  env: mockEnv,
+// vi.hoisted runs in the hoisted scope so configState is available to
+// vi.mock factories. `proxy.ts` only branches on the deployment
+// environment (the SSRF guard relaxes outside production).
+const { configState } = vi.hoisted(() => ({
+  configState: { env: 'development' as 'development' | 'production' | 'test' },
 }));
+
+vi.mock('../../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
+  return {
+    ...actual,
+    get config() {
+      return { ...actual.config, env: configState.env };
+    },
+  };
+});
 
 // Mock logger to suppress output
 vi.mock('../../logger.js', () => ({
@@ -121,7 +123,7 @@ beforeEach(() => {
   mockSharpMetadata.mockReset();
   mockSharpMetadata.mockResolvedValue({ hasAlpha: false, format: 'jpeg' });
   mockDnsLookup.mockResolvedValue([{ address: '93.184.216.34', family: 4 }]);
-  mockEnv.NODE_ENV = 'development';
+  configState.env = 'development';
   storeState.merchants = new Map([[MERCHANT.id, MERCHANT]]);
   storeState.pinByMerchant = new Map();
   __resetImageCacheForTests();
@@ -208,7 +210,7 @@ describe('GET /api/image — reference resolution (ADR 050)', () => {
   });
 
   it('rejects a non-HTTPS resolved URL in production with 502', async () => {
-    mockEnv.NODE_ENV = 'production';
+    configState.env = 'production';
     storeState.merchants.set('m-1', { ...MERCHANT, logoUrl: 'http://cdn.example.com/logo.png' });
     const res = await app.request('/api/image?merchantId=m-1&kind=logo');
     expect(res.status).toBe(502);
@@ -216,7 +218,7 @@ describe('GET /api/image — reference resolution (ADR 050)', () => {
   });
 
   it('rejects a resolved URL that resolves to a private IP in production with 502', async () => {
-    mockEnv.NODE_ENV = 'production';
+    configState.env = 'production';
     mockDnsLookup.mockResolvedValueOnce([{ address: '169.254.169.254', family: 4 }]);
     const res = await app.request('/api/image?merchantId=m-1&kind=logo');
     expect(res.status).toBe(502);

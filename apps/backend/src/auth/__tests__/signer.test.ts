@@ -1,17 +1,44 @@
 import { describe, it, expect, vi } from 'vitest';
+import type * as ConfigModule from '../../config/index.js';
 import { createHmac } from 'node:crypto';
 
-// Set the signing key BEFORE env.ts is loaded — signer.ts reads env
-// lazily inside getActiveSigner() but env.ts validates at import.
-vi.hoisted(() => {
-  process.env['LOOP_JWT_SIGNING_KEY'] = 'jwt-test-signing-key-32-chars-min!!';
+// `signer.ts` reads the keys lazily inside getActiveSigner(), so the
+// mock only has to serve an HS256 key over the real (test-fixture)
+// config.
+const { jwtState } = vi.hoisted(() => ({
+  jwtState: {
+    hs256: {
+      current: 'jwt-test-signing-key-32-chars-min!!' as string | undefined,
+      previous: undefined as string | undefined,
+    },
+    rs256: {
+      current: undefined as string | undefined,
+      previous: undefined as string | undefined,
+    },
+  },
+}));
+
+vi.mock('../../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
+  return {
+    ...actual,
+    get config() {
+      return {
+        ...actual.config,
+        auth: {
+          ...actual.config.auth,
+          native: { ...actual.config.auth.native, enabled: true, jwt: jwtState },
+        },
+      };
+    },
+  };
 });
 
 import { getActiveSigner, getVerifiersForAlg, isAnySignerConfigured } from '../signer.js';
 
 describe('signer (Tranche-2 prep — Track A.1)', () => {
   describe('getActiveSigner', () => {
-    it('returns an HS256 signer when LOOP_JWT_SIGNING_KEY is set', () => {
+    it('returns an HS256 signer when auth.native.jwt.hs256.current is set', () => {
       const s = getActiveSigner();
       expect(s).not.toBeNull();
       expect(s?.alg).toBe('HS256');
@@ -61,20 +88,19 @@ describe('signer (Tranche-2 prep — Track A.1)', () => {
     });
 
     it('returns BOTH current and previous keys during a rotation window', () => {
-      // Mutate process.env directly — the env module re-reads on each
-      // call, but signer.ts also re-reads via the env import. Match
-      // the existing test pattern in tokens.test.ts: override at the
-      // env mock level via vi.doMock.
-      vi.resetModules();
-      process.env['LOOP_JWT_SIGNING_KEY'] = 'jwt-test-current-signing-key-32min!!';
-      process.env['LOOP_JWT_SIGNING_KEY_PREVIOUS'] = 'jwt-test-signing-key-previous-32chr!';
-      // Re-import after env mutation — picks up both keys.
-      return import('../signer.js').then(({ getVerifiersForAlg: re }) => {
-        const verifiers = re('HS256');
+      // The mock re-reads `jwtState` on every access and signer.ts
+      // reads the config per call, so setting the previous slot here is
+      // enough — no module reload needed.
+      jwtState.hs256.current = 'jwt-test-current-signing-key-32min!!';
+      jwtState.hs256.previous = 'jwt-test-signing-key-previous-32chr!';
+      try {
+        const verifiers = getVerifiersForAlg('HS256');
         expect(verifiers.length).toBe(2);
         expect(verifiers.every((v) => v.alg === 'HS256')).toBe(true);
-        delete process.env['LOOP_JWT_SIGNING_KEY_PREVIOUS'];
-      });
+      } finally {
+        jwtState.hs256.current = 'jwt-test-signing-key-32-chars-min!!';
+        jwtState.hs256.previous = undefined;
+      }
     });
 
     it('returns an empty array for RS256 — Track A.2 reserved', () => {

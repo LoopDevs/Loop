@@ -13,27 +13,38 @@
  *   - the idempotent replay short-circuit
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type * as ConfigModule from '../../config/index.js';
 import type { Context } from 'hono';
 import type { LoopAuthContext } from '../../auth/require-auth.js';
 
-vi.hoisted(() => {
-  process.env['LOOP_AUTH_NATIVE_ENABLED'] = 'true';
-  process.env['LOOP_JWT_SIGNING_KEY'] ??= 'unit-test-loop-jwt-signing-key-32ch!';
-  process.env['LOOP_CTX_PAYMENT_CURRENCIES'] = 'XLM,DASH';
-});
-
-vi.mock('../../env.js', () => ({
-  get env() {
-    return {
-      LOOP_AUTH_NATIVE_ENABLED: process.env['LOOP_AUTH_NATIVE_ENABLED'] === 'true',
-      LOOP_CTX_PAYMENT_CURRENCIES: process.env['LOOP_CTX_PAYMENT_CURRENCIES'],
-      GIFT_CARD_API_KEY: 'k',
-      GIFT_CARD_API_SECRET: 's',
-      CTX_CLIENT_ID_WEB: 'loopweb',
-      GIFT_CARD_API_BASE_URL: 'https://ctx.test',
-    };
-  },
+// `nativeAuthEnabled` is per-test mutable: the flag-off case asserts the
+// handler 404s. Everything else the import chain reads comes from the
+// real (test-fixture) config.
+const { configState } = vi.hoisted(() => ({
+  configState: { nativeAuthEnabled: true },
 }));
+
+vi.mock('../../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
+  return {
+    ...actual,
+    get config() {
+      return {
+        ...actual.config,
+        ctx: {
+          ...actual.config.ctx,
+          baseUrl: 'https://ctx.test',
+          credentials: { key: 'k', secret: 's' },
+          paymentCurrencies: ['XLM', 'DASH'],
+        },
+        auth: {
+          ...actual.config.auth,
+          native: { ...actual.config.auth.native, enabled: configState.nativeAuthEnabled },
+        },
+      };
+    },
+  };
+});
 
 vi.mock('../../logger.js', () => ({
   logger: {
@@ -211,7 +222,7 @@ function ctx201(body?: Record<string, unknown>): Response {
 }
 
 beforeEach(() => {
-  process.env['LOOP_AUTH_NATIVE_ENABLED'] = 'true';
+  configState.nativeAuthEnabled = true;
   merchantsState.map = new Map([['amazon', { id: 'amazon', name: 'Amazon', enabled: true }]]);
   usersState.ctxUserId = 'ctx-u-1';
   repoState.created = undefined;
@@ -229,8 +240,8 @@ beforeEach(() => {
 });
 
 describe('gate ladder', () => {
-  it('404s when LOOP_AUTH_NATIVE_ENABLED is off', async () => {
-    process.env['LOOP_AUTH_NATIVE_ENABLED'] = 'false';
+  it('404s when auth.native.enabled is off', async () => {
+    configState.nativeAuthEnabled = false;
     const res = await loopCreateOrderHandler(
       makeCtx({ auth: LOOP_AUTH, clientId: 'loopweb', body: GOOD_BODY }),
     );

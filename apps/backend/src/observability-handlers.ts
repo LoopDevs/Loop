@@ -10,7 +10,7 @@
  * no-store for the bearer-gated spec).
  */
 import type { Context } from 'hono';
-import { env } from './env.js';
+import { config } from './config/index.js';
 import {
   METRIC_KEY_SEPARATOR,
   REQUEST_DURATION_BUCKETS_SECONDS,
@@ -46,8 +46,8 @@ function probeScopedHeaders(): Record<string, string> {
  * for rate-limit hits + per-(method, route, status) request totals.
  */
 export async function metricsHandler(c: Context): Promise<Response> {
-  if (!probeGateAllows(c, env.METRICS_BEARER_TOKEN)) {
-    return gateRejection(c, env.METRICS_BEARER_TOKEN);
+  if (!probeGateAllows(c, config.observability.metrics.bearerToken)) {
+    return gateRejection(c, config.observability.metrics.bearerToken);
   }
   const lines: string[] = [];
 
@@ -233,7 +233,7 @@ export async function metricsHandler(c: Context): Promise<Response> {
   // B-5: mirrors /health's geoDbStale soft-degraded reason. `stale` is
   // already false-for-both-fresh-and-unconfigured (see GeoDbStatus's doc
   // comment in public/geo.ts) so this gauge can't false-alarm on a
-  // deployment that never configured MAXMIND_GEOLITE2_PATH. The reader
+  // deployment that never configured `catalog.geoip.databasePath`. The reader
   // is memoized after first open (no repeated file I/O per scrape).
   const geoDbStatus = await getGeoDbStatus();
   lines.push('# HELP loop_geo_db_stale GeoLite2 database staleness state (1=stale, 0=fresh).');

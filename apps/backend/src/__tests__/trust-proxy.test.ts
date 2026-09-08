@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import type * as ConfigModule from '../config/index.js';
 import type { Context } from 'hono';
 
 /**
@@ -10,7 +11,7 @@ import type { Context } from 'hono';
  * past the rate limiter. If the env flag ever flipped or the
  * `clientIpFor` predicate regressed, no test would catch it.
  *
- * Two test files cover the two env modes (each mocks `env.TRUST_PROXY`
+ * Two test files cover the two env modes (each mocks `config.server.trustProxy`
  * at module-load time):
  *   - trust-proxy.test.ts — TRUST_PROXY=false (this file)
  *   - trust-proxy-trusted.test.ts — TRUST_PROXY=true (sibling file)
@@ -20,20 +21,18 @@ import type { Context } from 'hono';
  * logic, fast enough to run in the unit suite.
  */
 
-vi.mock('../env.js', () => ({
-  env: {
-    NODE_ENV: 'test',
-    TRUST_PROXY: false,
-    // Remaining env fields the import chain happens to pull in.
-    PORT: '8080',
-    LOG_LEVEL: 'silent',
-    GIFT_CARD_API_BASE_URL: 'http://test-upstream.local',
-    LOCATION_REFRESH_INTERVAL_HOURS: 24,
-    CTX_CLIENT_ID_WEB: 'loopweb',
-    CTX_CLIENT_ID_IOS: 'loopios',
-    CTX_CLIENT_ID_ANDROID: 'loopandroid',
-  },
-}));
+// Only `server.trustProxy` is under test — everything else the import
+// chain reads comes from the real (test-fixture) config.
+vi.mock('../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
+  return {
+    ...actual,
+    config: {
+      ...actual.config,
+      server: { ...actual.config.server, trustProxy: false },
+    },
+  };
+});
 
 vi.mock('../logger.js', () => ({
   logger: {

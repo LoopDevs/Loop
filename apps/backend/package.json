@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch --env-file=.env --import ./src/instrument.ts src/index.ts",
+    "dev": "tsx watch --import ./src/instrument.ts src/index.ts",
     "build": "tsup",
     "start": "node --import ./dist/instrument.js dist/index.js",
     "test": "vitest run",
@@ -24,6 +24,7 @@
     "mongodb": "^6.10.0",
     "pino": "10.3.1",
     "sharp": "0.35.4",
+    "yaml": "2.9.0",
     "zod": "4.4.3"
   },
   "devDependencies": {

@@ -1,10 +1,15 @@
 import { describe, it, expect, vi } from 'vitest';
+import type * as ConfigModule from '../config/index.js';
 
-vi.mock('../env.js', () => ({
-  env: {
-    GIFT_CARD_API_BASE_URL: 'https://spend.ctx.com',
-  },
-}));
+// Only `ctx.baseUrl` matters here; the rest of the real (test-fixture)
+// config stays intact so the import chain keeps booting.
+vi.mock('../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
+  return {
+    ...actual,
+    config: { ...actual.config, ctx: { ...actual.config.ctx, baseUrl: 'https://spend.ctx.com' } },
+  };
+});
 
 import { upstreamUrl } from '../upstream.js';
 
@@ -66,9 +71,18 @@ describe('upstreamUrl', () => {
 
   it('normalises a trailing slash on the base URL to avoid double-slash', async () => {
     vi.resetModules();
-    vi.doMock('../env.js', () => ({ env: { GIFT_CARD_API_BASE_URL: 'https://spend.ctx.com/' } }));
+    vi.doMock('../config/index.js', async (importActual) => {
+      const actual = await importActual<typeof ConfigModule>();
+      return {
+        ...actual,
+        config: {
+          ...actual.config,
+          ctx: { ...actual.config.ctx, baseUrl: 'https://spend.ctx.com/' },
+        },
+      };
+    });
     const { upstreamUrl: freshUrl } = await import('../upstream.js');
     expect(freshUrl('/login')).toBe('https://spend.ctx.com/login');
-    vi.doUnmock('../env.js');
+    vi.doUnmock('../config/index.js');
   });
 });

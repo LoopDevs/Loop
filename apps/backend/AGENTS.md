@@ -8,7 +8,7 @@
 src/
 ├── app.ts              ← Hono app, middleware chain, route mounts (import this in tests)
 ├── index.ts            ← Server startup + background workers (never import in tests)
-├── env.ts              ← Zod env composer + parseEnv (fields in env/sections/*)
+├── config/             ← YAML config: schema.ts composes sections/*, index.ts loads it
 ├── db/                 ← Document store
 │   ├── types.ts        ← Collection doc shapes + unique specs (THE schema)
 │   ├── store.ts        ← Collection/DataStore interfaces + filter matcher
@@ -63,8 +63,27 @@ src/
 4. Unit test beside the handler; flow test in
    `src/__tests__/integration/` if it touches persisted state.
 
-## Env vars
+## Configuration
 
-`src/env/sections/*.ts` hold the zod fields; `src/env.ts` composes
-them + cross-field boot guards. `.env.example` is the authoritative
-reference — update it in the same commit as any env change.
+Settings live in a YAML file, not environment variables. `CONFIG_PATH`
+picks the file (default `config.yaml` in the working directory);
+`config.example.yaml` is the authoritative reference — update it in the
+same commit as any config change.
+
+`src/config/sections/*.ts` hold the zod fields, `src/config/schema.ts`
+composes them into `ConfigSchema`, and `src/config/index.ts` reads +
+validates the file at boot and exports the typed `config` object
+everything else imports. Relationships between settings belong in the
+schema (nesting, discriminated unions) so they fail at parse time with
+the offending path in the message; only the checks a per-field schema
+can't express live in `applyCrossFieldGuards`.
+
+Two settings stay environment variables because no operator authors
+them: `CONFIG_PATH` itself, and `NODE_ENV` (which overrides the file's
+`env:` key, since node tooling sets it on its own). `FLY_APP_NAME` is
+read straight from `process.env` at its single use site.
+
+Tests either mock `../config/index.js` — spreading `importActual()` so
+only the settings under test change — or call `parseConfig()` with a
+synthetic document. `config.test.yaml` / `config.integration.yaml` are
+the committed fixtures the setup files point `CONFIG_PATH` at.

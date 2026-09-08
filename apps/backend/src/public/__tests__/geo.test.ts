@@ -14,17 +14,22 @@
  * mirrors the pattern in `well-known/__tests__/deep-link-verification.test.ts`.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type * as ConfigModule from '../../config/index.js';
 
-const { envState, openMock } = vi.hoisted(() => ({
-  envState: { MAXMIND_GEOLITE2_PATH: undefined as string | undefined },
+const { geoipState, openMock } = vi.hoisted(() => ({
+  geoipState: { databasePath: undefined as string | undefined },
   openMock: vi.fn(),
 }));
 
-vi.mock('../../env.js', () => ({
-  get env() {
-    return envState;
-  },
-}));
+vi.mock('../../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
+  return {
+    ...actual,
+    get config() {
+      return { ...actual.config, catalog: { ...actual.config.catalog, geoip: geoipState } };
+    },
+  };
+});
 
 vi.mock('maxmind', () => ({
   open: openMock,
@@ -32,10 +37,8 @@ vi.mock('maxmind', () => ({
 
 // S4-4: `clientIpFor` (imported below from `../../middleware/rate-limit.js`)
 // now pulls in `../../middleware/fleet-size.js`, which imports the real
-// logger at module scope. This file's `env.js` mock only carries the one
-// field `getGeoDbStatus` needs, so the real `logger.ts` would throw at
-// import time (`pino()` requires `LOG_LEVEL`/`NODE_ENV`, neither mocked
-// here). Mock it out, same as `rate-limit.test.ts` / `health.test.ts` do.
+// logger at module scope. Mock it out so this file never builds a real
+// pino instance, same as `rate-limit.test.ts` / `health.test.ts` do.
 vi.mock('../../logger.js', () => ({
   logger: {
     info: vi.fn(),
@@ -48,7 +51,7 @@ vi.mock('../../logger.js', () => ({
 
 beforeEach(() => {
   vi.resetModules();
-  envState.MAXMIND_GEOLITE2_PATH = undefined;
+  geoipState.databasePath = undefined;
   openMock.mockReset();
 });
 
@@ -61,7 +64,7 @@ describe('getGeoDbStatus', () => {
   });
 
   it('reports misconfigured (available: false, stale: true) when the path is set but open() rejects', async () => {
-    envState.MAXMIND_GEOLITE2_PATH = '/bad/path.mmdb';
+    geoipState.databasePath = '/bad/path.mmdb';
     openMock.mockRejectedValue(new Error('ENOENT'));
     const { getGeoDbStatus } = await import('../geo.js');
     const status = await getGeoDbStatus();
@@ -69,7 +72,7 @@ describe('getGeoDbStatus', () => {
   });
 
   it('reports fresh (stale: false) when the build is within the threshold', async () => {
-    envState.MAXMIND_GEOLITE2_PATH = '/good/path.mmdb';
+    geoipState.databasePath = '/good/path.mmdb';
     const buildEpoch = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
     openMock.mockResolvedValue({ metadata: { buildEpoch } });
     const { getGeoDbStatus } = await import('../geo.js');
@@ -81,7 +84,7 @@ describe('getGeoDbStatus', () => {
   });
 
   it('reports stale when the build is older than GEO_DB_STALE_AFTER_DAYS', async () => {
-    envState.MAXMIND_GEOLITE2_PATH = '/good/path.mmdb';
+    geoipState.databasePath = '/good/path.mmdb';
     const buildEpoch = new Date(Date.now() - 100 * 24 * 60 * 60 * 1000);
     openMock.mockResolvedValue({ metadata: { buildEpoch } });
     const { getGeoDbStatus, GEO_DB_STALE_AFTER_DAYS } = await import('../geo.js');
@@ -93,7 +96,7 @@ describe('getGeoDbStatus', () => {
   });
 
   it('memoizes the reader open — a second call does not re-open the db', async () => {
-    envState.MAXMIND_GEOLITE2_PATH = '/good/path.mmdb';
+    geoipState.databasePath = '/good/path.mmdb';
     openMock.mockResolvedValue({ metadata: { buildEpoch: new Date() } });
     const { getGeoDbStatus } = await import('../geo.js');
     await getGeoDbStatus();

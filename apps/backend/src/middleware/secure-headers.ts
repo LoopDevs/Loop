@@ -21,10 +21,10 @@
  *   caught in the hardening sweep).
  */
 import { secureHeaders } from 'hono/secure-headers';
-import { env } from '../env.js';
+import { config } from '../config/index.js';
 
 export const secureHeadersMiddleware = secureHeaders({
-  crossOriginResourcePolicy: env.NODE_ENV === 'production' ? 'same-origin' : 'cross-origin',
+  crossOriginResourcePolicy: config.env === 'production' ? 'same-origin' : 'cross-origin',
   contentSecurityPolicy: {
     defaultSrc: ["'none'"],
     frameAncestors: ["'none'"],

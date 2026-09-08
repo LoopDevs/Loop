@@ -12,23 +12,25 @@
  * preserved verbatim here; the only change is the location.
  */
 import { init } from '@sentry/hono/node';
-import { env } from './env.js';
+import { config } from './config/index.js';
 import { scrubSentryEvent } from './sentry-scrubber.js';
 
-if (env.SENTRY_DSN) {
+if (config.observability.sentry.dsn) {
   init({
-    dsn: env.SENTRY_DSN,
+    dsn: config.observability.sentry.dsn,
     // A2-1310: `LOOP_ENV` is the explicit logical-env tag so a
     // staging deploy that sets `NODE_ENV=production` can still
     // bucket events as `staging`. Falls back to NODE_ENV so
     // existing prod + dev deploys are unaffected.
-    environment: env.LOOP_ENV ?? env.NODE_ENV,
+    environment: config.observability.environmentTag ?? config.env,
     // A2-1309: release tag pivots a Sentry event back to the
     // deploy artifact. CI/CD sets `SENTRY_RELEASE` to the git SHA.
     // Absent → Sentry omits the attribute (pre-launch default; dev
     // runs don't poison the release pivot).
-    ...(env.SENTRY_RELEASE !== undefined ? { release: env.SENTRY_RELEASE } : {}),
-    tracesSampleRate: env.NODE_ENV === 'production' ? 0.1 : 1.0,
+    ...(config.observability.sentry.release !== undefined
+      ? { release: config.observability.sentry.release }
+      : {}),
+    tracesSampleRate: config.env === 'production' ? 0.1 : 1.0,
     // A2-1308: scrub known-secret keys out of every captured event
     // before it leaves the process. Sentry's sendDefaultPii:false
     // default handles the well-known PII fields; this catches the

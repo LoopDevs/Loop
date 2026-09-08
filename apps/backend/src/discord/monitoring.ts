@@ -1,6 +1,6 @@
 /**
  * Monitoring-channel Discord notifiers — fires to
- * `env.DISCORD_WEBHOOK_MONITORING`. Signals covering the
+ * `config.observability.discord.monitoringWebhook`. Signals covering the
  * fleet-health surfaces operators watch for incidents:
  *
  *   - **Service health flap** — `notifyHealthChange`
@@ -34,7 +34,7 @@
  * (`sendWebhook`, `truncate`, `escapeMarkdown`, colour constants)
  * lives in `./shared.ts`.
  */
-import { env } from '../env.js';
+import { config } from '../config/index.js';
 import {
   DESCRIPTION_MAX,
   FIELD_VALUE_MAX,
@@ -48,7 +48,7 @@ import {
 
 /** Notify: health status changed */
 export function notifyHealthChange(status: 'healthy' | 'degraded', details: string): void {
-  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+  void sendWebhook(config.observability.discord.monitoringWebhook, {
     title: status === 'healthy' ? '💚 Service Healthy' : '🟠 Service Degraded',
     description: truncate(details, DESCRIPTION_MAX),
     color: status === 'healthy' ? GREEN : ORANGE,
@@ -71,7 +71,7 @@ export function notifyGeoDbStale(args: {
   ageDays: number | null;
   thresholdDays: number;
 }): void {
-  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+  void sendWebhook(config.observability.discord.monitoringWebhook, {
     title: '🟡 GeoLite2 database stale',
     description: truncate(
       args.buildEpoch === null
@@ -126,7 +126,7 @@ export function notifyPayoutFailed(args: {
   // user's full uuid + order history from a stream of failures. The
   // tail-id is enough to pivot into the admin shell where the full
   // id lives alongside the access-controlled context.
-  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+  void sendWebhook(config.observability.discord.monitoringWebhook, {
     title: '🔴 Stellar Payout Failed',
     color: RED,
     fields: [
@@ -176,7 +176,7 @@ export function notifyPayoutTxHashOverwriteRefused(args: {
   newTxHash: string;
   attempts: number;
 }): void {
-  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+  void sendWebhook(config.observability.discord.monitoringWebhook, {
     title: '🟠 Payout tx-hash overwrite refused',
     description: truncate(
       `Re-submit of payout ${args.payoutId.slice(-8)} signed a new tx hash while a durable anchor was already set. The anchor was PRESERVED and the new hash appended to \`payout_tx_hashes\`. If the anchored tx also landed (deep Horizon lag), this may be a double-pay — reconcile both hashes against Horizon.`,
@@ -219,7 +219,7 @@ export function notifyPayoutAwaitingTrustline(args: {
   const key = `${args.userId}::${args.assetCode}`;
   if (awaitingTrustlineFired.has(key)) return;
   awaitingTrustlineFired.add(key);
-  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+  void sendWebhook(config.observability.discord.monitoringWebhook, {
     title: '🟡 Payout awaiting trustline',
     description: truncate(
       `User ${args.userId.slice(-8)} has linked ${args.account.slice(0, 8)}…${args.account.slice(-4)} but ${
@@ -273,7 +273,7 @@ export function notifyInterestPoolLow(args: {
   daysOfCover: number;
   minDaysOfCover: number;
 }): Promise<boolean> {
-  return sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+  return sendWebhook(config.observability.discord.monitoringWebhook, {
     title: '🟠 Interest pool running low',
     description: truncate(
       `${escapeMarkdown(args.assetCode)} forward-mint pool has ${args.daysOfCover.toFixed(1)} days of cover left (minimum ${args.minDaysOfCover}). Mint the next batch into the pool account before users are under-allocated.`,
@@ -305,7 +305,7 @@ export function notifyInterestPoolRecovered(args: {
   // than the literal "Infinity".
   const coverText = Number.isFinite(args.daysOfCover) ? args.daysOfCover.toFixed(1) : 'ample';
   const coverField = Number.isFinite(args.daysOfCover) ? args.daysOfCover.toFixed(2) : 'ample';
-  return sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+  return sendWebhook(config.observability.discord.monitoringWebhook, {
     title: '✅ Interest pool replenished',
     description: truncate(
       `${escapeMarkdown(args.assetCode)} forward-mint pool now has ${coverText} days of cover. Closing the prior depletion alert.`,
@@ -338,7 +338,7 @@ export function notifyPegBreakOnFulfillment(args: {
   userHomeCurrency: string;
   cashbackMinor: string;
 }): void {
-  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+  void sendWebhook(config.observability.discord.monitoringWebhook, {
     title: '🚨 LOOP-asset peg break on fulfillment',
     description: truncate(
       `Order ${escapeMarkdown(args.orderId)} fulfilled with chargeCurrency=${escapeMarkdown(args.chargeCurrency)} but user.homeCurrency=${escapeMarkdown(args.userHomeCurrency)}. Off-chain cashback credited; on-chain payout SKIPPED. Manual compensation needed to restore the 1:1 peg.`,
@@ -378,7 +378,7 @@ export function notifyLedgerDrift(args: {
     deltaMinor: string;
   }>;
 }): void {
-  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+  void sendWebhook(config.observability.discord.monitoringWebhook, {
     title: '🚨 Ledger Invariant Violated',
     color: RED,
     description: truncate(
@@ -458,8 +458,7 @@ export function __resetCtxCredentialDedupForTests(): void {
  * Notify: CTX returned 401 — the operator API key was rejected
  * (revoked, rotated on the CTX side, or misconfigured). ADR 051:
  * Loop authenticates with a single API key, so this is a full outage
- * of every CTX call until `GIFT_CARD_API_KEY`/`GIFT_CARD_API_SECRET`
- * are restored. `ctxFetch` has already forced the upstream breaker
+ * of every CTX call until `ctx.credentials` is restored. `ctxFetch` has already forced the upstream breaker
  * OPEN so procurement defers (orders stay retryable) instead of
  * failing paid orders. 10-minute dedup.
  */
@@ -469,10 +468,10 @@ export function notifyCtxCredentialInvalid(): void {
     return;
   }
   ctxCredentialLastNotified = now;
-  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+  void sendWebhook(config.observability.discord.monitoringWebhook, {
     title: '🔴 CTX API Key Rejected (401)',
     description: truncate(
-      `CTX returned 401 — the operator API key was rejected (revoked, rotated upstream, or misconfigured). Every CTX call fails until \`GIFT_CARD_API_KEY\`/\`GIFT_CARD_API_SECRET\` are restored. Calls raise a transient error, so procurement defers and paid orders stay retryable rather than failing (ADR 051).`,
+      `CTX returned 401 — the operator API key was rejected (revoked, rotated upstream, or misconfigured). Every CTX call fails until \`ctx.credentials\` is restored. Calls raise a transient error, so procurement defers and paid orders stay retryable rather than failing (ADR 051).`,
       DESCRIPTION_MAX,
     ),
     color: RED,
@@ -507,7 +506,7 @@ export function notifyDuplicateAccountSignal(args: {
   orderId: string;
   relatedOrderId: string;
 }): void {
-  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+  void sendWebhook(config.observability.discord.monitoringWebhook, {
     title: '🟡 Duplicate-account signal — shared funding source',
     description: truncate(
       `The same on-chain funding account paid orders for two distinct Loop users. Flag only (ADR 045) — no account action was taken; review both accounts before deciding whether this is a shared household wallet or account-farming.`,

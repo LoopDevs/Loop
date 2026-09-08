@@ -17,6 +17,7 @@
  * ends with exactly one live row: the winner's successor.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type * as ConfigModule from '../../config/index.js';
 import type { Context } from 'hono';
 
 interface StoreRow {
@@ -28,9 +29,36 @@ interface StoreRow {
   replacedByJti: string | null;
 }
 
-const fake = vi.hoisted(() => {
-  process.env['LOOP_JWT_SIGNING_KEY'] = 'jwt-test-signing-key-32-chars-min!!';
+const { jwtState } = vi.hoisted(() => ({
+  jwtState: {
+    hs256: {
+      current: 'jwt-test-signing-key-32-chars-min!!' as string | undefined,
+      previous: undefined as string | undefined,
+    },
+    rs256: {
+      current: undefined as string | undefined,
+      previous: undefined as string | undefined,
+    },
+  },
+}));
 
+vi.mock('../../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
+  return {
+    ...actual,
+    get config() {
+      return {
+        ...actual.config,
+        auth: {
+          ...actual.config.auth,
+          native: { ...actual.config.auth.native, enabled: true, jwt: jwtState },
+        },
+      };
+    },
+  };
+});
+
+const fake = vi.hoisted(() => {
   const rows = new Map<string, StoreRow>();
   // Cheap stand-in for SHA-256 — the store only needs hash equality.
   const hash = (token: string): string => `hashed:${token}`;

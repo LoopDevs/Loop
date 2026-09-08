@@ -1,17 +1,21 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type * as ConfigModule from '../../config/index.js';
 import { Hono } from 'hono';
 
 vi.mock('../../logger.js', () => ({
   logger: { child: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() }) },
 }));
 
-const { mockEnv } = vi.hoisted(() => ({
-  mockEnv: { GIFT_CARD_API_BASE_URL: 'http://ctx.test', NODE_ENV: 'test' } as Record<
-    string,
-    unknown
-  >,
-}));
-vi.mock('../../env.js', () => ({ env: mockEnv }));
+vi.mock('../../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
+  return {
+    ...actual,
+    config: {
+      ...actual.config,
+      ctx: { ...actual.config.ctx, baseUrl: 'http://ctx.test' },
+    },
+  };
+});
 
 // The caller's upstream CTX credentials — null simulates a loop-native
 // user with no CTX mapping.

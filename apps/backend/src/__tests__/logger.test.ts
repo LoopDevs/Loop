@@ -1,13 +1,6 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { Writable } from 'node:stream';
 import pino from 'pino';
-
-// env.ts throws on module load if GIFT_CARD_API_BASE_URL is missing.
-vi.hoisted(() => {
-  if (!process.env.GIFT_CARD_API_BASE_URL) {
-    process.env.GIFT_CARD_API_BASE_URL = 'https://placeholder-for-import.local';
-  }
-});
 
 import { REDACT_PATHS } from '../logger.js';
 

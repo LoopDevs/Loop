@@ -1,9 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
+import type * as ConfigModule from '../config/index.js';
 import type { Context } from 'hono';
 
 /**
  * A2-1526 / FT-08 — companion file to `trust-proxy.test.ts`. This one
- * mocks `env.TRUST_PROXY = true` at module-load and verifies that the
+ * mocks `config.server.trustProxy = true` at module-load and verifies that the
  * bucket-selection logic keys on the spoof-proof `Fly-Client-IP`
  * header under Fly deployments — and specifically that a client-
  * supplied `X-Forwarded-For` can NOT influence the bucket. Without
@@ -19,19 +20,18 @@ import type { Context } from 'hono';
  * the limiter keys on that instead.
  */
 
-vi.mock('../env.js', () => ({
-  env: {
-    NODE_ENV: 'test',
-    TRUST_PROXY: true,
-    PORT: '8080',
-    LOG_LEVEL: 'silent',
-    GIFT_CARD_API_BASE_URL: 'http://test-upstream.local',
-    LOCATION_REFRESH_INTERVAL_HOURS: 24,
-    CTX_CLIENT_ID_WEB: 'loopweb',
-    CTX_CLIENT_ID_IOS: 'loopios',
-    CTX_CLIENT_ID_ANDROID: 'loopandroid',
-  },
-}));
+// Only `server.trustProxy` is under test — everything else the import
+// chain reads comes from the real (test-fixture) config.
+vi.mock('../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
+  return {
+    ...actual,
+    config: {
+      ...actual.config,
+      server: { ...actual.config.server, trustProxy: true },
+    },
+  };
+});
 
 vi.mock('../logger.js', () => ({
   logger: {

@@ -66,8 +66,9 @@ npm run mobile:sync          # cap sync + re-apply native overlays (ADR 007)
 2. **All upstream CTX responses are Zod-validated** before forwarding.
 3. **All Capacitor plugin calls live in `apps/web/app/native/`.**
 4. **No `any`** except the dynamically-imported proto bridge.
-5. **NEVER hardcode secrets** — env vars only (`.env.example` is the
-   authoritative env reference; keep it in sync with `env.ts`).
+5. **NEVER hardcode secrets** — they live in the YAML config file
+   (`config.example.yaml` is the authoritative reference; keep it in
+   sync with `config/sections/*`), never in the repo.
 6. Access tokens: memory only. Refresh tokens: Keychain /
    EncryptedSharedPreferences on native (ADR 006), sessionStorage on web.
 7. Auth and order-path changes get human review before merge.

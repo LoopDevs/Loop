@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig, devices } from '@playwright/test';
 
 /**
@@ -54,53 +55,25 @@ export default defineConfig({
       env: { PORT: '9091' },
     },
     {
-      // Skip `npm run dev -w @loop/backend` because that script loads
-      // apps/backend/.env, which (a) may not exist in CI and (b) contains
-      // real-upstream values that would stomp our test config. Run tsx
-      // directly against the source so only the env below applies.
+      // Skip `npm run dev -w @loop/backend` because that script would
+      // pick up the developer's local `apps/backend/config.yaml`, which
+      // (a) may not exist in CI and (b) points at the real upstream.
+      // Run tsx directly against the source with CONFIG_PATH aimed at
+      // the committed e2e fixture so only that file applies.
       command: 'npm exec -w @loop/backend -- tsx src/index.ts',
       url: 'http://localhost:8081/health',
       reuseExistingServer: !process.env['CI'],
       timeout: 60_000,
       env: {
-        PORT: '8081',
+        // Everything the backend reads lives in the fixture: port 8081,
+        // the mock-CTX base URL + operator creds, the ephemeral memory
+        // store, rate limiting off, and the AUDIT-2-E test-endpoints
+        // secret. See apps/backend/config.e2e.yaml for the reasoning
+        // behind each.
+        // Absolute: `npm exec -w` runs the child from apps/backend, so a
+        // repo-root-relative path would not resolve.
+        CONFIG_PATH: fileURLToPath(new URL('apps/backend/config.e2e.yaml', import.meta.url)),
         NODE_ENV: 'test',
-        LOG_LEVEL: 'warn',
-        GIFT_CARD_API_BASE_URL: 'http://localhost:9091',
-        // The ws merchant maintainer (merchants/ws-maintainer.ts) only
-        // starts when the operator API creds are present — mock-ctx
-        // ignores their values, so any non-empty pair lights it up.
-        GIFT_CARD_API_KEY: 'mock-api-key',
-        GIFT_CARD_API_SECRET: 'mock-api-secret',
-        LOCATION_REFRESH_INTERVAL_HOURS: '24',
-        // A2-1705 phase A.2: real postgres connection. The migrations
-        // are applied by `tests/e2e-mocked/global-setup.ts` before
-        // Playwright boots this webServer, so the backend connects to
-        // a current schema. NODE_ENV=test still skips the backend's
-        // own `runMigrations()` call (idempotent overlap would be
-        // harmless but pointless). The existing CTX-proxy purchase
-        // flow doesn't write to the DB (orders live in mock-CTX's
-        // memory map), so this connection is a harness investment for
-        // future loop-native UI tests rather than a behaviour change
-        // for the current 2-test suite.
-        //
-        // Loop-native auth env (LOOP_AUTH_NATIVE_ENABLED + signing
-        // key + issuer fixtures) is intentionally left unset so the
-        // home page's `/api/config` response stays identical to its
-        // pre-A.2 shape. Flipping it would change SSR-vs-CSR rendering
-        // (the home page has a `loopAuthNativeEnabled` branch) and
-        // cause a hydration mismatch in the existing CTX-proxy tests.
-        // A future flywheel-via-UI test will pin those env vars in a
-        // dedicated `playwright.flywheel.config.ts`.
-        // Bypass per-IP rate limits — the suite runs 2 tests with
-        // Playwright retries=2 in CI, hitting /api/auth/request-otp
-        // up to 6 times in a cold window vs the 5/min limit.
-        DISABLE_RATE_LIMITING: '1',
-        // AUDIT-2-E: required second control (in addition to
-        // NODE_ENV=test) before test-endpoints.ts mounts `/__test__/*`.
-        // Must match the header value `resetMock()` sends in
-        // tests/e2e-mocked/purchase-flow.test.ts.
-        LOOP_TEST_ENDPOINTS_SECRET: 'loop-mocked-e2e-test-endpoints-secret',
       },
     },
     {

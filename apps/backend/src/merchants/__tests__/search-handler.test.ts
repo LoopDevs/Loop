@@ -1,19 +1,21 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type * as ConfigModule from '../../config/index.js';
 import type { Merchant } from '@loop/shared';
 
-const mockEnv = vi.hoisted(() => ({
-  PORT: 8080,
-  NODE_ENV: 'test',
-  LOG_LEVEL: 'silent',
-  GIFT_CARD_API_BASE_URL: 'http://test-upstream.local',
-  LOCATION_REFRESH_INTERVAL_HOURS: 24,
-  // Rate-limit test below drives requests via the spoof-proof `Fly-Client-IP`
-  // header (FT-08) — matches the auth handler test's pattern
-  // (auth/__tests__/handler.test.ts).
-  TRUST_PROXY: true,
-}));
-
-vi.mock('../../env.js', () => ({ env: mockEnv }));
+vi.mock('../../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
+  return {
+    ...actual,
+    config: {
+      ...actual.config,
+      ctx: { ...actual.config.ctx, baseUrl: 'http://test-upstream.local' },
+      // Rate-limit test below drives requests via the spoof-proof
+      // `Fly-Client-IP` header (FT-08) — matches the auth handler test's
+      // pattern (auth/__tests__/handler.test.ts).
+      server: { ...actual.config.server, trustProxy: true },
+    },
+  };
+});
 
 vi.mock('../../logger.js', () => ({
   logger: {

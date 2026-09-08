@@ -22,7 +22,7 @@
  * architecture.md" check leaves it alone.
  *
  * AUDIT-2-E defense-in-depth: `app.ts` already gates the *call
- * site* on `env.NODE_ENV === 'test'`, but that's a single string
+ * site* on `config.env === 'test'`, but that's a single string
  * compare — a misconfigured staging/preview deploy that copies
  * `NODE_ENV=test` (docker-compose override, debug deploy, etc.)
  * would otherwise expose `/__test__/mint-loop-token` — a
@@ -30,7 +30,7 @@
  * module re-asserts `NODE_ENV === 'test'` itself (so it's safe even
  * if some future refactor calls `mountTestEndpoints` from a
  * different site) AND requires a second, independent control:
- * `env.LOOP_TEST_ENDPOINTS_SECRET` must be configured, and every
+ * `config.testing.endpointsSecret` must be configured, and every
  * request under `/__test__/*` must present the matching value via
  * the `X-Test-Endpoints-Secret` header. If the secret env var isn't
  * set, NEITHER route mounts — same as if this function were never
@@ -42,7 +42,7 @@
 import type { Context, Hono, Next } from 'hono';
 import { timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
-import { env } from './env.js';
+import { config } from './config/index.js';
 import { __resetRateLimitsForTests } from './middleware/rate-limit.js';
 import { __resetUpstreamProbeCacheOnlyForTests } from './health.js';
 import { findOrCreateUserByEmail } from './db/users.js';
@@ -64,20 +64,20 @@ function safeEqual(a: string, b: string): boolean {
 
 /**
  * Mount the `/__test__/*` surface on the supplied Hono app.
- * Caller should gate on `env.NODE_ENV === 'test'` — this function
+ * Caller should gate on `config.env === 'test'` — this function
  * ALSO re-checks that itself (see module doc comment) and requires
- * `env.LOOP_TEST_ENDPOINTS_SECRET` to be configured before mounting
+ * `config.testing.endpointsSecret` to be configured before mounting
  * anything; a request under `/__test__/*` that omits or mismatches
  * the `X-Test-Endpoints-Secret` header 404s.
  */
 export function mountTestEndpoints(app: Hono): void {
   // Belt-and-suspenders: never mount outside a test process, even if
   // this function is somehow invoked from a different call site.
-  if (env.NODE_ENV !== 'test') {
+  if (config.env !== 'test') {
     return;
   }
 
-  const secret = env.LOOP_TEST_ENDPOINTS_SECRET;
+  const secret = config.testing.endpointsSecret;
   if (!secret) {
     // No secret configured — refuse to mount ANYTHING under
     // `/__test__/*`. `NODE_ENV==='test'` must never be sufficient on

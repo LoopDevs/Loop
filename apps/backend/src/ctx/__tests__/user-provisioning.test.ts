@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, type MockInstance } from 'vitest';
+import type * as ConfigModule from '../../config/index.js';
 
 vi.mock('../../logger.js', () => ({
   logger: {
@@ -6,16 +7,28 @@ vi.mock('../../logger.js', () => ({
   },
 }));
 
-const mockEnv = vi.hoisted(
-  () =>
-    ({
-      CTX_USER_PROVISIONING_ENABLED: true,
-      GIFT_CARD_API_KEY: 'op-key',
-      GIFT_CARD_API_SECRET: 'op-secret',
-      CTX_CLIENT_ID_WEB: 'loopweb',
-    }) as Record<string, unknown>,
-);
-vi.mock('../../env.js', () => ({ env: mockEnv }));
+const { ctxState } = vi.hoisted(() => ({
+  ctxState: {
+    userProvisioningEnabled: true,
+    credentials: { key: 'op-key', secret: 'op-secret' } as { key: string; secret: string },
+  },
+}));
+vi.mock('../../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
+  return {
+    ...actual,
+    get config() {
+      return {
+        ...actual.config,
+        ctx: {
+          ...actual.config.ctx,
+          credentials: ctxState.credentials,
+          userProvisioning: { enabled: ctxState.userProvisioningEnabled },
+        },
+      };
+    },
+  };
+});
 
 vi.mock('../../upstream.js', async (importOriginal) => ({
   ...((await importOriginal()) as Record<string, unknown>),
@@ -43,9 +56,8 @@ describe('provisionCtxUser', () => {
     vi.restoreAllMocks();
     setUserCtxUserIdMock.mockReset();
     setUserCtxUserIdMock.mockResolvedValue(true);
-    mockEnv['CTX_USER_PROVISIONING_ENABLED'] = true;
-    mockEnv['GIFT_CARD_API_KEY'] = 'op-key';
-    mockEnv['GIFT_CARD_API_SECRET'] = 'op-secret';
+    ctxState.userProvisioningEnabled = true;
+    ctxState.credentials = { key: 'op-key', secret: 'op-secret' };
   });
 
   it('POSTs /users with operator API creds + operatorUserId and stores the returned id', async () => {
@@ -120,9 +132,8 @@ describe('adoption on email-exists 400', () => {
     vi.restoreAllMocks();
     setUserCtxUserIdMock.mockReset();
     setUserCtxUserIdMock.mockResolvedValue(true);
-    mockEnv['CTX_USER_PROVISIONING_ENABLED'] = true;
-    mockEnv['GIFT_CARD_API_KEY'] = 'op-key';
-    mockEnv['GIFT_CARD_API_SECRET'] = 'op-secret';
+    ctxState.userProvisioningEnabled = true;
+    ctxState.credentials = { key: 'op-key', secret: 'op-secret' };
   });
 
   it('claims the unclaimed pre-contract customer and stores its id', async () => {
@@ -301,13 +312,12 @@ describe('enqueueCtxUserProvisioning', () => {
     vi.restoreAllMocks();
     setUserCtxUserIdMock.mockReset();
     setUserCtxUserIdMock.mockResolvedValue(true);
-    mockEnv['CTX_USER_PROVISIONING_ENABLED'] = true;
-    mockEnv['GIFT_CARD_API_KEY'] = 'op-key';
-    mockEnv['GIFT_CARD_API_SECRET'] = 'op-secret';
+    ctxState.userProvisioningEnabled = true;
+    ctxState.credentials = { key: 'op-key', secret: 'op-secret' };
   });
 
   it('is a no-op when the feature flag is off', async () => {
-    mockEnv['CTX_USER_PROVISIONING_ENABLED'] = false;
+    ctxState.userProvisioningEnabled = false;
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
 
     enqueueCtxUserProvisioning({ ...user, id: 'flag-off' });
@@ -333,8 +343,7 @@ describe('enqueueCtxUserProvisioning', () => {
 
 describe('ctxActAsHeaders', () => {
   beforeEach(() => {
-    mockEnv['GIFT_CARD_API_KEY'] = 'op-key';
-    mockEnv['GIFT_CARD_API_SECRET'] = 'op-secret';
+    ctxState.credentials = { key: 'op-key', secret: 'op-secret' };
   });
 
   it('returns the full act-as header set for a mapped user', () => {

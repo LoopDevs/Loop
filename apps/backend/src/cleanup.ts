@@ -20,7 +20,7 @@
  * in suites that use `vi.useFakeTimers()`. The `stopCleanupInterval`
  * helper is exported for graceful shutdown from `index.ts`.
  */
-import { env } from './env.js';
+import { config } from './config/index.js';
 import { evictExpiredImageCache } from './images/proxy.js';
 import { sweepExpiredRateLimits } from './middleware/rate-limit.js';
 
@@ -54,7 +54,7 @@ export function runRateLimitSweep(): void {
  * module-init time.
  */
 export function startCleanupInterval(): void {
-  if (env.NODE_ENV === 'test') return;
+  if (config.env === 'test') return;
   if (cleanupInterval !== null) return;
   cleanupInterval = setInterval(runCleanup, CLEANUP_INTERVAL_MS);
   // A4-006: don't pin the event loop on this timer. Match the

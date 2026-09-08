@@ -38,7 +38,7 @@
  * always the one from the last probe.
  */
 import type { Context } from 'hono';
-import { env } from './env.js';
+import { config } from './config/index.js';
 import { logger } from './logger.js';
 import { db } from './db/client.js';
 import { getLocations, isLocationLoading } from './clustering/data-store.js';
@@ -122,7 +122,7 @@ function sendHealthChangeWebhook(
   status: 'healthy' | 'degraded',
   details: string,
 ): Promise<boolean> {
-  return sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+  return sendWebhook(config.observability.discord.monitoringWebhook, {
     title: status === 'healthy' ? '💚 Service Healthy' : '🟠 Service Degraded',
     description: truncate(details, DESCRIPTION_MAX),
     color: status === 'healthy' ? GREEN : ORANGE,
@@ -280,7 +280,7 @@ export function merchantCatalogStaleAfterMs(): number {
 }
 
 export function locationCatalogStaleAfterMs(): number {
-  return env.LOCATION_REFRESH_INTERVAL_HOURS * 2 * 60 * 60 * 1000;
+  return config.catalog.locationRefreshIntervalHours * 2 * 60 * 60 * 1000;
 }
 
 export async function healthHandler(c: Context): Promise<Response> {
@@ -454,7 +454,7 @@ export async function healthHandler(c: Context): Promise<Response> {
   // Discord notify, geo-staleness paging) already ran and are unaffected
   // by which body shape we return.
   c.header('Vary', 'Authorization');
-  if (!probeGateAllows(c, env.METRICS_BEARER_TOKEN)) {
+  if (!probeGateAllows(c, config.observability.metrics.bearerToken)) {
     return c.json({ status: degraded ? 'degraded' : 'healthy' }, httpStatus);
   }
   return c.json(
@@ -483,7 +483,7 @@ export async function healthHandler(c: Context): Promise<Response> {
       // go-live-plan §T1-F: staleness/absence signal for the operator-
       // provided GeoLite2-Country .mmdb (docs/deployment.md §GeoLite2).
       // `geoDbStale` is false both when fresh AND when
-      // MAXMIND_GEOLITE2_PATH was never configured — see
+      // `catalog.geoip.databasePath` was never configured — see
       // `GeoDbStatus.stale` in `public/geo.ts` for why "unconfigured"
       // must not read as "degraded".
       geoDbStale: geoDbStatus.stale,

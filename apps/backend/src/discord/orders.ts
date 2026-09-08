@@ -1,6 +1,6 @@
 /**
  * Orders-channel Discord notifiers — fires to
- * `env.DISCORD_WEBHOOK_ORDERS`. Five signals that read together as
+ * `config.observability.discord.ordersWebhook`. Five signals that read together as
  * the customer-facing money-flow narrative:
  *
  *   1. **Order Created** — every new order, fleet-volume signal.
@@ -21,7 +21,7 @@
  * `formatMinorAmount`, colour constants) lives in
  * `./shared.ts`.
  */
-import { env } from '../env.js';
+import { config } from '../config/index.js';
 import {
   BLUE,
   FIELD_VALUE_MAX,
@@ -40,7 +40,7 @@ export function notifyOrderCreated(args: {
   currency: string;
   cryptoCurrency: string;
 }): void {
-  void sendWebhook(env.DISCORD_WEBHOOK_ORDERS, {
+  void sendWebhook(config.observability.discord.ordersWebhook, {
     title: '🛒 New Order',
     color: BLUE,
     fields: [
@@ -71,7 +71,7 @@ export function notifyOrderFulfilled(args: {
   faceValueMinor: bigint;
   currency: string;
 }): void {
-  void sendWebhook(env.DISCORD_WEBHOOK_ORDERS, {
+  void sendWebhook(config.observability.discord.ordersWebhook, {
     title: '✅ Order Fulfilled',
     color: GREEN,
     fields: [

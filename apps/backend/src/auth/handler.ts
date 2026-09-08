@@ -1,6 +1,6 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
-import { env } from '../env.js';
+import { config } from '../config/index.js';
 import { logger } from '../logger.js';
 import { upstreamUrl, upstreamFetch } from '../upstream.js';
 import { scrubUpstreamBody } from '../upstream-body-scrub.js';
@@ -26,9 +26,9 @@ const log = logger.child({ handler: 'auth' });
 
 /** Maps platform to the upstream CTX client ID. */
 function clientIdForPlatform(platform: 'web' | 'ios' | 'android'): string {
-  if (platform === 'ios') return env.CTX_CLIENT_ID_IOS;
-  if (platform === 'android') return env.CTX_CLIENT_ID_ANDROID;
-  return env.CTX_CLIENT_ID_WEB;
+  if (platform === 'ios') return config.ctx.clientIds.ios;
+  if (platform === 'android') return config.ctx.clientIds.android;
+  return config.ctx.clientIds.web;
 }
 
 // Upstream response schemas — validate before forwarding to client.
@@ -53,7 +53,7 @@ export const RefreshUpstreamResponse = z.object({
  * `otps` row — CTX is bypassed for user identity.
  */
 export async function requestOtpHandler(c: Context): Promise<Response> {
-  if (env.LOOP_AUTH_NATIVE_ENABLED) {
+  if (config.auth.native.enabled) {
     return nativeRequestOtpHandler(c);
   }
 
@@ -114,7 +114,7 @@ export async function requestOtpHandler(c: Context): Promise<Response> {
  * Loop-signed token pair.
  */
 export async function verifyOtpHandler(c: Context): Promise<Response> {
-  if (env.LOOP_AUTH_NATIVE_ENABLED) {
+  if (config.auth.native.enabled) {
     return nativeVerifyOtpHandler(c);
   }
 
@@ -184,7 +184,7 @@ export async function verifyOtpHandler(c: Context): Promise<Response> {
  * a new Loop-signed pair.
  */
 export async function refreshHandler(c: Context): Promise<Response> {
-  if (env.LOOP_AUTH_NATIVE_ENABLED) {
+  if (config.auth.native.enabled) {
     return nativeRefreshHandler(c);
   }
 

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type * as ConfigModule from '../config/index.js';
 import { Hono } from 'hono';
 
 /**
@@ -8,26 +9,34 @@ import { Hono } from 'hono';
  * Before this fix, the ONLY thing standing between an unauthenticated
  * caller and `/__test__/mint-loop-token` (which mints a full session
  * token pair for any allowlisted email with zero credential check)
- * was a single `env.NODE_ENV === 'test'` string compare at the
+ * was a single `config.env === 'test'` string compare at the
  * `app.ts` call site. This suite drives `mountTestEndpoints` directly
  * against a bare Hono app (not the full `app.ts` import graph) with a
- * mutable env mock, so each case can flip `NODE_ENV` /
- * `LOOP_TEST_ENDPOINTS_SECRET` independently and assert the router's
+ * mutable config mock, so each case can flip `env` /
+ * `testing.endpointsSecret` independently and assert the router's
  * own belt-and-suspenders checks — not just the app.ts call site.
  */
 
-const { envState } = vi.hoisted(() => ({
-  envState: {
-    NODE_ENV: 'test' as string,
-    LOOP_TEST_ENDPOINTS_SECRET: undefined as string | undefined,
+const { configState } = vi.hoisted(() => ({
+  configState: {
+    env: 'test' as 'development' | 'production' | 'test',
+    endpointsSecret: undefined as string | undefined,
   },
 }));
 
-vi.mock('../env.js', () => ({
-  get env() {
-    return envState;
-  },
-}));
+vi.mock('../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
+  return {
+    ...actual,
+    get config() {
+      return {
+        ...actual.config,
+        env: configState.env,
+        testing: { endpointsSecret: configState.endpointsSecret },
+      };
+    },
+  };
+});
 
 vi.mock('../db/users.js', () => ({
   findOrCreateUserByEmail: vi.fn(async (email: string) => ({
@@ -64,14 +73,14 @@ function buildApp(): Hono {
 }
 
 beforeEach(() => {
-  envState.NODE_ENV = 'test';
-  envState.LOOP_TEST_ENDPOINTS_SECRET = undefined;
+  configState.env = 'test';
+  configState.endpointsSecret = undefined;
 });
 
 describe('mountTestEndpoints — AUDIT-2-E secret gate', () => {
   it('404s /__test__/mint-loop-token when the secret env var is unset, even under NODE_ENV=test', async () => {
-    envState.NODE_ENV = 'test';
-    envState.LOOP_TEST_ENDPOINTS_SECRET = undefined;
+    configState.env = 'test';
+    configState.endpointsSecret = undefined;
     const app = buildApp();
     const res = await app.request('/__test__/mint-loop-token', {
       method: 'POST',
@@ -82,16 +91,16 @@ describe('mountTestEndpoints — AUDIT-2-E secret gate', () => {
   });
 
   it('404s /__test__/reset when the secret env var is unset, even under NODE_ENV=test', async () => {
-    envState.NODE_ENV = 'test';
-    envState.LOOP_TEST_ENDPOINTS_SECRET = undefined;
+    configState.env = 'test';
+    configState.endpointsSecret = undefined;
     const app = buildApp();
     const res = await app.request('/__test__/reset', { method: 'POST' });
     expect(res.status).toBe(404);
   });
 
   it('404s when the request omits the X-Test-Endpoints-Secret header', async () => {
-    envState.NODE_ENV = 'test';
-    envState.LOOP_TEST_ENDPOINTS_SECRET = SECRET;
+    configState.env = 'test';
+    configState.endpointsSecret = SECRET;
     const app = buildApp();
     const res = await app.request('/__test__/mint-loop-token', {
       method: 'POST',
@@ -102,8 +111,8 @@ describe('mountTestEndpoints — AUDIT-2-E secret gate', () => {
   });
 
   it('404s when the request sends a mismatched secret', async () => {
-    envState.NODE_ENV = 'test';
-    envState.LOOP_TEST_ENDPOINTS_SECRET = SECRET;
+    configState.env = 'test';
+    configState.endpointsSecret = SECRET;
     const app = buildApp();
     const res = await app.request('/__test__/mint-loop-token', {
       method: 'POST',
@@ -119,8 +128,8 @@ describe('mountTestEndpoints — AUDIT-2-E secret gate', () => {
   it('404s a mismatched secret of a DIFFERENT length than the configured one', async () => {
     // Exercises the length-mismatch branch of safeEqual (which can't
     // hand mismatched-length buffers to timingSafeEqual).
-    envState.NODE_ENV = 'test';
-    envState.LOOP_TEST_ENDPOINTS_SECRET = SECRET;
+    configState.env = 'test';
+    configState.endpointsSecret = SECRET;
     const app = buildApp();
     const res = await app.request('/__test__/mint-loop-token', {
       method: 'POST',
@@ -134,8 +143,8 @@ describe('mountTestEndpoints — AUDIT-2-E secret gate', () => {
   });
 
   it('mints a token pair when NODE_ENV=test AND the correct secret is presented', async () => {
-    envState.NODE_ENV = 'test';
-    envState.LOOP_TEST_ENDPOINTS_SECRET = SECRET;
+    configState.env = 'test';
+    configState.endpointsSecret = SECRET;
     const app = buildApp();
     const res = await app.request('/__test__/mint-loop-token', {
       method: 'POST',
@@ -152,8 +161,8 @@ describe('mountTestEndpoints — AUDIT-2-E secret gate', () => {
   });
 
   it('resets successfully when NODE_ENV=test AND the correct secret is presented', async () => {
-    envState.NODE_ENV = 'test';
-    envState.LOOP_TEST_ENDPOINTS_SECRET = SECRET;
+    configState.env = 'test';
+    configState.endpointsSecret = SECRET;
     const app = buildApp();
     const res = await app.request('/__test__/reset', {
       method: 'POST',
@@ -164,8 +173,8 @@ describe('mountTestEndpoints — AUDIT-2-E secret gate', () => {
   });
 
   it('never mounts under NODE_ENV=production, even with the correct secret set', async () => {
-    envState.NODE_ENV = 'production';
-    envState.LOOP_TEST_ENDPOINTS_SECRET = SECRET;
+    configState.env = 'production';
+    configState.endpointsSecret = SECRET;
     const app = buildApp();
     const res = await app.request('/__test__/mint-loop-token', {
       method: 'POST',
@@ -179,8 +188,8 @@ describe('mountTestEndpoints — AUDIT-2-E secret gate', () => {
   });
 
   it('never mounts under NODE_ENV=development, even with the correct secret set', async () => {
-    envState.NODE_ENV = 'development';
-    envState.LOOP_TEST_ENDPOINTS_SECRET = SECRET;
+    configState.env = 'development';
+    configState.endpointsSecret = SECRET;
     const app = buildApp();
     const res = await app.request('/__test__/reset', {
       method: 'POST',

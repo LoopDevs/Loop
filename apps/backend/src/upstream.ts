@@ -1,4 +1,4 @@
-import { env } from './env.js';
+import { config } from './config/index.js';
 import { getCurrentRequestId, setCtxResponseRequestId } from './request-context.js';
 
 /**
@@ -44,7 +44,7 @@ export function upstreamUrl(path: string): string {
   if (/%2e%2e/i.test(path)) {
     throw new Error('upstreamUrl: path contains percent-encoded traversal segments');
   }
-  const base = env.GIFT_CARD_API_BASE_URL.replace(/\/$/, '');
+  const base = config.ctx.baseUrl.replace(/\/$/, '');
   return `${base}${path}`;
 }
 

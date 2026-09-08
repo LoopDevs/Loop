@@ -4,18 +4,19 @@
  *
  * Two concrete signers:
  *
- * - `Rs256Signer` — preferred when `LOOP_JWT_RSA_PRIVATE_KEY` (PKCS8
- *   PEM, boot-validated in env.ts) is configured. Newly-minted Loop
+ * - `Rs256Signer` — preferred when `auth.native.jwt.rs256.current`
+ *   (PKCS8 PEM, boot-validated by the config schema) is configured.
+ *   Newly-minted Loop
  *   JWTs sign RS256 with a `kid` header (RFC 7638 SHA-256 JWK
  *   thumbprint of the public key) so an external wallet provider
  *   (Privy Custom Auth, or any JWKS-consuming verifier — ADR 030)
  *   can verify Loop's tokens against `/.well-known/jwks.json`
  *   without Loop sharing a secret.
  * - `Hs256Signer` — the legacy shared-secret path
- *   (`LOOP_JWT_SIGNING_KEY`). Still the active signer when no RSA
- *   key is configured (rollout safety), and always available as a
- *   verifier while the HS256 env vars remain set so outstanding
- *   tokens survive the HS256 → RS256 cutover window.
+ *   (`auth.native.jwt.hs256.current`). Still the active signer when no
+ *   RSA key is configured (rollout safety), and always available as a
+ *   verifier while the HS256 keys remain set so outstanding tokens
+ *   survive the HS256 → RS256 cutover window.
  *
  * Verification dispatches on the JWT header's `alg` field — during
  * the HS256 → RS256 cutover, both algorithms verify since 15-minute
@@ -33,7 +34,7 @@ import {
   timingSafeEqual,
   type KeyObject,
 } from 'node:crypto';
-import { env } from '../env.js';
+import { config } from '../config/index.js';
 
 export type Alg = 'HS256' | 'RS256';
 
@@ -84,7 +85,8 @@ class Rs256Signer implements Signer {
   private readonly publicKey: KeyObject;
 
   constructor(privateKeyPem: string) {
-    // env.ts boot-validates the PEM (parse + asymmetricKeyType check),
+    // The config schema boot-validates the PEM (parse +
+    // asymmetricKeyType check),
     // so a throw here means the module was driven with an unvalidated
     // value — fail loudly rather than mint unverifiable tokens.
     this.privateKey = createPrivateKey(privateKeyPem);
@@ -144,28 +146,34 @@ function rs256SignerFor(privateKeyPem: string): Rs256Signer {
 
 /**
  * Returns the signer that newly-issued tokens should use. `null` when
- * Loop-native auth is unconfigured (no signing key in env). Callers
- * treat null as "Loop-native auth disabled" and fall through to the
- * legacy CTX-proxy path.
+ * Loop-native auth is unconfigured (no signing key). Callers treat
+ * null as "Loop-native auth disabled" and fall through to the legacy
+ * CTX-proxy path.
  *
- * RS256 (`LOOP_JWT_RSA_PRIVATE_KEY`) is preferred over HS256 when
+ * RS256 (`auth.native.jwt.rs256.current`) is preferred over HS256 when
  * both are configured — the cutover is "set the RSA key"; the HS256
  * key stays set (verification only) until outstanding HS256 tokens
  * expire (ADR 030 Phase A; runbook: docs/runbooks/jwt-key-rotation.md).
  */
 export function getActiveSigner(): Signer | null {
-  if (typeof env.LOOP_JWT_RSA_PRIVATE_KEY === 'string' && env.LOOP_JWT_RSA_PRIVATE_KEY.length > 0) {
-    return rs256SignerFor(env.LOOP_JWT_RSA_PRIVATE_KEY);
+  if (
+    typeof config.auth.native.jwt.rs256.current === 'string' &&
+    config.auth.native.jwt.rs256.current.length > 0
+  ) {
+    return rs256SignerFor(config.auth.native.jwt.rs256.current);
   }
-  if (typeof env.LOOP_JWT_SIGNING_KEY === 'string' && env.LOOP_JWT_SIGNING_KEY.length > 0) {
-    return new Hs256Signer(env.LOOP_JWT_SIGNING_KEY);
+  if (
+    typeof config.auth.native.jwt.hs256.current === 'string' &&
+    config.auth.native.jwt.hs256.current.length > 0
+  ) {
+    return new Hs256Signer(config.auth.native.jwt.hs256.current);
   }
   return null;
 }
 
 /**
  * Returns the set of signers that can verify a token under the given
- * `alg`, current key first, `_PREVIOUS` rotation key second; the
+ * `alg`, current key first, the `previous` rotation key second; the
  * caller iterates and accepts the first match. Combined with the
  * alg dispatch in `tokens.ts::verifyLoopToken`, the effective verify
  * order across the migration window is: RS256 current → RS256
@@ -175,47 +183,56 @@ export function getActiveSigner(): Signer | null {
 export function getVerifiersForAlg(alg: Alg): readonly Signer[] {
   if (alg === 'HS256') {
     const out: Signer[] = [];
-    if (typeof env.LOOP_JWT_SIGNING_KEY === 'string' && env.LOOP_JWT_SIGNING_KEY.length > 0) {
-      out.push(new Hs256Signer(env.LOOP_JWT_SIGNING_KEY));
+    if (
+      typeof config.auth.native.jwt.hs256.current === 'string' &&
+      config.auth.native.jwt.hs256.current.length > 0
+    ) {
+      out.push(new Hs256Signer(config.auth.native.jwt.hs256.current));
     }
     if (
-      typeof env.LOOP_JWT_SIGNING_KEY_PREVIOUS === 'string' &&
-      env.LOOP_JWT_SIGNING_KEY_PREVIOUS.length > 0
+      typeof config.auth.native.jwt.hs256.previous === 'string' &&
+      config.auth.native.jwt.hs256.previous.length > 0
     ) {
-      out.push(new Hs256Signer(env.LOOP_JWT_SIGNING_KEY_PREVIOUS));
+      out.push(new Hs256Signer(config.auth.native.jwt.hs256.previous));
     }
     return out;
   }
   const out: Signer[] = [];
-  if (typeof env.LOOP_JWT_RSA_PRIVATE_KEY === 'string' && env.LOOP_JWT_RSA_PRIVATE_KEY.length > 0) {
-    out.push(rs256SignerFor(env.LOOP_JWT_RSA_PRIVATE_KEY));
+  if (
+    typeof config.auth.native.jwt.rs256.current === 'string' &&
+    config.auth.native.jwt.rs256.current.length > 0
+  ) {
+    out.push(rs256SignerFor(config.auth.native.jwt.rs256.current));
   }
   if (
-    typeof env.LOOP_JWT_RSA_PRIVATE_KEY_PREVIOUS === 'string' &&
-    env.LOOP_JWT_RSA_PRIVATE_KEY_PREVIOUS.length > 0
+    typeof config.auth.native.jwt.rs256.previous === 'string' &&
+    config.auth.native.jwt.rs256.previous.length > 0
   ) {
-    out.push(rs256SignerFor(env.LOOP_JWT_RSA_PRIVATE_KEY_PREVIOUS));
+    out.push(rs256SignerFor(config.auth.native.jwt.rs256.previous));
   }
   return out;
 }
 
 /**
  * Public JWKs for the configured RSA signing keys — current first,
- * then `_PREVIOUS` during a rotation window. Empty array when RS256
+ * then `previous` during a rotation window. Empty array when RS256
  * is unconfigured (the JWKS endpoint then serves a valid-but-empty
  * key set). Consumed by `auth/jwks-publish.ts`; contains public
  * members only by construction (see `LoopRsaPublicJwk`).
  */
 export function getLoopRsaPublicJwks(): LoopRsaPublicJwk[] {
   const out: LoopRsaPublicJwk[] = [];
-  if (typeof env.LOOP_JWT_RSA_PRIVATE_KEY === 'string' && env.LOOP_JWT_RSA_PRIVATE_KEY.length > 0) {
-    out.push(rs256SignerFor(env.LOOP_JWT_RSA_PRIVATE_KEY).publicJwk);
+  if (
+    typeof config.auth.native.jwt.rs256.current === 'string' &&
+    config.auth.native.jwt.rs256.current.length > 0
+  ) {
+    out.push(rs256SignerFor(config.auth.native.jwt.rs256.current).publicJwk);
   }
   if (
-    typeof env.LOOP_JWT_RSA_PRIVATE_KEY_PREVIOUS === 'string' &&
-    env.LOOP_JWT_RSA_PRIVATE_KEY_PREVIOUS.length > 0
+    typeof config.auth.native.jwt.rs256.previous === 'string' &&
+    config.auth.native.jwt.rs256.previous.length > 0
   ) {
-    out.push(rs256SignerFor(env.LOOP_JWT_RSA_PRIVATE_KEY_PREVIOUS).publicJwk);
+    out.push(rs256SignerFor(config.auth.native.jwt.rs256.previous).publicJwk);
   }
   return out;
 }

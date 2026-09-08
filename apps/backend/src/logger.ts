@@ -1,5 +1,5 @@
 import pino from 'pino';
-import { env } from './env.js';
+import { config } from './config/index.js';
 
 /**
  * Pino redaction paths — fields whose values must never appear in logs even
@@ -160,14 +160,14 @@ export const REDACT_PATHS: readonly string[] = [
 ];
 
 const basePinoOptions = {
-  level: env.LOG_LEVEL,
-  base: { service: 'loop-backend', env: env.NODE_ENV },
+  level: config.server.logLevel,
+  base: { service: 'loop-backend', env: config.env },
   redact: { paths: [...REDACT_PATHS], censor: '[REDACTED]' },
 };
 
 /** Structured logger for the Loop backend. */
 export const logger =
-  env.NODE_ENV === 'development'
+  config.env === 'development'
     ? pino({
         ...basePinoOptions,
         transport: { target: 'pino-pretty', options: { colorize: true } },

@@ -1,17 +1,28 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import type * as ConfigModule from '../../config/index.js';
 import { randomBytes } from 'node:crypto';
 
-// The crypto util reads the key from `env.LOOP_REDEEM_ENCRYPTION_KEY`.
-// Mock the env module with a mutable object so each test can toggle the
-// key on/off, then `resetRedeemKeyCache()` to drop the memoised buffer.
-const envState: { LOOP_REDEEM_ENCRYPTION_KEY: string | undefined } = {
-  LOOP_REDEEM_ENCRYPTION_KEY: undefined,
-};
-vi.mock('../../env.js', () => ({
-  get env() {
-    return envState;
-  },
+// The crypto util reads the key from `config.orders.redeem.encryptionKey`.
+// Mock it with a mutable object so each test can toggle the key on/off,
+// then `resetRedeemKeyCache()` to drop the memoised buffer.
+const { redeemState } = vi.hoisted(() => ({
+  redeemState: { key: undefined as string | undefined },
 }));
+// Partial config mock: only the redeem key is per-test mutable — the
+// rest of the real (test-fixture) config stays intact so logger/db keep
+// booting.
+vi.mock('../../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
+  return {
+    ...actual,
+    get config() {
+      return {
+        ...actual.config,
+        orders: { ...actual.config.orders, redeem: { encryptionKey: redeemState.key } },
+      };
+    },
+  };
+});
 
 import {
   encryptRedeemField,
@@ -29,7 +40,7 @@ const KEY_B64 = KEY_BYTES.toString('base64');
 const KEY_HEX = KEY_BYTES.toString('hex');
 
 function setKey(value: string | undefined): void {
-  envState.LOOP_REDEEM_ENCRYPTION_KEY = value;
+  redeemState.key = value;
   resetRedeemKeyCache();
 }
 

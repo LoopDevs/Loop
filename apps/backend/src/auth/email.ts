@@ -10,7 +10,7 @@
  * implementation lives below.
  */
 import { logger } from '../logger.js';
-import { env } from '../env.js';
+import { config } from '../config/index.js';
 
 const log = logger.child({ area: 'email' });
 
@@ -42,7 +42,7 @@ class ConsoleEmailProvider implements EmailProvider {
   readonly name = 'console';
 
   async sendOtpEmail(input: OtpEmailInput): Promise<void> {
-    const sentryActive = env.SENTRY_DSN !== undefined;
+    const sentryActive = config.observability.sentry.dsn !== undefined;
     log.info(
       {
         to: input.to,
@@ -58,7 +58,7 @@ class ConsoleEmailProvider implements EmailProvider {
         expiresAt: input.expiresAt.toISOString(),
       },
       sentryActive
-        ? 'OTP email (console stub) — code redacted because SENTRY_DSN is set; read from DB'
+        ? 'OTP email (console stub) — code redacted because a Sentry DSN is set; read from DB'
         : 'OTP email (console stub) — this provider is dev-only',
     );
   }
@@ -67,18 +67,18 @@ class ConsoleEmailProvider implements EmailProvider {
 /**
  * Resend transactional-email provider. Posts the OTP body to
  * `https://api.resend.com/emails` with the operator's
- * `RESEND_API_KEY`.
+ * `email.apiKey`.
  *
- * Three operator-tunable env vars beyond the API key:
- *   - `EMAIL_FROM_ADDRESS` — the sender. Resend requires this
+ * Three operator-tunable settings beyond the API key:
+ *   - `email.from.address` — the sender. Resend requires this
  *     domain to be verified (DKIM / SPF) in their dashboard
  *     before delivery succeeds. Defaults to `noreply@loopfinance.io`
  *     to make the launch path the no-touch case.
- *   - `EMAIL_FROM_NAME` — the human-readable display name.
+ *   - `email.from.name` — the human-readable display name.
  *     Defaults to `Loop`.
- *   - `EMAIL_REPLY_TO_ADDRESS` — optional Reply-To so user replies
- *     route to a monitored inbox. Omitted from the payload when
- *     unset. Email-validated by env.ts at boot.
+ *   - `email.replyTo` — optional Reply-To so user replies route to a
+ *     monitored inbox. Omitted from the payload when unset.
+ *     Email-validated by the schema at boot.
  *
  * Network failure / non-2xx responses throw — the caller (OTP
  * handler) maps the throw to a 503 so the user retries rather than
@@ -175,52 +175,39 @@ function escapeHtml(s: string): string {
 let cached: EmailProvider | null = null;
 
 /**
- * Lazily constructs the configured provider. The choice is driven by
- * `EMAIL_PROVIDER` when set; absent, it's `console` in non-production
- * and a throw in production (deploying to prod without real email is
- * a loud failure, not a silent one).
+ * Lazily constructs the configured provider from `config.email`.
+ *
+ * The `email` section is a discriminated union on `provider`, so the
+ * per-provider settings each branch needs are guaranteed present by the
+ * schema — `resend` without an API key no longer parses, which is what
+ * the old "EMAIL_PROVIDER=resend requires RESEND_API_KEY" throw here
+ * (and its production-only twin in the boot guards) existed to catch.
+ *
+ * These values used to be read live from `process.env` rather than from
+ * the validated object, purely so tests could mutate them and reset the
+ * cache. Tests now mock `../config/index.js` instead, and the read goes
+ * through the validated config like everything else.
  */
 export function getEmailProvider(): EmailProvider {
   if (cached !== null) return cached;
-  const configured = process.env['EMAIL_PROVIDER'];
-  if (configured === undefined || configured === 'console') {
+  if (config.email.provider === 'console') {
     // A2-571: the console provider logs plaintext OTPs to stdout and
-    // MUST NEVER run in production — regardless of whether it's the
-    // unset default or an explicit `EMAIL_PROVIDER=console`. A prior
-    // version only rejected the unset case; a deploy that shipped
-    // `EMAIL_PROVIDER=console` would silently leak OTPs into
-    // production logs. Reject both shapes loudly.
-    if (env.NODE_ENV === 'production') {
+    // MUST NEVER run in production — whether it arrived as the default
+    // or as an explicit `provider: console`. A deploy shipping the
+    // console stub would silently leak OTPs into production logs.
+    // `config.ts` also refuses this pairing at boot whenever native auth
+    // is on (A4-093); this throw covers the native-auth-off case.
+    if (config.env === 'production') {
       throw new Error(
-        `EMAIL_PROVIDER=${configured ?? '<unset>'} is not permitted in production — the console stub logs plaintext OTPs`,
+        'email.provider=console is not permitted in production — the console stub logs plaintext OTPs',
       );
     }
     cached = new ConsoleEmailProvider();
     return cached;
   }
-  if (configured === 'resend') {
-    const apiKey = process.env['RESEND_API_KEY'];
-    if (apiKey === undefined || apiKey.length === 0) {
-      throw new Error('EMAIL_PROVIDER=resend requires RESEND_API_KEY to be set');
-    }
-    const fromAddress = process.env['EMAIL_FROM_ADDRESS'] ?? 'noreply@loopfinance.io';
-    const fromName = process.env['EMAIL_FROM_NAME'] ?? 'Loop';
-    // Schema-validated by env.ts at boot (z.string().email()) so a
-    // typo'd address fails parseEnv instead of silently sending mail
-    // without a Reply-To. Read live from process.env here — same
-    // test-reload pattern as the EMAIL_FROM_* vars above (tests
-    // mutate process.env and reset the cached provider; the typed
-    // `env` object is frozen at module load).
-    const replyToRaw = process.env['EMAIL_REPLY_TO_ADDRESS'];
-    const replyTo = replyToRaw !== undefined && replyToRaw.length > 0 ? replyToRaw : null;
-    cached = new ResendEmailProvider(apiKey, `${fromName} <${fromAddress}>`, replyTo);
-    return cached;
-  }
-  // Keeping the throw minimal so an operator setting
-  // EMAIL_PROVIDER to an unknown value doesn't silently fall back
-  // to the console stub (which would leak OTP codes to stdout in
-  // production).
-  throw new Error(`Unsupported EMAIL_PROVIDER: ${configured}`);
+  const { apiKey, from, replyTo } = config.email;
+  cached = new ResendEmailProvider(apiKey, `${from.name} <${from.address}>`, replyTo ?? null);
+  return cached;
 }
 
 /** Resets the cached provider — test-only. */

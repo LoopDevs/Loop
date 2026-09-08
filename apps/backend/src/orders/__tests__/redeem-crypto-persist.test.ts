@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type * as ConfigModule from '../../config/index.js';
 import { randomBytes, randomUUID } from 'node:crypto';
 
 /**
@@ -8,22 +9,26 @@ import { randomBytes, randomUUID } from 'node:crypto';
  * `markOrderFulfilled` write against the real in-memory store, with
  * the envelope key set.
  */
-const { envState } = vi.hoisted(() => ({
-  envState: { LOOP_REDEEM_ENCRYPTION_KEY: undefined as string | undefined },
+const { redeemState } = vi.hoisted(() => ({
+  redeemState: { key: undefined as string | undefined },
 }));
-// Partial env mock: only the redeem key is per-test mutable — the rest
-// of the real (test-setup) env stays intact so logger/db keep booting.
-vi.mock('../../env.js', async (importActual) => {
-  const actual = (await importActual()) as { env: Record<string, unknown> };
+// Partial config mock: only the redeem key is per-test mutable — the
+// rest of the real (test-fixture) config stays intact so logger/db keep
+// booting.
+vi.mock('../../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
   return {
     ...actual,
-    get env() {
-      return { ...actual.env, ...envState };
+    get config() {
+      return {
+        ...actual.config,
+        orders: { ...actual.config.orders, redeem: { encryptionKey: redeemState.key } },
+      };
     },
   };
 });
 
-// 32-byte key, assigned into `envState` in `beforeEach` below.
+// 32-byte key, assigned into `redeemState` in `beforeEach` below.
 const KEY_B64 = randomBytes(32).toString('base64');
 
 import { db, __resetDbForTests } from '../../db/client.js';
@@ -38,7 +43,7 @@ import {
 
 beforeEach(() => {
   __resetDbForTests();
-  envState.LOOP_REDEEM_ENCRYPTION_KEY = KEY_B64;
+  redeemState.key = KEY_B64;
   resetRedeemKeyCache();
 });
 
@@ -118,7 +123,7 @@ describe('markOrderFulfilled — redeem secrets encrypted at rest', () => {
   });
 
   it('with the key unset, stores plaintext (ships dark — backward compatible)', async () => {
-    envState.LOOP_REDEEM_ENCRYPTION_KEY = undefined;
+    redeemState.key = undefined;
     resetRedeemKeyCache();
     const id = await seedPaidOrder();
     await markOrderFulfilled(id, {

@@ -5,8 +5,8 @@ export default defineConfig({
     globals: false,
     environment: 'node',
     // Pre-imports — runs before any test file resolves a module, so
-    // `env.ts`'s validate-on-load doesn't crash when tests are run
-    // without a real .env on disk.
+    // `config/index.ts`'s validate-on-load reads the committed test
+    // fixture rather than a developer's local `config.yaml`.
     setupFiles: ['./src/__tests__/vitest-env-setup.ts'],
     // The real-postgres integration suite (A2-1705) lives under
     // `__tests__/integration/` and runs via its own config

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type * as ConfigModule from '../config/index.js';
 import type { Context } from 'hono';
 
 /**
@@ -453,23 +454,31 @@ describe('healthHandler', () => {
 // minimal ok/degraded liveness signal (which is all Fly / CI probes read),
 // authenticated ops callers still get the full snapshot.
 //
-// These run through a fresh module graph with a production env + a configured
-// METRICS_BEARER_TOKEN so the probe gate is CLOSED for a caller with no bearer
-// — the real production posture. (In the default test env the token is unset
-// and the gate stays open, which is why the suite above still sees the full
-// body.) Same resetModules + doMock isolation the email/otp suites use.
+// These run through a fresh module graph with `env: production` + a
+// configured `observability.metrics.bearerToken` so the probe gate is
+// CLOSED for a caller with no bearer — the real production posture. (In
+// the default test config the token is unset and the gate stays open,
+// which is why the suite above still sees the full body.) Same
+// resetModules + doMock isolation the email/otp suites use.
 describe('BK-healthrecon: probe-gated /health body', () => {
   const TOKEN = 'a'.repeat(32);
 
   async function loadGatedHealthHandler(): Promise<(c: Context) => Promise<Response>> {
     vi.resetModules();
-    vi.doMock('../env.js', () => ({
-      env: {
-        NODE_ENV: 'production',
-        METRICS_BEARER_TOKEN: TOKEN,
-        LOCATION_REFRESH_INTERVAL_HOURS: 24,
-      },
-    }));
+    vi.doMock('../config/index.js', async (importActual) => {
+      const actual = await importActual<typeof ConfigModule>();
+      return {
+        ...actual,
+        config: {
+          ...actual.config,
+          env: 'production',
+          observability: {
+            ...actual.config.observability,
+            metrics: { bearerToken: TOKEN },
+          },
+        },
+      };
+    });
     vi.doMock('../logger.js', () => ({
       logger: {
         child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
@@ -514,7 +523,7 @@ describe('BK-healthrecon: probe-gated /health body', () => {
   ] as const;
 
   afterEach(() => {
-    vi.doUnmock('../env.js');
+    vi.doUnmock('../config/index.js');
     vi.doUnmock('../logger.js');
     vi.resetModules();
   });

@@ -34,7 +34,7 @@
  * native build.
  */
 import { cors } from 'hono/cors';
-import { env } from '../env.js';
+import { config } from '../config/index.js';
 
 /**
  * Origins permitted in production. Dev/test allow `*` because the
@@ -54,5 +54,5 @@ export const PRODUCTION_ORIGINS = [
  * `NODE_ENV=production`, `*` everywhere else.
  */
 export const corsMiddleware = cors({
-  origin: env.NODE_ENV === 'production' ? PRODUCTION_ORIGINS : '*',
+  origin: config.env === 'production' ? PRODUCTION_ORIGINS : '*',
 });

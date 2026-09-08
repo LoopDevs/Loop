@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type * as ConfigModule from '../../config/index.js';
 import { randomBytes } from 'node:crypto';
 
 /**
@@ -14,16 +15,21 @@ import { randomBytes } from 'node:crypto';
  */
 
 const KEY_B64 = randomBytes(32).toString('base64');
-const { envState } = vi.hoisted(() => ({
-  envState: { LOOP_REDEEM_ENCRYPTION_KEY: undefined as string | undefined },
+const { redeemState } = vi.hoisted(() => ({
+  redeemState: { key: undefined as string | undefined },
 }));
-// Partial env mock: only the redeem key is per-test mutable.
-vi.mock('../../env.js', async (importActual) => {
-  const actual = (await importActual()) as { env: Record<string, unknown> };
+// Partial config mock: only the redeem key is per-test mutable — the
+// rest of the real (test-fixture) config stays intact so logger/db keep
+// booting.
+vi.mock('../../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
   return {
     ...actual,
-    get env() {
-      return { ...actual.env, ...envState };
+    get config() {
+      return {
+        ...actual.config,
+        orders: { ...actual.config.orders, redeem: { encryptionKey: redeemState.key } },
+      };
     },
   };
 });
@@ -48,7 +54,7 @@ const NOW = 1_900_000_000_000;
 beforeEach(() => {
   __resetDbForTests();
   fetchRedemptionMock.mockReset();
-  envState.LOOP_REDEEM_ENCRYPTION_KEY = KEY_B64;
+  redeemState.key = KEY_B64;
   resetRedeemKeyCache();
 });
 

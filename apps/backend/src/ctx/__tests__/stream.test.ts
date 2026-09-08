@@ -1,13 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { streamGiftCardStatus } from '../stream.js';
 
-// upstream.ts reads GIFT_CARD_API_BASE_URL via env.ts → set a placeholder
-// before module load so `upstreamUrl` resolves. env.ts also requires
-// DATABASE_URL even though this suite never touches the DB.
-vi.hoisted(() => {
-  process.env['GIFT_CARD_API_BASE_URL'] = 'https://ctx.test';
-  process.env['DATABASE_URL'] ??= 'postgres://placeholder@localhost/test';
-});
+// `upstreamUrl` resolves against `ctx.baseUrl`, which the committed
+// test fixture (`config.test.yaml`, wired up by the vitest setup file)
+// already supplies — this suite never asserts on the base itself.
 
 function sseResponse(frames: string[]): Response {
   // Stream the frames out one chunk at a time, mimicking real SSE

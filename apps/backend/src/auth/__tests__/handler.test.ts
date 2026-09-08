@@ -1,24 +1,44 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type * as ConfigModule from '../../config/index.js';
 import type * as RefreshTokensModule from '../refresh-tokens.js';
 
-const mockEnv = vi.hoisted(() => ({
-  PORT: '8080',
-  NODE_ENV: 'test',
-  LOG_LEVEL: 'silent',
-  GIFT_CARD_API_BASE_URL: 'http://test-upstream.local',
-  CTX_CLIENT_ID_WEB: 'loopweb',
-  CTX_CLIENT_ID_IOS: 'loopios',
-  CTX_CLIENT_ID_ANDROID: 'loopandroid',
-  LOCATION_REFRESH_INTERVAL_HOURS: 24,
-  // Audit A-023 / FT-08 — the rate limiter keys on the client IP only when
-  // this is true; behind a trusted proxy it reads the spoof-proof
-  // `Fly-Client-IP` header (NOT the client-controllable X-Forwarded-For).
-  // These auth tests inject synthetic Fly-Client-IP values to get
-  // per-"client" isolation, so we turn trust on for the test harness.
-  TRUST_PROXY: true,
+// The HS256 signing key is per-test mutable: most of this suite runs
+// with Loop-native auth unconfigured (so the handlers take the legacy
+// CTX-proxy path), and a couple of cases turn it on to mint a
+// Loop-signed token.
+const { configState } = vi.hoisted(() => ({
+  configState: { hs256Current: undefined as string | undefined },
 }));
 
-vi.mock('../../env.js', () => ({ env: mockEnv }));
+vi.mock('../../config/index.js', async (importActual) => {
+  const actual = await importActual<typeof ConfigModule>();
+  return {
+    ...actual,
+    get config() {
+      return {
+        ...actual.config,
+        ctx: { ...actual.config.ctx, baseUrl: 'http://test-upstream.local' },
+        // Audit A-023 / FT-08 — the rate limiter keys on the client IP only
+        // when this is true; behind a trusted proxy it reads the spoof-proof
+        // `Fly-Client-IP` header (NOT the client-controllable
+        // X-Forwarded-For). These auth tests inject synthetic Fly-Client-IP
+        // values to get per-"client" isolation, so trust is on for the
+        // test harness.
+        server: { ...actual.config.server, trustProxy: true },
+        auth: {
+          ...actual.config.auth,
+          native: {
+            ...actual.config.auth.native,
+            jwt: {
+              ...actual.config.auth.native.jwt,
+              hs256: { current: configState.hs256Current, previous: undefined },
+            },
+          },
+        },
+      };
+    },
+  };
+});
 
 const revokeRefreshMock = vi.hoisted(() =>
   vi.fn<(args: unknown) => Promise<void>>(async () => undefined),
@@ -400,7 +420,7 @@ describe('DELETE /api/auth/session', () => {
 
   it('never forwards a Loop-signed bearer upstream (native mode)', async () => {
     const key = 'k'.repeat(32);
-    mockEnv['LOOP_JWT_SIGNING_KEY' as keyof typeof mockEnv] = key as never;
+    configState.hs256Current = key;
     const { signLoopToken } = await import('../tokens.js');
     const { token } = signLoopToken({
       sub: 'u-9',
@@ -421,7 +441,7 @@ describe('DELETE /api/auth/session', () => {
 
     expect(res.status).toBe(200);
     expect(mockFetch).not.toHaveBeenCalled();
-    delete (mockEnv as Record<string, unknown>)['LOOP_JWT_SIGNING_KEY'];
+    configState.hs256Current = undefined;
   });
 
   it('A2-565: revokes the Loop-native refresh-token row when the token is Loop-signed', async () => {
@@ -429,7 +449,7 @@ describe('DELETE /api/auth/session', () => {
     // must be ≥32 chars. Use a fixed value so the token below is
     // deterministic across reruns.
     const key = 'k'.repeat(32);
-    mockEnv['LOOP_JWT_SIGNING_KEY' as keyof typeof mockEnv] = key as never;
+    configState.hs256Current = key;
     const { signLoopToken } = await import('../tokens.js');
     const { token, claims } = signLoopToken({
       sub: 'u-1',
@@ -446,8 +466,8 @@ describe('DELETE /api/auth/session', () => {
     });
     expect(res.status).toBe(200);
     expect(revokeRefreshMock).toHaveBeenCalledWith(expect.objectContaining({ jti: claims.jti }));
-    // Undo the env override so downstream tests see no LOOP auth config.
-    delete (mockEnv as Record<string, unknown>)['LOOP_JWT_SIGNING_KEY'];
+    // Undo the override so downstream tests see no Loop auth config.
+    configState.hs256Current = undefined;
   });
 
   it('rate limits at 20/min per IP', async () => {
