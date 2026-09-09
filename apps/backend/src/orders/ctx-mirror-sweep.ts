@@ -33,6 +33,7 @@ import {
   markWorkerTickSuccess,
 } from '../runtime-health.js';
 import { listOpenMirrorOrders, recordOrderEconomics, type Order } from './repo.js';
+import { db } from '../db/client.js';
 import { markOrderExpired, markOrderRejected } from './transitions.js';
 import { applyCtxCardStatus } from './mirror-apply.js';
 import {
@@ -137,6 +138,58 @@ export async function runMirrorSweepTick(nowMs?: number): Promise<MirrorSweepRes
 }
 
 let sweepTimer: NodeJS.Timeout | null = null;
+
+/**
+ * One order's worth of the sweep, on demand.
+ *
+ * `POST /api/admin/orders/:orderId/redrive` is the operator's answer
+ * to "CTX says this card is fulfilled but Loop still shows it paid" —
+ * a row that a dropped ws event and a failed sweep tick between them
+ * left behind. It deliberately runs `sweepOne`, the same function the
+ * interval runs, rather than a bespoke admin path: a re-drive that
+ * could reach a state the sweep can't would be a second, untested
+ * state machine.
+ *
+ * Not single-flighted — it is a human clicking a button, the CAS
+ * guards in `transitions.ts` make a concurrent tick harmless, and
+ * taking the fleet sweep lock here would let one admin click stall the
+ * background reconciler.
+ *
+ * Terminal rows are refused rather than swept: there is nothing left
+ * for CTX to tell us, and re-reading one would only be a way to spend
+ * upstream budget.
+ */
+export type OrderResyncOutcome =
+  | { kind: 'order_not_found' }
+  | { kind: 'not_eligible'; reason: 'terminal_state' }
+  | { kind: 'resynced'; state: Order['state'] };
+
+export async function resyncOrderFromCtx(
+  orderId: string,
+  nowMs?: number,
+): Promise<OrderResyncOutcome> {
+  const order = await db.collection('orders').findOne({ id: orderId });
+  if (order === null) return { kind: 'order_not_found' };
+  if (order.state !== 'unpaid' && order.state !== 'paid') {
+    return { kind: 'not_eligible', reason: 'terminal_state' };
+  }
+
+  // The counters are the sweep's own bookkeeping; a single re-drive
+  // has no tick to report them to, so they are discarded here.
+  const discard: MirrorSweepResult = {
+    picked: 1,
+    applied: 0,
+    expired: 0,
+    orphaned: 0,
+    errors: 0,
+    abortedCtxUnavailable: false,
+    skippedLocked: false,
+  };
+  await sweepOne(order, nowMs ?? Date.now(), discard);
+
+  const after = await db.collection('orders').findOne({ id: orderId });
+  return { kind: 'resynced', state: after?.state ?? order.state };
+}
 
 export function startMirrorSweep(args?: { intervalMs?: number }): void {
   if (sweepTimer !== null) return;

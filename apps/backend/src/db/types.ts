@@ -234,6 +234,31 @@ export interface AdminStepUpConsumptionDoc {
   consumedAt: Date;
 }
 
+/**
+ * Audit trail for `merchant_cashback_configs` (ADR 011 / 018). One row
+ * per admin edit, capturing the values as they were BEFORE it, so the
+ * history answers "who changed this rate, from what, and why" without
+ * the current row having to carry its own past.
+ *
+ * Written by the admin upsert rather than by a database trigger — the
+ * document store has none, and a write the application forgets to
+ * record would be a silent hole in the audit trail, so the upsert
+ * writes the history entry before it touches the live row.
+ */
+export interface MerchantCashbackConfigHistoryDoc {
+  id: string;
+  merchantId: string;
+  /** Null when this entry records the FIRST time the merchant was configured. */
+  priorUserCashbackPct: number | null;
+  priorActive: boolean | null;
+  newUserCashbackPct: number;
+  newActive: boolean;
+  changedByUserId: string;
+  changedByEmail: string;
+  reason: string;
+  changedAt: Date;
+}
+
 /** Collection name → document type. The single registry both drivers key off. */
 export interface CollectionDocs {
   users: UserDoc;
@@ -246,6 +271,7 @@ export interface CollectionDocs {
   user_favorite_merchants: UserFavoriteMerchantDoc;
   merchant_cashback_configs: MerchantCashbackConfigDoc;
   ctx_catalog_snapshots: CtxCatalogSnapshotDoc;
+  merchant_cashback_config_history: MerchantCashbackConfigHistoryDoc;
   staff_roles: StaffRoleDoc;
   admin_idempotency_keys: AdminIdempotencyKeyDoc;
   admin_step_up_consumptions: AdminStepUpConsumptionDoc;
@@ -272,6 +298,7 @@ export const COLLECTION_SPECS: {
   user_favorite_merchants: { uniques: [['userId', 'merchantId']] },
   merchant_cashback_configs: { uniques: [['merchantId']] },
   ctx_catalog_snapshots: { uniques: [['name']] },
+  merchant_cashback_config_history: { uniques: [['id']] },
   staff_roles: { uniques: [['userId']] },
   admin_idempotency_keys: { uniques: [['adminUserId', 'key']] },
   admin_step_up_consumptions: { uniques: [['jti']] },

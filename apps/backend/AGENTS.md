@@ -20,7 +20,8 @@ src/
 │   ├── staff-roles.ts  ← ADR 037 staff grants + the last-admin invariant
 │   └── users.ts        ← User repo helpers (find-or-create, token version, admin shim)
 ├── auth/               ← Loop-native OTP + social login + refresh rotation + purge sweep
-├── admin/              ← ADR 017/028/037 admin surface: staff roles, step-up, idempotency
+├── admin/              ← ADR 017/028/037 admin surface: staff roles, step-up, idempotency,
+│                          audit tail, user-360 drill, order triage, cashback rates
 ├── orders/             ← ADR 052 order mirror: create at CTX, ws/sweep transitions,
 │                          redemption backfill, redeem-secret crypto
 ├── merchants/          ← In-memory catalog synced from CTX + ws maintainer + cashback rates

@@ -41,8 +41,8 @@ ctx:
   # REQUIRED — operator API credentials. ADR 052: these authenticate
   # every upstream surface, so the backend refuses to boot without them.
   credentials:
-    key:
-    secret:
+    key: loop
+    secret: loop
   # Defaults come from @loop/shared DEFAULT_CLIENT_IDS. Override per
   # deployment only alongside a matching web rebuild (audit A-018) —
   # the backend warns at boot if these diverge from the shared default.

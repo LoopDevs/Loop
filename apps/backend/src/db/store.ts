@@ -25,6 +25,19 @@ export type FieldFilter<V> =
       $gte?: V;
       $ne?: V | null;
       $in?: ReadonlyArray<V | null>;
+      /**
+       * Case-insensitivity and other flags for `$regex`. Mongo reads
+       * this natively; the memory driver passes it to `RegExp`.
+       */
+      $options?: string;
+      /**
+       * Substring / pattern match on a string field, in Mongo's own
+       * spelling so the filter still passes straight through to the
+       * driver. Build it with `containsFilter()` rather than by hand —
+       * an unescaped operator-supplied term would be both a wrong
+       * match (`a.b` matching `axb`) and a ReDoS surface.
+       */
+      $regex?: string;
     };
 
 /** Implicit AND across fields. */
@@ -138,6 +151,13 @@ export function matchesFilter<T extends object>(doc: T, filter: Filter<T> | unde
       const list = ops['$in'] as ReadonlyArray<unknown>;
       if (!list.some((candidate) => valuesEqual(value, candidate))) return false;
     }
+    if (ops['$regex'] !== undefined) {
+      // Only strings can match a pattern; null/missing/non-string
+      // never does, mirroring Mongo.
+      if (typeof value !== 'string') return false;
+      const flags = typeof ops['$options'] === 'string' ? ops['$options'] : '';
+      if (!new RegExp(ops['$regex'] as string, flags).test(value)) return false;
+    }
   }
   return true;
 }
@@ -171,4 +191,30 @@ export function sortDocs<T extends object>(docs: T[], sort: Sort<T> | undefined)
     }
     return 0;
   });
+}
+
+/**
+ * Escapes every regex metacharacter so a term is matched literally.
+ * Exported for tests; handlers should reach for `containsFilter`.
+ */
+export function escapeRegex(term: string): string {
+  return term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Case-insensitive "field contains this literal text" predicate — the
+ * document-store stand-in for SQL `ILIKE '%term%'`.
+ *
+ * The term is escaped, so an operator searching for `a.b` matches the
+ * literal `a.b` rather than `axb`, and no operator-supplied input can
+ * reach the regex engine as syntax (a pathological pattern would be a
+ * ReDoS on the memory driver and a scan amplifier on Mongo).
+ *
+ * This is a collection scan on both drivers. That is fine for the
+ * admin surfaces that use it — operator-facing, low-frequency, and
+ * bounded by an explicit row cap — and would want an index (or a
+ * proper text search) before it went anywhere near a hot path.
+ */
+export function containsFilter(term: string): { $regex: string; $options: string } {
+  return { $regex: escapeRegex(term), $options: 'i' };
 }

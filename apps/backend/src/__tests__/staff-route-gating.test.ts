@@ -113,6 +113,7 @@ import type { UserDoc } from '../db/types.js';
 const ADMIN_ID = '00000000-0000-4000-8000-000000000001'; // allowlist shim, no row
 const SUPPORT_ID = '00000000-0000-4000-8000-000000000002'; // staff_roles support row
 const NOBODY_ID = '00000000-0000-4000-8000-000000000003'; // authenticated non-staff
+const ORDER_ID = '00000000-0000-4000-8000-0000000000aa';
 
 function user(id: string, email: string, isAdmin: boolean): UserDoc {
   const now = new Date();
@@ -156,6 +157,33 @@ const ADMIN_ONLY_PROBES: Array<[string, string]> = [
   ['PUT', `/api/admin/staff/${NOBODY_ID}/role`],
   ['DELETE', `/api/admin/staff/${NOBODY_ID}/role`],
   ['POST', '/api/admin/step-up'],
+  ['POST', `/api/admin/users/${NOBODY_ID}/revoke-sessions`],
+  ['POST', `/api/admin/users/${NOBODY_ID}/clear-otp-lockout`],
+  ['POST', `/api/admin/users/${NOBODY_ID}/home-currency`],
+  ['POST', `/api/admin/orders/${ORDER_ID}/redrive`],
+  ['PUT', '/api/admin/merchant-cashback-configs/some-merchant'],
+  ['POST', '/api/admin/merchants/resync'],
+  ['GET', '/api/admin/discord/config'],
+  ['POST', '/api/admin/discord/test'],
+  ['GET', '/api/admin/orders.csv'],
+  ['GET', '/api/admin/merchant-cashback-configs.csv'],
+  ['GET', '/api/admin/merchants-catalog.csv'],
+  ['GET', '/api/admin/audit-tail'],
+  ['GET', '/api/admin/audit-tail.csv'],
+];
+
+/** Surfaces a support user MUST be able to reach (ADR 037 §3). */
+const SUPPORT_VISIBLE_PROBES: Array<[string, string]> = [
+  ['GET', '/api/admin/users'],
+  ['GET', '/api/admin/users?q=loop'],
+  ['GET', '/api/admin/users/search?q=loop'],
+  ['GET', `/api/admin/users/${NOBODY_ID}`],
+  ['GET', `/api/admin/users/${NOBODY_ID}/auth-state`],
+  ['GET', '/api/admin/orders'],
+  ['GET', '/api/admin/orders-activity'],
+  ['GET', '/api/admin/stuck-orders'],
+  ['GET', '/api/admin/merchant-cashback-configs'],
+  ['GET', '/api/admin/merchant-stats'],
 ];
 
 describe('ADR 037 tier behaviour', () => {
@@ -192,6 +220,30 @@ describe('ADR 037 tier behaviour', () => {
     // The support row, plus the shim admin who has no row.
     expect(body.staff).toHaveLength(2);
     expect(body.staff.map((s) => s['source']).sort()).toEqual(['legacy_is_admin', 'staff_roles']);
+  });
+
+  it.each(SUPPORT_VISIBLE_PROBES)('support can read %s %s', async (_method, path) => {
+    const res = await app.request(path, asUser(SUPPORT_ID));
+    expect(res.status).toBe(200);
+  });
+
+  it.each(SUPPORT_VISIBLE_PROBES)(
+    'a non-staff user is still concealed from %s %s',
+    async (_method, path) => {
+      const res = await app.request(path, asUser(NOBODY_ID));
+      expect(res.status).toBe(404);
+    },
+  );
+
+  // The support-tier delivery unstick: a 400 for the missing
+  // Idempotency-Key proves the gate passed and the handler's own
+  // validation is what answered, which a 404 would not.
+  it('support can reach the redemption re-fetch past the gate', async () => {
+    const res = await app.request(
+      `/api/admin/orders/${ORDER_ID}/refetch-redemption`,
+      asUser(SUPPORT_ID, { method: 'POST' }),
+    );
+    expect(res.status).toBe(400);
   });
 
   it('the step-up gate fires before the handler on a staff-role write', async () => {
@@ -253,6 +305,12 @@ describe('ADR 037 mount inventory (default-deny)', () => {
     const mustCarryStepUp: Record<string, string> = {
       'PUT /api/admin/staff/:userId/role': 'requireAdminStepUp(staff-role-grant)',
       'DELETE /api/admin/staff/:userId/role': 'requireAdminStepUp(staff-role-revoke)',
+      // ADR 015: re-denominates what the customer is quoted and charged.
+      'POST /api/admin/users/:userId/home-currency': 'requireAdminStepUp(home-currency)',
+      // A5-1: runs a real CTX sweep step that can move the order's state.
+      'POST /api/admin/orders/:orderId/redrive': 'requireAdminStepUp(order-redrive)',
+      // Hardening B1: sets the split FUTURE orders stamp at creation.
+      'PUT /api/admin/merchant-cashback-configs/:merchantId': 'requireAdminStepUp(cashback-config)',
     };
     const groups = new Map(adminRouteGroups().map((g) => [`${g.method} ${g.path}`, g]));
     for (const [key, gate] of Object.entries(mustCarryStepUp)) {
@@ -271,6 +329,27 @@ describe('ADR 037 mount inventory (default-deny)', () => {
       // Mints the step-up token itself — gating it on step-up would be
       // circular; it re-authenticates with a fresh OTP instead.
       'POST /api/admin/step-up',
+      // B4 incident response: moves no value, and the user simply
+      // signs back in. Step-up friction in the first minute of "their
+      // laptop was stolen" is the wrong trade.
+      'POST /api/admin/users/:userId/revoke-sessions',
+      // A5-3: same rationale as revoke-sessions — clearing the counter
+      // grants no access by itself, it only re-opens the guess budget,
+      // and a wrong guess re-arms the lockout from a clean window. Its
+      // own per-target velocity cap is what bounds abuse.
+      'POST /api/admin/users/:userId/clear-otp-lockout',
+      // ADR 037 support-tier delivery unstick: re-drives work the
+      // customer already paid for and creates nothing. Adding step-up
+      // would push it back to admin-only, which is the opposite of
+      // what the tier is for.
+      'POST /api/admin/orders/:orderId/refetch-redemption',
+      // Catalog refresh: no money path, self-correcting (the worst
+      // outcome is that the catalog matches CTX sooner), and already
+      // the tightest rate limit on the surface.
+      'POST /api/admin/merchants/resync',
+      // Sends one test embed to an already-configured webhook — no
+      // state change beyond the outbound message.
+      'POST /api/admin/discord/test',
     ]);
     const offenders: string[] = [];
     for (const g of adminRouteGroups()) {

@@ -39,6 +39,7 @@ npm run typecheck        # tsc --noEmit
 | `src/openapi.ts`  | OpenAPI 3.1 spec generated from zod schemas. Served live at `GET /openapi.json`. Every new handler must register its path + status codes here — see `AGENTS.md` recipe step 8                                        |
 | `src/logger.ts`   | Pino instance + `REDACT_PATHS` (its own test file locks the redaction list)                                                                                                                                          |
 | `src/config/`     | Zod-validated YAML config (`sections/*` → `schema.ts` → `index.ts`) — fails fast on startup                                                                                                                          |
+| `src/admin/`      | `/api/admin/*` — staff roles (ADR 037), step-up auth (ADR 028), the ADR 017 idempotency + audit envelope, and the user / order / cashback-rate operator surfaces                                                     |
 
 ## Configuration
 

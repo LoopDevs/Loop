@@ -35,8 +35,11 @@
  * A note on what is NOT here. This module was ~80 endpoints before the
  * ADR 052 rails retirement and the Postgres-to-document-store move;
  * the treasury / payouts / credits / vault / emissions families went
- * with the tables they read. What returns is the surface that
- * administers Loop itself, rebuilt against `db/`.
+ * with the tables they read, and are not coming back while CTX is the
+ * payment processor. What returns is the surface that administers Loop
+ * itself, rebuilt against `db/`: staff roles, the user-360 drill,
+ * order triage, the cashback-rate knob, the catalog, and the audit
+ * trail over all of it.
  */
 import type { Context, Hono } from 'hono';
 import { logger } from '../logger.js';
@@ -53,6 +56,9 @@ import { notifyAdminBulkRead } from '../discord.js';
 import { rateLimit } from '../middleware/rate-limit.js';
 import { adminStepUpHandler } from '../admin/step-up-handler.js';
 import { mountAdminStaffRoutes } from './admin-staff.js';
+import { mountAdminUserRoutes } from './admin-users.js';
+import { mountAdminOrderRoutes } from './admin-orders.js';
+import { mountAdminOpsRoutes } from './admin-ops.js';
 
 /** Mounts all `/api/admin/*` routes on the supplied Hono app. */
 export function mountAdminRoutes(app: Hono): void {
@@ -131,6 +137,19 @@ export function mountAdminRoutes(app: Hono): void {
   // writes). The one surface that must exist before any other, since
   // it is how everybody except the first admin gets their access.
   mountAdminStaffRoutes(app);
+
+  // The user-360 surface: search / list / drill / auth-state, plus the
+  // three per-user writes. Registers its literal paths before
+  // `/users/:userId` — see that module on why the order matters.
+  mountAdminUserRoutes(app);
+
+  // Order triage: list / drill / activity / CSV / stuck queue, plus
+  // the redemption re-fetch and the per-order re-drive.
+  mountAdminOrderRoutes(app);
+
+  // Cashback rates, merchant surfaces, Discord wiring checks, the
+  // reverse lookup and the write-audit tail.
+  mountAdminOpsRoutes(app);
 
   // ADR 028 / A4-063: step-up token endpoint. Mounted under the
   // standard admin middleware stack so only authenticated staff can
