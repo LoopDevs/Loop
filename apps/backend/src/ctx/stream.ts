@@ -20,8 +20,8 @@
  * carries fields like `{fulfilmentStatus, paymentStatus, ...}`.
  * The status timeline is `unpaid → paid → fulfilled`. Frames
  * may or may not include the redemption fields (`redeemUrl`,
- * `redeemCode`, `redeemPin`) — the caller follows up with one
- * authoritative `GET /gift-cards/:id` to pull those.
+ * `number`, `pin`) — the caller follows up with one authoritative
+ * `GET /gift-cards/:id` to pull those.
  *
  * Ported from `vcc/api/src/ctx/client.js:362-431` (the working
  * reference implementation). Credential wiring is at the call-site:

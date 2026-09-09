@@ -61,7 +61,7 @@ describe('waitForRedemption', () => {
   it('stream-first: terminal fulfilled → one authoritative GET → returns codes', async () => {
     streamMock.mockResolvedValueOnce({ fulfilmentStatus: 'fulfilled' });
     ctxFetchMock.mockResolvedValueOnce(
-      detailResponse({ redeemCode: 'C', redeemPin: 'P', redeemUrl: 'https://x.example' }),
+      detailResponse({ number: 'C', pin: 'P', redeemUrl: 'https://x.example' }),
     );
     const result = await waitForRedemption('o-1');
     expect(result).toEqual({ code: 'C', pin: 'P', url: 'https://x.example' });
@@ -97,7 +97,7 @@ describe('waitForRedemption', () => {
 
   it('keeps usable code/PIN when CTX returns a non-absolute redeemUrl, nulling the unusable url', async () => {
     ctxFetchMock.mockResolvedValueOnce(
-      detailResponse({ redeemCode: 'C', redeemPin: 'P', redeemUrl: '/relative/redeem' }),
+      detailResponse({ number: 'C', pin: 'P', redeemUrl: '/relative/redeem' }),
     );
     const result = await fetchRedemption('o-1');
     expect(result).toEqual({ code: 'C', pin: 'P', url: null });
@@ -106,7 +106,7 @@ describe('waitForRedemption', () => {
 
   it('F10: never persists a non-http(s) redeem URL — javascript: is nulled, code/PIN survive', async () => {
     ctxFetchMock.mockResolvedValueOnce(
-      detailResponse({ redeemCode: 'C', redeemUrl: 'javascript:alert(document.cookie)' }),
+      detailResponse({ number: 'C', redeemUrl: 'javascript:alert(document.cookie)' }),
     );
     const result = await fetchRedemption('o-1');
     expect(result).toEqual({ code: 'C', pin: null, url: null });
@@ -120,6 +120,23 @@ describe('waitForRedemption', () => {
     expect(result).toEqual({ code: null, pin: null, url: 'https://redeem.example.com/card/123' });
   });
 
+  it('barcode-merchant shape: `number` + `pin` collapse into code + pin', async () => {
+    // CTX returns barcode-merchant cards as `number` (the card number)
+    // + `pin` + `barcodeType` / `barcodeUrl` — not `redeemCode`. The
+    // number must surface as the user-facing code, or the user gets a
+    // PIN with no card number.
+    ctxFetchMock.mockResolvedValueOnce(
+      detailResponse({
+        number: '8711653414464265',
+        pin: '6741',
+        barcodeType: 'code128',
+        redeemType: 'barcode',
+      }),
+    );
+    const result = await fetchRedemption('o-1');
+    expect(result).toEqual({ code: '8711653414464265', pin: '6741', url: null });
+  });
+
   it('C2-1: never logs the raw response body once a redemption field is present (codes are PII)', async () => {
     // procurement-redemption.ts's diagnostic "capturing shape for
     // diagnosis" log is gated on ALL THREE fields being null — its own
@@ -127,9 +144,7 @@ describe('waitForRedemption', () => {
     // populated the codes are PII and must not land in logs"). Pin
     // that contract directly: a response carrying a real code/PIN must
     // never surface in any log call, at any level.
-    ctxFetchMock.mockResolvedValueOnce(
-      detailResponse({ redeemCode: 'SECRET-CODE-1234', redeemPin: '9999' }),
-    );
+    ctxFetchMock.mockResolvedValueOnce(detailResponse({ number: 'SECRET-CODE-1234', pin: '9999' }));
     const result = await fetchRedemption('o-1');
     expect(result).toEqual({ code: 'SECRET-CODE-1234', pin: '9999', url: null });
     expect(logMock.info).not.toHaveBeenCalled();
@@ -154,8 +169,8 @@ describe('waitForRedemption', () => {
   });
 
   it('FT-14: an all-null redemption with a DRIFTED field name never leaks the live code/PIN in the diagnostic log', async () => {
-    // Field-name drift: CTX renames redeemCode→redemptionCode /
-    // redeemPin→redemptionPin. Our parser sees all KNOWN fields absent, so
+    // Field-name drift: CTX renames number→cardNumber /
+    // pin→securityPin. Our parser sees all KNOWN fields absent, so
     // `out` is all-null and the "capturing shape" diagnostic fires — which
     // is *exactly* the branch where the drifted field is still carrying a
     // LIVE gift-card code/PIN. The old code logged the raw body here,
@@ -164,7 +179,7 @@ describe('waitForRedemption', () => {
     // (a hyphenated code, a 4-digit PIN) deliberately slip past the token /
     // card-shape scrubber, proving keys-only is required, not just scrubbing.
     ctxFetchMock.mockResolvedValueOnce(
-      detailResponse({ redemptionCode: 'LIVE-CODE-4242', redemptionPin: '7788' }),
+      detailResponse({ cardNumber: 'LIVE-CODE-4242', securityPin: '7788' }),
     );
     const result = await fetchRedemption('o-1');
     expect(result).toEqual({ code: null, pin: null, url: null });
@@ -173,7 +188,7 @@ describe('waitForRedemption', () => {
     expect(logMock.info).toHaveBeenCalledTimes(1);
     const [meta, message] = logMock.info.mock.calls[0] as [Record<string, unknown>, string];
     expect(message).toContain('no redemption fields');
-    expect(meta['keys']).toEqual(['redemptionCode', 'redemptionPin']);
+    expect(meta['keys']).toEqual(['cardNumber', 'securityPin']);
 
     // ...but the live code + PIN must not surface in ANY log call/level.
     const allCalls = [
@@ -191,7 +206,7 @@ describe('waitForRedemption', () => {
     ctxFetchMock
       .mockResolvedValueOnce(new Response('boom', { status: 500 }))
       .mockResolvedValueOnce(detailResponse({})) // empty fields — polling continues
-      .mockResolvedValueOnce(detailResponse({ redeemCode: 'C', redeemUrl: 'https://x.example' }));
+      .mockResolvedValueOnce(detailResponse({ number: 'C', redeemUrl: 'https://x.example' }));
     const result = await waitForRedemption('o-1', { pollIntervalMs: 1, totalTimeoutMs: 200 });
     expect(result.code).toBe('C');
     expect(result.url).toBe('https://x.example');
@@ -221,9 +236,7 @@ describe('waitForRedemption', () => {
     let calls = 0;
     ctxFetchMock.mockImplementation(async () => {
       calls++;
-      return calls < 4
-        ? detailResponse({})
-        : detailResponse({ redeemCode: 'LATE-CODE', redeemPin: '9876' });
+      return calls < 4 ? detailResponse({}) : detailResponse({ number: 'LATE-CODE', pin: '9876' });
     });
     const result = await waitForRedemption('o-1', { pollIntervalMs: 1, totalTimeoutMs: 5_000 });
     expect(result).toEqual({ code: 'LATE-CODE', pin: '9876', url: null });

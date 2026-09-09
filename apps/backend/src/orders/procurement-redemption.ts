@@ -5,9 +5,9 @@
  * Lifted out of `apps/backend/src/orders/procurement.ts`. The
  * procurement worker calls `waitForRedemption(ctxOrderId)` per
  * successful order to wait out CTX's issuance latency and pull the
- * user-facing redeem code / PIN / URL — CTX has been observed to
- * use both `redeemCode` / `code` spellings in the wild depending on
- * endpoint version, so the parser collapses them into our internal
+ * user-facing redeem code / PIN / URL — CTX returns the card number
+ * as `number`, the PIN as `pin`, and (for URL merchants) a
+ * tokenized `redeemUrl`; the parser collapses them into our internal
  * shape.
  *
  * This is the only place in the backend that decodes a CTX
@@ -40,15 +40,12 @@ const log = logger.child({ area: 'procurement-redemption' });
  * CTX response shape for GET /gift-cards/:id, narrowed to the
  * redemption fields we surface to the user. All fields are optional
  * — some merchant types redeem by URL + challenge, others by a
- * static code with or without a PIN.
+ * static number with or without a PIN.
  */
 const CtxGiftCardDetailResponse = z.object({
-  redeemCode: z.string().optional(),
-  redeemPin: z.string().optional(),
-  redeemUrl: z.string().optional(),
-  code: z.string().optional(),
+  number: z.string().optional(),
   pin: z.string().optional(),
-  url: z.string().optional(),
+  redeemUrl: z.string().optional(),
 });
 
 /**
@@ -72,10 +69,9 @@ export function sanitizeRedeemUrl(raw: string | null): string | null {
 }
 
 /**
- * Fetches the gift-card detail from CTX and collapses its various
- * field aliases into our internal `redeemCode / redeemPin / redeemUrl`
- * shape. CTX has been seen to use both `redeemCode` / `code` in the
- * wild depending on endpoint version; accept either.
+ * Fetches the gift-card detail from CTX and maps its redemption
+ * fields (`number`, `pin`, `redeemUrl`) into our internal
+ * `redeemCode / redeemPin / redeemUrl` shape.
  */
 export async function fetchRedemption(ctxOrderId: string): Promise<{
   code: string | null;
@@ -108,9 +104,9 @@ export async function fetchRedemption(ctxOrderId: string): Promise<{
     return { code: null, pin: null, url: null };
   }
   const out = {
-    code: parsed.data.redeemCode ?? parsed.data.code ?? null,
-    pin: parsed.data.redeemPin ?? parsed.data.pin ?? null,
-    url: sanitizeRedeemUrl(parsed.data.redeemUrl ?? parsed.data.url ?? null),
+    code: parsed.data.number ?? null,
+    pin: parsed.data.pin ?? null,
+    url: sanitizeRedeemUrl(parsed.data.redeemUrl ?? null),
   };
   // Diagnostic: CTX has been returning 200 with all redemption fields
   // missing across long polling windows for operator-account orders.
@@ -120,7 +116,7 @@ export async function fetchRedemption(ctxOrderId: string): Promise<{
   // FT-14: never log the raw body or any value here. This branch fires
   // exactly when all of OUR known fields parsed to null — which is also
   // precisely what a field-name drift produces (e.g. CTX renames
-  // `redeemCode` → `redemptionCode`), and the drifted field then holds a
+  // `number` → `cardNumber`), and the drifted field then holds a
   // LIVE gift-card code/PIN. Logging the raw body would leak that
   // code/PIN. The key names alone answer the drift-vs-empty question
   // without exposing any value; scrubbing the body would not be enough —
