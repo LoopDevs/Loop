@@ -9,6 +9,11 @@
  * extracting these fields here is what completes the barcode-merchant
  * purchase flow end-to-end.
  *
+ * Those three names are the whole contract. An unrecognised spelling
+ * reads as absent rather than being absorbed by a fallback list, so a
+ * CTX rename surfaces as a visibly empty extraction in the log below
+ * instead of quietly working until it doesn't.
+ *
  * The function mutates the supplied `order` object in place and logs
  * which fields were populated — that log line is the only signal we
  * have at this layer for "did the upstream actually return something
@@ -21,27 +26,23 @@
 import type { Logger } from 'pino';
 
 /**
- * Picks the first non-empty string value from a record across a list
- * of candidate keys. CTX has shipped the same field under several
- * names over time (e.g. `number` vs `cardNumber` vs `giftCardCode`),
- * so we accept any of them.
+ * Reads one string field off a CTX gift-card record. Missing, empty
+ * and non-string all read as absent, so a malformed upstream value
+ * never lands on the order as card material.
  */
-function pickString(record: Record<string, unknown>, ...keys: string[]): string | undefined {
-  for (const key of keys) {
-    const v = record[key];
-    if (typeof v === 'string' && v.length > 0) return v;
-  }
-  return undefined;
+function readString(record: Record<string, unknown>, key: string): string | undefined {
+  const v = record[key];
+  return typeof v === 'string' && v.length > 0 ? v : undefined;
 }
 
 /**
- * Pulls the barcode image URL out of a CTX gift-card record. CTX has
- * shipped it under several names over time. Shared with the authed
- * barcode-image proxy (`./barcode-image-handler.ts`, ADR 050), which
- * resolves the URL server-side instead of forwarding it to the client.
+ * Pulls the barcode image URL out of a CTX gift-card record. Shared
+ * with the authed barcode-image proxy (`./barcode-image-handler.ts`,
+ * ADR 050), which resolves the URL server-side instead of forwarding
+ * it to the client.
  */
 export function extractBarcodeImageUrl(upstream: Record<string, unknown>): string | undefined {
-  return pickString(upstream, 'barcodeUrl', 'imageUrl', 'barcodeImageUrl', 'giftCardImageUrl');
+  return readString(upstream, 'barcodeUrl');
 }
 
 /**
@@ -57,8 +58,8 @@ export function applyBarcodeFields(args: {
   log: Logger;
 }): void {
   const { upstream, orderId, order, log } = args;
-  const code = pickString(upstream, 'number', 'code', 'cardNumber', 'giftCardCode');
-  const pin = pickString(upstream, 'pin', 'cardPin', 'giftCardPin');
+  const code = readString(upstream, 'number');
+  const pin = readString(upstream, 'pin');
   const imageUrl = extractBarcodeImageUrl(upstream);
 
   if (code !== undefined) order.giftCardCode = code;

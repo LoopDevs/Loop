@@ -30,11 +30,16 @@ describe('applyBarcodeFields', () => {
     });
   });
 
-  it('falls back to alternate field names CTX has shipped historically', () => {
+  it('ignores field names CTX does not return', () => {
+    // The extractor reads `number` / `pin` / `barcodeUrl` and nothing
+    // else. A CTX rename has to fail loudly here — a visibly empty
+    // extraction in the ops log — rather than be absorbed by a
+    // speculative fallback list that keeps working until it doesn't.
     const order: Record<string, unknown> = {};
     applyBarcodeFields({
       upstream: {
         cardNumber: 'ALT-CODE',
+        giftCardCode: 'ALT-CODE-2',
         cardPin: 'ALT-PIN',
         giftCardImageUrl: 'https://x/alt.png',
       },
@@ -42,23 +47,7 @@ describe('applyBarcodeFields', () => {
       order,
       log: makeLog(),
     });
-    expect(order).toEqual({
-      giftCardCode: 'ALT-CODE',
-      giftCardPin: 'ALT-PIN',
-      barcodeImageUrl: 'https://x/alt.png',
-    });
-  });
-
-  it('preferred field name wins over alternates when both are present', () => {
-    // `number` is preferred over `cardNumber`/`code`/`giftCardCode`.
-    const order: Record<string, unknown> = {};
-    applyBarcodeFields({
-      upstream: { number: 'PRIMARY', cardNumber: 'SECONDARY' },
-      orderId: 'o-3',
-      order,
-      log: makeLog(),
-    });
-    expect(order.giftCardCode).toBe('PRIMARY');
+    expect(order).toEqual({});
   });
 
   it('skips fields that are missing or non-string', () => {
