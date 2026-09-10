@@ -25,9 +25,9 @@ COPY apps/web/ apps/web/
 # absent at build → undefined in the bundle → Sentry.init never
 # fires → frontend errors invisible to ops. Plumb every Sentry-
 # adjacent env through Dockerfile ARG + ENV, and mirror them in
-# `apps/web/fly.toml` `[build.args]`. Defaults are empty so a
-# local `docker build` without the args still produces a
-# functional bundle (Sentry just stays off, same as before).
+# `.drone.yml`. Defaults are empty so a local `docker build`
+# without the args still produces a functional bundle (Sentry
+# just stays off, same as before).
 ARG VITE_API_URL=https://api.loopfinance.io
 ENV VITE_API_URL=$VITE_API_URL
 # FE-22: the Phase-1 launch gate's SSR/first-paint default. Must be set
@@ -72,7 +72,7 @@ ENV PORT=3000 NODE_ENV=production
 
 WORKDIR /app/apps/web
 
-# A2-402: liveness probe for Fly.io / Kubernetes. Hits the SSR root
+# A2-402: orchestrator liveness probe. Hits the SSR root
 # which always responds — react-router-serve serves the home route.
 # 5s timeout; 3 retries keep a transient blip from cycling the pod.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

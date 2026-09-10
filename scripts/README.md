@@ -20,12 +20,11 @@ README + `archive/` convention).
 
 ## Operator / release scripts
 
-| Script                           | What it does                                                                                                     |
-| -------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `preflight-tranche-1.sh`         | Diffs `flyctl secrets list` against the required secret set — the pre-`flyctl deploy` gate. Never prints values. |
-| `bootstrap-e2e-refresh-token.sh` | One-time bootstrap of the `LOOP_E2E_REFRESH_TOKEN` repo secret via a live request-otp → verify-otp round trip.   |
-| `e2e-real.mjs`                   | Real-CTX e2e purchase probe (`.github/workflows/e2e-real.yml`, workflow_dispatch-only).                          |
-| `ci-watch.sh`                    | Polls a PR's CI checks and reports the outcome — local convenience.                                              |
+| Script                           | What it does                                                                                                   |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `bootstrap-e2e-refresh-token.sh` | One-time bootstrap of the `LOOP_E2E_REFRESH_TOKEN` repo secret via a live request-otp → verify-otp round trip. |
+| `e2e-real.mjs`                   | Real-CTX e2e purchase probe (`.github/workflows/e2e-real.yml`, workflow_dispatch-only).                        |
+| `ci-watch.sh`                    | Polls a PR's CI checks and reports the outcome — local convenience.                                            |
 
 ## Git hooks
 

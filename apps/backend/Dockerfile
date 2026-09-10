@@ -26,10 +26,8 @@ RUN npm run build -w @loop/backend
 # Bake the MaxMind GeoLite2-Country DB for /api/public/geo's first guess (ADR 033).
 # Best-effort + BuildKit-only: skipped when the build secrets are absent (CI/local image
 # builds), so the endpoint just falls back to the US default. Done in the builder stage so
-# curl never lands in the runtime image. Provide at deploy time:
-#   flyctl deploy \
-#     --build-secret maxmind_account_id=<account-id> \
-#     --build-secret maxmind_license_key=<license-key>
+# curl never lands in the runtime image. The build secrets are plumbed from drone
+# secrets in `.drone.yml`.
 RUN --mount=type=secret,id=maxmind_account_id \
     --mount=type=secret,id=maxmind_license_key \
     mkdir -p /app/geoip && \
@@ -77,7 +75,7 @@ ENV PORT=8080 NODE_ENV=production MAXMIND_GEOLITE2_PATH=/app/geoip/GeoLite2-Coun
 # A2-402: orchestrator-visible liveness probe. `GET /health` runs the
 # app-level health logic (upstream reachability + DB + signing-key
 # present) and always responds — 200 when green, 503 when degraded.
-# Fly.io + Kubernetes read HEALTHCHECK status; a degraded container
+# The orchestrator reads HEALTHCHECK status; a degraded container
 # gets cycled instead of left serving traffic.
 #
 # Uses node's built-in http (no curl/wget dep on alpine). 5s timeout

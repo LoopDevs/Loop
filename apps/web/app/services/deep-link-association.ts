@@ -11,7 +11,7 @@
  * declare the hosts `loopfinance.io`, `www.loopfinance.io`,
  * `beta.loopfinance.io` — and Apple/Google fetch the verification file
  * from `https://<that-exact-host>/.well-known/...`. Those hosts are
- * served by `@loop/web` (react-router-serve on Fly, app `loopfinance-web`);
+ * served by `@loop/web` (react-router-serve);
  * the API lives on the separate host `api.loopfinance.io`. The backend
  * ALSO exposes these files (`apps/backend/src/well-known/deep-link-verification.ts`),
  * but a file served only at `api.loopfinance.io` is never fetched by the
@@ -29,7 +29,7 @@
  *
  * The two gating env vars are PUBLIC values (an Apple Team ID and
  * release-keystore SHA-256 fingerprints — both intended to be visible),
- * so setting them on the `loopfinance-web` Fly app as well as the backend
+ * so setting them on the web deployment as well as the backend
  * is fine. Absent → the route 404s (matching how both OS verifiers read a
  * missing file: "app linking not offered", the correct pre-enrollment
  * state), never a placeholder file that would fail verification and get

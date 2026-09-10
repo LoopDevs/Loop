@@ -53,9 +53,9 @@ vi.mock('../db/client.js', () => ({
 import { app } from '../app.js';
 
 const UNLIMITED_ALLOWLIST = new Set<string>([
-  // Fly.io health checks probe this every few seconds from the
-  // platform's own addresses; a per-IP budget would page ops on the
-  // prober. The handler is a cheap SELECT 1 + in-memory reads.
+  // Infra health checks probe this every few seconds from a fixed
+  // address; a per-IP budget would page ops on the prober. The
+  // handler is a cheap SELECT 1 + in-memory reads.
   'GET /health',
   // Bearer-gated ops probes (production policy: 404 unless the
   // *_BEARER_TOKEN env is set and matches). Scraped by monitoring at

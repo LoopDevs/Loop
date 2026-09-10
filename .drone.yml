@@ -1,0 +1,112 @@
+kind: pipeline
+type: kubernetes
+name: default
+
+metadata:
+  namespace: drone
+
+service_account_name: drone-runner-sa
+
+steps:
+  - name: wait for docker
+    image: docker:dind
+    volumes:
+      - name: dockersock
+        path: /var/run
+    commands:
+      - |
+        echo "Waiting for Docker to be available..."
+        until docker info > /dev/null 2>&1; do
+          echo -n "."
+          sleep 1
+        done
+        echo "Docker is ready!"
+
+  - name: build loop-api
+    image: docker:dind
+    volumes:
+      - name: dockersock
+        path: /var/run
+    environment:
+      DOCKER_BUILDKIT: 1
+      MAXMIND_ACCOUNT_ID:
+        from_secret: MAXMIND_ACCOUNT_ID
+      MAXMIND_LICENSE_KEY:
+        from_secret: MAXMIND_LICENSE_KEY
+    commands:
+      - |
+        docker build \
+          -t registry.ctx.com/loop-api:latest \
+          -f apps/backend/Dockerfile \
+          ${MAXMIND_ACCOUNT_ID:+--secret id=maxmind_account_id,env=MAXMIND_ACCOUNT_ID} \
+          ${MAXMIND_LICENSE_KEY:+--secret id=maxmind_license_key,env=MAXMIND_LICENSE_KEY} \
+          .
+      - docker tag registry.ctx.com/loop-api:latest registry.ctx.com/loop-api:$DRONE_COMMIT_SHA
+      - docker tag registry.ctx.com/loop-api:latest registry.ctx.com/loop-api:$DRONE_BRANCH
+      - docker push registry.ctx.com/loop-api:$DRONE_COMMIT_SHA
+      - docker push registry.ctx.com/loop-api:$DRONE_BRANCH
+      - docker push registry.ctx.com/loop-api:latest
+
+  - name: build loop-web
+    image: docker:dind
+    volumes:
+      - name: dockersock
+        path: /var/run
+    environment:
+      DOCKER_BUILDKIT: 1
+      VITE_API_URL:
+        from_secret: VITE_API_URL
+      VITE_PHASE_1_ONLY:
+        from_secret: VITE_PHASE_1_ONLY
+      VITE_SENTRY_DSN:
+        from_secret: VITE_SENTRY_DSN
+      VITE_LOOP_ENV:
+        from_secret: VITE_LOOP_ENV
+    commands:
+      - |
+        docker build \
+          -t registry.ctx.com/loop-web:latest \
+          -f apps/web/Dockerfile \
+          --build-arg VITE_SENTRY_RELEASE=$DRONE_COMMIT_SHA \
+          ${VITE_API_URL:+--build-arg VITE_API_URL=$VITE_API_URL} \
+          ${VITE_PHASE_1_ONLY:+--build-arg VITE_PHASE_1_ONLY=$VITE_PHASE_1_ONLY} \
+          ${VITE_SENTRY_DSN:+--build-arg VITE_SENTRY_DSN=$VITE_SENTRY_DSN} \
+          ${VITE_LOOP_ENV:+--build-arg VITE_LOOP_ENV=$VITE_LOOP_ENV} \
+          .
+      - docker tag registry.ctx.com/loop-web:latest registry.ctx.com/loop-web:$DRONE_COMMIT_SHA
+      - docker tag registry.ctx.com/loop-web:latest registry.ctx.com/loop-web:$DRONE_BRANCH
+      - docker push registry.ctx.com/loop-web:$DRONE_COMMIT_SHA
+      - docker push registry.ctx.com/loop-web:$DRONE_BRANCH
+      - docker push registry.ctx.com/loop-web:latest
+
+  - name: discord notification
+    image: appleboy/drone-discord
+    failure: ignore
+    settings:
+      webhook_id:
+        from_secret: DISCORD_WEBHOOK_ID
+      webhook_token:
+        from_secret: DISCORD_WEBHOOK_TOKEN
+      username: loop
+      message: >
+        {{#success build.status}}✅{{else}}❌{{/success}} {{ repo.name }} #{{ build.number }} — {{ truncate commit.message 200 }}
+
+services:
+  - name: docker
+    image: docker:dind
+    privileged: true
+    command: ['--insecure-registry', 'registry.ctx.com']
+    volumes:
+      - name: dockersock
+        path: /var/run
+
+volumes:
+  - name: dockersock
+    temp: {}
+
+trigger:
+  branch:
+    - main
+    - staging
+  event:
+    - push
