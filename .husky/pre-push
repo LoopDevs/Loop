@@ -1,6 +1,6 @@
 # Enforce branch naming convention
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
-if [ "$BRANCH" != "main" ] && ! echo "$BRANCH" | grep -qE "^(feat|fix|chore|docs|test|refactor|perf|ci|build)/"; then
+if [ "$BRANCH" != "main" ] && [ "$BRANCH" != "staging" ] && ! echo "$BRANCH" | grep -qE "^(feat|fix|chore|docs|test|refactor|perf|ci|build)/"; then
   echo "ERROR: Branch name '$BRANCH' doesn't match convention."
   echo "Use: feat/, fix/, chore/, docs/, test/, refactor/, perf/, ci/, build/"
   exit 1
@@ -13,7 +13,7 @@ fi
 # own PR (re-pushes) and Dependabot (authored by the bot, not you). Set
 # ALLOW_STACKED_PRS=1 to silence for a deliberate disjoint batch. Skips
 # silently where `gh` is unavailable (CI, etc.).
-if [ "$BRANCH" != "main" ] && [ -z "$ALLOW_STACKED_PRS" ] && command -v gh >/dev/null 2>&1; then
+if [ "$BRANCH" != "main" ] && [ "$BRANCH" != "staging" ] && [ -z "$ALLOW_STACKED_PRS" ] && command -v gh >/dev/null 2>&1; then
   OPEN=$(gh pr list --state open --author '@me' --json headRefName \
     --jq "[.[] | select(.headRefName != \"$BRANCH\")] | length" 2>/dev/null || echo 0)
   if [ "${OPEN:-0}" -gt 0 ] 2>/dev/null; then
