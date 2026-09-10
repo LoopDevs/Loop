@@ -20,18 +20,7 @@ import { useAllMerchants } from '~/hooks/use-merchants';
 
 const DEBOUNCE_MS = 300;
 
-/**
- * The shape of the dynamically-imported `maplibre-gl` module we actually
- * use (its 4 constructors). maplibre-gl's generated `.d.ts` re-exports
- * `@maplibre/maplibre-gl-style-spec`'s types via `export type * from ...`,
- * which makes `typeof import('maplibre-gl')` (equivalently, `import type *
- * as X from 'maplibre-gl'`) structurally include those type-only members
- * as pseudo-properties — a shape no real runtime value can satisfy, so a
- * dynamically-`import()`ed module's `.default` never type-checks against
- * it (even though it's the runtime-correct value — Vite's CJS/UMD interop
- * handles this fine, this is purely a `tsc` type-level mismatch). Naming
- * just the constructors we call sidesteps that entirely.
- */
+/** The maplibre-gl constructors the map uses (dynamic import below). */
 interface MapLibreGl {
   Map: new (options: MapOptions) => MapLibreMap;
   Marker: new (options?: MarkerOptions) => Marker;
@@ -533,13 +522,7 @@ export default function ClusterMap({
         import('maplibre-gl'),
         import('maplibre-gl/dist/maplibre-gl.css'),
       ]);
-      // Cast needed: `maplibreModule.default`'s inferred type doesn't
-      // structurally match `MapLibreGl` (see that interface's doc comment)
-      // even though it's the runtime-correct value — Vite's build already
-      // confirms this resolves correctly (`new maplibreModule.default.Map(...)`
-      // works in the built bundle); this narrows the type `tsc` sees to
-      // just the 4 constructors we call.
-      const maplibregl = maplibreModule.default as unknown as MapLibreGl;
+      const maplibregl: MapLibreGl = maplibreModule;
       // Stash the MapLibre module for the locate button's callback —
       // it runs outside the init effect and needs `maplibregl.Marker`
       // to plot the user's position.
