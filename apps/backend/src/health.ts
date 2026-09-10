@@ -6,8 +6,7 @@ import { db } from './db/client.js';
 import { getLocations, isLocationLoading } from './clustering/data-store.js';
 import { getMerchants } from './merchants/sync.js';
 import { MERCHANT_REFRESH_INTERVAL_MS } from './merchants/sync-interval.js';
-import { getMerchantWsStatus } from './merchants/ws-maintainer.js';
-import { getGiftcardWsStatus } from './ctx/giftcard-ws-maintainer.js';
+import { getCtxWsStatus, getCtxWsSubscribedTopics } from './ctx/ws-events.js';
 import { getRuntimeHealthSnapshot } from './runtime-health.js';
 import { upstreamUrl } from './upstream.js';
 import { notifyGeoDbStale } from './discord.js';
@@ -265,8 +264,8 @@ export async function healthHandler(c: Context): Promise<Response> {
       locationsLoadedAt: new Date(locLoadedAt).toISOString(),
       merchantsStale,
       locationsStale,
-      merchantWs: getMerchantWsStatus(),
-      giftcardWs: getGiftcardWsStatus(),
+      ctxWs: getCtxWsStatus(),
+      ctxWsTopics: getCtxWsSubscribedTopics(),
       // go-live-plan §T1-F: geoDbStale is false when unconfigured; see GeoDbStatus.stale
       geoDbStale: geoDbStatus.stale,
       geoDbBuildEpoch: geoDbStatus.buildEpoch,

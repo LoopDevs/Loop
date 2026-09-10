@@ -1,34 +1,12 @@
-// CTX `/ws` merchant-topic client — event-driven merchant-store maintenance
+// CTX `/ws` connection owner — single-socket topic pubsub (ADR 052)
 import { z } from 'zod';
 import { config } from '../config/index.js';
 import { logger } from '../logger.js';
-import {
-  applyMerchantRemoval,
-  applyMerchantUpsert,
-  isMerchantDenylisted,
-  refreshMerchants,
-} from './sync.js';
-import { UpstreamMerchantSchema, mapUpstreamMerchant } from './sync-upstream.js';
 
-const log = logger.child({ module: 'merchants-ws' });
+const log = logger.child({ module: 'ctx-ws' });
 
-const SUBSCRIBE_COMMAND = JSON.stringify({ action: 'subscribe', topic: 'merchant' });
 const BACKOFF_INITIAL_MS = 1_000;
 const BACKOFF_MAX_MS = 60_000;
-
-const EVENT_DELETED = 'system.merchant.deleted';
-const MERCHANT_EVENTS = new Set([
-  'system.merchant.created',
-  'system.merchant.updated',
-  'system.merchant.status_changed',
-  EVENT_DELETED,
-  // Merchant-LINK mutations arrive on the same topic with the same
-  // merchant-shaped payload — CTX resolves the link to its merchant
-  // before delivery, so the handling below is identical.
-  'system.merchantlink.created',
-  'system.merchantlink.updated',
-  'system.merchantlink.status_changed',
-]);
 
 const WsMessageSchema = z
   .object({
@@ -38,30 +16,56 @@ const WsMessageSchema = z
     topic: z.string().optional(),
     event: z.string().optional(),
     data: z.unknown().optional(),
+    subscriptions: z.array(z.string()).optional(),
   })
   .passthrough();
 
-export type MerchantWsStatus = 'disabled' | 'connecting' | 'connected';
+export interface CtxWsTopicHandler {
+  topic: string;
+  events: ReadonlySet<string>;
+  onEvent: (eventName: string, data: unknown) => void | Promise<void>;
+  onSubscribed?: (info: { resubscribe: boolean }) => void;
+}
+
+export type CtxWsStatus = 'disabled' | 'connecting' | 'connected';
+
+const handlers: CtxWsTopicHandler[] = [];
+const subscribedTopics = new Set<string>();
+const everSubscribedTopics = new Set<string>();
 
 let socket: WebSocket | null = null;
-let status: MerchantWsStatus = 'disabled';
+let status: CtxWsStatus = 'disabled';
 let reconnectTimer: NodeJS.Timeout | null = null;
 let backoffMs = BACKOFF_INITIAL_MS;
 let stopped = true;
-let hadSession = false;
 
-export function getMerchantWsStatus(): MerchantWsStatus {
+export function getCtxWsStatus(): CtxWsStatus {
   return status;
 }
 
-export function startMerchantWs(): void {
+export function getCtxWsSubscribedTopics(): string[] {
+  return [...subscribedTopics].sort();
+}
+
+export function registerCtxWsTopic(handler: CtxWsTopicHandler): void {
+  if (handlers.some((h) => h.topic === handler.topic)) {
+    throw new Error(`CTX ws topic '${handler.topic}' is already registered`);
+  }
+  handlers.push(handler);
+  if (socket !== null && socket.readyState === WebSocket.OPEN) {
+    socket.send(subscribeCommand(handler.topic));
+  }
+}
+
+export function startCtxWs(): void {
   stopped = false;
   connect();
 }
 
-export function stopMerchantWs(): void {
+export function stopCtxWs(): void {
   stopped = true;
   status = 'disabled';
+  subscribedTopics.clear();
   if (reconnectTimer !== null) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
@@ -74,6 +78,10 @@ export function stopMerchantWs(): void {
     }
     socket = null;
   }
+}
+
+function subscribeCommand(topic: string): string {
+  return JSON.stringify({ action: 'subscribe', topic });
 }
 
 function wsUrl(): string {
@@ -105,7 +113,9 @@ function connect(): void {
   socket = ws;
 
   ws.onopen = () => {
-    ws.send(SUBSCRIBE_COMMAND);
+    for (const handler of handlers) {
+      ws.send(subscribeCommand(handler.topic));
+    }
   };
 
   ws.onmessage = (event) => {
@@ -118,6 +128,7 @@ function connect(): void {
 
   ws.onclose = (event) => {
     if (socket === ws) socket = null;
+    subscribedTopics.clear();
     if (stopped) return;
     log.warn(
       { code: event.code, reason: event.reason, backoffMs },
@@ -157,18 +168,7 @@ function handleMessage(raw: string): void {
   const msg = message.data;
   switch (msg.type) {
     case 'ok':
-      if (msg.action === 'subscribe') {
-        status = 'connected';
-        backoffMs = BACKOFF_INITIAL_MS;
-        log.info('CTX ws merchant subscription active');
-        if (hadSession) {
-          // Events during the disconnect window are unrecoverable —
-          // resync the whole catalog (coalesces via the sweep mutex).
-          log.info('Resyncing merchant catalog after ws reconnect');
-          void refreshMerchants();
-        }
-        hadSession = true;
-      }
+      if (msg.action === 'subscribe') handleSubscribeAck(msg);
       return;
 
     case 'error':
@@ -180,62 +180,64 @@ function handleMessage(raw: string): void {
       return;
 
     case 'event':
-      handleMerchantEvent(msg.event ?? '', msg.data);
+      dispatchEvent(msg.event ?? '', msg.data);
       return;
   }
 }
 
-function handleMerchantEvent(eventName: string, data: unknown): void {
-  if (!MERCHANT_EVENTS.has(eventName)) return;
-
-  const merchantParsed = UpstreamMerchantSchema.safeParse(data);
-  if (!merchantParsed.success) {
-    log.warn(
-      { event: eventName, issues: merchantParsed.error.issues.slice(0, 5) },
-      'CTX ws merchant event payload failed validation — ignoring',
-    );
-    return;
+function handleSubscribeAck(msg: {
+  subscriptions?: string[] | undefined;
+  topic?: string | undefined;
+}): void {
+  for (const topic of ackedTopics(msg)) {
+    markTopicSubscribed(topic);
   }
-  const upstream = merchantParsed.data;
-
-  if (eventName === EVENT_DELETED) {
-    applyMerchantRemoval(upstream.id);
-    log.info({ merchantId: upstream.id, event: eventName }, 'Merchant removed via ws event');
-    return;
-  }
-
-  if (isMerchantDenylisted(upstream.id)) {
-    log.info(
-      { merchantId: upstream.id, merchantName: upstream.name },
-      'Merchant ws event filtered by LOOP_MERCHANT_DENYLIST',
-    );
-    return;
-  }
-
-  const merchant = mapUpstreamMerchant(upstream);
-  if (merchant === null) {
-    // Disabled upstream — the sweep would drop it, so the event drops
-    // it too.
-    applyMerchantRemoval(upstream.id);
-    log.info({ merchantId: upstream.id, event: eventName }, 'Merchant dropped via ws event');
-    return;
-  }
-
-  applyMerchantUpsert(merchant);
-  log.info(
-    { merchantId: merchant.id, merchantName: merchant.name, event: eventName },
-    'Merchant upserted via ws event',
-  );
+  if (handlers.every((h) => subscribedTopics.has(h.topic))) status = 'connected';
 }
 
-export function __handleWsMessageForTests(raw: string): void {
+function ackedTopics(msg: {
+  subscriptions?: string[] | undefined;
+  topic?: string | undefined;
+}): string[] {
+  if (msg.subscriptions !== undefined) return msg.subscriptions;
+  if (msg.topic !== undefined) return [msg.topic];
+  const oldestUnacked = handlers.find((h) => !subscribedTopics.has(h.topic));
+  return oldestUnacked === undefined ? [] : [oldestUnacked.topic];
+}
+
+function markTopicSubscribed(topic: string): void {
+  const handler = handlers.find((h) => h.topic === topic);
+  if (handler === undefined || subscribedTopics.has(topic)) return;
+  subscribedTopics.add(topic);
+  backoffMs = BACKOFF_INITIAL_MS;
+  log.info({ topic }, 'CTX ws topic subscription active');
+  const resubscribe = everSubscribedTopics.has(topic);
+  everSubscribedTopics.add(topic);
+  if (handler.onSubscribed !== undefined) handler.onSubscribed({ resubscribe });
+}
+
+function dispatchEvent(eventName: string, data: unknown): void {
+  const handler = handlers.find((h) => h.events.has(eventName));
+  if (handler === undefined) return;
+  void Promise.resolve(handler.onEvent(eventName, data)).catch((err: unknown) => {
+    log.error({ topic: handler.topic, event: eventName, err }, 'CTX ws event handling failed');
+  });
+}
+
+export function __handleCtxWsMessageForTests(raw: string): void {
   handleMessage(raw);
 }
 
-export function __resetMerchantWsForTests(): void {
-  stopMerchantWs();
+export function __dropCtxWsSessionForTests(): void {
+  subscribedTopics.clear();
+  status = 'connecting';
+}
+
+export function __resetCtxWsForTests(): void {
+  stopCtxWs();
+  handlers.length = 0;
+  everSubscribedTopics.clear();
   backoffMs = BACKOFF_INITIAL_MS;
-  hadSession = false;
   stopped = true;
   status = 'disabled';
 }

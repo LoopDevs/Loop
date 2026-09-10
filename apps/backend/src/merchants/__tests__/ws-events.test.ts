@@ -1,21 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type * as ConfigModule from '../../config/index.js';
-
-const { ctxState } = vi.hoisted(() => ({
-  ctxState: {
-    baseUrl: 'http://test',
-    credentials: { key: 'test-key', secret: 'test-secret' },
-  },
-}));
-vi.mock('../../config/index.js', async (importActual) => {
-  const actual = await importActual<typeof ConfigModule>();
-  return {
-    ...actual,
-    get config() {
-      return { ...actual.config, ctx: { ...actual.config.ctx, ...ctxState } };
-    },
-  };
-});
 
 vi.mock('../../logger.js', () => ({
   logger: { child: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() }) },
@@ -32,7 +15,12 @@ const { syncMock } = vi.hoisted(() => ({
 }));
 vi.mock('../sync.js', () => syncMock);
 
-import { __handleWsMessageForTests, __resetMerchantWsForTests } from '../ws-maintainer.js';
+import { registerMerchantWsEvents } from '../ws-events.js';
+import {
+  __dropCtxWsSessionForTests,
+  __handleCtxWsMessageForTests,
+  __resetCtxWsForTests,
+} from '../../ctx/ws-events.js';
 
 function eventFrame(eventName: string, data: unknown): string {
   return JSON.stringify({ type: 'event', topic: 'merchant', event: eventName, data });
@@ -55,15 +43,16 @@ const MERCHANT = {
   country: 'CA',
 };
 
-describe('merchant ws maintainer message handling', () => {
+describe('merchant ws event handling', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     syncMock.isMerchantDenylisted.mockReturnValue(false);
-    __resetMerchantWsForTests();
+    __resetCtxWsForTests();
+    registerMerchantWsEvents();
   });
 
   it('upserts a mapped merchant on system.merchant.updated', () => {
-    __handleWsMessageForTests(eventFrame('system.merchant.updated', MERCHANT));
+    __handleCtxWsMessageForTests(eventFrame('system.merchant.updated', MERCHANT));
 
     expect(syncMock.applyMerchantUpsert).toHaveBeenCalledTimes(1);
     const merchant = syncMock.applyMerchantUpsert.mock.calls[0]![0] as Record<string, unknown>;
@@ -76,15 +65,15 @@ describe('merchant ws maintainer message handling', () => {
   });
 
   it('upserts on system.merchant.created and system.merchant.status_changed', () => {
-    __handleWsMessageForTests(eventFrame('system.merchant.created', MERCHANT));
-    __handleWsMessageForTests(eventFrame('system.merchant.status_changed', MERCHANT));
+    __handleCtxWsMessageForTests(eventFrame('system.merchant.created', MERCHANT));
+    __handleCtxWsMessageForTests(eventFrame('system.merchant.status_changed', MERCHANT));
     expect(syncMock.applyMerchantUpsert).toHaveBeenCalledTimes(2);
   });
 
   it('handles merchant-link events (same merchant-shaped payload)', () => {
     // Linking Loop delivers the merchant; a per-link discount override
     // rides in `link` and beats the merchant default.
-    __handleWsMessageForTests(
+    __handleCtxWsMessageForTests(
       eventFrame('system.merchantlink.created', {
         ...MERCHANT,
         status: 'enabled',
@@ -96,20 +85,20 @@ describe('merchant ws maintainer message handling', () => {
     expect(merchant['savingsPercentage']).toBe(7.5);
 
     // Link disabled for Loop → effective status disables the merchant.
-    __handleWsMessageForTests(
+    __handleCtxWsMessageForTests(
       eventFrame('system.merchantlink.status_changed', { ...MERCHANT, status: 'disabled' }),
     );
     expect(syncMock.applyMerchantRemoval).toHaveBeenCalledWith('m-1');
   });
 
   it('removes the merchant on system.merchant.deleted', () => {
-    __handleWsMessageForTests(eventFrame('system.merchant.deleted', MERCHANT));
+    __handleCtxWsMessageForTests(eventFrame('system.merchant.deleted', MERCHANT));
     expect(syncMock.applyMerchantRemoval).toHaveBeenCalledWith('m-1');
     expect(syncMock.applyMerchantUpsert).not.toHaveBeenCalled();
   });
 
   it('removes a merchant that becomes disabled (mapper returns null)', () => {
-    __handleWsMessageForTests(
+    __handleCtxWsMessageForTests(
       eventFrame('system.merchant.updated', { ...MERCHANT, enabled: false }),
     );
     expect(syncMock.applyMerchantRemoval).toHaveBeenCalledWith('m-1');
@@ -118,13 +107,13 @@ describe('merchant ws maintainer message handling', () => {
 
   it('treats the per-operator effective status as authoritative over the global flag', () => {
     // Link-disabled for Loop while globally enabled → removed.
-    __handleWsMessageForTests(
+    __handleCtxWsMessageForTests(
       eventFrame('system.merchant.updated', { ...MERCHANT, enabled: true, status: 'disabled' }),
     );
     expect(syncMock.applyMerchantRemoval).toHaveBeenCalledWith('m-1');
 
     // Effective status enabled wins over a false global flag.
-    __handleWsMessageForTests(
+    __handleCtxWsMessageForTests(
       eventFrame('system.merchant.updated', { ...MERCHANT, enabled: false, status: 'enabled' }),
     );
     expect(syncMock.applyMerchantUpsert).toHaveBeenCalledTimes(1);
@@ -132,27 +121,29 @@ describe('merchant ws maintainer message handling', () => {
 
   it('respects LOOP_MERCHANT_DENYLIST on event-driven upserts', () => {
     syncMock.isMerchantDenylisted.mockReturnValue(true);
-    __handleWsMessageForTests(eventFrame('system.merchant.updated', MERCHANT));
+    __handleCtxWsMessageForTests(eventFrame('system.merchant.updated', MERCHANT));
     expect(syncMock.applyMerchantUpsert).not.toHaveBeenCalled();
     expect(syncMock.applyMerchantRemoval).not.toHaveBeenCalled();
   });
 
   it('ignores unknown event names, malformed payloads, and non-JSON frames', () => {
-    __handleWsMessageForTests(eventFrame('system.giftcard.updated', MERCHANT));
-    __handleWsMessageForTests(eventFrame('system.merchant.updated', { nope: true }));
-    __handleWsMessageForTests('not json at all');
-    __handleWsMessageForTests(JSON.stringify({ type: 'weird' }));
+    __handleCtxWsMessageForTests(eventFrame('system.giftcard.updated', MERCHANT));
+    __handleCtxWsMessageForTests(eventFrame('system.merchant.updated', { nope: true }));
+    __handleCtxWsMessageForTests('not json at all');
+    __handleCtxWsMessageForTests(JSON.stringify({ type: 'weird' }));
     expect(syncMock.applyMerchantUpsert).not.toHaveBeenCalled();
     expect(syncMock.applyMerchantRemoval).not.toHaveBeenCalled();
   });
 
   it('resyncs the full catalog on reconnect, but not on the first session', () => {
     // First subscribe-ok: fresh boot, the startup sweep already ran.
-    __handleWsMessageForTests(SUBSCRIBE_OK);
+    __handleCtxWsMessageForTests(SUBSCRIBE_OK);
     expect(syncMock.refreshMerchants).not.toHaveBeenCalled();
 
+    __dropCtxWsSessionForTests();
+
     // Second subscribe-ok: a reconnect — events may have been missed.
-    __handleWsMessageForTests(SUBSCRIBE_OK);
+    __handleCtxWsMessageForTests(SUBSCRIBE_OK);
     expect(syncMock.refreshMerchants).toHaveBeenCalledTimes(1);
   });
 });

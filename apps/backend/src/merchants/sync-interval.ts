@@ -5,7 +5,7 @@ import { getMerchants, refreshMerchants, warmStartMerchantsFromSnapshot } from '
 const log = logger.child({ module: 'merchants-sync' });
 
 // Fixed hourly sweep — deliberately NOT configurable. The sweep is only
-// the fallback reconciler behind the ws maintainer (./ws-maintainer.ts),
+// the fallback reconciler behind the ws maintainer (./ws-events.ts),
 // so a cadence knob would be dead config; one full catalog request per
 // hour is negligible load either way.
 export const MERCHANT_REFRESH_INTERVAL_MS = 60 * 60 * 1000;

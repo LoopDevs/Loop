@@ -9,9 +9,10 @@ import {
   stopMerchantRefresh,
   cancelPendingSnapshotPersist,
 } from './merchants/sync.js';
-import { startMerchantWs, stopMerchantWs } from './merchants/ws-maintainer.js';
+import { registerMerchantWsEvents } from './merchants/ws-events.js';
 import { initDb, closeDb } from './db/client.js';
-import { startGiftcardWs, stopGiftcardWs } from './ctx/giftcard-ws-maintainer.js';
+import { registerGiftcardWsEvents } from './orders/ws-events.js';
+import { startCtxWs, stopCtxWs } from './ctx/ws-events.js';
 import { startMirrorSweep, stopMirrorSweep } from './orders/ctx-mirror-sweep.js';
 import { startRedemptionBackfill, stopRedemptionBackfill } from './orders/redemption-backfill.js';
 import { startAuthRowPurge, stopAuthRowPurge } from './auth/auth-row-purge.js';
@@ -40,13 +41,14 @@ await initDb();
 
 // Merchants load first to ensure data is available for cross-referencing pin logos.
 await startMerchantRefresh();
-startMerchantWs();
+registerMerchantWsEvents();
+registerGiftcardWsEvents();
+startCtxWs();
 const locationStartTimer = setTimeout(() => {
   void startLocationRefresh();
 }, 3000);
 
 // Order-mirror machinery (ADR 052). ctx is the payment processor and these are the only writers of order state.
-startGiftcardWs();
 startMirrorSweep();
 // Redemption-backfill sweeper — backstops the fulfil-time redemption fetch.
 startRedemptionBackfill();
@@ -74,10 +76,9 @@ function shutdown(signal: string): void {
   stopCleanupInterval();
   stopFleetSizeEstimator();
   stopMerchantRefresh();
-  stopMerchantWs();
+  stopCtxWs();
   cancelPendingSnapshotPersist();
   stopLocationRefresh();
-  stopGiftcardWs();
   stopMirrorSweep();
   stopRedemptionBackfill();
   stopAuthRowPurge();

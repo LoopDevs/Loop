@@ -41,7 +41,7 @@ calls to upstream. Both paths coexist until the takeover completes.
 
 **Orders.** `POST /api/orders/loop` inserts the local mirror doc,
 creates the gift card at CTX, and relays CTX's payment instructions.
-The giftcard ws maintainer + mirror sweep move the local doc through
+The giftcard ws subscription + mirror sweep move the local doc through
 `unpaid → paid → fulfilled` (or `rejected | refunded | expired`) in
 lock-step with CTX.
 

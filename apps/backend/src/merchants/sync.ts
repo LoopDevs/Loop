@@ -144,7 +144,7 @@ export async function forceRefreshMerchants(): Promise<RefreshOutcome> {
   return refreshMerchantsInternal({ rethrow: true });
 }
 
-// ── Websocket-event store maintenance (./ws-maintainer.ts) ──────────────
+// ── Websocket-event store maintenance (./ws-events.ts) ──────────────
 //
 // Between full sweeps, the CTX `/ws` merchant topic delivers per-merchant
 // upserts/removals. Each application rebuilds the store atomically via
