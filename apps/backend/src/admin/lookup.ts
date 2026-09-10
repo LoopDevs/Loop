@@ -1,21 +1,4 @@
-/**
- * Reverse lookup — the user-360 entry point (ADR 037).
- *
- * `GET /api/admin/lookup?q=<order id>` resolves an artifact the
- * customer can quote back to the owning user, so support can start
- * from what the customer actually has in front of them rather than
- * asking for an email they may not remember signing up with.
- *
- * Two artifacts resolve today, both to `kind: 'order'`: Loop's own
- * order id (what the app shows them) and the CTX order id (what
- * appears in the supplier's mail and on the card page). Both are exact
- * lookups against an existing unique key, never a scan — a reverse
- * lookup that degraded into a fuzzy search would be a PII-enumeration
- * surface rather than a support tool.
- *
- * A miss is a 404 rather than an empty 200: the caller pasted
- * something that isn't ours, and the UI should say so.
- */
+// Reverse lookup — user-360 entry point (ADR 037)
 import type { Context } from 'hono';
 import type { AdminLookupResponse } from '@loop/shared';
 import { db } from '../db/client.js';
@@ -39,9 +22,7 @@ export async function adminLookupHandler(c: Context): Promise<Response> {
   }
 
   try {
-    // A uuid is our own order id; anything else that reaches here is
-    // tried as a CTX order id. Both are unique keys, so at most one
-    // row comes back either way.
+    // UUIDs are our order ids; others are CTX order ids. Both are unique keys, so at most one row returns.
     const order = UUID_RE.test(q)
       ? await db.collection('orders').findOne({ id: q })
       : await db.collection('orders').findOne({ ctxOrderId: q });
@@ -56,9 +37,7 @@ export async function adminLookupHandler(c: Context): Promise<Response> {
       orderId: order.id,
     });
   } catch (err) {
-    // The query itself is an order id, not PII, but it is customer-
-    // supplied — keep it out of the log line and correlate by request
-    // id like the other admin reads.
+    // Query is customer-supplied; keep it out of logs and correlate by request id.
     log.error({ err }, 'Admin lookup failed');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Lookup failed' }, 500);
   }

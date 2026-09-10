@@ -1,31 +1,4 @@
-/**
- * COR-11 — real-postgres integration test for `logoutHandler`
- * (`auth/logout-handler.ts`).
- *
- * Refresh tokens rotate in a chain: each rotated row's
- * `replaced_by_jti` links to the token that superseded it, so a
- * stolen-token reuse can be traced through the chain (A → B → C → …).
- *
- * The bug (COR-11): logout revokes the presented token by jti through
- * `revokeRefreshToken`, which unconditionally coerced `replaced_by_jti`
- * to NULL. A logout presented with an already-rotated (mid-chain) token
- * — a stale device, or an attacker covering their tracks; `verifyLoopToken`
- * checks the SIGNATURE, not DB liveness — therefore clobbered that row's
- * rotation link and dead-ended the audit chain at the logout, so a
- * compromise could no longer be traced past it.
- *
- * These tests drive the REAL `logoutHandler` against a live `refresh_tokens`
- * chain (upstream fetch stubbed — logout swallows upstream errors and the
- * DB revoke happens before it) and pin:
- *   1. a mid-chain logout leaves `replaced_by_jti` intact (lineage
- *      traceable end-to-end) while still invalidating the token — proven
- *      RED against the overwrite, and
- *   2. a well-behaved tail logout still invalidates the live token and
- *      leaves the whole chain intact.
- *
- * Runs under `vitest.integration.config.ts` against the ephemeral
- * in-memory document store.
- */
+// COR-11 — real-postgres integration test for `logoutHandler`
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import type { Context } from 'hono';
@@ -43,10 +16,7 @@ let realFetch: typeof globalThis.fetch;
 
 beforeEach(() => {
   __resetDbForTests();
-  // Logout best-effort revokes upstream (CTX /logout) after the local
-  // revoke. Stub `fetch` so the test never touches the network — the
-  // handler swallows upstream errors anyway, but a stubbed 200 keeps
-  // the circuit breaker closed and the run deterministic.
+  // Stub fetch to keep circuit breaker closed and run deterministic
   realFetch = globalThis.fetch;
   globalThis.fetch = (async () => new Response(null, { status: 200 })) as typeof globalThis.fetch;
 });
@@ -57,8 +27,7 @@ afterAll(() => {
 
 function makeCtx(body: unknown): Context {
   return {
-    // No Authorization header — the upstream CTX revoke (bearer-driven)
-    // is out of scope here; these tests exercise the local row revoke.
+    // No Authorization header — upstream CTX revoke is out of scope
     req: { json: async () => body, header: () => undefined },
     json: (b: unknown, status?: number) =>
       new Response(JSON.stringify(b), {

@@ -14,11 +14,6 @@ import {
   OTP_MAX_ATTEMPTS,
 } from '../otps.js';
 
-/**
- * OTP repository (ADR 013), exercised against the real in-memory
- * document store so the CAS consume, the live-row predicate, and the
- * retention sweep all run for real.
- */
 beforeEach(() => {
   __resetDbForTests();
 });
@@ -109,8 +104,6 @@ describe('tryConsumeOtp (BK-otpatomic)', () => {
   it('of two consume attempts on the same row, exactly one wins', async () => {
     const now = new Date('2030-01-01T00:00:00Z');
     const { id } = await createOtp({ email: 'a@b.com', code: '123456', now });
-    // The single-use CAS: first flip null → now succeeds, the replay
-    // matches nothing and loses.
     expect(await tryConsumeOtp(id, now)).toBe(true);
     expect(await tryConsumeOtp(id, now)).toBe(false);
     const row = await db.collection('otps').findOne({ id });
@@ -127,9 +120,7 @@ describe('countRecentOtpsForEmail', () => {
     const now = new Date('2030-01-01T01:00:00Z');
     await createOtp({ email: 'a@b.com', code: '111111', now: new Date(now.getTime() - 30_000) });
     await createOtp({ email: 'a@b.com', code: '222222', now: new Date(now.getTime() - 45_000) });
-    // Outside the window — must not count.
     await createOtp({ email: 'a@b.com', code: '333333', now: new Date(now.getTime() - 120_000) });
-    // Different email — must not count.
     await createOtp({ email: 'other@b.com', code: '444444', now });
     const n = await countRecentOtpsForEmail({ email: 'a@b.com', windowMs: 60_000, now });
     expect(n).toBe(2);
@@ -142,10 +133,7 @@ describe('countRecentOtpsForEmail', () => {
 });
 
 describe('incrementOtpAttempts', () => {
-  // CF2 AUTH-01 regression guard: a bad guess must bump EVERY live row
-  // for the email, not just the newest — the single-row shape is
-  // exactly what let an attacker dodge the ceiling on an older code by
-  // requesting fresh OTPs.
+  // CF2 AUTH-01: must bump every live row to prevent dodging the ceiling via fresh OTPs
   it('bumps every live row for the email, not just the newest', async () => {
     const now = new Date('2030-01-01T00:05:00Z');
     const a = await createOtp({
@@ -182,7 +170,6 @@ describe('purgeExpiredOtps (CF-26 / X-PRIV-07)', () => {
   it('deletes rows expired beyond the retention grace and returns the count', async () => {
     const now = new Date('2030-02-01T00:00:00Z');
     const retentionMs = 30 * 24 * 60 * 60 * 1000;
-    // Two rows whose expiry is past the retention cutoff.
     await createOtp({
       email: 'old1@b.com',
       code: '111111',
@@ -193,13 +180,11 @@ describe('purgeExpiredOtps (CF-26 / X-PRIV-07)', () => {
       code: '222222',
       now: new Date(now.getTime() - retentionMs - OTP_TTL_MS - 120_000),
     });
-    // A recently-expired row inside the grace — must survive.
     await createOtp({
       email: 'recent@b.com',
       code: '333333',
       now: new Date(now.getTime() - OTP_TTL_MS - 1000),
     });
-    // A live row — must survive.
     await createOtp({ email: 'live@b.com', code: '444444', now });
     const n = await purgeExpiredOtps({ retentionMs, now });
     expect(n).toBe(2);

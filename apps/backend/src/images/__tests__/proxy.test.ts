@@ -18,7 +18,6 @@ vi.mock('../../config/index.js', async (importActual) => {
   };
 });
 
-// Mock logger to suppress output
 vi.mock('../../logger.js', () => ({
   logger: {
     info: vi.fn(),
@@ -54,7 +53,6 @@ vi.mock('../../clustering/data-store.js', () => ({
   getMapPinUrl: (merchantId: string) => storeState.pinByMerchant.get(merchantId) ?? null,
 }));
 
-// Mock clustering handler to avoid proto import
 vi.mock('../../clustering/handler.js', () => ({
   clustersHandler: vi.fn(async (c: { json: (data: unknown) => Response }) =>
     c.json({ clusterPoints: [], locationPoints: [] }),
@@ -129,7 +127,6 @@ beforeEach(() => {
   __resetImageCacheForTests();
 });
 
-// Tiny valid JPEG-like response for tests that need a successful upstream
 function fakeImageResponse(): Response {
   const body = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
   return new Response(body, {

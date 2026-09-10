@@ -1,32 +1,4 @@
-/**
- * A2-1905 — Data Subject Rights (DSR) account deletion.
- *
- * `POST /api/users/me/dsr/delete` — deletes the calling user's
- * account. Privacy-policy promise (`/privacy` route, §5 — erasure +
- * the GDPR / CCPA equivalent for non-EU jurisdictions).
- *
- * **What "delete" means here.** Order history must be retained for
- * tax / regulatory reporting, so "delete" is **anonymisation** rather
- * than a hard row removal:
- *
- *   - `users.email` is replaced with a synthetic
- *     `deleted-{userId}@deleted.loopfinance.io` placeholder so the
- *     doc remains consistent with order history but no longer carries
- *     a real PII anchor.
- *   - `users.ctxUserId` is set null.
- *   - `user_identities` docs are deleted (Google/Apple OAuth links).
- *   - All refresh tokens are revoked so any session in flight is
- *     immediately invalidated.
- *
- * **Pre-conditions.** Refuse to anonymise while any order is
- * mid-flight (`unpaid` / `paid`) — the purchase is being fulfilled
- * and CTX attribution still needs the account.
- *
- * **Post-deletion auth.** A subsequent OTP request to the original
- * email creates a fresh user doc (the deleted doc's email is now
- * `deleted-{id}@…`). Old order history is invisible to the new
- * account.
- */
+// A2-1905 — DSR account deletion via anonymisation
 import { db } from '../db/client.js';
 import { revokeAllRefreshTokensForUser } from '../auth/refresh-tokens.js';
 import { logger } from '../logger.js';
@@ -34,26 +6,14 @@ import { logger } from '../logger.js';
 export type DsrDeleteBlockReason = 'in_flight_orders';
 
 export interface DsrDeleteResult {
-  /** True when the anonymisation succeeded; the caller's session is dead. */
   ok: boolean;
-  /** Set when `ok=false`. The first blocker found wins. */
   blockedBy?: DsrDeleteBlockReason;
 }
 
-/**
- * Build the synthetic placeholder email used post-deletion. Pure;
- * exposed so tests can pin the format without redoing the synthesis.
- * The `userId` segment is the doc's UUID so different deletions
- * never collide.
- */
 export function deletedEmailFor(userId: string): string {
   return `deleted-${userId}@deleted.loopfinance.io`;
 }
 
-/**
- * Anonymises the user identified by `userId`. Refuses (returns
- * `ok: false`) when a fulfilment is in flight.
- */
 export async function deleteUserViaAnonymisation(userId: string): Promise<DsrDeleteResult> {
   // Block: orders mid-fulfilment (ADR 052 states: unpaid → paid →
   // fulfilled). Anonymising during fulfilment could drop the CTX

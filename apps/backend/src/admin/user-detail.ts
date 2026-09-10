@@ -1,23 +1,4 @@
-/**
- * Admin user-detail drill-down and its two lookup siblings.
- *
- * `GET /api/admin/users/:userId`        — the row by internal uuid
- * `GET /api/admin/users/by-email?email` — the row by exact address
- *
- * The detail row is what the admin panel's user page fetches first and
- * keys everything else off: home currency, staff tier, CTX linkage,
- * "member since". `updatedAt` is surfaced because it is how support
- * spots a recent edit.
- *
- * The by-email variant is deliberately narrower than the `?q=`
- * fragment search: one row by exact match, no pagination, a 404 when
- * nothing matches. The support workflow is "I have the address from
- * the ticket, give me the user" — a fragment search would make them
- * re-select from suggestions. Emails are case-insensitive in practice
- * ("Alice@Example.COM" is the same mailbox), and the stored form is
- * already normalised at signup, so the comparison lowercases the input
- * to match.
- */
+// admin user-detail + by-email lookups
 import type { Context } from 'hono';
 import { UUID_RE } from '../uuid.js';
 import { db } from '../db/client.js';
@@ -26,10 +7,7 @@ import { logger } from '../logger.js';
 
 const log = logger.child({ handler: 'admin-user-detail' });
 
-// Plausible email shape — not a full RFC 5321 validator. Real
-// validation lives at signup; this only filters obvious garbage
-// (missing `@`, embedded whitespace) so an impossible input doesn't
-// cost a lookup.
+// pre-filters obvious garbage to avoid a lookup; real validation is at signup
 const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const EMAIL_MAX_LENGTH = 254;
 
@@ -55,7 +33,6 @@ function toView(row: UserDoc): AdminUserView {
   };
 }
 
-/** GET /api/admin/users/:userId */
 export async function adminGetUserHandler(c: Context): Promise<Response> {
   const userId = c.req.param('userId');
   if (userId === undefined || userId.length === 0) {
@@ -76,7 +53,6 @@ export async function adminGetUserHandler(c: Context): Promise<Response> {
   }
 }
 
-/** GET /api/admin/users/by-email?email=… */
 export async function adminUserByEmailHandler(c: Context): Promise<Response> {
   const raw = c.req.query('email');
   if (raw === undefined || raw.length === 0) {

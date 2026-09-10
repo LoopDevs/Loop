@@ -1,16 +1,4 @@
-/**
- * User profile handlers.
- *
- * `GET /api/users/me` — returns the caller's Loop user profile. The
- * primary surface for the client to read `home_currency` (ADR 015)
- * + email.
- *
- * `POST /api/users/me/home-currency` — first-time-only write path.
- * Onboarding UIs call this after OTP verify to set the user's
- * region. Guarded on "no orders yet": once a user places their first
- * order, pricing is pinned to that order's currency and letting the
- * user flip regions would misalign the history.
- */
+// User profile handlers — ADR 015, ADR 037, A2-550, A2-551, A2-1905, A2-1906
 import type { Context } from 'hono';
 import { z } from 'zod';
 import { HOME_CURRENCIES, type StaffRole } from '@loop/shared';
@@ -42,16 +30,7 @@ export interface UserMeView {
   isAdmin: boolean;
 }
 
-/**
- * Resolves the caller's effective staff tier the same way
- * `requireStaff` does — a `staff_roles` row wins, and the
- * config-allowlist `isAdmin` shim is the fallback when there is none.
- *
- * A lookup failure degrades to the shim rather than failing the
- * request: `/api/users/me` is the profile endpoint every authenticated
- * client polls, and a staff-role blip must not log the whole fleet out
- * of their own account page.
- */
+// Lookup failure degrades to shim: profile endpoint is polled by all clients, staff-role blip must not log out fleet
 async function resolveStaffRoleFor(row: User): Promise<StaffRole | null> {
   try {
     const staffRow = await getStaffRole(row.id);
@@ -73,11 +52,7 @@ export async function toView(row: User): Promise<UserMeView> {
   };
 }
 
-/**
- * A2-550 / A2-551 fix: identity is now resolved only from the
- * cryptographically-verified Loop-signed token. See
- * `apps/backend/src/auth/authenticated-user.ts` for the rationale.
- */
+// A2-550 / A2-551: identity resolved only from cryptographically-verified Loop-signed token
 export async function resolveCallingUser(c: Context): Promise<User | null> {
   return await resolveLoopAuthenticatedUser(c);
 }
@@ -100,11 +75,7 @@ const SetHomeCurrencyBody = z.object({
   currency: z.enum(HOME_CURRENCIES),
 });
 
-/**
- * POST /api/users/me/home-currency — onboarding-time picker.
- * Succeeds when the caller has zero orders; returns 409 otherwise so
- * the client can render a "contact support" path for existing users.
- */
+// 409 on existing orders: pricing history pins currency at order creation
 export async function setHomeCurrencyHandler(c: Context): Promise<Response> {
   const parsed = SetHomeCurrencyBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) {
@@ -127,15 +98,11 @@ export async function setHomeCurrencyHandler(c: Context): Promise<Response> {
     return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
   }
 
-  // Early-exit: no-op when the user is already on the requested
-  // currency. Lets the client call this endpoint unconditionally
-  // from onboarding without first checking `GET /me`.
+  // No-op if already on requested currency: allows unconditional onboarding calls without prior GET /me
   if (user.homeCurrency === parsed.data.currency) {
     return c.json<UserMeView>(await toView(user));
   }
 
-  // Order guard — pricing history pins currency at order creation, so
-  // home currency is a first-time-only write.
   const hasOrder = await db.collection('orders').findOne({ userId: user.id });
   if (hasOrder !== null) {
     return c.json(
@@ -159,8 +126,5 @@ export async function setHomeCurrencyHandler(c: Context): Promise<Response> {
   return c.json<UserMeView>(await toView(updated));
 }
 
-// DSR handlers (2 functions covering data-subject-rights export +
-// delete, A2-1905 + A2-1906) live in `./dsr-handler.ts`. Re-
-// exported here so the routes module's existing import block keeps
-// working without re-targeting.
+// Re-exported from ./dsr-handler.ts to preserve existing routes module import block
 export { dsrExportHandler, dsrDeleteHandler } from './dsr-handler.js';

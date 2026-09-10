@@ -9,8 +9,6 @@ vi.mock('../../logger.js', () => ({
 
 import { fetchJwks, verifyIdToken, __resetJwksCacheForTests } from '../id-token.js';
 
-// ─── Test-side signer ────────────────────────────────────────────────────────
-
 interface Keypair {
   publicKey: KeyObject;
   privateKey: KeyObject;
@@ -46,8 +44,6 @@ function signJwt(args: {
   return `${signingInput}.${sig}`;
 }
 
-// ─── fetch + JWKS mock harness ───────────────────────────────────────────────
-
 const JWKS_URL = 'https://issuer.example/.well-known/jwks.json';
 let fetchSpy: ReturnType<typeof vi.spyOn> | null = null;
 
@@ -65,8 +61,6 @@ function stubJwks(keys: Array<Record<string, unknown>>): ReturnType<typeof vi.sp
     return new Response(JSON.stringify({ keys }), { status: 200 });
   });
 }
-
-// ─── fetchJwks ────────────────────────────────────────────────────────────────
 
 describe('fetchJwks', () => {
   it('fetches + caches the JWKS (second call is a cache hit)', async () => {
@@ -90,8 +84,6 @@ describe('fetchJwks', () => {
     await expect(fetchJwks(JWKS_URL)).rejects.toThrow(/schema drift/);
   });
 });
-
-// ─── verifyIdToken happy + reject paths ──────────────────────────────────────
 
 const ISS = 'https://issuer.example';
 const AUD = 'loop-web-client';

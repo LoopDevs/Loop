@@ -1,26 +1,4 @@
-/**
- * Admin user search.
- *
- * `GET /api/admin/users/search?q=<email-fragment>` — case-insensitive
- * substring match on email. Closes the navigation gap on the admin
- * surface: ops can drill into a user from an order, but the only way
- * to find one from scratch (support chat: "user@example.com says their
- * card never arrived") would otherwise be to hunt through orders.
- *
- * Search policy:
- *   - Minimum 2 chars. Shorter queries match too much to be useful and
- *     would scan the whole collection for nothing; reject with 400.
- *   - Maximum 254 chars (RFC 5321 email length cap).
- *   - Substring anywhere in the email. Starts-with would be cheaper,
- *     but ops often only remembers the domain or a name fragment.
- *   - 20 results. A broader match means the operator should narrow the
- *     query, not that we should stream thousands of rows to the UI.
- *   - Newest signup first, which lines up with the "user just signed
- *     up, please check their account" case.
- *
- * Returns a thin view — enough to disambiguate and click through to
- * the drill-down at `/api/admin/users/:userId`.
- */
+// Admin user search — A2-507
 import { createHash } from 'node:crypto';
 import type { Context } from 'hono';
 import { db } from '../db/client.js';

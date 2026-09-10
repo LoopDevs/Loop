@@ -1,12 +1,4 @@
-/**
- * Mirror application — shared by the giftcard ws maintainer (event
- * push) and the ctx mirror sweep (poll reconcile), so both paths
- * resolve + apply a CTX card identically (ADR 052).
- *
- * Resolution keys `operatorReference` (the Loop order row id) first,
- * `ctx_order_id` as fallback; unknown cards are ignored — the
- * company-wide feed can carry non-Loop-originated cards.
- */
+// Mirror application — shared by giftcard ws maintainer + ctx mirror sweep (ADR 052)
 import { logger } from '../logger.js';
 import { notifyOrderFulfilled } from '../discord.js';
 import { mapCtxDisplayStatus, type CtxGiftCard } from './ctx-order.js';
@@ -38,14 +30,7 @@ export async function resolveOrderForCard(card: CtxGiftCard): Promise<Order | nu
   return getOrderByCtxOrderId(card.id);
 }
 
-/**
- * Applies a CTX card's `displayStatus` onto its mirror row. The
- * transitions module's state guards make this idempotent + safe under
- * concurrent ws/sweep delivery. On `fulfilled`, does one
- * authoritative redemption fetch (payloads on the ws never carry
- * secrets); a fetch failure still fulfils the row — the redemption
- * backfill retries the payload.
- */
+// ws payloads never carry secrets; fetch failure still fulfils — backfill retries
 export async function applyCtxCardStatus(order: Order, card: CtxGiftCard): Promise<void> {
   const displayStatus = card.displayStatus !== undefined ? card.displayStatus : '';
   const mapped = mapCtxDisplayStatus(displayStatus);

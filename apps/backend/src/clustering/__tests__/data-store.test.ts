@@ -60,7 +60,6 @@ interface MockLocation {
   mapPinUrl?: string;
 }
 
-/** Helper: build a paginated /locations response. */
 function makePage(page: number, pages: number, result: MockLocation[]): Response {
   return new Response(
     JSON.stringify({
@@ -271,9 +270,7 @@ describe('refreshLocations', () => {
               enabled: true,
               latLong: { latitude: '40.0', longitude: '-74.0' },
             },
-            // missing merchantId → rejected by Zod
             { id: 'bad-1', enabled: true, latLong: { latitude: '40', longitude: '-74' } },
-            // missing latLong entirely → rejected by Zod
             { id: 'bad-2', merchantId: 'm-2', enabled: true },
             {
               id: 'good-2',
@@ -338,19 +335,14 @@ describe('refreshLocations', () => {
   });
 
   it('rejects an upstream response that is missing pagination', async () => {
-    // Previously this would have crashed on data.pagination.pages access.
-    // Now the Zod validator rejects cleanly and the catch preserves previous data.
     mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }));
 
     await refreshLocations();
 
-    // No throw propagated; store retains whatever it had before.
     expect(Array.isArray(getLocations().locations)).toBe(true);
   });
 
   it('rejects an oversized result array wholesale — a compromised upstream cannot blow memory (FT-15)', async () => {
-    // Load one good page first so we can prove the oversized refresh is
-    // REJECTED (previous data retained), not merely that it ended up empty.
     mockFetch.mockResolvedValueOnce(
       makePage(1, 1, [
         {
@@ -364,9 +356,6 @@ describe('refreshLocations', () => {
     await refreshLocations();
     expect(getLocations().locations).toHaveLength(1);
 
-    // A compromised/buggy upstream hands back an unbounded result array
-    // (> MAX_RESULT_COUNT = 5000) in a single page. The count cap must reject
-    // the whole response before it is loaded into the served store.
     const flood: MockLocation[] = Array.from({ length: 5001 }, (_, i) => ({
       id: `loc-${i}`,
       merchantId: `m-${i}`,
@@ -376,8 +365,6 @@ describe('refreshLocations', () => {
     mockFetch.mockResolvedValueOnce(makePage(1, 1, flood));
     await refreshLocations();
 
-    // Whole response rejected by the count cap → previous good data retained,
-    // NOT the 5001-element flood.
     expect(getLocations().locations).toHaveLength(1);
     expect(getLocations().locations[0]!.merchantId).toBe('m-good');
   });
@@ -392,9 +379,6 @@ describe('refreshLocations', () => {
           latLong: { latitude: '40.0', longitude: '-74.0' },
         },
         {
-          // 200-char merchantId > MAX_ID_LENGTH (128): a compromised upstream
-          // injecting an oversized string. Per-item safeParse must skip it
-          // without poisoning the rest of the page.
           id: 'loc-huge',
           merchantId: 'x'.repeat(200),
           enabled: true,

@@ -1,42 +1,4 @@
-/**
- * `/health` handler + the rolling-window flap-damping state that
- * gates Discord notifies. Pulled out of `app.ts` so the
- * hysteresis policy + the upstream-probe cache + the notify
- * cooldown all live in one file.
- *
- * Why two layers of throttling here:
- *
- * 1. **Rolling-window streak detection** — switched from a
- *    consecutive-streak detector after a prod flap: a marginally-
- *    slow CTX `/status` probe (near the 5s timeout) would produce
- *    alternating DOWN/UP readings; the streak detector caught
- *    every one as a transition. The window approach tolerates a
- *    few bad probes without flipping — the signal has to be
- *    persistent. Asymmetric thresholds preserve the original
- *    behaviour: easier to fall *into* degraded (5 of 10 bad
- *    probes ≈ 2-3 minutes during real outages), harder to claim
- *    *back* to healthy (8 of 10 good probes) so a marginally-
- *    slow upstream doesn't bounce us before the underlying issue
- *    settles.
- * 2. **Fleet-wide fire-once gate** (CONV-WATCH-02) — the per-machine
- *    flip above still absorbs per-probe jitter, but the resulting page
- *    is routed through the `watchdog_alert_state` dedup gate (the
- *    pattern the money watchdogs use) so a SHARED-dependency outage
- *    (DB / required worker) pages ONCE fleet-wide and re-arms on
- *    recovery, instead of once per machine (N machines ⇒ N pages) with
- *    a per-process cooldown that a Fly machine-cycle would reset. Raw
- *    `/health` state is always queryable so ops still has ground truth.
- *
- * The upstream-probe cache (10s TTL) keeps `/health` cheap:
- * `/health` is unauthenticated and unrate-limited (Fly probes
- * every 15s, k8s-ish liveness patterns do similar). Without the
- * cache every external call — including from an attacker
- * spamming the endpoint — would trigger a fresh outbound fetch to
- * CTX, both generating upstream load we don't want to be
- * responsible for and burning our local socket budget. 10s is
- * shorter than the Fly probe interval so the cached value is
- * always the one from the last probe.
- */
+// /health handler + flap-damping state — CONV-WATCH-02, A4-034, A4-035, A4-073, B-5, S4-4, BK-healthrecon
 import type { Context } from 'hono';
 import { config } from './config/index.js';
 import { logger } from './logger.js';
@@ -64,26 +26,10 @@ const HEALTH_FLIP_TO_DEGRADED_THRESHOLD = 5;
 const HEALTH_FLIP_TO_HEALTHY_THRESHOLD = 8;
 const healthReadings: Array<'healthy' | 'degraded'> = [];
 
-/**
- * CONV-WATCH-02: fleet-wide `watchdog_alert_state` key for the
- * health-change page. The per-process rolling window (above) still damps
- * per-probe jitter on THIS machine; this key makes the resulting page
- * fleet-wide fire-once. See `routeHealthChangeNotify` for the rationale.
- */
+// CONV-WATCH-02: fleet-wide fire-once gate for health-change pages
 const HEALTH_CHANGE_WATCHDOG_NAME = 'health-change';
 
-/**
- * GeoLite2 staleness is a slow-changing, weeks-long condition (unlike the
- * healthy/degraded flap this file otherwise damps), so it gets its own,
- * much longer cooldown rather than piggy-backing on the health-change
- * fleet gate / the rolling-window flip detector — without
- * this a stale-but-not-fixed DB would otherwise either page every 30
- * minutes (too noisy for a "remember to redeploy" nudge) or never re-page
- * once the initial degraded→healthy/healthy→degraded transition already
- * fired for an unrelated reason. 7 days: MaxMind's own refresh cadence, so
- * a forgotten refresh surfaces at roughly the same cadence it should have
- * happened.
- */
+// GeoLite2 staleness is a slow-changing condition; 7-day cooldown matches MaxMind refresh cadence
 const GEO_DB_NOTIFY_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 let lastGeoDbNotifyAt = 0;
 
@@ -95,29 +41,12 @@ function maybeNotifyGeoDbStale(buildEpoch: string | null, ageDays: number | null
 }
 
 const UPSTREAM_PROBE_TTL_MS = 10_000;
-/**
- * Probe timeout. Intentionally LONGER than the Fly healthcheck
- * timeout (5s) — the Fly probe times out and retries its own
- * schedule, but the probe result we care about here is whether
- * upstream *eventually* responds within a few seconds. Keeping
- * this at 5s was producing degraded readings whenever CTX
- * `/status` p95 latency spiked into the 4.5–7s band (common
- * under load). 8s covers that band without stretching so far
- * that a genuinely down upstream waits forever.
- */
+// 8s timeout covers CTX /status p95 latency spikes (4.5–7s) without masking genuine outages
 const UPSTREAM_PROBE_TIMEOUT_MS = 8_000;
 let upstreamProbeCache: { reachable: boolean; at: number } | null = null;
 let upstreamProbeInFlight: Promise<boolean> | null = null;
 
-/**
- * Delivery-confirming health-change send. Returns whether the Discord
- * webhook actually delivered (`sendWebhook` reports `false` on a non-2xx
- * OR an unconfigured webhook), so the fleet-wide gate below only latches
- * `alert_active` on a real delivery — same at-least-once contract the
- * money watchdogs rely on. Mirrors the embed `discord/monitoring.ts`'s
- * `notifyHealthChange` built; kept here because that notifier is
- * fire-and-forget (`void`) and can't report delivery.
- */
+// Returns delivery status so the fleet-wide gate latches alert_active only on real delivery
 function sendHealthChangeWebhook(
   status: 'healthy' | 'degraded',
   details: string,
@@ -129,28 +58,7 @@ function sendHealthChangeWebhook(
   });
 }
 
-/**
- * CONV-WATCH-02: route the health-change page through the fleet-wide
- * fire-once dedup gate (`watchdog_alert_state`, the pattern the money
- * watchdogs use) so a SHARED-dependency outage pages ONCE fleet-wide,
- * not once per machine.
- *
- * Before this, each machine ran its own per-process rolling window AND a
- * per-process notify cooldown, so a shared outage (DB unreachable /
- * required worker degraded) flipped every machine to `critical` and each
- * paged independently — N machines ⇒ N pages — and a Fly machine cycle
- * reset the per-process cooldown, re-paging on the next flip. The gate
- * keyed on `HEALTH_CHANGE_WATCHDOG_NAME` persists the fired-state in
- * Postgres: the first machine to flip → degraded pages and latches
- * `alert_active=true`; every other machine that flips reads `true` and
- * stays quiet; whichever machine flips back → healthy re-arms it.
- *
- * `shouldBeActive` is derived fresh from the current per-machine status
- * on each transition — the per-process window still decides WHEN this
- * machine considers itself degraded; the gate only decides whether the
- * fleet has already been paged. Exported so the integration suite can
- * drive the real gate + real `watchdog_alert_state` end-to-end.
- */
+// CONV-WATCH-02: routes health-change pages through fleet-wide dedup gate to prevent N-machines-N-pages
 export function routeHealthChangeNotify(
   status: 'healthy' | 'degraded',
   details: string,
@@ -163,20 +71,7 @@ export function routeHealthChangeNotify(
   });
 }
 
-/**
- * Fire-and-forget wrapper so the `/health` response path never blocks on
- * the gate's DB round-trip or the Discord send.
- *
- * Fallback: the dedup gate READS Postgres, but a DB outage is itself a
- * critical health incident (`!databaseReachable` → the flip that got us
- * here). If the gate throws (DB unreachable — likely the incident), we
- * must NOT drop the page: fall back to a direct, un-deduped send so a
- * DB-down incident still surfaces on the monitoring channel (per-machine,
- * as before the fix — strictly better than zero pages). When the DB is
- * up, the gate resolves and dedups fleet-wide; a `false` resolution
- * (already paged elsewhere) is the intended dedup, NOT an error, so it
- * does not trigger the fallback.
- */
+// Fire-and-forget wrapper; falls back to un-deduped send if the gate's DB read fails (DB outage is the incident)
 function maybeNotifyHealthChange(status: 'healthy' | 'degraded', details: string): void {
   void routeHealthChangeNotify(status, details).catch((err: unknown) => {
     healthLog.warn(
@@ -187,18 +82,7 @@ function maybeNotifyHealthChange(status: 'healthy' | 'degraded', details: string
   });
 }
 
-/**
- * A4-034: lightweight Postgres readiness probe. Runs `SELECT 1`
- * with a short timeout so a connection-pool exhaustion / DB
- * outage / credential rotation mistake / network partition flips
- * `/health` to degraded (HTTP 503 — A4-035 / A4-073) rather than
- * silently leaving the orchestrator in the dark while DB-backed
- * endpoints fail.
- *
- * Cached at the same 10s TTL as the upstream probe — `/health`
- * is unauthenticated and Fly probes every 15s; we don't want a
- * burst of `/health` calls to flood the DB pool.
- */
+// A4-034: lightweight Postgres readiness probe; A4-035 / A4-073: 503 on failure
 const DB_PROBE_TIMEOUT_MS = 3_000;
 let dbProbeCache: { reachable: boolean; at: number } | null = null;
 let dbProbeInFlight: Promise<boolean> | null = null;
@@ -213,8 +97,6 @@ async function probeDb(): Promise<boolean> {
   dbProbeInFlight = (async () => {
     let reachable = true;
     try {
-      // Cheap store probe with a short timeout — a wedged driver
-      // surfaces as unreachable rather than hanging /health.
       await Promise.race([
         db.collection('users').count({}),
         new Promise<never>((_, reject) =>
@@ -231,10 +113,6 @@ async function probeDb(): Promise<boolean> {
   return dbProbeInFlight;
 }
 
-/**
- * Test seam: drops the cached DB probe so the next /health call
- * re-runs the SELECT 1.
- */
 export function __resetDbProbeCacheForTests(): void {
   dbProbeCache = null;
   dbProbeInFlight = null;
@@ -245,9 +123,6 @@ async function probeUpstream(): Promise<boolean> {
   if (upstreamProbeCache !== null && now - upstreamProbeCache.at < UPSTREAM_PROBE_TTL_MS) {
     return upstreamProbeCache.reachable;
   }
-  // Coalesce concurrent probes — a burst of /health requests that
-  // arrive within the TTL window should share one outbound fetch,
-  // not each fire their own.
   if (upstreamProbeInFlight !== null) return upstreamProbeInFlight;
 
   upstreamProbeInFlight = (async () => {
@@ -267,14 +142,7 @@ async function probeUpstream(): Promise<boolean> {
   return upstreamProbeInFlight;
 }
 
-/**
- * B-5: the freshness-threshold formulas backing `/health`'s
- * `merchantsStale` / `locationsStale` flags AND the equivalent
- * `loop_catalog_stale` gauge on `/metrics` (`observability-handlers.ts`).
- * Pulled out to a single source of truth so the two surfaces can never
- * silently drift apart on the "2x refresh interval" threshold pinned in
- * `docs/slo.md` §Freshness.
- */
+// B-5: single source of truth for freshness thresholds to prevent drift between /health and /metrics
 export function merchantCatalogStaleAfterMs(): number {
   return MERCHANT_REFRESH_INTERVAL_MS * 2;
 }
@@ -300,52 +168,17 @@ export async function healthHandler(c: Context): Promise<Response> {
   ]);
   const runtime = getRuntimeHealthSnapshot();
 
-  // Retained for response-shape stability only: `getCtxApiHealth()`
-  // reports constants now that the CTX-upstream breaker it used to
-  // read is gone, so `ctxApiDown` never becomes true and the branches
-  // keyed on it below never fire. `upstreamReachable` above is the
-  // live "is CTX up" signal. The fields stay because the shared
-  // `TreasurySnapshot` type and the admin UI's CTX status indicator
-  // still read them — see `packages/shared/src/admin-treasury.ts`.
+  // Retained for response-shape stability; ctxApiDown never true as CTX-upstream breaker is gone
   const ctxApiHealth = getCtxApiHealth();
   const ctxApiDown = ctxApiHealth.configured && ctxApiHealth.state === 'open';
 
-  // Two-tier degradation. Critical = "the backend itself is in
-  // trouble; orchestrator should cycle this machine". Soft = "an
-  // external dependency we proxy is slow; we still want it visible
-  // in monitoring but the machine is functional and shouldn't
-  // cycle".
-  //
-  // Why split: a flapping upstream `/status` (CTX latency near our
-  // probe timeout) used to push `/health` to 503 → Fly cycles the
-  // machine → fresh process resets the in-memory notify cooldown →
-  // next state transition fires Discord again. Result: monitoring
-  // channel shows degraded↔healthy oscillation every couple of
-  // minutes during a CTX latency incident, even though Loop's own
-  // surfaces (DB, workers, in-memory caches) are fine.
-  //
-  // After this split:
-  //   - DB unreachable / required worker degraded → 503, Fly cycles.
-  //   - Upstream slow / catalog stale → 200 with `degraded: true`
-  //     in the body and `softDegradedReasons` listing causes. Fly
-  //     keeps the machine; monitoring dashboards still see truth;
-  //     Discord stays quiet on upstream blips.
+  // Two-tier degradation: critical (503, Fly cycles) vs soft (200, visible in monitoring)
   const criticalDegraded = !databaseReachable || runtime.degraded;
   const softDegraded =
     merchantsStale || locationsStale || !upstreamReachable || ctxApiDown || geoDbStatus.stale;
   const degraded = criticalDegraded || softDegraded;
 
-  // Raw reading → rolling window. Keep the last N readings, flip
-  // when a supermajority agrees. Shifts out the oldest reading
-  // once the window is full so the detector always reflects
-  // recent state.
-  //
-  // Notification-flap fix: only critical degradation (DB / worker)
-  // contributes to the notify-window. Soft degradation (upstream
-  // slow, catalog stale) is reflected in the response body and the
-  // dashboard but doesn't toggle the Discord paging state. A CTX
-  // latency incident no longer flips the monitoring channel
-  // every 90 seconds.
+  // Only critical degradation contributes to the notify-window to prevent Discord paging on upstream blips
   const rawReading: 'degraded' | 'healthy' = criticalDegraded ? 'degraded' : 'healthy';
   healthReadings.push(rawReading);
   if (healthReadings.length > HEALTH_WINDOW_SIZE) healthReadings.shift();
@@ -353,9 +186,6 @@ export async function healthHandler(c: Context): Promise<Response> {
   const degradedInWindow = healthReadings.filter((r) => r === 'degraded').length;
   const healthyInWindow = healthReadings.length - degradedInWindow;
 
-  // Bootstrap on first /health hit — no window gating yet because
-  // we have no prior state to flip against. After this one-shot
-  // seed, every subsequent transition has to clear the threshold.
   if (lastHealthStatus === null) {
     lastHealthStatus = rawReading;
   } else if (
@@ -406,19 +236,8 @@ export async function healthHandler(c: Context): Promise<Response> {
     maybeNotifyHealthChange('healthy', 'All systems operational');
   }
 
-  // /health reports live service state (merchant/location
-  // staleness, upstream reachability). A CDN in front caching
-  // this would serve "healthy" for the cache TTL after upstream
-  // went down — masking outages from external probes. `no-store`
-  // is the safe default even though Fly's own probe path doesn't
-  // cache.
+  // no-store prevents CDN from masking outages by serving stale "healthy" status
   c.header('Cache-Control', 'no-store');
-  // Only critical degradation (DB / required worker) returns 503
-  // and triggers Fly machine cycling. Soft degradation (upstream
-  // slow, catalogs stale) still surfaces in the body so dashboards
-  // see the truth, but the orchestrator keeps the machine — Loop
-  // can serve cached merchants + place Loop-native orders
-  // independent of CTX `/status` latency.
   const httpStatus = criticalDegraded ? 503 : 200;
   const softDegradedReasons: string[] = [];
   if (merchantsStale) softDegradedReasons.push('merchants_stale');
@@ -427,32 +246,11 @@ export async function healthHandler(c: Context): Promise<Response> {
   if (ctxApiDown) softDegradedReasons.push('ctx_api_down');
   if (geoDbStatus.stale) {
     softDegradedReasons.push('geo_db_stale');
-    // go-live-plan §T1-F: unlike the other soft-degraded reasons above,
-    // this one deliberately pages — a forgotten GeoLite2 refresh is a
-    // silent config-drift that nobody would otherwise notice, and the
-    // long cooldown (7 days) keeps it a once-a-week nudge rather than
-    // incident-grade noise.
+    // go-live-plan §T1-F: pages on GeoLite2 staleness as silent config-drift
     maybeNotifyGeoDbStale(geoDbStatus.buildEpoch, geoDbStatus.ageDays);
   }
 
-  // BK-healthrecon: the detailed body below is reconnaissance surface for
-  // an UNAUTHENTICATED caller —
-  // internal worker names + which are broken, the fleet machine count
-  // (⇒ the aggregate rate-limit budget), raw OTP-delivery error strings,
-  // and DB/upstream reachability. None of it is needed by a legitimate
-  // external liveness probe: Fly keys purely off the HTTP status
-  // (`apps/backend/fly.toml` → GET /health), and CI/Playwright probes
-  // discard the body. The full operational snapshot is ALSO already
-  // exposed — the same data, in Prometheus form — behind the probe-gated
-  // `/metrics` (`observability-handlers.ts`), so gating it here loses no
-  // observability. Gate on the same ops-probe bearer that guards
-  // `/metrics`: external callers get a minimal ok/degraded liveness
-  // signal (+ the 200/503 Fly cycles on); internal callers presenting the
-  // bearer get the full snapshot. `probeGateAllows` keeps the gate OPEN
-  // in dev/test when no token is configured, so local tooling + vitest
-  // still see the detailed body. All side effects above (hysteresis,
-  // Discord notify, geo-staleness paging) already ran and are unaffected
-  // by which body shape we return.
+  // BK-healthrecon: gates detailed body behind ops-probe bearer to hide reconnaissance surface from unauthenticated callers
   c.header('Vary', 'Authorization');
   if (!probeGateAllows(c, config.observability.metrics.bearerToken)) {
     return c.json({ status: degraded ? 'degraded' : 'healthy' }, httpStatus);
@@ -467,42 +265,18 @@ export async function healthHandler(c: Context): Promise<Response> {
       locationsLoadedAt: new Date(locLoadedAt).toISOString(),
       merchantsStale,
       locationsStale,
-      // Event-driven merchant maintenance (merchants/ws-maintainer.ts).
-      // 'disabled' = not started / stopped; 'connecting' = between
-      // sessions / backoff; 'connected' = the CTX merchant-topic
-      // subscription is live. Informational — a down ws degrades
-      // freshness to the sweep cadence, which `merchantsStale` already
-      // covers.
       merchantWs: getMerchantWsStatus(),
-      // Event-driven order-mirror maintenance (ctx/giftcard-ws-
-      // maintainer.ts), same state vocabulary as merchantWs.
-      // Informational — a down ws degrades order-status freshness to
-      // the mirror-sweep cadence, whose own tick health the `workers`
-      // array covers.
       giftcardWs: getGiftcardWsStatus(),
-      // go-live-plan §T1-F: staleness/absence signal for the operator-
-      // provided GeoLite2-Country .mmdb (docs/deployment.md §GeoLite2).
-      // `geoDbStale` is false both when fresh AND when
-      // `catalog.geoip.databasePath` was never configured — see
-      // `GeoDbStatus.stale` in `public/geo.ts` for why "unconfigured"
-      // must not read as "degraded".
+      // go-live-plan §T1-F: geoDbStale is false when unconfigured; see GeoDbStatus.stale
       geoDbStale: geoDbStatus.stale,
       geoDbBuildEpoch: geoDbStatus.buildEpoch,
-      // S4-4: current divisor the rate limiter uses for its per-machine
-      // → fleet-wide budget conversion (middleware/fleet-size.ts).
-      // `rateLimitFleetEstimateSource` is 'dynamic' when a fresh
-      // `.internal` DNS read is in effect, 'static' when running on the
-      // RATE_LIMIT_MACHINE_COUNT_ESTIMATE fallback (no FLY_APP_NAME —
-      // local dev/CI — or DNS unavailable past the grace period). Purely
-      // informational: neither field affects softDegraded/criticalDegraded.
+      // S4-4: current divisor for rate limiter fleet-wide budget conversion
       rateLimitFleetEstimate: currentFleetSizeEstimate(),
       rateLimitFleetEstimateSource: currentFleetSizeSource(),
       upstreamReachable,
-      // A4-034: DB readiness component. False = pool exhausted /
-      // credentials rotated / network partition / DB hard-down.
+      // A4-034: DB readiness component
       databaseReachable,
-      // Constant now — kept because the admin CTX status indicator
-      // reads this shape. See the note at the assignment above.
+      // Constant now — kept because the admin CTX status indicator reads this shape
       ctxApi: ctxApiHealth,
       ctxApiDown,
       criticalDegraded,
@@ -515,37 +289,16 @@ export async function healthHandler(c: Context): Promise<Response> {
   );
 }
 
-/**
- * Test helper: clear the /health upstream-probe cache + the
- * hysteresis state. The handler caches the upstream fetch result
- * for 10s so external spammers don't generate outbound traffic
- * proportional to inbound. Tests that simulate upstream
- * reachability changes need to invalidate the cache + the
- * rolling-window readings between cases to observe the
- * transition.
- */
 export function __resetHealthProbeCacheForTests(): void {
   upstreamProbeCache = null;
   upstreamProbeInFlight = null;
-  // A4-034: reset the DB probe cache too so DB-related test
-  // transitions are observable.
   dbProbeCache = null;
   dbProbeInFlight = null;
   lastHealthStatus = null;
   healthReadings.length = 0;
-  // CONV-WATCH-02: the notify fired-state is no longer a per-process
-  // variable — it lives fleet-wide in `watchdog_alert_state` under
-  // `HEALTH_CHANGE_WATCHDOG_NAME`. Nothing to reset here for it.
   lastGeoDbNotifyAt = 0;
 }
 
-/**
- * Test seam: resets only the upstream probe cache (not the
- * hysteresis streaks or notify cooldown). Used by flap-damping
- * tests that need to force a fresh probe between /health calls
- * while preserving the accumulated streak state — the whole point
- * the tests are verifying.
- */
 export function __resetUpstreamProbeCacheOnlyForTests(): void {
   upstreamProbeCache = null;
   upstreamProbeInFlight = null;

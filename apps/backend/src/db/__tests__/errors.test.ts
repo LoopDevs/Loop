@@ -1,21 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { isUniqueViolation, UniqueViolationError } from '../errors.js';
 
-/**
- * The document store surfaces every unique-spec collision — from either
- * driver — as a single typed `UniqueViolationError` (the Mongo driver
- * translates the server's E11000 into it; the memory driver throws it
- * directly from its insert scan). Callers that treat "already inserted"
- * as a benign race (order idempotency, the social id-token replay
- * guard) therefore check exactly one shape via `isUniqueViolation`.
- *
- * The history here matters: the Drizzle-era helper walked `.cause`
- * chains sniffing Postgres `code`/`constraint_name` fields, and AUDIT-2
- * finding D showed how easily a message-substring check gave false
- * confidence. The typed-error design removes that whole class of bug —
- * these tests pin that ONLY the typed error matches, never a lookalike
- * built from strings or duck-typed fields.
- */
+// AUDIT-2 D: typed error prevents message-sniffing false positives
 describe('isUniqueViolation', () => {
   it('recognizes a UniqueViolationError thrown by a driver', () => {
     const err = new UniqueViolationError('orders', ['userId', 'idempotencyKey']);
@@ -26,15 +12,12 @@ describe('isUniqueViolation', () => {
     const err = new UniqueViolationError('user_identities', ['provider', 'providerSub']);
     expect(err.collection).toBe('user_identities');
     expect(err.fields).toEqual(['provider', 'providerSub']);
-    // The message carries both so a bare `throw` in a log is actionable.
     expect(err.message).toContain('user_identities');
     expect(err.message).toContain('provider, providerSub');
     expect(err.name).toBe('UniqueViolationError');
   });
 
   it('does NOT match a plain Error, even one whose message mimics the unique-violation text', () => {
-    // Message-sniffing is exactly the anti-pattern the typed error
-    // replaced — a lookalike string must never be treated as benign.
     const err = new Error('unique violation on orders (userId, idempotencyKey)');
     expect(isUniqueViolation(err)).toBe(false);
   });

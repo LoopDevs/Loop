@@ -1,32 +1,13 @@
-/**
- * Admin stuck-orders triage.
- *
- * `GET /api/admin/stuck-orders` — orders CTX has taken payment for but
- * that Loop has not yet seen fulfilled, older than a threshold. The
- * admin dashboard renders this as the "needs attention" card, and
- * anything landing here means the mirror is behind: the giftcard ws
- * dropped an event and the sweep hasn't caught up, or CTX itself is
- * stuck on the card.
- *
- * `unpaid` rows are excluded — those are waiting on the customer, not
- * on us — and the terminal states never appear. The support action
- * from here is the per-order re-drive, which runs the same sweep step
- * on demand.
- *
- * Support-tier: an operator cannot explain a stuck order to a customer
- * without first being able to see that it is stuck (ADR 037 §3).
- */
+// Admin stuck-orders triage — ADR 037 §3
 import type { Context } from 'hono';
 import { db } from '../db/client.js';
 import { logger } from '../logger.js';
 
 const log = logger.child({ handler: 'admin-stuck-orders' });
 
-/**
- * Deliberately earlier than any automatic action. An operator should
- * see a row here well before a background sweep gives up on it, not
- * learn about the incident afterwards from an alert.
- */
+// Deliberately earlier than any automatic action. An operator should
+// see a row here well before a background sweep gives up on it, not
+// learn about the incident afterwards from an alert.
 export const DEFAULT_THRESHOLD_MINUTES = 5;
 const MAX_THRESHOLD_MINUTES = 60 * 24 * 7; // a week
 const DEFAULT_LIMIT = 20;

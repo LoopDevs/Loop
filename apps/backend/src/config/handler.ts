@@ -1,14 +1,4 @@
-/**
- * Public client config (ADR 010 / ADR 013).
- *
- * Returns the feature flags the web client needs to decide which code
- * paths to take — e.g. whether to call `POST /api/orders/loop`
- * (Loop-native flow) or the legacy `POST /api/orders` (CTX proxy).
- *
- * Unauthenticated on purpose: these flags are effectively "did the
- * operator turn this on?" and the client needs the answer before it
- * has a bearer token. Never include anything sensitive here.
- */
+// public client config — ADR 010, ADR 013, ADR 014, ADR 052, P2-14
 import type { Context } from 'hono';
 import { config } from '../config/index.js';
 import { ctxPaymentCurrencies } from '../orders/loop-handler.js';

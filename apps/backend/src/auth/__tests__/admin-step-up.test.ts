@@ -1,12 +1,4 @@
-/**
- * Admin step-up tokens (ADR 028 / CF-08 / SEC-02-stepup).
- *
- * The stateless half (`verifyAdminStepUpToken`) and the authoritative
- * half (`consumeAdminStepUpToken`) are tested separately, because the
- * whole point of SEC-02-stepup is that they disagree: a token can
- * verify perfectly and still be refused because it was minted for a
- * different action class or has already been spent.
- */
+// Admin step-up tokens — ADR 028, CF-08, SEC-02-stepup
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type * as ConfigModule from '../../config/index.js';
 
@@ -55,8 +47,7 @@ describe('configuration', () => {
     stepUpState.signingKey = undefined;
 
     expect(isAdminStepUpConfigured()).toBe(false);
-    // `not_configured`, not `bad_signature` — the gate maps this to a
-    // 503 so the surface ships disabled rather than silently skipping.
+    // `not_configured` maps to 503 so the surface ships disabled rather than silently skipping
     expect(verifyAdminStepUpToken(token)).toEqual({ ok: false, reason: 'not_configured' });
   });
 
@@ -116,10 +107,7 @@ describe('verifyAdminStepUpToken', () => {
   });
 
   it('rejects an unknown scope as malformed rather than reading it as the wildcard', async () => {
-    // A silent wildcard fallback here would turn a typo'd — or
-    // forged — scope into an all-class token. Sign the forged payload
-    // properly so the signature check passes and the scope check is
-    // what actually decides.
+    // Silent wildcard fallback would turn a typo'd or forged scope into an all-class token
     const nowSec = Math.floor(Date.now() / 1000);
     const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
     const payload = Buffer.from(
@@ -152,7 +140,7 @@ describe('consumeAdminStepUpToken', () => {
     const first = await consumeAdminStepUpToken({ token, action: 'staff-role-grant' });
     expect(first.ok).toBe(true);
 
-    // SINGLE-USE: the replay collides on the recorded `jti`.
+    // SINGLE-USE: the replay collides on the recorded `jti`
     const second = await consumeAdminStepUpToken({ token, action: 'staff-role-grant' });
     expect(second).toEqual({ ok: false, reason: 'already_consumed' });
   });
@@ -178,8 +166,7 @@ describe('consumeAdminStepUpToken', () => {
   });
 
   it('fails a jti-less token closed rather than treating it as unlimited-use', async () => {
-    // A token from before the claim existed: verifiable, but not
-    // trackable, so it must not be spendable.
+    // A token from before the claim existed: verifiable, but not trackable, so it must not be spendable
     const nowSec = Math.floor(Date.now() / 1000);
     const claims = {
       sub: 'a',

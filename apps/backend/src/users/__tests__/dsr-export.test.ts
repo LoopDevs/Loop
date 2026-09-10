@@ -1,15 +1,4 @@
-/**
- * A2-1906 — buildDsrExport tests.
- *
- * The handler-side wiring (auth, rate limit, content-disposition) is
- * covered by an integration-style mocked-fetch test in the same
- * suite. The bulk of the contract — what's included, what's redacted,
- * shape stability — is exercised against `buildDsrExport` directly so
- * a refactor to the handler doesn't silently degrade the export
- * payload. Runs against the real in-memory document store (schema
- * version 2: user / identities / orders — the credits/payout sections
- * died with the ledger under ADR 052).
- */
+// A2-1906 — buildDsrExport tests
 import { describe, it, expect, beforeEach } from 'vitest';
 import { db, __resetDbForTests } from '../../db/client.js';
 import type { OrderDoc, UserDoc } from '../../db/types.js';
@@ -85,7 +74,6 @@ describe('buildDsrExport (A2-1906)', () => {
       fulfilledAt: NOW,
     });
     await seedOrder({ id: 'o-pending', merchantId: 'm2', state: 'unpaid' });
-    // Another user's order must not appear at all.
     await seedOrder({ id: 'o-foreign', userId: 'u-other', state: 'fulfilled' });
 
     const out = await buildDsrExport('u-1');
@@ -97,8 +85,6 @@ describe('buildDsrExport (A2-1906)', () => {
     expect(out.orders).toHaveLength(2);
 
     const orderJson = JSON.stringify(out.orders);
-    // Critical: the secret material must NOT leak even though we read
-    // it from the stored doc to set `redeemIssued`.
     expect(orderJson).not.toContain('SECRET-CODE-12345');
     expect(orderJson).not.toContain('SECRET-PIN-9999');
 
@@ -142,8 +128,6 @@ describe('buildDsrExport (A2-1906)', () => {
 
     expect(out.notes.fallbackContact).toBe('privacy@loopfinance.io');
     expect(out.notes.excluded.length).toBeGreaterThan(0);
-    // The exclusion list must mention CTX-side data and off-host
-    // logs so a reader knows where else to ask.
     const all = out.notes.excluded.join(' ');
     expect(all).toMatch(/CTX/);
     expect(all).toMatch(/log/i);

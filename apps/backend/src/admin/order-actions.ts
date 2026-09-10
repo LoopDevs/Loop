@@ -1,27 +1,4 @@
-/**
- * The two per-order operator actions (ADR 037 delivery-unsticking).
- *
- * `POST /api/admin/orders/:orderId/refetch-redemption` — support-tier.
- *     A fulfilled order whose redemption fields never landed: re-ask
- *     CTX for the card details now instead of waiting for the backfill
- *     worker's next attempt. Re-drives work the customer has already
- *     paid for and touches no security control, which is exactly the
- *     shape ADR 037 puts in the support remit.
- *
- * `POST /api/admin/orders/:orderId/redrive` — admin-tier, step-up
- *     gated. Runs one mirror-sweep step against CTX for a single
- *     order. It can move the order's state and, through the sweep's
- *     economics retry, write the commission figures — so a captured
- *     bearer alone must not be able to trigger it.
- *
- * Both carry the ADR 017 envelope. Neither moves money, but both are
- * operator actions on somebody else's order, and the envelope is what
- * makes them show up in the audit tail with a reason attached.
- *
- * Neither echoes a redemption code, PIN or URL. The re-fetch reports
- * only WHICH fields are now present: the operator needs to know the
- * card arrived, not what is on it.
- */
+// per-order operator actions — ADR 037, ADR 017
 import type { Context } from 'hono';
 import { z } from 'zod';
 import type { AdminRefetchRedemptionResult } from '@loop/shared';
@@ -52,7 +29,6 @@ interface WriteEdge {
   reason: string;
 }
 
-/** Shared request-edge validation. Returns the error Response, or the pieces. */
 async function validateWriteEdge(c: Context): Promise<Response | WriteEdge> {
   const orderId = c.req.param('orderId');
   if (orderId === undefined || !UUID_RE.test(orderId)) {
@@ -88,7 +64,6 @@ async function validateWriteEdge(c: Context): Promise<Response | WriteEdge> {
   return { orderId, idempotencyKey, actor, reason: parsed.data.reason };
 }
 
-/** POST /api/admin/orders/:orderId/refetch-redemption */
 export async function adminRefetchRedemptionHandler(c: Context): Promise<Response> {
   const edge = await validateWriteEdge(c);
   if (edge instanceof Response) return edge;
@@ -154,9 +129,6 @@ export async function adminRefetchRedemptionHandler(c: Context): Promise<Respons
     return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to re-fetch redemption' }, 500);
   }
 
-  // Only a real application is worth an audit line; the not-found and
-  // not-eligible arms are the operator discovering the order's state,
-  // not acting on it.
   if (guardResult.status === 200) {
     notifyAdminAudit({
       actorUserId: actor.id,
@@ -172,11 +144,9 @@ export async function adminRefetchRedemptionHandler(c: Context): Promise<Respons
 
 export interface AdminOrderRedriveResult {
   orderId: string;
-  /** The order's state after the sweep step ran. */
   state: string;
 }
 
-/** POST /api/admin/orders/:orderId/redrive */
 export async function adminOrderRedriveHandler(c: Context): Promise<Response> {
   const edge = await validateWriteEdge(c);
   if (edge instanceof Response) return edge;

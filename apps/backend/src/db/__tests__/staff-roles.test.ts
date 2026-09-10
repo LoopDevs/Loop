@@ -1,19 +1,4 @@
-/**
- * Staff-role repo (ADR 037), run against the real in-memory document
- * store — no mocks.
- *
- * The cases that matter are the invariants the SQL version enforced
- * with a transaction and an advisory lock, and which now rest on
- * `db/keyed-lock.ts`:
- *
- *   - the last effective admin cannot be demoted or revoked, and
- *     "effective" spans BOTH sources (a `staff_roles` row and the
- *     `users.isAdmin` allowlist shim) — miscounting either way either
- *     locks everyone out or lets the final admin go;
- *   - every write mirrors the shim, so `requireStaff`'s fallback can
- *     never contradict the row;
- *   - two concurrent demotions cannot both pass the count.
- */
+// Staff-role repo (ADR 037) — invariants rest on `db/keyed-lock.ts`
 import { describe, it, expect, beforeEach } from 'vitest';
 import { db, __resetDbForTests } from '../client.js';
 import type { UserDoc } from '../types.js';
@@ -90,8 +75,7 @@ describe('grantStaffRole', () => {
 
     expect(applied.priorRole).toBe('admin');
     expect(await getStaffRole('target')).toMatchObject({ role: 'support', reason: 'second' });
-    // Support is not admin — the shim has to follow the row down, or
-    // requireStaff's fallback would keep letting them through.
+    // Shim must mirror the row down, or requireStaff's fallback contradicts the row
     expect(await isAdminFlag('target')).toBe(false);
   });
 
@@ -116,8 +100,7 @@ describe('grantStaffRole', () => {
   });
 
   it('counts an allowlist-shim admin as an effective admin, so demoting a row-admin beside one is allowed', async () => {
-    // The shim admin has no row at all — a count that only looked at
-    // `staff_roles` would see one admin here and wrongly refuse.
+    // "Effective" spans both sources; counting only `staff_roles` would wrongly refuse
     await seedUser('shim-admin', true);
     await seedUser('row-admin');
     await grantStaffRole({
@@ -169,9 +152,7 @@ describe('revokeStaffRole', () => {
   });
 
   it('serialises concurrent revokes so two admins cannot both pass the count', async () => {
-    // Both callers see two admins if they read before either writes.
-    // The lock is what makes the second one observe the first's
-    // deletion and refuse.
+    // Lock ensures the second revoke observes the first's deletion
     await seedUser('a', true);
     await seedUser('b', true);
 
@@ -183,7 +164,6 @@ describe('revokeStaffRole', () => {
     const rejected = results.filter((r) => r.status === 'rejected');
     expect(rejected).toHaveLength(1);
     expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(LastAdminError);
-    // Exactly one admin survives — the invariant this all exists for.
     const remaining = await db.collection('users').findMany({ isAdmin: true });
     expect(remaining).toHaveLength(1);
   });
@@ -209,7 +189,6 @@ describe('listStaffEntries', () => {
       source: 'staff_roles',
       email: 'rowed@loop.test',
       grantedByUserId: 'grantor',
-      // Resolved through the grantor's user row, not stored on the grant.
       grantedByEmail: 'grantor@loop.test',
     });
     expect(entries.find((e) => e.userId === 'grantor')).toMatchObject({

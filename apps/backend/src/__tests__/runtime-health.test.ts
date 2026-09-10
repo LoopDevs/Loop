@@ -32,21 +32,16 @@ describe('runtime health snapshot', () => {
   });
 
   it('recordOtpSendFailure does not re-arm a disabled kill-switch; only a successful send does', () => {
-    // Operator silenced the surface during a known provider incident.
     setOtpDeliveryEnabled(false);
     recordOtpSendFailure(new Error('provider down'));
 
     const silenced = getRuntimeHealthSnapshot();
-    // Pre-fix, the failure flipped `enabled` back to true — every
-    // failing request re-paged the exact incident being silenced.
     expect(silenced.otpDelivery.enabled).toBe(false);
     expect(silenced.otpDelivery.degraded).toBe(false);
     expect(silenced.degraded).toBe(false);
-    // Failure metadata is still recorded while silenced.
     expect(silenced.otpDelivery.lastError).toBe('provider down');
     expect(silenced.otpDelivery.lastFailureAtMs).not.toBeNull();
 
-    // A successful send is real evidence of recovery — it re-arms.
     recordOtpSendSuccess();
     const rearmed = getRuntimeHealthSnapshot();
     expect(rearmed.otpDelivery.enabled).toBe(true);
@@ -88,25 +83,19 @@ describe('runtime health snapshot', () => {
 
   it('S4-8: a lock-skipped tick counts as liveness (not stale/degraded) but is distinguishable from a led tick', () => {
     markWorkerStarted('ctx_mirror_sweep', { staleAfterMs: 1_000 });
-    // This machine keeps losing the fleet-wide single-flight lock —
-    // its loop is alive (must NOT go stale → Fly must not restart a
-    // healthy machine) but it has never actually led a tick.
     markWorkerTickSkippedLocked('ctx_mirror_sweep');
 
     const snap = getRuntimeHealthSnapshot();
     const worker = snap.workers[0]!;
     expect(worker.stale).toBe(false);
     expect(worker.degraded).toBe(false);
-    expect(worker.lastSuccessAtMs).not.toBeNull(); // liveness stamp advanced
+    expect(worker.lastSuccessAtMs).not.toBeNull();
     expect(worker.lastSkippedLockedAtMs).toBe(worker.lastSuccessAtMs);
-    expect(worker.lastLeadTickAtMs).toBeNull(); // never did the real work
+    expect(worker.lastLeadTickAtMs).toBeNull();
 
-    // Still fresh (not stale) right before the window; the liveness
-    // stamp from the skip is what keeps it healthy.
     const fresh = getRuntimeHealthSnapshot((worker.lastSuccessAtMs ?? 0) + 500);
     expect(fresh.workers[0]).toEqual(expect.objectContaining({ stale: false, degraded: false }));
 
-    // A real led tick advances lastLeadTickAtMs.
     markWorkerTickSuccess('ctx_mirror_sweep');
     const led = getRuntimeHealthSnapshot().workers[0]!;
     expect(led.lastLeadTickAtMs).not.toBeNull();
@@ -114,10 +103,6 @@ describe('runtime health snapshot', () => {
   });
 
   it('A4-111: marks a worker whose first tick never resolves as stale once startedAtMs ages out', () => {
-    // Earlier behaviour: with no `lastSuccessAtMs` and no
-    // `lastErrorAtMs`, /health reported the worker green forever
-    // — a hung first tick masqueraded as healthy. Now we treat
-    // `startedAtMs` as the staleness anchor until the first success.
     markWorkerStarted('payout_worker', { staleAfterMs: 1_000 });
     const startedAtMs = getRuntimeHealthSnapshot().workers[0]?.startedAtMs ?? 0;
     const fresh = getRuntimeHealthSnapshot(startedAtMs + 500);

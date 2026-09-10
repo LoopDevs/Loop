@@ -14,10 +14,7 @@ const state = vi.hoisted(() => ({
   >(),
 }));
 
-// The handler reads the active config doc via
-// `db.collection('merchant_cashback_configs').findOne(...)` and calls
-// `.toFixed(2)` on the numeric pct — the mock parses the historical
-// string fixtures into doc-shaped numbers.
+// Mock parses historical string fixtures into doc-shaped numbers to match handler's `.toFixed(2)` usage
 vi.mock('../../db/client.js', () => ({
   db: {
     collection: () => ({
@@ -93,9 +90,9 @@ describe('cashbackPctToBps', () => {
 
 describe('previewCashbackMinor', () => {
   it('returns floor(amount × bps / 10 000)', () => {
-    expect(previewCashbackMinor(10_000n, 250)).toBe(250n); // $100 at 2.50% → $2.50
-    expect(previewCashbackMinor(9999n, 250)).toBe(249n); // floor rounds down
-    expect(previewCashbackMinor(1_000_000n, 550)).toBe(55_000n); // $10k at 5.50%
+    expect(previewCashbackMinor(10_000n, 250)).toBe(250n);
+    expect(previewCashbackMinor(9999n, 250)).toBe(249n);
+    expect(previewCashbackMinor(1_000_000n, 550)).toBe(55_000n);
   });
 
   it('returns 0n on zero / negative amount + zero bps', () => {
@@ -160,7 +157,7 @@ describe('publicCashbackPreviewHandler', () => {
     };
     expect(body.merchantName).toBe('Amazon');
     expect(body.cashbackPct).toBe('2.50');
-    expect(body.cashbackMinor).toBe('250'); // $2.50 on $100
+    expect(body.cashbackMinor).toBe('250');
     expect(body.currency).toBe('USD');
   });
 

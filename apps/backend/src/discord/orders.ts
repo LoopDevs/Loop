@@ -1,26 +1,4 @@
-/**
- * Orders-channel Discord notifiers — fires to
- * `config.observability.discord.ordersWebhook`. Five signals that read together as
- * the customer-facing money-flow narrative:
- *
- *   1. **Order Created** — every new order, fleet-volume signal.
- *   2. **Cashback Recycled** — orders paid with LOOP-asset
- *      cashback (subset of (1)). ADR 015 flywheel light-up.
- *   3. **First Cashback Recycled** — fires once per user, on the
- *      order that graduates them from "earns cashback" to "spends
- *      cashback on new orders." Subset-of-subset of (2).
- *   4. **Order Fulfilled** — gift card ready signal.
- *   5. **Cashback Credited** — cashback delta committed to the
- *      ledger (ADR 009). Distinct from (4): fulfilled fires every
- *      successful procurement, credited only when the user
- *      actually earned positive cashback.
- *
- * Pulled out of `discord.ts` so the per-channel surfaces are
- * traceable to one file each. Shared infrastructure
- * (`sendWebhook`, `truncate`, `escapeMarkdown`, `formatAmount`,
- * `formatMinorAmount`, colour constants) lives in
- * `./shared.ts`.
- */
+// Orders-channel Discord notifiers — ADR 015, ADR 009, ADR 052
 import { config } from '../config/index.js';
 import {
   BLUE,
@@ -32,7 +10,7 @@ import {
   truncate,
 } from './shared.js';
 
-/** Notify: new order created (ADR 052 — the customer pays CTX). */
+// ADR 052 — customer pays CTX
 export function notifyOrderCreated(args: {
   orderId: string;
   merchantName: string;
@@ -64,7 +42,6 @@ export function notifyOrderCreated(args: {
   });
 }
 
-/** Notify: order fulfilled (gift card ready). */
 export function notifyOrderFulfilled(args: {
   orderId: string;
   merchantId: string;

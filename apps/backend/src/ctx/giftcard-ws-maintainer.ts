@@ -1,30 +1,4 @@
-/**
- * CTX `/ws` giftcard-topic client — event-driven order-mirror
- * maintenance (ADR 052).
- *
- * ctx owns the order lifecycle; this maintainer subscribes to the
- * giftcard topic with the operator API key and applies status events
- * onto the local mirror rows:
- *
- *   GET {GIFT_CARD_API_BASE_URL}/ws        (http → ws upgrade)
- *   headers: X-Api-Key / X-Api-Secret      (operator API creds)
- *   → send  {"action":"subscribe","topic":"giftcard"}
- *   ← recv  {"type":"event","topic":"giftcard",
- *            "event":"system.giftcard.paid","data":{...card}}
- *
- * The operator-scoped payload carries `operatorReference` — the Loop
- * order row id — so events key straight onto the mirror (fallback:
- * `ctx_order_id`). Payloads never carry redemption secrets (CTX
- * builds them `ShowDetails:false`); on `fulfilled` we do one
- * authoritative `GET /gift-cards/:id` for the codes.
- *
- * Same lifecycle discipline as `merchants/ws-maintainer.ts`:
- * undici WebSocket with the operator auth headers on the upgrade
- * (the env schema guarantees the creds at boot), exponential
- * reconnect (1s → 60s, ±25% jitter), and the mirror sweep
- * (`orders/ctx-mirror-sweep.ts`) as the missed-event safety net —
- * the ws has no replay.
- */
+// CTX `/ws` giftcard-topic client — event-driven order-mirror maintenance (ADR 052)
 import { z } from 'zod';
 import { config } from '../config/index.js';
 import { logger } from '../logger.js';
@@ -65,7 +39,6 @@ let reconnectTimer: NodeJS.Timeout | null = null;
 let backoffMs = BACKOFF_INITIAL_MS;
 let stopped = true;
 
-/** Current connection state, surfaced by /health. */
 export function getGiftcardWsStatus(): GiftcardWsStatus {
   return status;
 }
@@ -210,12 +183,10 @@ async function handleGiftcardEvent(eventName: string, data: unknown): Promise<vo
   await applyCtxCardStatus(order, card);
 }
 
-/** Test seam: feeds a raw ws frame through the message handler. */
 export function __handleGiftcardWsMessageForTests(raw: string): void {
   handleMessage(raw);
 }
 
-/** Test seam: resets module state between tests. */
 export function __resetGiftcardWsForTests(): void {
   stopGiftcardWs();
   backoffMs = BACKOFF_INITIAL_MS;

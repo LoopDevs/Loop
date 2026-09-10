@@ -10,13 +10,7 @@ import {
   OTP_EMAIL_LOCKOUT_MS,
 } from '../otp-attempt-counter.js';
 
-/**
- * Per-email OTP attempt counter (hardening B5), against the real
- * in-memory document store. The full window/lockout/reset walk lives
- * in the integration suite (`__tests__/integration/
- * otp-attempt-counter.test.ts`); this covers the unit-level read/
- * write/clear/purge contracts.
- */
+// Per-email OTP attempt counter (hardening B5) unit tests
 beforeEach(() => {
   __resetDbForTests();
 });
@@ -32,7 +26,6 @@ describe('otp-attempt-counter constants', () => {
 
 describe('isEmailOtpLocked', () => {
   it('returns true only while a lockout is active', async () => {
-    // Cross the threshold to set the lock.
     for (let i = 1; i <= OTP_EMAIL_MAX_FAILED_ATTEMPTS; i++) {
       await registerFailedOtpAttempt({
         email: 'brute@example.com',
@@ -41,7 +34,6 @@ describe('isEmailOtpLocked', () => {
     }
     const during = new Date(T0.getTime() + 60_000);
     await expect(isEmailOtpLocked({ email: 'brute@example.com', now: during })).resolves.toBe(true);
-    // Once the lockout elapses the read reports unlocked.
     const after = new Date(
       T0.getTime() + OTP_EMAIL_MAX_FAILED_ATTEMPTS * 1000 + OTP_EMAIL_LOCKOUT_MS + 1000,
     );
@@ -104,10 +96,8 @@ describe('clearOtpAttempts', () => {
 
 describe('purgeStaleOtpAttemptCounters', () => {
   it('returns the number of stale counters deleted, sparing active ones', async () => {
-    // Two stale counters from long ago.
     await registerFailedOtpAttempt({ email: 'a@example.com', now: T0 });
     await registerFailedOtpAttempt({ email: 'b@example.com', now: T0 });
-    // A fresh one right at the sweep time.
     const sweepNow = new Date(T0.getTime() + 100 * 60 * 1000);
     await registerFailedOtpAttempt({ email: 'fresh@example.com', now: sweepNow });
 

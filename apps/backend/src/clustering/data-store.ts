@@ -7,25 +7,14 @@ import { scrubUpstreamBody } from '../upstream-body-scrub.js';
 import { getMerchants } from '../merchants/sync.js';
 import { loadCatalogSnapshot, saveCatalogSnapshot } from '../ctx/catalog-snapshots.js';
 
-// Size caps stop a compromised or buggy upstream from blowing memory or
-// injecting unbounded data into the in-memory location store (which we serve
-// to every map client). Mirrors the per-field caps on the merchant upstream
-// schema (`sync-upstream.ts`). Generous vs. real location data, tight enough
-// to catch "upstream returns a 1MB string" or "a 10M-element result page".
+// Size caps prevent a compromised upstream from exhausting memory or injecting unbounded data into the in-memory store.
 const MAX_ID_LENGTH = 128;
 const MAX_URL_LENGTH = 2048;
 const MAX_COORD_LENGTH = 32;
-// perPage is requested at 1000; cap a single page's array at 5x that so a
-// compromised upstream can't hand us an unbounded array in one response.
-// Combined with MAX_PAGES this bounds total records the whole sync can hold.
+// Cap single page array at 5x requested perPage to bound total records held during sync.
 const MAX_RESULT_COUNT = 5000;
 
-/**
- * Zod schema for a single upstream location entry. Required fields are strict;
- * `mapPinUrl` is optional. `.passthrough()` preserves unknown fields. Every
- * string field is length-capped (FT-15) so one oversized value is skipped
- * rather than absorbed into the served store.
- */
+// FT-15: Length-capped string fields ensure oversized values are skipped rather than absorbed.
 const UpstreamLocationSchema = z
   .object({
     id: z.string().max(MAX_ID_LENGTH),
@@ -47,17 +36,12 @@ const UpstreamLocationsResponseSchema = z
       perPage: z.number().int().nonnegative(),
       total: z.number().int().nonnegative(),
     }),
-    // Validate individually inside the loop so one malformed record does not
-    // poison the whole page. Count-cap the array itself (FT-15) so an oversized
-    // page is rejected wholesale — the refresh throws and retains previous data
-    // rather than loading an unbounded array into memory.
+    // FT-15: Reject oversized pages wholesale to prevent loading unbounded arrays into memory.
     result: z.array(z.unknown()).max(MAX_RESULT_COUNT),
   })
   .passthrough();
 
-// Defensive ceiling on pagination. The locations catalog has grown past 1000
-// pages historically; 500 at perPage=1000 gives us 500k records which is
-// already well beyond realistic, and stops runaway loops on upstream bugs.
+// Defensive ceiling to stop runaway pagination loops on upstream bugs.
 const MAX_PAGES = 500;
 
 interface StoreData {
@@ -65,9 +49,7 @@ interface StoreData {
   loadedAt: number;
 }
 
-// loadedAt starts at 0 so /health reports locations stale until the first
-// successful refresh lands, rather than pretending fresh during the ~48h
-// window before the first real load completes.
+// loadedAt starts at 0 so /health reports stale status until the first successful refresh.
 let store: StoreData = { locations: [], loadedAt: 0 };
 
 /** Returns the current snapshot. Callers should not hold references across awaits. */
@@ -75,12 +57,8 @@ export function getLocations(): StoreData {
   return store;
 }
 
-// ADR 050: per-merchant map-pin lookup for the reference-keyed image
-// proxy (`GET /api/image?kind=pin`). Built lazily and invalidated by
-// store identity, so every store-replacement path (refresh, warm
-// start, test reset) refreshes it without extra wiring. First
-// location with a pin wins — pins are brand logos in practice, so
-// per-location variation isn't a supported case.
+// ADR 050: Per-merchant map-pin lookup for reference-keyed image proxy.
+// Built lazily and invalidated by store identity; first location with a pin wins.
 let pinIndexSource: StoreData | null = null;
 let pinIndex = new Map<string, string>();
 
@@ -158,10 +136,7 @@ export async function refreshLocations(): Promise<void> {
       });
 
       if (!response.ok) {
-        // Capture a truncated body snippet so schema-drift or auth-rejection
-        // debugging doesn't require reproducing. A2-1306: scrub JWT /
-        // opaque-token / email / card substrings before logging — matches
-        // the redaction posture of auth/orders/procurement sites.
+        // A2-1306: Scrub JWT / opaque-token / email / card substrings before logging.
         const body = await response.text().catch(() => '');
         log.error(
           { status: response.status, body: scrubUpstreamBody(body), page },
@@ -179,8 +154,7 @@ export async function refreshLocations(): Promise<void> {
       }
       totalPages = parsed.data.pagination.pages;
 
-      // Cross-reference with merchant data for mapPinUrl (logos)
-      // The /locations endpoint doesn't include mapPinUrl — it comes from /merchants
+      // mapPinUrl comes from /merchants, not /locations
       const { merchantsById } = getMerchants();
 
       for (const rawItem of parsed.data.result) {
@@ -200,11 +174,9 @@ export async function refreshLocations(): Promise<void> {
 
         if (isNaN(lat) || isNaN(lng)) continue;
         if (lat === 0 && lng === 0) continue;
-        // Reject physically impossible coordinates — guards against unit
-        // confusion or bad geocodes slipping past the upstream parser.
+        // Reject physically impossible coordinates to guard against unit confusion or bad geocodes.
         if (lat < -90 || lat > 90 || lng < -180 || lng > 180) continue;
 
-        // Look up merchant logo from the merchant store
         const merchant = merchantsById.get(item.merchantId);
         const mapPinUrl = item.mapPinUrl ?? merchant?.logoUrl ?? null;
 
@@ -237,8 +209,7 @@ export async function refreshLocations(): Promise<void> {
     } catch (err) {
       log.error({ err }, 'Failed to persist location catalog snapshot');
     }
-    // Successful refresh clears the stale-warning dedup so a *future* staleness
-    // event can warn again.
+    // Clear stale-warning dedup so future staleness events can warn again.
     hasWarnedStale = false;
     log.info({ count: locations.length }, 'Location data refreshed');
   } catch (err) {
@@ -249,10 +220,7 @@ export async function refreshLocations(): Promise<void> {
 }
 
 let refreshInterval: NodeJS.Timeout | null = null;
-// Stale-data warning dedup. The timer fires every `intervalMs` (24h default)
-// and would otherwise re-warn on every tick while upstream stays down. We
-// only want one "location data is stale" entry per outage; reset when a
-// refresh successfully completes (see refreshLocations).
+// Dedup stale-data warnings to emit one entry per outage, not per tick.
 let hasWarnedStale = false;
 
 /** Starts the background refresh timer. Call once at startup. */

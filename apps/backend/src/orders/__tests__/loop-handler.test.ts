@@ -1,25 +1,9 @@
-/**
- * `POST /api/orders/loop` create-handler tests (ADR 052). ctx is the
- * payment processor — the handler's job is gates → local mirror row →
- * CTX create act-as → relay payment instructions. These pin:
- *
- *   - the gate ladder (flag 404, auth 401, X-Client-Id 400,
- *     cryptoCurrency allowlist 400, face-value cap,
- *     merchant/denomination validation)
- *   - the CTX call shape (act-as headers + platform client id,
- *     operatorReference = the local row id, major-unit fiatAmount)
- *   - CTX failure mapping (400 pass-through class, 5xx/transport →
- *     503 + mirror row rejected)
- *   - the idempotent replay short-circuit
- */
+// POST /api/orders/loop create-handler tests — ADR 052
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type * as ConfigModule from '../../config/index.js';
 import type { Context } from 'hono';
 import type { LoopAuthContext } from '../../auth/require-auth.js';
 
-// `nativeAuthEnabled` is per-test mutable: the flag-off case asserts the
-// handler 404s. Everything else the import chain reads comes from the
-// real (test-fixture) config.
 const { configState } = vi.hoisted(() => ({
   configState: { nativeAuthEnabled: true },
 }));

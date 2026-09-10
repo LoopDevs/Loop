@@ -1,21 +1,4 @@
-/**
- * Social-provider identity linking (ADR 014).
- *
- * `resolveOrCreateUserForIdentity` is the one verb social-login
- * handlers call after verifying a provider's id_token. Three-step
- * resolution:
- *
- *   1. Existing `(provider, sub)` row → return its user_id.
- *   2. Else, existing `users.email` row → link this provider to it.
- *   3. Else, create a fresh `users` row + link.
- *
- * The middle step is deliberate: a user who signed up with OTP and
- * later picks "Continue with Google" against the same email lands
- * on the same Loop account instead of a shadow duplicate. The
- * email_verified guarantee from the provider is what makes step 2
- * safe — the social-handler enforces `email_verified = true` before
- * calling this function.
- */
+// Social-provider identity linking — ADR 014
 import { randomUUID } from 'node:crypto';
 import { db } from '../db/client.js';
 import { isUniqueViolation } from '../db/errors.js';
@@ -30,9 +13,8 @@ export interface ResolveOrCreateArgs {
 }
 
 /**
- * Link `(provider, sub)` to a user, tolerating the parallel-login race:
- * the unique spec on (provider, providerSub) means the later of two
- * simultaneous inserts harmlessly no-ops.
+ * Tolerates parallel-login race: unique spec on (provider, providerSub)
+ * makes later simultaneous inserts no-op.
  */
 async function linkIdentity(
   userId: string,
@@ -55,18 +37,12 @@ async function linkIdentity(
 }
 
 /**
- * Single entry point the social-login handlers use. Returns the
- * Loop user row plus a flag saying whether we created a new user
- * (useful for welcome-email / analytics signals).
+ * Returns user row and flag for new user creation.
  */
 export async function resolveOrCreateUserForIdentity(
   args: ResolveOrCreateArgs,
 ): Promise<{ user: User; created: boolean }> {
-  // A2-2002: normalizeEmail does NFKC + lowercase + trim and rejects
-  // non-ASCII. The social-login handlers call this with the email
-  // returned by the provider's id_token, so any homograph the
-  // provider would have accepted is filtered here. NonAsciiEmailError
-  // bubbles up to the social-login handler which maps it to 400.
+  // A2-2002: normalizeEmail filters homographs; NonAsciiEmailError bubbles to handler for 400.
   const email = normalizeEmail(args.email);
 
   // Step 1 — known (provider, sub).
@@ -76,27 +52,24 @@ export async function resolveOrCreateUserForIdentity(
   if (knownIdentity !== null) {
     const user = await db.collection('users').findOne({ id: knownIdentity.userId });
     if (user !== null) return { user, created: false };
-    // Dangling identity row (user deleted under us) — drop through so
-    // we create a fresh user and re-link below. Ops-grade edge case.
+    // Dangling identity row (user deleted) — drop through to create fresh user.
   }
 
-  // Step 2 — email already known. Link provider to the existing user.
+  // Step 2 — email already known. Link provider to existing user.
   const existingUser: UserDoc | null = await db.collection('users').findOne({ email });
   if (existingUser !== null) {
     await linkIdentity(existingUser.id, args, email);
     return { user: existingUser, created: false };
   }
 
-  // Step 3 — brand-new user. findOrCreateUserByEmail absorbs the
-  // parallel-first-login race the same way the OTP signup path does.
+  // Step 3 — brand-new user.
   const user = await findOrCreateUserByEmail(email);
   await linkIdentity(user.id, args, email);
   return { user, created: true };
 }
 
 /**
- * Lists every provider linked to a user — reads for the settings /
- * account page. Empty array is a fresh Loop-OTP-only user.
+ * Lists providers linked to a user for settings page.
  */
 export async function listLinkedIdentities(userId: string): Promise<
   Array<{

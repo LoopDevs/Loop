@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type * as ConfigModule from '../../config/index.js';
 
-// Env mock mirrors sync.test.ts's pattern.
 const { ctxState } = vi.hoisted(() => ({
   ctxState: {
     baseUrl: 'http://test',
@@ -22,8 +21,7 @@ vi.mock('../../logger.js', () => ({
   logger: { child: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() }) },
 }));
 
-// The maintainer's store side effects all go through sync.js — mock it
-// whole so message handling is assertable without sockets or fetches.
+// Mock sync.js to isolate message handling from socket/fetch side effects.
 const { syncMock } = vi.hoisted(() => ({
   syncMock: {
     applyMerchantUpsert: vi.fn(),

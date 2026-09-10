@@ -1,20 +1,4 @@
-/**
- * Database singleton. Picks the driver from `database.driver`:
- *
- *   - `memory` (default) — the whole database in process memory,
- *     hydrated from / flushed to the JSON file at `database.jsonPath`
- *     (empty → ephemeral). The right shape while Loop is undeployed
- *     and for every test.
- *   - `mongo` — MongoDB via `database.uri` / `database.name`.
- *
- * The config schema models `database` as a discriminated union on
- * `driver`, so each branch below can read its own settings directly and
- * the old "DB_DRIVER=mongo requires MONGODB_URI" boot guard is gone —
- * a mongo config without a URI no longer parses.
- *
- * `initDb()` must be awaited at boot before serving traffic (index.ts
- * does this; tests use the ephemeral memory store which needs no init).
- */
+// Database singleton — memory (default) or mongo, selected by `database.driver`
 import { config } from '../config/index.js';
 import { logger } from '../logger.js';
 import { MemoryStore } from './memory-store.js';

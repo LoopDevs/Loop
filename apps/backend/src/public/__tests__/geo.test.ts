@@ -1,18 +1,4 @@
-/**
- * `getGeoDbStatus` (go-live-plan §T1-F) — the GeoLite2-Country `.mmdb`
- * staleness/absence signal consumed by `/health` (`health.ts`) and the
- * boot-time diagnostic (`index.ts`). Pins the three-way distinction that
- * matters for not permanently soft-degrading a dev/staging deploy:
- *
- *   - unconfigured (`MAXMIND_GEOLITE2_PATH` unset)        → not stale
- *   - configured but the `.mmdb` fails to open            → stale
- *   - configured, opens, build within the threshold       → not stale
- *   - configured, opens, build past the threshold         → stale
- *
- * Each test re-imports the module fresh (`vi.resetModules`) so the
- * internal reader-open memoization doesn't leak state across scenarios —
- * mirrors the pattern in `well-known/__tests__/deep-link-verification.test.ts`.
- */
+// getGeoDbStatus tests — S4-4
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type * as ConfigModule from '../../config/index.js';
 
@@ -35,10 +21,7 @@ vi.mock('maxmind', () => ({
   open: openMock,
 }));
 
-// S4-4: `clientIpFor` (imported below from `../../middleware/rate-limit.js`)
-// now pulls in `../../middleware/fleet-size.js`, which imports the real
-// logger at module scope. Mock it out so this file never builds a real
-// pino instance, same as `rate-limit.test.ts` / `health.test.ts` do.
+// S4-4: mock logger to prevent real pino instance creation via transitive import
 vi.mock('../../logger.js', () => ({
   logger: {
     info: vi.fn(),

@@ -2,9 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type * as ConfigModule from '../../config/index.js';
 import type { Context } from 'hono';
 
-// The social handlers need native auth on, a signing key, and the
-// provider audiences; everything else comes from the real
-// (test-fixture) config.
 const { configState } = vi.hoisted(() => ({
   configState: { nativeAuthEnabled: true },
 }));
@@ -44,9 +41,7 @@ const consumeIdTokenMock = vi.fn();
 vi.mock('../id-token.js', () => ({
   verifyIdToken: (args: unknown) => verifyMock(args),
 }));
-// A2-566: social handler one-shot-consumes the id_token after verify.
-// Default happy-path returns `true` (first use); replay-test cases
-// override to `false` to exercise the rejection path.
+// A2-566: one-shot consume; replay rejection uses generic 401
 vi.mock('../id-token-replay.js', () => ({
   consumeIdToken: (args: unknown) => consumeIdTokenMock(args),
 }));
@@ -91,7 +86,6 @@ beforeEach(() => {
   recordRefreshMock.mockReset();
   recordRefreshMock.mockResolvedValue(undefined);
   consumeIdTokenMock.mockReset();
-  // Default: id_token is fresh. A2-566 tests override to false.
   consumeIdTokenMock.mockResolvedValue(true);
 });
 
@@ -169,9 +163,7 @@ describe('googleSocialLoginHandler', () => {
     expect(res.status).toBe(503);
   });
 
-  // A2-566: one-shot consume. A replayed id_token (already seen) is
-  // rejected with the same generic 401 as a verify failure — don't tell
-  // the caller it was a replay specifically.
+  // A2-566: replay rejection uses generic 401 to avoid leaking replay status
   it('A2-566: 401 when consumeIdToken reports a replay', async () => {
     verifyMock.mockResolvedValue({
       ok: true,

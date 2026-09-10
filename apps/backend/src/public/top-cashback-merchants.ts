@@ -1,28 +1,6 @@
-/**
- * Public top-cashback-merchants endpoint (ADR 011 / 020).
- *
- * `GET /api/public/top-cashback-merchants` — unauthenticated,
- * CDN-friendly list of the N merchants with the highest active
- * `user_cashback_pct`. Marketing uses this on the landing page to
- * render the "best cashback" band — "Earn up to X% at Argos, Amazon,
- * Tesco...".
- *
- * Joins the active `merchant_cashback_configs` pct against the
- * in-memory merchant catalog for name / logo enrichment. Merchants
- * that have been evicted from the catalog (ADR 021 Rule B) are
- * dropped from the response — we don't want the marketing list
- * pointing at a merchant that's about to disappear.
- *
- * Public-first conventions (ADR 020):
- *   - Never 500. DB throws fall through to a last-known-good
- *     snapshot; first-boot fallback is an empty list.
- *   - `Cache-Control: public, max-age=300` on the happy path,
- *     `max-age=60` on the fallback path.
- */
+// Public top-cashback-merchants endpoint — ADR 011, ADR 020
 import type { Context } from 'hono';
-// Response shape lives in `@loop/shared` alongside the web's consumer
-// (ADR 019 single-source rule). Re-exported below for existing backend
-// callers that import the symbol relative to this module.
+// Response shape lives in `@loop/shared` alongside the web's consumer (ADR 019 single-source rule). Re-exported below for existing backend callers that import the symbol relative to this module.
 import type { PublicTopCashbackMerchantsResponse, TopCashbackMerchant } from '@loop/shared';
 import { isSupportedCountryCode, merchantInCountry, merchantSlug } from '@loop/shared';
 import { db } from '../db/client.js';
@@ -41,9 +19,7 @@ interface ConfigRow {
   userCashbackPct: string;
 }
 
-// CAT-02 (2026-06-30 cold audit): keyed by `${limit}:${country ?? ''}` so a
-// fallback snapshot never crosses country boundaries — a US visitor hitting
-// the fallback path must never see a cached AE-scoped result and vice versa.
+// CAT-02 (2026-06-30 cold audit): keyed by `${limit}:${country ?? ''}` so a fallback snapshot never crosses country boundaries — a US visitor hitting the fallback path must never see a cached AE-scoped result and vice versa.
 const lastKnownGoodByKey = new Map<string, PublicTopCashbackMerchantsResponse>();
 
 function cacheKey(limit: number, country: string | null): string {
@@ -69,17 +45,12 @@ async function compute(
 
   const { merchantsById } = getMerchants();
 
-  // Drop merchants evicted from the catalog (ADR 021 Rule B) — a
-  // config row with no matching merchant is a stale pointer we
-  // shouldn't surface to unauth'd visitors.
+  // Drop merchants evicted from the catalog (ADR 021 Rule B) — a config row with no matching merchant is a stale pointer we shouldn't surface to unauth'd visitors.
   const merchants: TopCashbackMerchant[] = [];
   for (const row of rows) {
     const m = merchantsById.get(row.merchantId);
     if (m === undefined) continue;
-    // CAT-02: same country↔merchant visibility rule home.tsx / the now-
-    // fixed brand.$slug.tsx already use — a merchant tagged to a
-    // different country/currency than the visitor's shouldn't feed the
-    // "best cashback" marketing band for them.
+    // CAT-02: same country↔merchant visibility rule home.tsx / the now-fixed brand.$slug.tsx already use — a merchant tagged to a different country/currency than the visitor's shouldn't feed the "best cashback" marketing band for them.
     if (country !== null && !merchantInCountry(m, country)) continue;
     merchants.push({
       id: m.id,
@@ -102,11 +73,7 @@ export async function publicTopCashbackMerchantsHandler(c: Context): Promise<Res
     MAX_LIMIT,
   );
 
-  // CAT-02: optional `?country=` filter. Lenient parsing matching this
-  // handler's own `limit` precedent (and the rest of the public surface,
-  // ADR 020) — an unrecognised code is treated as "no filter" rather than
-  // a 400, since this is an unauthenticated, CDN-cached, never-500
-  // marketing endpoint that should degrade gracefully for any caller.
+  // CAT-02: optional `?country=` filter. Lenient parsing matching this handler's own `limit` precedent (and the rest of the public surface, ADR 020) — an unrecognised code is treated as "no filter" rather than a 400, since this is an unauthenticated, CDN-cached, never-500 marketing endpoint that should degrade gracefully for any caller.
   const countryRaw = c.req.query('country');
   const country =
     countryRaw !== undefined && isSupportedCountryCode(countryRaw)

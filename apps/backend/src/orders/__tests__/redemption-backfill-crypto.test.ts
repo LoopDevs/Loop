@@ -2,25 +2,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type * as ConfigModule from '../../config/index.js';
 import { randomBytes } from 'node:crypto';
 
-/**
- * CF-25 / X-PRIV-03 persistence test for the redemption-backfill path.
- * `persistRecoveredRedemption` is shared by `runRedemptionBackfillTick`
- * and the ADR 037 `refetchOrderRedemption` admin one-shot — a prior
- * refactor pulling both call sites into that shared helper silently
- * dropped the `encryptRedeemField` wrapper (caught during PR #1430's
- * rebase review). This locks in that the shared helper still
- * encrypts, not just the primary `markOrderFulfilled` write path
- * covered by `redeem-crypto-persist.test.ts`. Runs against the real
- * in-memory document store.
- */
+// CF-25 / X-PRIV-03: locks in that the shared `persistRecoveredRedemption` helper still encrypts code/PIN, not just the primary `markOrderFulfilled` path.
 
 const KEY_B64 = randomBytes(32).toString('base64');
 const { redeemState } = vi.hoisted(() => ({
   redeemState: { key: undefined as string | undefined },
 }));
-// Partial config mock: only the redeem key is per-test mutable — the
-// rest of the real (test-fixture) config stays intact so logger/db keep
-// booting.
+// Only the redeem key is per-test mutable; the rest of the real config stays intact so logger/db keep booting.
 vi.mock('../../config/index.js', async (importActual) => {
   const actual = await importActual<typeof ConfigModule>();
   return {
@@ -60,8 +48,6 @@ beforeEach(() => {
 
 describe('redemption-backfill — persistRecoveredRedemption encrypts at rest (CF-25)', () => {
   it('stores ciphertext for code + PIN, plaintext for the URL', async () => {
-    // A fulfilled doc that captured a ctxOrderId but no redemption
-    // payload — the sweeper's candidate shape.
     await db.collection('orders').insertOne({
       id: 'order-1',
       userId: 'user-1',

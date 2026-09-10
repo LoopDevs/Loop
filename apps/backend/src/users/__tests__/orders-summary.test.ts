@@ -13,12 +13,6 @@ import { db, __resetDbForTests } from '../../db/client.js';
 import type { OrderState, UserDoc } from '../../db/types.js';
 import { getUserOrdersSummaryHandler } from '../orders-summary.js';
 
-/**
- * `GET /api/users/me/orders/summary` — the compact 5-number header —
- * against the real in-memory document store: bucket semantics
- * (pending = unpaid|paid, failed = rejected|refunded|expired),
- * fulfilled-only spend, and the home-currency lock.
- */
 const LOOP_AUTH: LoopAuthContext = {
   kind: 'loop',
   userId: 'user-uuid',
@@ -120,13 +114,10 @@ describe('getUserOrdersSummaryHandler', () => {
 
   it('buckets the states and sums fulfilled spend only', async () => {
     await seedUser();
-    // Fulfilled: counted + spend.
     await seedOrder({ state: 'fulfilled', chargeMinor: 20_000 });
     await seedOrder({ state: 'fulfilled', chargeMinor: 15_000 });
-    // In-flight bucket: unpaid + paid.
     await seedOrder({ state: 'unpaid', chargeMinor: 9_999 });
     await seedOrder({ state: 'paid', chargeMinor: 9_999 });
-    // Didn't-succeed bucket: rejected + refunded + expired.
     await seedOrder({ state: 'rejected' });
     await seedOrder({ state: 'refunded' });
     await seedOrder({ state: 'expired' });
@@ -139,7 +130,6 @@ describe('getUserOrdersSummaryHandler', () => {
       fulfilledCount: 2,
       pendingCount: 2,
       failedCount: 3,
-      // Pending / failed orders never count toward lifetime spend.
       totalSpentMinor: '35000',
     });
   });
@@ -147,9 +137,7 @@ describe('getUserOrdersSummaryHandler', () => {
   it('is home-currency locked — other-currency and other-user orders are excluded', async () => {
     await seedUser();
     await seedOrder({ state: 'fulfilled', chargeMinor: 5_000 });
-    // Cross-currency order (support-mediated region flip) — excluded.
     await seedOrder({ state: 'fulfilled', chargeMinor: 7_000, chargeCurrency: 'USD' });
-    // Another user's order — excluded.
     await seedOrder({ state: 'fulfilled', chargeMinor: 9_000, userId: 'other-user' });
 
     const res = await getUserOrdersSummaryHandler(makeCtx(LOOP_AUTH));

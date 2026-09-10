@@ -1,46 +1,4 @@
-/**
- * `/api/admin/*` route mounts.
- *
- * The admin surface bundles four things together because their mount
- * ORDER is the contract:
- *
- * 1. **Cache-Control: private, no-store** mounts FIRST so the header
- *    lands on every response, including the 401 / 404 envelopes
- *    emitted by `requireAuth` / `requireStaff`. A2-1010 — every
- *    handler under this namespace returns operator-visible data
- *    (user drills, order history, audit events, CSV exports). A CDN
- *    keyed on URL alone — not Authorization — must not cache one of
- *    these. Registered BEFORE `requireAuth` so a 401 also carries
- *    no-store; otherwise a misbehaving CDN caching 401 envelopes
- *    leaks "this URL is admin-only" cross-user.
- * 2. **`requireAuth`** mounts SECOND so the actor identity is attached
- *    before the staff gate checks it. Order matters: an unauth'd
- *    request should get a 401 (clearer envelope) rather than a 404.
- * 3. **`requireStaff('support')`** mounts THIRD as the namespace
- *    blanket — it resolves the caller's role (a `staff_roles` row,
- *    falling back to the `users.isAdmin` allowlist shim), 404s
- *    non-staff, and sets `user` + `staffRole` on the context for
- *    everything downstream. Tiering is then declared PER MOUNT:
- *    admin-only surfaces carry an explicit `requireStaff('admin')`
- *    next to their rateLimit; support-visible reads ride the blanket
- *    alone.
- * 4. **Admin read audit middleware** (A2-2008) mounts FOURTH — after
- *    the gates so the actor identity is available, and before the
- *    handler so the request body is unbuffered. Every admin GET emits
- *    a Pino access-log line tagged `admin-read-audit`; bulk reads
- *    (CSV downloads, large list pages) additionally fire a Discord
- *    ping. Single-row drills stay log-only — pinging every drill would
- *    flood the channel and dilute the signal on real exfil patterns.
- *
- * A note on what is NOT here. This module was ~80 endpoints before the
- * ADR 052 rails retirement and the Postgres-to-document-store move;
- * the treasury / payouts / credits / vault / emissions families went
- * with the tables they read, and are not coming back while CTX is the
- * payment processor. What returns is the surface that administers Loop
- * itself, rebuilt against `db/`: staff roles, the user-360 drill,
- * order triage, the cashback-rate knob, the catalog, and the audit
- * trail over all of it.
- */
+// /api/admin/* route mounts — A2-1010, A2-2008, ADR 037, ADR 028, A4-063
 import type { Context, Hono } from 'hono';
 import { logger } from '../logger.js';
 import type { User } from '../db/users.js';
@@ -60,28 +18,14 @@ import { mountAdminUserRoutes } from './admin-users.js';
 import { mountAdminOrderRoutes } from './admin-orders.js';
 import { mountAdminOpsRoutes } from './admin-ops.js';
 
-/** Mounts all `/api/admin/*` routes on the supplied Hono app. */
 export function mountAdminRoutes(app: Hono): void {
-  // A2-1010 — see the module docstring for why this is first.
+  // A2-1010 — must precede requireAuth so 401/404 envelopes also carry no-store
   app.use('/api/admin/*', privateNoStoreResponse);
 
   app.use('/api/admin/*', requireAuth);
   app.use('/api/admin/*', requireStaff('support'));
 
-  // A2-2008 / CF-10: admin read audit. Every admin GET emits a Pino
-  // access-log line so the line-item read trail survives off the host
-  // (Fly logflow ships logs externally — harder to tamper with than a
-  // stored row). Bulk reads additionally fire a Discord ping so a
-  // human sees the export-in-progress signal alongside the write
-  // stream. A read counts as "bulk" when EITHER:
-  //   - the path is a `.csv` export (any size), OR
-  //   - CF-10: a JSON list response returns at least its effective
-  //     bulk-row threshold (`bulkRowThresholdFor` — the global
-  //     default, or a lower per-path override for an endpoint whose
-  //     own row cap sits below it). The original A2-2008 tripwire only
-  //     wired the `.csv` path, leaving cursor-walking JSON list pulls
-  //     unmonitored; a near-max page is the fingerprint of an exfil
-  //     walk.
+  // A2-2008 / CF-10 — logs to Pino (Fly logflow) for tamper resistance; bulk = .csv OR rowCount >= threshold
   app.use('/api/admin/*', async (c, next) => {
     await next();
     if (c.req.method !== 'GET') return;
@@ -93,10 +37,7 @@ export function mountAdminRoutes(app: Hono): void {
     const query = sanitizeAdminReadQueryString(c.req.url.split('?')[1] ?? '');
     const isCsv = path.endsWith('.csv');
 
-    // Count list rows in non-CSV JSON responses. Clone the response so
-    // reading the body doesn't drain the stream the client is waiting
-    // on. Body-read failures fall back to rowCount=0 (never throws) so
-    // the audit pass can't break the response path.
+    // Clone response to avoid draining the client stream; fallback to 0 on read failure
     let rowCount = 0;
     if (!isCsv) {
       try {
@@ -133,31 +74,17 @@ export function mountAdminRoutes(app: Hono): void {
     }
   });
 
-  // ADR 037 — staff role management (admin-tier; step-up-gated
-  // writes). The one surface that must exist before any other, since
-  // it is how everybody except the first admin gets their access.
+  // ADR 037 — must mount first; required for non-initial admins to gain access
   mountAdminStaffRoutes(app);
 
-  // The user-360 surface: search / list / drill / auth-state, plus the
-  // three per-user writes. Registers its literal paths before
-  // `/users/:userId` — see that module on why the order matters.
+  // Literal paths registered before /users/:userId to prevent route shadowing
   mountAdminUserRoutes(app);
 
-  // Order triage: list / drill / activity / CSV / stuck queue, plus
-  // the redemption re-fetch and the per-order re-drive.
   mountAdminOrderRoutes(app);
 
-  // Cashback rates, merchant surfaces, Discord wiring checks, the
-  // reverse lookup and the write-audit tail.
   mountAdminOpsRoutes(app);
 
-  // ADR 028 / A4-063: step-up token endpoint. Mounted under the
-  // standard admin middleware stack so only authenticated staff can
-  // mint step-up tokens — but NOT under `requireAdminStepUp` itself
-  // (chicken-and-egg: the admin can't hold a step-up token before they
-  // hit this endpoint to get one). Admin-tier: step-up only gates
-  // admin-only writes, so support has no business minting one — and
-  // must not learn the endpoint exists (404).
+  // ADR 028 / A4-063 — mounted under standard admin stack but NOT requireAdminStepUp (chicken-and-egg)
   app.post(
     '/api/admin/step-up',
     rateLimit('POST /api/admin/step-up', 30, 60_000),

@@ -1,21 +1,4 @@
-/**
- * Loop order read handlers — `GET /api/orders/loop/:id`
- * + `GET /api/orders/loop` (ADR 052).
- *
- * Two caller-scoped reads over the local mirror:
- *
- *   - `loopGetOrderHandler` — owner-scoped single-order detail.
- *     404 on non-owner reads to avoid leaking existence. For a
- *     still-`unpaid` order, overlays live CTX payment instructions
- *     (operator-scope card + payment reads) so the pay screen is
- *     fully server-rebuildable — nothing payment-directing is ever
- *     trusted from client-persisted storage (Q6-4b lineage).
- *   - `loopListOrdersHandler` — owner-scoped paginated list,
- *     newest-first, `?limit=` clamped 1-100, `?before=<iso>`.
- *
- * Both gate on `LOOP_AUTH_NATIVE_ENABLED` (404 when off) and
- * require an `auth.kind === 'loop'` bearer (401 otherwise).
- */
+// Loop order read handlers — ADR 052
 import type { Context } from 'hono';
 import { db } from '../db/client.js';
 import { config } from '../config/index.js';
@@ -34,15 +17,7 @@ const log = logger.child({ area: 'loop-order-reads' });
 
 export type { LoopOrderView };
 
-/**
- * CF-25 / X-PRIV-03: decrypt a stored redeem secret for the owner-
- * scoped read. Legacy plaintext rows pass through untouched. A decrypt
- * failure (tampered ciphertext, or the key was rotated away / unset
- * after a row was encrypted) returns null + logs — the order still
- * renders, the field reads as "redemption unavailable", and we never
- * serve a forged/unverifiable code. The order id is safe to log; the
- * code/PIN never is.
- */
+// CF-25 / X-PRIV-03: decrypt failure returns null + logs; order renders with "redemption unavailable"
 function readRedeemField(
   orderId: string,
   field: 'code' | 'pin',
@@ -59,11 +34,6 @@ function readRedeemField(
   }
 }
 
-/**
- * Shapes a DB `orders` row into the BigInt-safe wire view. `payment`
- * starts null — the detail read overlays live CTX instructions for
- * unpaid rows.
- */
 export function orderToView(row: Order): LoopOrderView {
   return {
     id: row.id,

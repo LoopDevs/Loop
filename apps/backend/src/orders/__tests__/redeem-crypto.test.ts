@@ -2,15 +2,10 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type * as ConfigModule from '../../config/index.js';
 import { randomBytes } from 'node:crypto';
 
-// The crypto util reads the key from `config.orders.redeem.encryptionKey`.
-// Mock it with a mutable object so each test can toggle the key on/off,
-// then `resetRedeemKeyCache()` to drop the memoised buffer.
+// Mock config to allow per-test key toggling; resetRedeemKeyCache drops the memoised buffer.
 const { redeemState } = vi.hoisted(() => ({
   redeemState: { key: undefined as string | undefined },
 }));
-// Partial config mock: only the redeem key is per-test mutable — the
-// rest of the real (test-fixture) config stays intact so logger/db keep
-// booting.
 vi.mock('../../config/index.js', async (importActual) => {
   const actual = await importActual<typeof ConfigModule>();
   return {
@@ -34,7 +29,6 @@ import {
   REDEEM_ENVELOPE_PREFIX,
 } from '../redeem-crypto.js';
 
-// A deterministic 32-byte key in base64 + the same key in hex.
 const KEY_BYTES = randomBytes(32);
 const KEY_B64 = KEY_BYTES.toString('base64');
 const KEY_HEX = KEY_BYTES.toString('hex');
@@ -55,7 +49,7 @@ describe('encryptRedeemField / decryptRedeemField — round trip', () => {
     const stored = encryptRedeemField(plaintext);
     expect(stored).not.toBeNull();
     expect(stored).toMatch(/^enc:v1:/);
-    expect(stored).not.toContain(plaintext); // ciphertext, not plaintext
+    expect(stored).not.toContain(plaintext);
     expect(decryptRedeemField(stored)).toBe(plaintext);
   });
 
@@ -64,7 +58,7 @@ describe('encryptRedeemField / decryptRedeemField — round trip', () => {
     const plaintext = 'PIN-0000';
     const a = encryptRedeemField(plaintext);
     const b = encryptRedeemField(plaintext);
-    expect(a).not.toBe(b); // distinct IVs → distinct envelopes
+    expect(a).not.toBe(b);
     expect(decryptRedeemField(a)).toBe(plaintext);
     expect(decryptRedeemField(b)).toBe(plaintext);
   });
@@ -87,7 +81,7 @@ describe('encryptRedeemField / decryptRedeemField — round trip', () => {
   it('decrypts ciphertext written under the equivalent base64 key (hex/b64 are the same key)', () => {
     setKey(KEY_B64);
     const stored = encryptRedeemField('cross-encoding-code');
-    setKey(KEY_HEX); // same 32 bytes, different encoding
+    setKey(KEY_HEX);
     expect(decryptRedeemField(stored)).toBe('cross-encoding-code');
   });
 });
@@ -109,7 +103,7 @@ describe('null / undefined handling', () => {
     setKey(KEY_B64);
     const once = encryptRedeemField('code');
     const twice = encryptRedeemField(once);
-    expect(twice).toBe(once); // idempotent — no nested envelope
+    expect(twice).toBe(once);
     expect(decryptRedeemField(twice)).toBe('code');
   });
 });
@@ -117,7 +111,6 @@ describe('null / undefined handling', () => {
 describe('legacy plaintext passthrough', () => {
   it('decrypt returns a non-enveloped value verbatim (existing rows)', () => {
     setKey(KEY_B64);
-    // A row captured before this slice has no `enc:v1:` prefix.
     expect(decryptRedeemField('LEGACY-PLAINTEXT-CODE')).toBe('LEGACY-PLAINTEXT-CODE');
   });
 
@@ -143,7 +136,7 @@ describe('key-unset behaviour (ships dark)', () => {
   it('decrypt throws when an enveloped value is read but the key is unset', () => {
     setKey(KEY_B64);
     const stored = encryptRedeemField('CODE');
-    setKey(undefined); // key removed / rotated away
+    setKey(undefined);
     expect(() => decryptRedeemField(stored)).toThrow(RedeemDecryptError);
   });
 
@@ -160,7 +153,6 @@ describe('tamper / auth-tag rejection', () => {
     const stored = encryptRedeemField('TAMPER-ME')!;
     const packed = stored.slice(REDEEM_ENVELOPE_PREFIX.length);
     const raw = Buffer.from(packed, 'base64url');
-    // Flip a byte in the ciphertext region (after the 12-byte IV).
     raw[13] = raw[13]! ^ 0xff;
     const tampered = `${REDEEM_ENVELOPE_PREFIX}${raw.toString('base64url')}`;
     expect(() => decryptRedeemField(tampered)).toThrow(RedeemDecryptError);
@@ -171,7 +163,7 @@ describe('tamper / auth-tag rejection', () => {
     const stored = encryptRedeemField('TAG-TAMPER')!;
     const packed = stored.slice(REDEEM_ENVELOPE_PREFIX.length);
     const raw = Buffer.from(packed, 'base64url');
-    raw[raw.length - 1] = raw[raw.length - 1]! ^ 0x01; // last byte = tail of the 16-byte tag
+    raw[raw.length - 1] = raw[raw.length - 1]! ^ 0x01;
     const tampered = `${REDEEM_ENVELOPE_PREFIX}${raw.toString('base64url')}`;
     expect(() => decryptRedeemField(tampered)).toThrow(RedeemDecryptError);
   });
@@ -179,7 +171,7 @@ describe('tamper / auth-tag rejection', () => {
   it('rejects a value decrypted under the wrong key', () => {
     setKey(KEY_B64);
     const stored = encryptRedeemField('WRONG-KEY')!;
-    setKey(randomBytes(32).toString('base64')); // a different key
+    setKey(randomBytes(32).toString('base64'));
     expect(() => decryptRedeemField(stored)).toThrow(RedeemDecryptError);
   });
 
@@ -192,7 +184,7 @@ describe('tamper / auth-tag rejection', () => {
 
 describe('key decoding guards', () => {
   it('throws when the key does not decode to 32 bytes', () => {
-    setKey(Buffer.alloc(16).toString('base64')); // 16 bytes — too short
+    setKey(Buffer.alloc(16).toString('base64'));
     expect(() => resolveRedeemKey()).toThrow(/32 bytes/);
   });
 });

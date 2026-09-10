@@ -1,40 +1,8 @@
-/**
- * Admin-audit channel Discord notifiers — fires to
- * `observability.discord.adminAuditWebhook`. Two signals that read
- * together as the admin-action audit trail:
- *
- *   1. **Admin write** (`notifyAdminAudit`) — generic ADR
- *      017/018 mutation log. Every staff-role grant, cashback-config
- *      edit, order redrive, etc. emits one of these AFTER the write
- *      commits. Actor id last-8-chars only; idempotency-
- *      key first-32-chars only; reason verbatim (truncated to
- *      `FIELD_VALUE_MAX`); replayed flag pulled from the
- *      idempotency-store hit.
- *   2. **Admin bulk read** (`notifyAdminBulkRead`) — A2-2008.
- *      Single-row drills aren't logged here (the access log is
- *      authoritative for line-item reads); CSV exports + large
- *      full-lists are. Discord post is the human-visible "someone
- *      is exporting right now" signal that's hard to ignore on a
- *      shared channel.
- *
- * Pulled out of `discord.ts` so the per-channel surfaces are
- * traceable to one file each. Shared infrastructure
- * (`sendWebhook`, `truncate`, `escapeMarkdown`, colour constants)
- * lives in `./shared.ts`.
- */
+// Admin-audit channel Discord notifiers — ADR 017/018, A2-2008, A2-511, CF-10
 import { config } from '../config/index.js';
 import { BLUE, FIELD_VALUE_MAX, GREEN, escapeMarkdown, sendWebhook, truncate } from './shared.js';
 
-/**
- * Notify: admin write action (ADR 017/018). Called fire-and-forget
- * AFTER the DB commit of every admin mutation. Actor id truncated
- * to the last 8 chars so the embed doesn't expose a full uuid; the
- * full id is still on the `admin_idempotency_keys` audit row. A2-511: actor email
- * dropped from the embed — the tail-id convention is the Discord-
- * side identifier, and admin emails are reserved for the ledger
- * row (where they're useful) rather than the webhook feed (where
- * they aren't).
- */
+// A2-511: actor email dropped from embed; tail-id is the Discord-side identifier
 export function notifyAdminAudit(args: {
   actorUserId: string;
   endpoint: string;
@@ -84,23 +52,7 @@ export function notifyAdminAudit(args: {
   });
 }
 
-/**
- * A2-2008: bulk-read audit notification. Admin reads are a separate
- * surface from admin writes — logging every single-row drill would
- * flood the channel — but bulk exports (CSV downloads, full-list
- * pulls past a row threshold) are a high-PII surface where a
- * malicious or mis-targeted admin can exfiltrate user data without
- * leaving a trace.
- *
- * Fires on:
- *   - any `GET /api/admin/*.csv` 200 response
- *   - CF-10: admin GETs whose JSON list body returns a bulk row count
- *     past the middleware threshold (cursor-walking PII pulls)
- *
- * The Pino access log (server-side, ships off-host via Fly logflow)
- * is the line-item read audit; this Discord post is the human-visible
- * "someone's running an export right now" signal.
- */
+// A2-2008: bulk-read audit; single-row drills are in the access log, not here
 export function notifyAdminBulkRead(args: {
   actorUserId: string;
   endpoint: string;

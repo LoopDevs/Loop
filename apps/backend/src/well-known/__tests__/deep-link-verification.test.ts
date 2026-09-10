@@ -1,20 +1,8 @@
-/**
- * `GET /.well-known/apple-app-site-association` +
- * `GET /.well-known/assetlinks.json` endpoint tests (M-3 deep linking).
- *
- * Drives the real route module (`routes/well-known.ts`, including the
- * rate-limit middleware) mounted on a minimal Hono app — same shape as
- * `auth/__tests__/jwks-publish.test.ts`.
- */
+// M-3 deep linking — AASA + assetlinks endpoint tests
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
 import type * as ConfigModule from '../../config/index.js';
 import { Hono } from 'hono';
 
-/**
- * The deep-link settings are the only config these tests vary; the mock
- * serves a mutable `mobile.deepLinks` block over the real (test-fixture)
- * config.
- */
 const { deepLinkState } = vi.hoisted(() => ({
   deepLinkState: {
     apple: { teamId: undefined as string | undefined },
@@ -35,13 +23,11 @@ vi.mock('../../config/index.js', async (importActual) => {
   };
 });
 
-/** The deep-link settings `appWithDeepLinks` accepts. */
 interface DeepLinkConfig {
   appleTeamId?: string;
   androidCertFingerprints?: string[];
 }
 
-/** Re-imports the routes with exactly the given settings and mounts the app. */
 async function appWithDeepLinks(settings: DeepLinkConfig): Promise<Hono> {
   vi.resetModules();
   deepLinkState.apple.teamId = settings.appleTeamId;
@@ -71,9 +57,7 @@ describe('GET /.well-known/apple-app-site-association', () => {
     expect(body.code).toBe('WELL_KNOWN_NOT_CONFIGURED');
   });
 
-  // API-02: a present-but-blank / whitespace / malformed value passed
-  // the old `=== undefined` guard and served a broken AASA file with an
-  // empty or mangled appID. It must now read as "not configured" (404).
+  // API-02: blank/whitespace/malformed values must read as "not configured" (404)
   it.each([
     ['empty string', ''],
     ['whitespace only', '   '],
@@ -88,8 +72,6 @@ describe('GET /.well-known/apple-app-site-association', () => {
   });
 
   it('trims surrounding whitespace so a padded APPLE_TEAM_ID yields a clean appID', async () => {
-    // The un-fixed handler interpolated the raw value, producing
-    // `  ABCDE12345  .io.loopfinance.app`. The guard now trims first.
     const app = await appWithDeepLinks({ appleTeamId: '  ABCDE12345  ' });
     const res = await app.request('/.well-known/apple-app-site-association');
     expect(res.status).toBe(200);
@@ -141,10 +123,7 @@ describe('GET /.well-known/assetlinks.json', () => {
     expect(body.code).toBe('WELL_KNOWN_NOT_CONFIGURED');
   });
 
-  // API-02: a value that collapses to no fingerprints (blank,
-  // whitespace, comma-only) passed the old `=== undefined` guard and
-  // served an assetlinks statement with `sha256_cert_fingerprints: []`.
-  // It must now read as "not configured" (404).
+  // API-02: values collapsing to no fingerprints must read as "not configured" (404)
   it.each([
     ['empty', []],
     ['a single empty entry', ['']],

@@ -1,24 +1,4 @@
-/**
- * `notifyHotFloatBackingShortfall` — the pager for NS-06's hot-float
- * USDC-backing reconciler (`treasury/hot-float-backing-reconciliation.ts`).
- *
- * Sibling of `monitoring-vault-drift.ts`'s `notifyVaultFloatDesync`
- * (which pages the operator's on-chain vault-SHARE reconciliation); this
- * pages the USDC-BALANCE reconciliation those shares back. Fires when the
- * RECORDED hot-float balance the INV-V2 solvency check trusts as backing
- * exceeds the operator's ACTUAL on-chain USDC beyond tolerance (a
- * `drift`), or when the reconciler could not read the balance at all (an
- * `error`). Like `notifyVaultFloatDesync` / `notifyOperatorFloatDrift`,
- * this pages on EVERY bad-state run (at-least-once reminder) rather than
- * deduping to one page per incident, since the reconciler runs on a slow
- * (daily-default) cadence.
- *
- * Returns the `sendWebhook` delivery result (hardening A2 pattern) so a
- * caller can treat an undelivered page as not-yet-sent.
- *
- * Re-exported through `discord/monitoring.ts` (and the top-level
- * `discord.ts` barrel).
- */
+// NS-06 hot-float USDC-backing pager — A2
 import { config } from '../config/index.js';
 import { scrubUpstreamBody } from '../upstream-body-scrub.js';
 import { DESCRIPTION_MAX, ORANGE, RED, escapeMarkdown, sendWebhook, truncate } from './shared.js';
@@ -27,15 +7,11 @@ export interface HotFloatBackingShortfallArgs {
   network: string;
   underlyingAssetCode: string;
   account: string;
-  /** Σ recorded hot-float balance over the USDC-backed vaults, in USDC stroops. `null` on an `error` run. */
   recordedFloatStroops: string | null;
-  /** Operator's actual on-chain USDC, in stroops. `null` on an `error` run. */
   onchainUsdcStroops: string | null;
-  /** `recorded − onchain` (positive = unbacked shortfall). `null` on an `error` run. */
   shortfallStroops: string | null;
   thresholdStroops: string;
   state: 'drift' | 'error';
-  /** Caught exception message on the `error` path; scrubbed + escaped before it reaches the embed. */
   error: string | null;
 }
 
@@ -45,9 +21,7 @@ export function notifyHotFloatBackingShortfall(
   if (args.state === 'error') {
     return sendWebhook(config.observability.discord.monitoringWebhook, {
       title: '🔴 Hot-Float Backing Reconciliation — check failed',
-      // The raw message can carry internals (a URL / secret that surfaced
-      // in the thrown error) — scrub then escape it exactly as
-      // `notifyOperatorFloatDrift` does before embedding.
+      // Scrub then escape to prevent leaking internals (URLs/secrets) from thrown errors.
       description: truncate(
         args.error !== null
           ? escapeMarkdown(scrubUpstreamBody(args.error))

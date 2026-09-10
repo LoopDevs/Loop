@@ -2,16 +2,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type * as ConfigModule from '../../config/index.js';
 import type { Config } from '../../config/index.js';
 
-/**
- * `getEmailProvider()` reads the validated `config.email` union, so
- * these tests drive it by mutating a hoisted override that the config
- * mock re-reads on every access (the provider itself is cached, hence
- * the `__resetEmailProviderForTests()` calls).
- *
- * The old "unknown provider" / "resend without an API key" cases are
- * gone: the `email` section is a discriminated union now, so neither
- * shape parses. Their coverage lives in `__tests__/config.test.ts`.
- */
+// `getEmailProvider()` reads the validated `config.email` union, so
+// these tests drive it by mutating a hoisted override that the config
+// mock re-reads on every access (the provider itself is cached, hence
+// the `__resetEmailProviderForTests()` calls).
 const CONSOLE_EMAIL: Config['email'] = {
   provider: 'console',
   from: { address: 'noreply@loopfinance.io', name: 'Loop' },

@@ -17,10 +17,7 @@ import { replaceMerchantLinks, reconcileUserDiscounts, type CtxMerchantLink } fr
 // from `merchants/sync.js`. Definitions live in `./sync-upstream.ts`.
 export { UpstreamMerchantSchema, UpstreamListResponseSchema };
 
-/**
- * A2-1915: condense a Zod issue array into a compact one-line
- * summary for the Discord embed.
- */
+// A2-1915
 function summariseZodIssues(issues: readonly z.ZodIssue[]): string {
   return issues
     .slice(0, 5)
@@ -37,18 +34,7 @@ const MAX_PAGES = 100;
 // if the response spans more than one.
 const PER_PAGE = 100_000;
 
-/**
- * A2-1922: build the denylist Set from `catalog.merchantDenylist` once
- * per refresh tick. Whitespace is trimmed and empty entries dropped, so
- * a sloppily-edited list still behaves. Returns an empty Set when the
- * list is absent or empty.
- *
- * Rebuilt every tick rather than hoisted to module scope so that a
- * future hot-reload of the config file takes effect on the next tick
- * (or sooner via a ws merchant event or the admin force-refresh button)
- * rather than needing a restart. Today `config` is read once at boot, so
- * changing the list still requires a redeploy.
- */
+// A2-1922: rebuilt every tick so a future hot-reload of the config file takes effect on the next tick
 function readMerchantDenylist(): ReadonlySet<string> {
   return new Set(
     config.catalog.merchantDenylist.map((id) => id.trim()).filter((id) => id.length > 0),
@@ -112,7 +98,6 @@ function buildMerchantStore(
   return { merchants, merchantsById, merchantsBySlug, loadedAt };
 }
 
-/** Returns the current merchant snapshot. */
 export function getMerchants(): MerchantStore {
   return store;
 }
@@ -147,39 +132,14 @@ export async function warmStartMerchantsFromSnapshot(): Promise<boolean> {
 
 let isMerchantRefreshing = false;
 
-/**
- * Outcome of a forced admin-triggered merchant refresh.
- *
- * - `triggered: true`  — this call acquired the lock and the store
- *   advanced (or the upstream failed, in which case `triggered` is
- *   still true but the thrown error is the signal).
- * - `triggered: false` — another refresh was already in flight, so
- *   this call coalesced into it. The admin sees the post-sync
- *   `loadedAt` regardless. (Two admins clicking the button at the
- *   same moment produce one upstream sweep.)
- */
 export interface RefreshOutcome {
   triggered: boolean;
 }
 
-/**
- * Fetches all merchant pages from the upstream API and atomically replaces
- * the in-memory store. Fire-and-forget — catches and logs any error,
- * then returns without signalling the caller. The background timer uses
- * this form; admin handlers call `forceRefreshMerchants()` to get the
- * outcome + a rethrown error on failure.
- */
 export async function refreshMerchants(): Promise<void> {
   await refreshMerchantsInternal();
 }
 
-/**
- * Admin-triggered variant. Returns `{ triggered }` so the caller can
- * tell a real sweep from a coalesced short-circuit, and rethrows any
- * upstream error so the handler can map it to a 502 response. Keeps
- * the background timer's swallow-and-log semantics intact on
- * `refreshMerchants()`.
- */
 export async function forceRefreshMerchants(): Promise<RefreshOutcome> {
   return refreshMerchantsInternal({ rethrow: true });
 }
@@ -220,7 +180,6 @@ function scheduleSnapshotPersist(): void {
   snapshotTimer.unref();
 }
 
-/** Cancels a pending debounced snapshot write. For graceful shutdown/tests. */
 export function cancelPendingSnapshotPersist(): void {
   if (snapshotTimer !== null) {
     clearTimeout(snapshotTimer);
@@ -228,7 +187,6 @@ export function cancelPendingSnapshotPersist(): void {
   }
 }
 
-/** Inserts or replaces one merchant in the in-memory store. */
 export function applyMerchantUpsert(merchant: Merchant): void {
   // Replace in place / append if new — filter+push would move an updated
   // merchant to the end of the catalog, destabilising `/api/merchants`
@@ -247,7 +205,6 @@ export function applyMerchantUpsert(merchant: Merchant): void {
   scheduleSnapshotPersist();
 }
 
-/** Removes one merchant from the in-memory store. No-op if absent. */
 export function applyMerchantRemoval(merchantId: string): void {
   if (!store.merchantsById.has(merchantId)) return;
   store = buildMerchantStore(
@@ -258,10 +215,7 @@ export function applyMerchantRemoval(merchantId: string): void {
   scheduleSnapshotPersist();
 }
 
-/**
- * A2-1922 denylist, exposed for the ws maintainer so an event-driven
- * upsert respects the same filter as the sweep.
- */
+// A2-1922
 export function isMerchantDenylisted(merchantId: string): boolean {
   return readMerchantDenylist().has(merchantId);
 }

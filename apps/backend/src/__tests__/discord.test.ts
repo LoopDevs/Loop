@@ -1,10 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type * as ConfigModule from '../config/index.js';
 
-// The two webhook URLs are the only settings `discord.ts` reads, and
-// each test flips them to exercise the configured/unconfigured
-// branches — so they live in a mutable object the mock reads per
-// access, over the real (test-fixture) config.
+// Mutable object so tests can flip webhook config per-access without re-mocking the module.
 const mockWebhooks = vi.hoisted(() => ({
   ordersWebhook: 'https://discord.test/orders-hook' as string | undefined,
   monitoringWebhook: 'https://discord.test/monitoring-hook' as string | undefined,
@@ -53,10 +50,7 @@ beforeEach(() => {
   mockFetch.mockReset();
   mockLog.warn.mockReset();
   mockFetch.mockResolvedValue(new Response(null, { status: 204 }));
-  // Reset to the default configured state. Individual tests may
-  // override (e.g. `undefined` for the "skips silently when not
-  // configured" branch); this resets so later siblings start clean
-  // regardless.
+  // Reset to default configured state; individual tests may override for unconfigured branches.
   mockWebhooks.ordersWebhook = 'https://discord.test/orders-hook';
   mockWebhooks.monitoringWebhook = 'https://discord.test/monitoring-hook';
 });
@@ -191,9 +185,7 @@ describe('notifyOrderFulfilled', () => {
     const body = lastBody();
     const embed = body.embeds[0] as { fields: Array<{ name: string; value: string }> };
     const amount = embed.fields.find((f) => f.name === 'Amount');
-    // Intl.NumberFormat picks the correct symbol for NOK. The exact
-    // symbol is `kr` on modern ICU; accept either `kr` or `Kr` to
-    // stay robust against Node version drift in the ICU tables.
+    // Accepts `kr` or `Kr` to remain robust against Node/ICU version drift.
     expect(amount?.value).toMatch(/^[Kk]r25\.00 NOK$/);
   });
 
@@ -208,10 +200,7 @@ describe('notifyOrderFulfilled', () => {
     const body = lastBody();
     const embed = body.embeds[0] as { fields: Array<{ name: string; value: string }> };
     const amount = embed.fields.find((f) => f.name === 'Amount');
-    // ZZZ is the ISO-4217 "no currency" code; Intl.NumberFormat
-    // accepts it and returns 'ZZZ' as the symbol. Either branch of
-    // the fallback (no symbol found) or symbol === code is fine —
-    // the point is the method doesn't throw.
+    // ZZZ is ISO-4217 "no currency"; Intl.NumberFormat accepts it. Verifies no throw.
     expect(amount?.value).toMatch(/^(25\.00 ZZZ|ZZZ25\.00 ZZZ)$/);
   });
 });
@@ -244,9 +233,7 @@ describe('mention injection defense', () => {
   });
 
   it('applies allowed_mentions on monitoring webhooks too', async () => {
-    // Any monitoring-channel notifier proves the point; the surface is
-    // unique so this call can't be swallowed by the per-surface dedup
-    // exercised in the notifyCtxSchemaDrift block below.
+    // Uses unique surface to avoid dedup interference from notifyCtxSchemaDrift tests.
     notifyCtxSchemaDrift({
       surface: 'GET /allowed-mentions-probe',
       issuesSummary: '@everyone nice try',
@@ -293,7 +280,7 @@ describe('sendWebhook error handling', () => {
 
   it('does not throw from notify functions even when fetch rejects', async () => {
     mockFetch.mockRejectedValueOnce(new Error('boom'));
-    // This must not throw — callers are sync `void sendWebhook(...)`.
+    // Callers are sync `void sendWebhook(...)`; must not throw.
     expect(() =>
       notifyOrderCreated({
         orderId: 'o1',

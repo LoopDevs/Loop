@@ -1,21 +1,5 @@
-/**
- * A4-098 regression: concurrent refresh-token rotation.
- *
- * `native.test.ts` pins the handler's branch logic with per-function
- * mocks; this file drives TWO truly concurrent `nativeRefreshHandler`
- * calls against a stateful in-memory `refresh_tokens` store whose
- * `tryRevokeIfLive` implements the same compare-and-set contract as
- * the real repo (`UPDATE ... WHERE revoked_at IS NULL ... RETURNING`).
- * A barrier inside `findLiveRefreshToken` parks both requests until
- * each has observed the pre-revoke row — the widest possible race
- * window — before either is allowed to proceed to the CAS.
- *
- * The bug this pins: the handler used to persist the successor row
- * (inside `issueTokenPair`) BEFORE the CAS, so the losing request
- * left an orphaned LIVE refresh row in the store with no revocation
- * path. Post-fix the loser signs but never persists, so the store
- * ends with exactly one live row: the winner's successor.
- */
+// A4-098: concurrent refresh rotation — CAS race window via barrier
+
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type * as ConfigModule from '../../config/index.js';
 import type { Context } from 'hono';
@@ -60,7 +44,6 @@ vi.mock('../../config/index.js', async (importActual) => {
 
 const fake = vi.hoisted(() => {
   const rows = new Map<string, StoreRow>();
-  // Cheap stand-in for SHA-256 — the store only needs hash equality.
   const hash = (token: string): string => `hashed:${token}`;
 
   let expectedReaders = 0;
@@ -68,7 +51,6 @@ const fake = vi.hoisted(() => {
   return {
     rows,
     hash,
-    /** Next N findLiveRefreshToken calls rendezvous before returning. */
     setReadBarrier(n: number): void {
       expectedReaders = n;
       parked = [];
@@ -187,7 +169,6 @@ describe('A4-098: concurrent refresh rotation against a stateful store', () => {
     });
     expect(claims.jti).toBeDefined();
     const oldJti = claims.jti as string;
-    // Seed the live row exactly as verify-otp's first issue would.
     fake.rows.set(oldJti, {
       jti: oldJti,
       userId: 'user-1',
@@ -197,14 +178,12 @@ describe('A4-098: concurrent refresh rotation against a stateful store', () => {
       replacedByJti: null,
     });
 
-    // Both requests must read the live row before either may revoke.
     fake.setReadBarrier(2);
     const [resA, resB] = await Promise.all([
       nativeRefreshHandler(makeCtx({ refreshToken: token })),
       nativeRefreshHandler(makeCtx({ refreshToken: token })),
     ]);
 
-    // Exactly one 200 (winner) and one 401 (CAS loser).
     expect([resA.status, resB.status].sort()).toEqual([200, 401]);
     const winnerRes = resA.status === 200 ? resA : resB;
     const loserRes = resA.status === 200 ? resB : resA;
@@ -212,16 +191,12 @@ describe('A4-098: concurrent refresh rotation against a stateful store', () => {
     const loserBody = (await loserRes.json()) as { code: string };
     expect(loserBody.code).toBe('UNAUTHORIZED');
 
-    // Store state: exactly two rows — the revoked original and ONE
-    // live successor. Pre-fix, the loser's pre-CAS insert left a
-    // third row here, live and orphaned (no revocation path).
+    // Pre-fix, the loser's pre-CAS insert left a third row here, live and orphaned (no revocation path).
     const allRows = [...fake.rows.values()];
     expect(allRows).toHaveLength(2);
     const liveRows = allRows.filter((row) => row.revokedAt === null);
     expect(liveRows).toHaveLength(1);
 
-    // The original row links to the surviving successor, and the
-    // successor is the pair the winner actually received.
     const original = fake.rows.get(oldJti) as StoreRow;
     expect(original.revokedAt).not.toBeNull();
     const successor = liveRows[0] as StoreRow;

@@ -2,11 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type * as ConfigModule from '../index.js';
 import type { Context } from 'hono';
 
-/**
- * The handler is a pure projection of `config`, so the mock serves a
- * mutable subset of the settings it reads over the real (test-fixture)
- * config, and each test assigns the ones it cares about.
- */
 const { configState } = vi.hoisted(() => ({
   configState: {
     nativeAuthEnabled: false,
@@ -63,7 +58,6 @@ function makeCtx(): { headers: Record<string, string>; ctx: Context } {
   };
 }
 
-/** Back to the all-defaults posture between tests. */
 function resetConfigState(): void {
   configState.nativeAuthEnabled = false;
   configState.phase1Only = false;
@@ -131,9 +125,7 @@ describe('configHandler', () => {
     expect(body.social.appleServiceId).toBe('io.loopfinance.app');
   });
 
-  // ADR 052: the operator API creds are boot-required and the
-  // order-mirror machinery always runs, so native auth is the only
-  // gate loopOrdersEnabled reflects.
+  // ADR 052: native auth is the only gate loopOrdersEnabled reflects
   it('sets loopOrdersEnabled with auth.native.enabled alone', async () => {
     configState.nativeAuthEnabled = true;
     const { configHandler } = await import('../handler.js');
@@ -178,7 +170,6 @@ describe('configHandler', () => {
   });
 
   it('surfaces per-platform minSupportedVersion floors independently', async () => {
-    // Android floor left unset — must stay null (no gate on that platform).
     configState.minSupportedVersion = { ios: '0.4.0', android: undefined };
     const { configHandler } = await import('../handler.js');
     const { ctx } = makeCtx();

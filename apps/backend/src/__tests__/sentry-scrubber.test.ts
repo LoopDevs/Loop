@@ -34,10 +34,7 @@ describe('scrubSentryEvent (A2-1308)', () => {
     expect(data.otp).toBe('[REDACTED]');
     const user = data.user as Record<string, unknown>;
     expect(user.refreshToken).toBe('[REDACTED]');
-    // A4-074: emails are now scrubbed via the free-text regex pass
-    // even at non-sensitive key names (was previously left intact).
-    // The scrubber walks string values applying EMAIL_RE / BEARER_RE
-    // / STELLAR_SECRET_RE / LONG_HEX_RE.
+    // A4-074: emails scrubbed via free-text regex pass even at non-sensitive key names
     expect(user.email).toBe('[REDACTED_EMAIL]');
   });
 
@@ -77,8 +74,7 @@ describe('scrubSentryEvent (A2-1308)', () => {
     expect(out.extra).toEqual({
       merchantId: 'amazon',
       amountMinor: '1000',
-      // A4-074: free-text regex pass — emails redacted regardless
-      // of the field name they live under.
+      // A4-074: free-text regex pass — emails redacted regardless of field name
       email: '[REDACTED_EMAIL]',
     });
   });
@@ -109,9 +105,7 @@ describe('scrubSentryEvent (A2-1308)', () => {
     expect(out).toEqual(weird);
   });
 
-  // CF2-09 (2026-06-30 cold audit): the implementation already walked
-  // breadcrumbs (unlike the web twin, which didn't) but this file had
-  // zero test coverage pinning that behavior.
+  // CF2-09: pins breadcrumb scrubbing behavior (implementation already walked breadcrumbs)
   it('scrubs free-text PII in breadcrumb.message and sensitive keys in breadcrumb.data', () => {
     const out = scrubSentryEvent({
       breadcrumbs: [
@@ -124,38 +118,24 @@ describe('scrubSentryEvent (A2-1308)', () => {
     expect(out.breadcrumbs?.[1]?.message).toBe('no pii here');
   });
 
-  // OBS-04 (cold audit): the scrubber's hand-maintained key list had
-  // drifted from logger.ts REDACT_PATHS — the source of truth it claims
-  // to mirror. Secrets the logger redacts leaked to Sentry: the Privy
-  // wallet-provider app secret (`appSecret` / `PRIVY_APP_SECRET`) and
-  // the OTP `code`. Values below are chosen so they are NOT caught by
-  // the free-text regex pass (no email / Bearer / Stellar-secret /
-  // 32+hex shape) — so a bare `[REDACTED]` here can only come from the
-  // key-based redaction that drifted, not from the A4-074 string pass.
+  // OBS-04: values chosen to avoid free-text regex shapes, isolating key-based redaction
   it('OBS-04: redacts appSecret / PRIVY_APP_SECRET / OTP code that leaked past the drifted scrubber', () => {
     const out = scrubSentryEvent({
       request: {
         data: {
-          // OTP verification body: logger redacts `code`, scrubber did not.
           code: '123456',
           phone: '+15551234567',
         },
       },
       extra: {
-        // Privy adapter config object dumped into `extra`.
         appSecret: 'privy-app-secret-value',
-        // Fully-qualified env-key shape from an env dump.
         PRIVY_APP_SECRET: 'privy-env-secret-value',
-        // Nested, to prove depth is covered too.
         privy: { appSecret: 'nested-privy-secret' },
-        // A non-secret field must still survive.
         merchantId: 'amazon',
       },
     });
     const data = out.request?.data as Record<string, unknown>;
     expect(data.code).toBe('[REDACTED]');
-    // Not a secret key — the phone value has no free-text PII shape, so
-    // it passes through (documents that we didn't over-redact).
     expect(data.phone).toBe('+15551234567');
     const extra = out.extra as Record<string, unknown>;
     expect(extra.appSecret).toBe('[REDACTED]');
@@ -164,11 +144,7 @@ describe('scrubSentryEvent (A2-1308)', () => {
     expect(extra.merchantId).toBe('amazon');
   });
 
-  // OBS-04 drift-guard: prove parity with the logger by exercising a
-  // field named after *every* leaf key in REDACT_PATHS. Any key the
-  // scrubber fails to redact is a leak. The value has no free-text PII
-  // shape, so the only way it becomes `[REDACTED]` is key-based
-  // redaction — this fails RED for all 13 drifted keys pre-fix.
+  // OBS-04 drift-guard: exercises every leaf key in REDACT_PATHS to prove parity with logger
   it('OBS-04: redacts every secret key the logger does (no drift from REDACT_PATHS)', () => {
     const leafKeys = [...new Set(REDACT_PATHS.map((p) => p.slice(p.lastIndexOf('.') + 1)))];
     const SAFE_VALUE = 'redact-me-please'; // no email/Bearer/Stellar/hex shape
@@ -181,27 +157,14 @@ describe('scrubSentryEvent (A2-1308)', () => {
     expect(leaked).toEqual([]);
   });
 
-  // OBS-04 gap 1 (cold audit): key-based redaction only fired when the
-  // value was a *string* (`typeof value === 'string'`), so a secret
-  // serialized as a number/boolean — or wrapped in an object/array —
-  // at a known-secret key slipped through un-redacted. It is now
-  // redacted regardless of type. The values below carry NO free-text
-  // PII shape, so a bare `[REDACTED]` can only come from the
-  // type-agnostic key redaction this fix adds (RED on unfixed: the raw
-  // value / recursed subtree leaks).
+  // OBS-04 gap 1: values carry no free-text PII shape, isolating type-agnostic key redaction
   it('OBS-04: redacts a NON-STRING value at a secret key (number / boolean / object / array)', () => {
     const out = scrubSentryEvent({
       extra: {
-        // Numeric secret (e.g. an internal key id serialized as a number).
         apiKey: 1234567890,
-        // Boolean at a secret key.
         secret: true,
-        // Secret wrapped in an object — must be redacted WHOLESALE and
-        // NOT recursed into (the old code recursed and re-exposed `raw`).
         apiSecret: { raw: 42, note: 'sekret' },
-        // Secret wrapped in an array.
         privateKey: [0xdead, 'part-two'],
-        // Non-secret numeric field must survive (no over-redaction).
         PORT: 8080,
       },
     });
@@ -213,10 +176,7 @@ describe('scrubSentryEvent (A2-1308)', () => {
     expect(extra.PORT).toBe(8080);
   });
 
-  // OBS-04 carve-out pin: null / undefined at a secret key carry no
-  // secret, so we preserve them rather than fabricate a `[REDACTED]`
-  // marker — keeps the event shape honest. (Green pre- and post-fix;
-  // documents the deliberate decision, not a red proof.)
+  // OBS-04 carve-out: null/undefined at secret keys preserved to keep event shape honest
   it('OBS-04: preserves null / undefined at a secret key (no fabricated marker)', () => {
     const out = scrubSentryEvent({ extra: { apiKey: null, apiSecret: undefined } });
     const extra = out.extra as Record<string, unknown>;
@@ -225,20 +185,15 @@ describe('scrubSentryEvent (A2-1308)', () => {
     expect(extra.apiSecret).toBeUndefined();
   });
 
-  // OBS-04 gap 2 (cold audit): `event.user` was never walked, so a
-  // secret-named key or a free-text PII shape parked under it reached
-  // Sentry un-redacted. It is now key-walked with the same
-  // `scrubObject` treatment as extra/contexts/tags. RED on unfixed for
-  // the secret key AND the email; id / ip_address / username are
-  // asserted intact to prove we don't over-redact benign user fields.
+  // OBS-04 gap 2: pins event.user key-walk and free-text PII redaction
   it('OBS-04: key-walks event.user (secret keys + free-text PII redacted, benign fields intact)', () => {
     const out = scrubSentryEvent({
       user: {
         id: 'u-123',
-        apiKey: 'user-scoped-secret', // secret key, no free-text PII shape
-        email: 'u@example.com', // free-text PII (A4-074 regex)
-        ip_address: '1.2.3.4', // benign, must survive
-        username: 'alice', // benign, must survive
+        apiKey: 'user-scoped-secret',
+        email: 'u@example.com',
+        ip_address: '1.2.3.4',
+        username: 'alice',
       },
     });
     const user = out.user as Record<string, unknown>;
@@ -249,11 +204,7 @@ describe('scrubSentryEvent (A2-1308)', () => {
     expect(user.username).toBe('alice');
   });
 
-  // OBS-04 pin: the finding also named `event.exception.values[].value`
-  // as a missed region, but re-derivation against current code shows it
-  // is ALREADY scrubbed by the A4-074 free-text pass (scrubSentryString)
-  // — so this is a GREEN-on-both regression guard, not a red proof. It
-  // pins that the exception message keeps getting the PII regex applied.
+  // OBS-04 pin: regression guard for exception.values[].value free-text PII scrub
   it('OBS-04: exception.values[].value keeps its free-text PII scrub (regression pin)', () => {
     const out = scrubSentryEvent({
       exception: {

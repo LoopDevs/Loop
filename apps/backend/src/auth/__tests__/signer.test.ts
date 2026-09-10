@@ -2,9 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import type * as ConfigModule from '../../config/index.js';
 import { createHmac } from 'node:crypto';
 
-// `signer.ts` reads the keys lazily inside getActiveSigner(), so the
-// mock only has to serve an HS256 key over the real (test-fixture)
-// config.
+// `signer.ts` reads keys lazily inside getActiveSigner(), so the mock only needs to serve an HS256 key.
 const { jwtState } = vi.hoisted(() => ({
   jwtState: {
     hs256: {
@@ -42,7 +40,6 @@ describe('signer (Tranche-2 prep — Track A.1)', () => {
       const s = getActiveSigner();
       expect(s).not.toBeNull();
       expect(s?.alg).toBe('HS256');
-      // HS256 has no kid; the JWT header omits it accordingly.
       expect(s?.kid).toBeUndefined();
     });
 
@@ -50,7 +47,6 @@ describe('signer (Tranche-2 prep — Track A.1)', () => {
       const s = getActiveSigner();
       if (s === null) throw new Error('expected signer');
       const sig = s.sign('header.payload');
-      // HMAC-SHA256 produces 32-byte digests.
       expect(sig.length).toBe(32);
       expect(s.verify('header.payload', sig)).toBe(true);
     });
@@ -60,8 +56,7 @@ describe('signer (Tranche-2 prep — Track A.1)', () => {
       if (s === null) throw new Error('expected signer');
       const sig = s.sign('header.payload');
       const tampered = Buffer.concat([sig.subarray(0, sig.length - 1), Buffer.from([0])]);
-      // Almost always different from the real last byte; if by chance
-      // the original last byte was already 0x00, flip it.
+      // Flip the last byte if it was already 0x00 to ensure the signature differs.
       const finalTampered =
         Buffer.compare(tampered, sig) === 0
           ? Buffer.concat([sig.subarray(0, sig.length - 1), Buffer.from([1])])
@@ -88,9 +83,7 @@ describe('signer (Tranche-2 prep — Track A.1)', () => {
     });
 
     it('returns BOTH current and previous keys during a rotation window', () => {
-      // The mock re-reads `jwtState` on every access and signer.ts
-      // reads the config per call, so setting the previous slot here is
-      // enough — no module reload needed.
+      // The mock re-reads `jwtState` on every access, so setting the previous slot here is sufficient.
       jwtState.hs256.current = 'jwt-test-current-signing-key-32min!!';
       jwtState.hs256.previous = 'jwt-test-signing-key-previous-32chr!';
       try {
@@ -104,8 +97,7 @@ describe('signer (Tranche-2 prep — Track A.1)', () => {
     });
 
     it('returns an empty array for RS256 — Track A.2 reserved', () => {
-      // Track A.1 only ships HS256. RS256 verifiers are wired in A.2
-      // when the JWKS publish + LOOP_JWT_PRIVATE_KEY family lands.
+      // Track A.1 only ships HS256. RS256 verifiers are wired in A.2.
       const verifiers = getVerifiersForAlg('RS256');
       expect(verifiers).toEqual([]);
     });

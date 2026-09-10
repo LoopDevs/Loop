@@ -1,19 +1,7 @@
-/**
- * `withKeyedLock` — the in-process serialisation that replaced
- * `pg_advisory_xact_lock` for the multi-document invariants the store
- * can't make atomic (`db/keyed-lock.ts`).
- *
- * Three properties the callers depend on:
- *   - same key ⇒ strictly one at a time, in arrival order;
- *   - different keys ⇒ no serialisation at all (an admin's idempotent
- *     write must not queue behind an unrelated admin's);
- *   - a rejecting holder must not poison the queue behind it, or one
- *     malformed request would wedge every later caller on that key.
- */
+// withKeyedLock — in-process serialisation replacing pg_advisory_xact_lock — db/keyed-lock.ts
 import { describe, it, expect } from 'vitest';
 import { withKeyedLock } from '../keyed-lock.js';
 
-/** Resolves after `ms`, so the interleaving is observable. */
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -60,8 +48,6 @@ describe('withKeyedLock', () => {
 
   it('releases the key once the queue drains, so a later call starts fresh', async () => {
     await withKeyedLock('k', async () => 'first');
-    // Nothing is holding 'k' any more; a second call must not wait on
-    // a stale chain entry.
     await expect(withKeyedLock('k', async () => 'second')).resolves.toBe('second');
   });
 });

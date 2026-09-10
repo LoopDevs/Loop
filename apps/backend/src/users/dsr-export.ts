@@ -1,27 +1,4 @@
-/**
- * A2-1906 — Data Subject Rights (DSR) export.
- *
- * `GET /api/users/me/dsr/export` — returns every stored record Loop
- * holds keyed to the calling user. Self-serve compliance with the
- * GDPR "right to data portability" / CCPA equivalent.
- *
- * What's included:
- *   - `users` doc (id, email, homeCurrency, ctxUserId)
- *   - `user_identities` docs (Google / Apple linkage; ADR 014)
- *   - `orders` docs (purchase history with the per-order economics)
- *
- * What's NOT included (must be requested via privacy@loopfinance.io):
- *   - CTX-side data — gift card codes live on CTX's side after
- *     fulfillment; Loop stores only the mapping (included).
- *   - Backend access logs / Sentry events (off-host, short retention).
- *
- * Sensitive material the export deliberately REDACTS:
- *   - `redeemCode` / `redeemPin` on orders. These are the gift card
- *     secret material — exporting them in plaintext would mean a
- *     stolen Loop bearer + this endpoint = full gift-card theft. The
- *     export shows whether a redeem code was issued (`redeemIssued`)
- *     and points at the in-app order view instead.
- */
+// A2-1906 — DSR export (GDPR portability); redeem codes redacted: a stolen bearer + this endpoint = gift-card theft
 import { db } from '../db/client.js';
 
 export const DSR_EXPORT_SCHEMA_VERSION = 2;

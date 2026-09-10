@@ -1,18 +1,4 @@
-/**
- * Loop-native `POST /api/auth/request-otp` (ADR 013).
- *
- * Lifted out of `./native.ts` so the request side of the
- * Loop-native flow lives separately from the verify + refresh
- * trio. The three handlers share `LOOP_AUTH_NATIVE_ENABLED`
- * gating and the same `request-schemas.ts` source-of-truth, but
- * the handler bodies share no helpers and pulling request-otp
- * into its own file keeps the parent's import surface focused
- * on the token-issuance pair (verify-otp + refresh) that share
- * `issueTokenPair`.
- *
- * Re-exported from `./native.ts` so the dispatcher in
- * `auth/handler.ts` keeps importing from the historical path.
- */
+// Loop-native `POST /api/auth/request-otp` — ADR 013
 import type { Context } from 'hono';
 import { logger } from '../logger.js';
 import { recordOtpSendFailure, recordOtpSendSuccess } from '../runtime-health.js';
@@ -28,27 +14,6 @@ import { RequestOtpBody } from './request-schemas.js';
 
 const log = logger.child({ handler: 'auth-native' });
 
-/**
- * POST /api/auth/request-otp — native path.
- *
- * Always returns 200 with `{ message: 'Verification code sent' }`
- * regardless of whether the email is known or whether the email
- * provider succeeded — email-enumeration defence, same shape the
- * CTX-proxy path already uses.
- *
- * Per-email cap on top of the per-IP rate limit: an attacker
- * rotating IPs can't still flood one inbox.
- *
- * Health-surface note: this handler used to call
- * `setOtpDeliveryEnabled(true)` unconditionally on entry, which
- * re-armed the OTP-delivery surface on every request — including
- * requests that failed validation or never reached the provider —
- * clobbering an operator-set kill-switch before any email was sent.
- * Enablement is owned by the send path now: `recordOtpSendSuccess()`
- * re-enables on a successful send (the only real evidence of
- * recovery); `recordOtpSendFailure()` records error metadata without
- * touching the switch.
- */
 export async function nativeRequestOtpHandler(c: Context): Promise<Response> {
   const parsed = RequestOtpBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) {

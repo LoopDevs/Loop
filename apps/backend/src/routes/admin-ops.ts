@@ -1,17 +1,4 @@
-/**
- * `/api/admin/*` operational mounts: the cashback-rate CRUD, the
- * merchant surfaces, the Discord wiring checks, the reverse lookup,
- * and the write-audit tail.
- *
- * The tiering follows ADR 037: reads ride the support blanket, and
- * every CSV export, Discord surface and write carries an explicit
- * `requireStaff('admin')`. The one step-up gate here is on the
- * cashback-rate upsert — it sets the split future orders stamp at
- * creation, so a captured bearer must not be able to move it quietly.
- *
- * Mount order: `/merchant-cashback-configs.csv` and `/audit-tail.csv`
- * are literals that must register before their param-bearing siblings.
- */
+// /api/admin/* operational mounts — ADR 037
 import type { Hono } from 'hono';
 import { rateLimit } from '../middleware/rate-limit.js';
 import { requireStaff } from '../auth/require-staff.js';
@@ -32,7 +19,6 @@ import { adminLookupHandler } from '../admin/lookup.js';
 import { adminAuditTailCsvHandler, adminAuditTailHandler } from '../admin/audit-tail.js';
 
 export function mountAdminOpsRoutes(app: Hono): void {
-  // ─── Cashback rates (ADR 011) ─────────────────────────────────────
   app.get(
     '/api/admin/merchant-cashback-configs.csv',
     rateLimit('GET /api/admin/merchant-cashback-configs.csv', 10, 60_000),
@@ -58,7 +44,6 @@ export function mountAdminOpsRoutes(app: Hono): void {
     upsertConfigHandler,
   );
 
-  // ─── Merchants ────────────────────────────────────────────────────
   app.get(
     '/api/admin/merchants-catalog.csv',
     rateLimit('GET /api/admin/merchants-catalog.csv', 10, 60_000),
@@ -80,7 +65,6 @@ export function mountAdminOpsRoutes(app: Hono): void {
     adminMerchantsResyncHandler,
   );
 
-  // ─── Discord wiring ───────────────────────────────────────────────
   // Admin-tier: knowing which alert channels exist, and being able to
   // post into them, is not part of the support remit.
   app.get(
@@ -97,7 +81,6 @@ export function mountAdminOpsRoutes(app: Hono): void {
     adminDiscordTestHandler,
   );
 
-  // ─── Reverse lookup + audit tail ──────────────────────────────────
   app.get('/api/admin/lookup', rateLimit('GET /api/admin/lookup', 60, 60_000), adminLookupHandler);
   app.get(
     '/api/admin/audit-tail.csv',

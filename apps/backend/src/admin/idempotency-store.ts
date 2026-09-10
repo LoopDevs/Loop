@@ -1,24 +1,4 @@
-/**
- * Admin idempotency store — the single-row CRUD layer (ADR 017).
- *
- * Three persistence helpers over the `admin_idempotency_keys`
- * collection:
- *
- *   - `lookupIdempotencyKey` — read snapshot, replay-TTL-aware
- *   - `storeIdempotencyKey`  — write snapshot (upsert)
- *   - `sweepStaleIdempotencyKeys` — audit-retention sweep, called from
- *     the app-level cleanup interval
- *
- * The higher-level `withIdempotencyGuard` (which serialises
- * lookup → write → store) lives in the parent file. NS-03: the 24h
- * REPLAY window (`IDEMPOTENCY_TTL_HOURS`) is decoupled from the much
- * longer retention window (`admin.auditRetentionDays`) — this
- * collection doubles as the durable admin-action audit trail, which
- * must outlive replay.
- *
- * Re-exported from `./idempotency.ts` so the import sites across the
- * admin handlers keep resolving against `'../admin/idempotency.js'`.
- */
+// admin idempotency store — ADR 017; NS-03: replay TTL decoupled from audit retention (this collection doubles as the audit trail)
 import { config } from '../config/index.js';
 import { db } from '../db/client.js';
 import { logger } from '../logger.js';
@@ -32,12 +12,7 @@ export interface IdempotencySnapshot {
   createdAt: Date;
 }
 
-/**
- * Fetch a prior snapshot for the given (adminUserId, key). Returns
- * null on miss OR on a TTL-expired row. A2-500: expired rows read as a
- * miss so replay semantics match the promised window even in the gap
- * between sweeps (e.g. right after boot).
- */
+// A2-500: an expired row reads as a miss so replay semantics hold even in the gap between sweeps
 export async function lookupIdempotencyKey(args: {
   adminUserId: string;
   key: string;
@@ -58,26 +33,9 @@ export async function lookupIdempotencyKey(args: {
   return { status: row.status, body, createdAt: row.createdAt };
 }
 
-/**
- * A2-500 / NS-03: sweep that deletes admin-idempotency snapshots older
- * than the AUDIT RETENTION window (`admin.auditRetentionDays`), called
- * from the app-level cleanup interval.
- *
- * The retention window is NOT the 24h replay TTL: this collection is
- * the durable admin-action audit trail (`audit-tail.ts` reads it), so
- * a 24h sweep would silently delete the sole forensic record of every
- * admin write after a day.
- *
- * Replay semantics are preserved: a re-submitted key whose row is
- * RETAINED but older than 24h is a replay MISS (the read-time gate),
- * so `doWrite()` re-executes — exactly as it did when the row would
- * already have been swept.
- *
- * @param args.retentionMs override the retention grace (defaults to
- *        `admin.auditRetentionDays`). Mirrors the `runAuthRowPurgeTick`
- *        seam so tests can drive a short window.
- * @param args.now clock injection for tests.
- */
+// A2-500 / NS-03: sweeps by AUDIT RETENTION, not the 24h replay TTL — this collection is the durable admin audit trail (audit-tail.ts reads it)
+// a retained row older than 24h is a replay miss at read time, so replay semantics are unchanged
+// retentionMs/now are test seams (mirrors runAuthRowPurgeTick)
 export async function sweepStaleIdempotencyKeys(args?: {
   retentionMs?: number;
   now?: Date;
@@ -101,23 +59,8 @@ export async function sweepStaleIdempotencyKeys(args?: {
   }
 }
 
-/**
- * A5-3: how many admin actions on this exact `path` were APPLIED
- * within the trailing `windowMs`. Used as a PER-TARGET velocity cap
- * where the path encodes the target (e.g.
- * `/api/admin/users/<uuid>/clear-otp-lockout`), which is what actually
- * bounds a "clear → guess → clear" loop — the per-IP route limit
- * can't, since an attacker's several IPs under one bearer all target
- * one victim.
- *
- * Counts stored snapshots, and a row exists only if the write
- * committed — so this counts APPLIED actions, not attempts. A replay
- * creates no new row, so it doesn't inflate the count.
- *
- * Deliberately does NOT catch its own errors: the caller treats a
- * throw as FAIL-CLOSED (reject the action) so a transient DB error
- * cannot hand an attacker a free, uncounted action.
- */
+// A5-3: per-target velocity cap — per-IP limits can't bound several IPs under one bearer targeting one victim
+// counts committed snapshots only (a replay adds no row); errors propagate so the caller fails closed
 export async function countAppliedActionsForPath(args: {
   path: string;
   windowMs: number;
@@ -129,13 +72,7 @@ export async function countAppliedActionsForPath(args: {
     .count({ path: args.path, createdAt: { $gt: since } });
 }
 
-/**
- * Persist a completed snapshot. Upserts so a re-post with the same key
- * idempotently refreshes the stored response (e.g. after a crash
- * between the write and the store). `createdAt` on an existing row is
- * deliberately left alone so the audit timestamp stays at the first
- * write.
- */
+// upsert idempotently refreshes the stored response; createdAt stays at the first write (audit timestamp)
 export async function storeIdempotencyKey(args: {
   adminUserId: string;
   key: string;

@@ -46,9 +46,6 @@ vi.mock('../../images/proxy.js', async (importOriginal) => {
   return { ...(orig as Record<string, unknown>), evictExpiredImageCache: vi.fn() };
 });
 
-// Import the REAL clustering handler — do not mock ../handler so we exercise
-// the validation and the algorithm composition. app.ts imports the real
-// handler via ./clustering/handler.
 import { app } from '../../app.js';
 
 function loc(merchantId: string, lng: number, lat: number): Location {
@@ -103,8 +100,7 @@ describe('GET /api/clusters — validation', () => {
 
   it('allows west > east silently (date-line crossing — returns empty)', async () => {
     seed([loc('m-1', 170, 20)]);
-    // Known limitation: antimeridian case returns empty. We explicitly do
-    // NOT 400 these so existing clients continue working.
+    // Antimeridian crossing returns empty; not 400 to preserve client compatibility.
     const res = await app.request('/api/clusters?west=170&south=-90&east=-170&north=90&zoom=3');
     expect(res.status).toBe(200);
     const body = (await res.json()) as { locationPoints: unknown[]; clusterPoints: unknown[] };
@@ -120,9 +116,7 @@ describe('GET /api/clusters — response shape', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('Content-Type')).toContain('application/json');
     expect(res.headers.get('Cache-Control')).toContain('max-age=60');
-    // The handler negotiates protobuf vs JSON on Accept and caches both
-    // for 60s. Without Vary: Accept, a browser/CDN would hand the wrong
-    // variant to a client asking for the other.
+    // Vary: Accept required because handler serves both JSON and protobuf variants.
     expect(res.headers.get('Vary')).toBe('Accept');
     const body = (await res.json()) as {
       locationPoints: Array<{ properties: { merchantId: string } }>;
@@ -136,7 +130,6 @@ describe('GET /api/clusters — response shape', () => {
     expect(body.clusterPoints).toHaveLength(0);
     expect(body.zoom).toBe(14);
     expect(body.bounds).toEqual({ west: -1, south: -1, east: 1, north: 1 });
-    // loadedAt should be the seeded timestamp / 1000 floored
     expect(body.loadedAt).toBe(Math.floor(1_700_000_000_000 / 1000));
   });
 
@@ -149,7 +142,7 @@ describe('GET /api/clusters — response shape', () => {
   });
 
   it('returns empty result with valid shape when no locations match', async () => {
-    seed([loc('m-1', 100, 100)]); // far outside bounds
+    seed([loc('m-1', 100, 100)]);
     const res = await app.request('/api/clusters?west=-1&south=-1&east=1&north=1&zoom=14');
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
@@ -159,36 +152,26 @@ describe('GET /api/clusters — response shape', () => {
     };
     expect(body.locationPoints).toEqual([]);
     expect(body.clusterPoints).toEqual([]);
-    // total is the count within the *expanded* bbox, not matches.
+    // Total counts locations in the expanded bbox, not just matches.
     expect(body.total).toBe(0);
   });
 
   it('clamps the 50%-expanded bbox to the globe (no -140° latitudes)', async () => {
-    // Starting bounds span the full globe — a naive 50% buffer would push
-    // south to -135°, which is nonsense. A merchant at (-90, -90) must still
-    // be filtered IN, and the computation must not crash or produce empties.
+    // Full-globe bounds: naive 50% buffer exceeds valid latitude range.
     seed([loc('m-south-pole', 0, -90), loc('m-north-pole', 0, 90)]);
     const res = await app.request('/api/clusters?west=-180&south=-90&east=180&north=90&zoom=1');
     expect(res.status).toBe(200);
     const body = (await res.json()) as { clusterPoints: unknown[]; locationPoints: unknown[] };
-    // Two points at distant cells won't cluster at zoom 1 (20° grid) — they
-    // land in cell (-5, -5) and (-5, 4), separate cells. Expected: two location
-    // points, no clusters.
     expect(body.locationPoints.length + body.clusterPoints.length).toBeGreaterThan(0);
   });
 
   it('falls back to JSON when Accept requests protobuf but types are unavailable', async () => {
-    // Proto types aren't generated in test environment — handler catches the
-    // dynamic-import error and falls through to JSON. Ensures the fallback
-    // path is live and produces the usual shape.
+    // Proto types may be missing in test env; handler falls back to JSON.
     seed([loc('m-1', 0, 0)]);
     const res = await app.request('/api/clusters?west=-1&south=-1&east=1&north=1&zoom=14', {
       headers: { Accept: 'application/x-protobuf' },
     });
     expect(res.status).toBe(200);
-    // If proto types are available (CI has run buf generate), response will
-    // be protobuf; otherwise JSON. Accept either, but assert we got 200 and
-    // a useful Content-Type.
     const ct = res.headers.get('Content-Type');
     expect(ct === null || ct.length > 0).toBe(true);
   });

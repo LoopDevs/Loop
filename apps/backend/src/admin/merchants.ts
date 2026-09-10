@@ -1,11 +1,4 @@
-/**
- * Merchant-side admin surfaces: the manual catalog resync, the
- * per-merchant order stats, and the catalog CSV export.
- *
- * `POST /api/admin/merchants/resync`      — force an upstream sweep
- * `GET  /api/admin/merchant-stats`        — orders rolled up per merchant
- * `GET  /api/admin/merchants-catalog.csv` — the catalog + its rates
- */
+// merchant admin surfaces — manual resync, per-merchant stats, catalog CSV export
 import type { Context } from 'hono';
 import { z } from 'zod';
 import { forceRefreshMerchants, getMerchants } from '../merchants/sync.js';
@@ -24,29 +17,8 @@ import {
 
 const log = logger.child({ handler: 'admin-merchants' });
 
-// ─── Manual catalog resync ──────────────────────────────────────────────────
+// Manual catalog resync
 
-/**
- * `POST /api/admin/merchants/resync` — forces an immediate sweep of
- * the upstream CTX catalog so ops can apply a merchant change (a new
- * store, a denomination tweak, a disabled flag) within seconds instead
- * of waiting for the scheduled refresh. The in-memory catalog is
- * swapped atomically once the new snapshot is fully built.
- *
- * Rate-limited tightly, because every hit goes to CTX — this is a
- * manual override, not a polled surface. Two admins clicking at once
- * coalesce into a single upstream sweep; one sees `triggered: true`,
- * the other `false` with the same `loadedAt`.
- *
- * A 502 on failure rather than a 500: it is a CTX problem, not a
- * backend bug. The cached snapshot is kept rather than zeroed, so
- * `/api/merchants` keeps serving the prior catalog through the
- * outage.
- *
- * Not step-up gated: it moves no money, creates nothing, and is
- * self-correcting — the worst outcome of an unwanted resync is that
- * the catalog matches CTX slightly sooner than it would have.
- */
 export interface AdminMerchantResyncResponse {
   /** Post-sync total, not a delta against the previous snapshot. */
   merchantCount: number;
@@ -138,16 +110,11 @@ export async function adminMerchantsResyncHandler(c: Context): Promise<Response>
   return c.json(guardResult.body, guardResult.status as 200 | 400 | 500);
 }
 
-// ─── Per-merchant order stats ───────────────────────────────────────────────
+// Per-merchant order stats
 
 const DEFAULT_WINDOW_DAYS = 30;
 const MAX_WINDOW_DAYS = 365;
-/**
- * Rows scanned to build the roll-up. The store has no aggregation, so
- * the tally happens here — this bound is what stops a wide window from
- * pulling an unbounded number of orders into memory. When it bites,
- * the response says so rather than quietly under-reporting.
- */
+// No aggregation in store; this bound prevents unbounded memory use on wide windows.
 const STATS_SCAN_LIMIT = 20000;
 
 export interface AdminMerchantStatsRow {
@@ -171,13 +138,6 @@ export interface AdminMerchantStatsResponse {
   rows: AdminMerchantStatsRow[];
 }
 
-/**
- * `GET /api/admin/merchant-stats` — which merchants people are
- * actually buying, and how much cashback each is costing, over a
- * trailing window. The commercial view behind the cashback-rate knob:
- * a rate edit is hard to justify without knowing the volume it
- * applies to.
- */
 export async function adminMerchantStatsHandler(c: Context): Promise<Response> {
   const raw = c.req.query('windowDays');
   const parsed = Number.parseInt(raw ?? String(DEFAULT_WINDOW_DAYS), 10);
@@ -225,15 +185,8 @@ export async function adminMerchantStatsHandler(c: Context): Promise<Response> {
   }
 }
 
-// ─── Catalog export ─────────────────────────────────────────────────────────
+// Catalog export
 
-/**
- * `GET /api/admin/merchants-catalog.csv` — the live catalog joined to
- * its configured cashback rate. The one place an operator can see, in
- * a single artifact, which merchants are advertised and what each is
- * promising — including the ones with no config at all, which are
- * silently on the fallback split.
- */
 export async function adminMerchantsCatalogCsvHandler(c: Context): Promise<Response> {
   try {
     const configs = await db.collection('merchant_cashback_configs').findMany();

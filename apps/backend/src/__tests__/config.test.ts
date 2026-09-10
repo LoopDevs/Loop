@@ -11,34 +11,15 @@ import {
   DEFAULT_CONFIG_FILENAME,
 } from '../config/index.js';
 
-/**
- * These tests exercise the config *schema and loader* directly with
- * synthetic YAML-shaped documents, so they never touch the real
- * `config.yaml`. The setup file (`vitest-env-setup.ts`) already points
- * `CONFIG_PATH` at the committed placeholder fixture, which is what
- * makes importing `../config/index.js` (and its boot-time
- * `loadConfig()`) safe from a test.
- */
-
 // A valid HTTPS Discord webhook URL (SEC-10 schema shape).
 const MONITORING_WEBHOOK = 'https://discord.com/api/webhooks/123456789012345678/AbCdEf-gh_Ij';
 
-// NS-10 (CF-25 / X-PRIV-03): production boots require
-// `orders.redeem.encryptionKey` (or the explicit opt-out). A 32-byte key
-// (base64 of "0123456789abcdef0123456789abcdef") that also clears the
-// 32-byte length validation. Carried in `base` so every
-// production-success fixture that spreads `...base` satisfies the
-// guard; it's optional in dev/test, so its presence is inert there.
+// NS-10 (CF-25 / X-PRIV-03): production boots require the redeem key; carried in base so production fixtures satisfy the guard
 const REDEEM_KEY = 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=';
 
 const JWT_KEY = 'jwt-test-signing-key-32-chars-min!!';
 
-/**
- * The minimum viable document: `ctx.baseUrl` and the operator
- * credentials are the only keys with no default anywhere in the schema
- * (ADR 052 — CTX is the payment processor, so a deployment without
- * credentials would come up with orders that never leave `unpaid`).
- */
+// minimal doc: ctx.baseUrl + credentials are the only keys with no default (ADR 052)
 const base = {
   ctx: {
     baseUrl: 'https://upstream.example.com',
@@ -47,24 +28,14 @@ const base = {
   orders: { redeem: { encryptionKey: REDEEM_KEY } },
 };
 
-/**
- * A production document that clears every production boot guard:
- * native auth on with a signing key (R3-7), a real email provider
- * (A4-093), and the redeem key from `base` (NS-10). Individual guard
- * tests start from this and break exactly one thing.
- */
+// production doc clearing every boot guard (R3-7, A4-093, NS-10); guard tests break exactly one thing
 const prodBase = {
   ...base,
   auth: { native: { enabled: true, jwt: { hs256: { current: JWT_KEY } } } },
   email: { provider: 'resend', apiKey: 're_test_key_value' },
 };
 
-/**
- * `parseConfig` lets `NODE_ENV` override the document's `env:` key (see
- * the module comment in `../config/index.js`), and vitest always sets
- * `NODE_ENV=test`. So a test that wants a production parse has to move
- * the *process* variable, not the document key.
- */
+// NODE_ENV overrides the document's env: key and vitest always sets NODE_ENV=test, so production parses must move the process variable
 function withNodeEnv<T>(value: string | undefined, fn: () => T): T {
   const previous = process.env['NODE_ENV'];
   if (value === undefined) delete process.env['NODE_ENV'];
@@ -77,12 +48,10 @@ function withNodeEnv<T>(value: string | undefined, fn: () => T): T {
   }
 }
 
-/** Parse `document` as if the process were running in production. */
 function parseProd(document: unknown): ReturnType<typeof parseConfig> {
   return withNodeEnv('production', () => parseConfig(document, 'test config'));
 }
 
-/** Parse `document` in the ambient (test) environment. */
 function parse(document: unknown): ReturnType<typeof parseConfig> {
   return parseConfig(document, 'test config');
 }
@@ -114,21 +83,14 @@ describe('parseConfig', () => {
     ).toBe('production');
   });
 
-  // The one documented env-overlay: node tooling sets NODE_ENV on its
-  // own, so a test run loading a development config must not take
-  // development branches under a `test` process.
+  // node tooling sets NODE_ENV itself, so a test run must not take development branches under a `test` process
   it('lets NODE_ENV override the document env: key', () => {
-    // `env: production` in the file, `test` in the process — the
-    // process wins, so the production guards never even run here.
     expect(parse({ ...base, env: 'production' }).env).toBe('test');
     expect(parseProd({ ...prodBase, env: 'development' }).env).toBe('production');
   });
 
   it('reports missing required keys by path with a clear message', () => {
-    // `ctx:` is the only section with no defaults, so an empty document
-    // fails on the section itself...
     expect(() => parse({})).toThrow(/ctx: /);
-    // ...and a half-filled one names the exact leaf that is missing.
     expect(() => parse({ ctx: { credentials: base.ctx.credentials } })).toThrow(/ctx\.baseUrl: /);
   });
 
@@ -137,7 +99,6 @@ describe('parseConfig', () => {
       parse({ ctx: { ...base.ctx, baseUrl: 'not-a-url' } });
       expect.fail('should have thrown');
     } catch (err) {
-      // We emit 'path: reason' rather than a bare path.
       expect((err as Error).message).toMatch(/ctx\.baseUrl: /);
     }
   });
@@ -148,10 +109,7 @@ describe('parseConfig', () => {
     );
   });
 
-  // YAML writes `key:` with no value as null. An operator commenting a
-  // setting out that way means "unset", not "the value null" — the
-  // loader strips nulls before validation so optional keys stay
-  // optional and defaulted keys still get their default.
+  // a bare `key:` in YAML is null, meaning "unset" — the loader strips nulls so optional/defaulted keys stay intact
   it('treats a null value (a bare `key:` in YAML) as absent', () => {
     const config = parse({
       ...base,
@@ -170,10 +128,7 @@ describe('parseConfig', () => {
       expect(() => parse({ ...base, server: { port: -1 } })).toThrow(/server\.port/);
     });
 
-    // The env format had to coerce every value out of a string, which
-    // is where `TRUST_PROXY=false` silently meaning `true` came from.
-    // YAML has real scalars, so a quoted string is now an operator
-    // mistake worth rejecting rather than guessing at.
+    // the env format's string coercion is where TRUST_PROXY=false meant true; YAML scalars make that a rejectable mistake
     it('rejects a stringly-typed port or boolean instead of coercing it', () => {
       expect(() => parse({ ...base, server: { port: '9090' } })).toThrow(/server\.port/);
       expect(() => parse({ ...base, server: { trustProxy: 'yes' } })).toThrow(/server\.trustProxy/);
@@ -202,8 +157,6 @@ describe('parseConfig', () => {
       }
     });
 
-    // ADR 052: CTX is the payment processor, so the operator API creds
-    // are boot-required.
     it('rejects a document without the operator API credentials', () => {
       expect(() => parse({ ctx: { baseUrl: base.ctx.baseUrl } })).toThrow(/ctx\.credentials/);
       expect(() => parse({ ctx: { ...base.ctx, credentials: { key: '', secret: 'x' } } })).toThrow(
@@ -211,9 +164,7 @@ describe('parseConfig', () => {
       );
     });
 
-    // Audit A-018: the web bundle hardcodes DEFAULT_CLIENT_IDS at build
-    // time, so a server-side override that isn't mirrored into a web
-    // rebuild breaks the X-Client-Id allowlist (A-036) after login.
+    // A-018: the web bundle hardcodes DEFAULT_CLIENT_IDS at build time, so an unmirrored server override breaks the X-Client-Id allowlist (A-036) after login
     it('warns when a client id diverges from the shared default', () => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
       parse({ ...base, ctx: { ...base.ctx, clientIds: { web: 'customweb' } } });
@@ -229,10 +180,7 @@ describe('parseConfig', () => {
     });
   });
 
-  // The document store (post-Drizzle): `database.driver` picks the
-  // driver and, as a discriminated union, drags in exactly the keys
-  // that driver needs — the old "DB_DRIVER=mongo requires MONGODB_URI"
-  // boot guard is now a parse error with the path already in it.
+  // database.driver is a discriminated union — the old DB_DRIVER/MONGODB_URI boot guard is now a parse error with the path
   describe('database', () => {
     it('defaults to the memory driver with the _data/db.json path', () => {
       const config = parse(base);
@@ -270,8 +218,7 @@ describe('parseConfig', () => {
     });
 
     it('rejects a URI that is not a mongodb URL', () => {
-      // A well-formed URL on the wrong scheme is the classic paste
-      // error (postgres:// from the old stack) — must fail loudly.
+      // wrong-scheme URL is the classic paste error (postgres:// from the old stack)
       for (const uri of [
         'not-a-url',
         'postgres://user:pass@localhost:5432/loop',
@@ -297,9 +244,7 @@ describe('parseConfig', () => {
     });
   });
 
-  // CF2-17 (2026-06-30 cold audit): length alone doesn't rule out a
-  // guessable signing key — a 32-char string of one repeated character
-  // passes `.min(32)` but has zero real entropy.
+  // CF2-17: length alone doesn't rule out a guessable key — a repeated character passes .min(32) with zero entropy
   describe('signing-key entropy validation', () => {
     const hs256 = (jwt: Record<string, unknown>): unknown => ({
       ...base,
@@ -333,9 +278,6 @@ describe('parseConfig', () => {
     });
   });
 
-  // ADR 030 Phase A: the RS256 signing keys are PEM-validated at parse
-  // time — a malformed or non-RSA PEM must fail the boot rather than
-  // surface as a 500 on the first token mint or JWKS fetch.
   describe('RS256 signing keys (ADR 030 Phase A)', () => {
     // Generated at runtime — never commit a PEM fixture, even test-only.
     const rsaPem = generateKeyPairSync('rsa', { modulusLength: 2048 })
@@ -390,9 +332,7 @@ describe('parseConfig', () => {
     });
   });
 
-  // Hardening B3: native auth without any signing key used to surface
-  // as a 500 on the first verify-otp/refresh. The schema expresses it
-  // as a parse error on `auth.native.jwt` instead.
+  // Hardening B3: native auth without a signing key used to 500 on first verify-otp/refresh; now a parse error
   describe('native-auth signing-key requirement', () => {
     it('refuses auth.native.enabled with no signing capability, in any env', () => {
       for (const nodeEnv of ['development', 'test', 'production'] as const) {
@@ -427,8 +367,6 @@ describe('parseConfig', () => {
     });
   });
 
-  // Hardening B7: HS256 retirement tripwire. After an RS256 cutover the
-  // HS256 key must go once the refresh window elapses.
   describe('B7: HS256 retirement tripwire', () => {
     it('warns on every boot while both the RSA and HS256 keys are set', () => {
       const pem = generateKeyPairSync('rsa', { modulusLength: 2048 })
@@ -460,9 +398,7 @@ describe('parseConfig', () => {
       expect(config.email.from).toEqual({ address: 'noreply@loopfinance.io', name: 'Loop' });
     });
 
-    // FT-09: the resend provider without a key is a silent login outage
-    // (every OTP swallowed into a fake 200). The discriminated union
-    // makes it un-representable rather than a boot guard.
+    // FT-09: resend without a key is a silent login outage (OTPs swallowed into fake 200s) — the union makes it un-representable
     it('requires an apiKey for the resend provider', () => {
       expect(() => parse({ ...base, email: { provider: 'resend' } })).toThrow(/email\.apiKey/);
       expect(() => parse({ ...base, email: { provider: 'resend', apiKey: '' } })).toThrow(
@@ -478,8 +414,6 @@ describe('parseConfig', () => {
     });
   });
 
-  // A2-203: the fallback cashback split must respect the
-  // `userCashback + margin + wholesale = 100` invariant.
   describe('A2-203: orders.cashbackDefaults', () => {
     it('defaults to a 0/0 split', () => {
       const config = parse(base);
@@ -521,9 +455,7 @@ describe('parseConfig', () => {
     });
   });
 
-  // CF-25 / X-PRIV-03: a wrong-length key would silently write
-  // ciphertext nobody can later decrypt, so the decoded length is
-  // validated whenever the key is present, in any env.
+  // CF-25 / X-PRIV-03: a wrong-length key would write ciphertext nobody can decrypt, so the decoded length is validated whenever present
   describe('orders.redeem.encryptionKey', () => {
     it('rejects a key that does not decode to exactly 32 bytes', () => {
       expect(() =>
@@ -547,9 +479,7 @@ describe('parseConfig', () => {
     });
   });
 
-  // SEC-10: the Discord webhooks must be real HTTPS Discord webhook
-  // URLs, not merely well-formed URLs. A non-Discord / non-HTTPS host
-  // would exfiltrate every alert/audit embed off-platform.
+  // SEC-10: a non-Discord / non-HTTPS host would exfiltrate every alert/audit embed off-platform
   describe('SEC-10: Discord webhook URL host/scheme constraint', () => {
     const VALID = 'https://discord.com/api/webhooks/123456789012345678/tok-EN_value';
     const discord = (d: Record<string, unknown>): unknown => ({
@@ -665,8 +595,7 @@ describe('admin', () => {
   });
 
   it('rejects a non-address in the email allowlist', () => {
-    // A typo here silently grants nobody, which is a security-relevant
-    // no-op an operator would not notice — so fail the boot instead.
+    // a typo here silently grants nobody — a security-relevant no-op an operator wouldn't notice
     expect(() => parse({ ...base, admin: { emails: ['not-an-email'] } })).toThrow(
       /admin\.emails\.0/,
     );
@@ -685,17 +614,12 @@ describe('admin', () => {
   });
 });
 
-/**
- * The production postures that are unsafe enough to refuse the boot
- * over. Each has an explicit `unsafe:` opt-out where a deliberate
- * rollback needs one.
- */
+// production postures unsafe enough to refuse boot; each has an explicit unsafe: opt-out for deliberate rollback
 describe('production cross-field guards', () => {
   it('accepts a production document that clears every guard', () => {
     expect(() => parseProd(prodBase)).not.toThrow();
   });
 
-  // A2-1605: disabling rate limiting bypasses every per-IP limiter.
   it('A2-1605: refuses production with rateLimit.enabled false', () => {
     expect(() => parseProd({ ...prodBase, rateLimit: { enabled: false } })).toThrow(
       /rateLimit\.enabled must not be false in production/,
@@ -712,16 +636,13 @@ describe('production cross-field guards', () => {
     }
   });
 
-  // AUDIT-2-E: the secret only unlocks the test-only /__test__/* mount;
-  // its presence in a production file means a copy-pasted config.
+  // the secret only unlocks the test-only /__test__/* mount; in a production file it means copy-pasted config
   it('AUDIT-2-E: refuses production when testing.endpointsSecret is set', () => {
     expect(() =>
       parseProd({ ...prodBase, testing: { endpointsSecret: 'a-secret-that-is-long-enough-16' } }),
     ).toThrow(/testing\.endpointsSecret must not be set in production/);
   });
 
-  // R3-7: production must not silently fall back to the legacy
-  // CTX-proxy auth path.
   it('R3-7: refuses production when auth.native.enabled is false or absent', () => {
     expect(() => parseProd(base)).toThrow(/auth\.native\.enabled must be true in production/);
     expect(() => parseProd({ ...base, auth: { native: { enabled: false } } })).toThrow(
@@ -739,8 +660,7 @@ describe('production cross-field guards', () => {
     }
   });
 
-  // A4-093 / FT-09: the console provider only logs OTPs to stdout, so
-  // every login would silently fail while returning 200.
+  // the console provider only logs OTPs to stdout, so every login would silently fail while returning 200
   it('A4-093: refuses production native auth with the console email provider', () => {
     expect(() => parseProd({ ...prodBase, email: { provider: 'console' } })).toThrow(
       /email\.provider must be a real provider/,
@@ -757,8 +677,7 @@ describe('production cross-field guards', () => {
     ).not.toThrow();
   });
 
-  // NS-10 (CF-25 / X-PRIV-03): redeem codes/PINs are spendable bearer
-  // secrets — production must encrypt them at rest.
+  // redeem codes/PINs are spendable bearer secrets — production must encrypt them at rest
   it('NS-10: refuses production when orders.redeem.encryptionKey is unset', () => {
     const prodMinusRedeem = { ...prodBase, orders: {} };
     expect(() => parseProd(prodMinusRedeem)).toThrow(

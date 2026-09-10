@@ -1,28 +1,4 @@
-/**
- * CTX mirror sweep (ADR 052) — the poll-side reconciler behind the
- * giftcard ws maintainer.
- *
- * The ws has no replay, so events that fire while Loop is
- * disconnected are gone; this sweep re-reads every non-terminal
- * mirror row (`unpaid` / `paid`) from CTX on an interval and applies
- * the same status mapping the ws path uses (`mirror-apply.ts`). It
- * also owns the two things CTX never pushes:
- *
- *   - **Payment expiry** — CTX leaves a never-paid card `unpaid`
- *     forever; once the CTX payment reads `expired` (or its
- *     `expires` + grace has lapsed), the local row flips `expired`.
- *   - **Economics retry** — a row whose operator read-back failed at
- *     create (`expected_commission_minor IS NULL`) gets the
- *     user-cashback / expected-commission derivation retried.
- *
- * Rows that never got a CTX card (create failed before
- * `recordCtxCreate`) are rejected after `ORPHAN_GRACE_MS`.
- *
- * Fleet-single-flighted via the same sha256 advisory-lock derivation
- * as the redemption backfill; every write is CAS-guarded in
- * `transitions.ts`, so duplicate runs are safe — the lock is a CTX
- * read-volume optimisation.
- */
+// CTX mirror sweep — ADR 052
 import { withSingleFlight } from '../db/client.js';
 import { logger } from '../logger.js';
 import {
@@ -48,9 +24,7 @@ const log = logger.child({ area: 'ctx-mirror-sweep' });
 
 const SWEEP_INTERVAL_MS = 60_000;
 const SWEEP_BATCH = 50;
-/** CTX payment expiry is 10 min + 15 min grace; add slack on top. */
 const EXPIRY_SLACK_MS = 5 * 60 * 1000;
-/** A row with no CTX card after this long never got created upstream. */
 const ORPHAN_GRACE_MS = 60 * 60 * 1000;
 
 export interface MirrorSweepResult {
@@ -117,8 +91,6 @@ export async function runMirrorSweepTick(nowMs?: number): Promise<MirrorSweepRes
         await sweepOne(row, now, r);
       } catch (err) {
         if (err instanceof CtxUnavailableError || err instanceof CtxRateLimitedError) {
-          // Upstream-wide outage / back-pressure — every subsequent row
-          // hits the same wall; abort the tick and let the next one retry.
           r.abortedCtxUnavailable = true;
           log.warn(
             { orderId: row.id, rateLimited: err instanceof CtxRateLimitedError },
@@ -139,26 +111,6 @@ export async function runMirrorSweepTick(nowMs?: number): Promise<MirrorSweepRes
 
 let sweepTimer: NodeJS.Timeout | null = null;
 
-/**
- * One order's worth of the sweep, on demand.
- *
- * `POST /api/admin/orders/:orderId/redrive` is the operator's answer
- * to "CTX says this card is fulfilled but Loop still shows it paid" —
- * a row that a dropped ws event and a failed sweep tick between them
- * left behind. It deliberately runs `sweepOne`, the same function the
- * interval runs, rather than a bespoke admin path: a re-drive that
- * could reach a state the sweep can't would be a second, untested
- * state machine.
- *
- * Not single-flighted — it is a human clicking a button, the CAS
- * guards in `transitions.ts` make a concurrent tick harmless, and
- * taking the fleet sweep lock here would let one admin click stall the
- * background reconciler.
- *
- * Terminal rows are refused rather than swept: there is nothing left
- * for CTX to tell us, and re-reading one would only be a way to spend
- * upstream budget.
- */
 export type OrderResyncOutcome =
   | { kind: 'order_not_found' }
   | { kind: 'not_eligible'; reason: 'terminal_state' }
@@ -174,8 +126,6 @@ export async function resyncOrderFromCtx(
     return { kind: 'not_eligible', reason: 'terminal_state' };
   }
 
-  // The counters are the sweep's own bookkeeping; a single re-drive
-  // has no tick to report them to, so they are discarded here.
   const discard: MirrorSweepResult = {
     picked: 1,
     applied: 0,

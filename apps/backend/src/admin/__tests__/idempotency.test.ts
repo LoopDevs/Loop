@@ -1,14 +1,4 @@
-/**
- * Admin idempotency guard (ADR 017 / A2-2001 / A2-500 / NS-03), run
- * against the real in-memory document store.
- *
- * The behaviour that matters is what happens on the *second* call: a
- * replay must return the first response without re-running the write,
- * and two concurrent callers with the same key must not both execute.
- * That serialisation used to be a Postgres advisory lock inside a
- * transaction; here it is `db/keyed-lock.ts`, so it is worth pinning
- * directly rather than trusting the swap.
- */
+// Admin idempotency guard — ADR 017, A2-2001, A2-500, NS-03
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { db, __resetDbForTests } from '../../db/client.js';
 import {
@@ -72,8 +62,7 @@ describe('withIdempotencyGuard', () => {
     expect(first.replayed).toBe(false);
     expect(second.replayed).toBe(true);
     expect(second.status).toBe(200);
-    // ADR 017 promises the replayed flag on the wire, so the guard
-    // flips it in the stored body rather than making every handler do it.
+    // ADR 017: guard flips replayed flag in stored body
     expect(second.body['audit']).toEqual({ replayed: true });
   });
 
@@ -85,9 +74,6 @@ describe('withIdempotencyGuard', () => {
   });
 
   it('serialises concurrent callers so the write runs exactly once', async () => {
-    // Without the lock both callers see a miss, both execute, and both
-    // store — the second store hides the fact that the side-effect
-    // landed twice.
     let running = 0;
     let maxConcurrent = 0;
     const write = vi.fn(async () => {
@@ -122,8 +108,7 @@ describe('withIdempotencyGuard', () => {
 
     expect(write).toHaveBeenCalledTimes(2);
     expect(again.replayed).toBe(false);
-    // NS-03: the row is the audit record, so its timestamp stays at
-    // the FIRST application even though the response was refreshed.
+    // NS-03: row is the audit record, timestamp stays at first application
     const row = await db.collection('admin_idempotency_keys').findOne({ adminUserId: ADMIN });
     expect(row?.createdAt).toEqual(createdAt);
   });
@@ -137,8 +122,7 @@ describe('withIdempotencyGuard', () => {
 
     const result = await withIdempotencyGuard(guardArgs(), write);
 
-    // The snapshot only exists because the write committed, so
-    // re-running it would double the side-effect. Fail loud instead.
+    // Snapshot exists only if write committed; re-running would double side-effects
     expect(write).toHaveBeenCalledTimes(1);
     expect(result.status).toBe(500);
     expect(result.body['code']).toBe('IDEMPOTENCY_SNAPSHOT_CORRUPT');
@@ -191,7 +175,6 @@ describe('countAppliedActionsForPath', () => {
     });
 
     expect(await countAppliedActionsForPath({ path, windowMs: 60_000 })).toBe(1);
-    // A window that closes before the row was written sees nothing.
     expect(
       await countAppliedActionsForPath({
         path,

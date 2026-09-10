@@ -16,11 +16,7 @@ import {
   __expirePublicCashbackStatsCache,
 } from '../cashback-stats.js';
 
-/**
- * ADR 020 / ADR 052 public cashback stats, against the real in-memory
- * document store: the fulfilled-orders aggregate, the never-500
- * last-known-good fallback, and the CF-29 / PERF-001 TTL memo.
- */
+// ADR 020 / ADR 052 public cashback stats
 function makeCtx(): Context {
   const headers = new Map<string, string>();
   return {
@@ -94,14 +90,11 @@ describe('publicCashbackStatsHandler', () => {
   });
 
   it('aggregates per currency, counting only fulfilled orders and cashback-earning users', async () => {
-    // Two GBP cashback orders for the same user (dedup to one user).
     await seedOrder({ userId: 'u-1', currency: 'GBP', userCashbackMinor: 5_000_000 });
     await seedOrder({ userId: 'u-1', currency: 'GBP', userCashbackMinor: 4_000_000 });
     await seedOrder({ userId: 'u-2', currency: 'USD', userCashbackMinor: 4_500_000 });
     await seedOrder({ userId: 'u-3', currency: 'EUR', userCashbackMinor: 1_200_000 });
-    // Fulfilled but zero cashback: counts as an order, not a cashback user.
     await seedOrder({ userId: 'u-4', currency: 'USD', userCashbackMinor: 0 });
-    // Not fulfilled: excluded from everything.
     await seedOrder({ userId: 'u-5', currency: 'USD', userCashbackMinor: 100, state: 'paid' });
 
     const res = await publicCashbackStatsHandler(makeCtx());
@@ -134,8 +127,6 @@ describe('publicCashbackStatsHandler', () => {
     expect(firstBody['totalUsersWithCashback']).toBe(1);
     expect(firstBody['fulfilledOrders']).toBe(1);
 
-    // Expire the TTL memo so the second request recomputes (and hits the
-    // injected DB failure) rather than serving the still-fresh snapshot.
     __expirePublicCashbackStatsCache();
     const orders = db.collection('orders');
     vi.spyOn(orders, 'findMany').mockRejectedValueOnce(new Error('db exploded'));
@@ -159,14 +150,12 @@ describe('publicCashbackStatsHandler', () => {
     const first = await publicCashbackStatsHandler(makeCtx());
     expect(first.status).toBe(200);
     const callsAfterFirst = findManySpy.mock.calls.length;
-    expect(callsAfterFirst).toBeGreaterThan(0); // first call did compute
+    expect(callsAfterFirst).toBeGreaterThan(0);
 
-    // Second request inside the TTL window — must serve the memo and
-    // issue zero new store queries (the crawler-storm guard).
     const second = await publicCashbackStatsHandler(makeCtx());
     expect(second.status).toBe(200);
     expect(second.headers.get('cache-control')).toBe('public, max-age=300');
-    expect(findManySpy.mock.calls.length).toBe(callsAfterFirst); // no extra queries
+    expect(findManySpy.mock.calls.length).toBe(callsAfterFirst);
     const body = (await second.json()) as Record<string, unknown>;
     expect(body['totalUsersWithCashback']).toBe(1);
   });
@@ -175,7 +164,6 @@ describe('publicCashbackStatsHandler', () => {
     await seedOrder({ userId: 'u-1', currency: 'USD', userCashbackMinor: 100 });
     await publicCashbackStatsHandler(makeCtx());
     __expirePublicCashbackStatsCache();
-    // New data lands after the first compute; the recompute must see it.
     await seedOrder({ userId: 'u-2', currency: 'USD', userCashbackMinor: 100 });
     const res = await publicCashbackStatsHandler(makeCtx());
     const body = (await res.json()) as Record<string, unknown>;

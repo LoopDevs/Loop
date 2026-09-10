@@ -1,26 +1,4 @@
-/**
- * ADR 037 — staff-tier route gating, end-to-end through the real Hono
- * app (mocked boot edges, real store, real middleware).
- *
- * Three things are proven here:
- *
- *   1. **Tier behaviour** — a support user gets the uniform 404 on
- *      every admin-tier mount; an admin (allowlist shim, no
- *      `staff_roles` row) reaches them; a non-staff authenticated
- *      user gets 404 across the namespace; an unauthenticated one
- *      gets 401.
- *   2. **Default-deny inventory** — every concrete `/api/admin` mount
- *      must either carry an explicit `requireStaff('admin')` /
- *      `requireStaff('support')` gate or be a blanket-riding support
- *      read, which per the ADR 037 matrix means a non-CSV GET. A new
- *      POST/PUT/DELETE or CSV mount without an explicit tier fails.
- *   3. **Step-up pinning** — every non-GET admin-tier mount carries a
- *      correctly-SCOPED `requireAdminStepUp(...)` gate or sits on an
- *      explicit exempt list with its reason. This is the structural
- *      half the tier inventory can't see: without it a new money write
- *      mounted `requireStaff('admin')` but WITHOUT step-up would pass
- *      every other test.
- */
+// ADR 037 — staff-tier route gating, end-to-end through the real Hono app (mocked boot edges, real store, real middleware).
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type * as ConfigModule from '../config/index.js';
 
@@ -30,9 +8,7 @@ vi.mock('../config/index.js', async (importActual) => {
     ...actual,
     config: {
       ...actual.config,
-      // The step-up gates short-circuit to 503 when no signing key is
-      // configured, which would mask the 404-vs-not-404 tier signal
-      // this file is about. Pin a key so they take their real path.
+      // Step-up gates short-circuit to 503 without a signing key, masking the 404-vs-not-404 tier signal.
       admin: {
         ...actual.config.admin,
         stepUp: {
@@ -79,10 +55,7 @@ vi.mock('../discord.js', async (importOriginal) => {
   return { ...orig, notifyAdminAudit: vi.fn(), notifyAdminBulkRead: vi.fn() };
 });
 
-// Replace requireAuth with a header-driven test double: the
-// `x-test-user` header IS the loop-verified identity. Everything
-// downstream (requireStaff resolution, the handlers, the real store)
-// is the production code path.
+// `x-test-user` header IS the loop-verified identity; everything downstream is the production code path.
 vi.mock('../auth/handler.js', async (importOriginal) => {
   const orig = (await importOriginal()) as Record<string, unknown>;
   return {
@@ -151,7 +124,6 @@ function asUser(id: string, init?: RequestInit): RequestInit {
   };
 }
 
-/** Every admin-only surface a support user must NOT see (404). */
 const ADMIN_ONLY_PROBES: Array<[string, string]> = [
   ['GET', '/api/admin/staff'],
   ['PUT', `/api/admin/staff/${NOBODY_ID}/role`],
@@ -172,7 +144,6 @@ const ADMIN_ONLY_PROBES: Array<[string, string]> = [
   ['GET', '/api/admin/audit-tail.csv'],
 ];
 
-/** Surfaces a support user MUST be able to reach (ADR 037 §3). */
 const SUPPORT_VISIBLE_PROBES: Array<[string, string]> = [
   ['GET', '/api/admin/users'],
   ['GET', '/api/admin/users?q=loop'],
@@ -201,15 +172,13 @@ describe('ADR 037 tier behaviour', () => {
   it.each(ADMIN_ONLY_PROBES)('support gets 404 on %s %s', async (method, path) => {
     const res = await app.request(path, asUser(SUPPORT_ID, { method }));
     expect(res.status).toBe(404);
-    // Uniform concealment envelope — a support user must not be able
-    // to tell an admin-only mount from one that doesn't exist.
+    // Uniform concealment envelope — a support user must not be able to tell an admin-only mount from one that doesn't exist.
     expect(((await res.json()) as { code: string }).code).toBe('NOT_FOUND');
   });
 
   it.each(ADMIN_ONLY_PROBES)('admin is NOT masked on %s %s', async (method, path) => {
     const res = await app.request(path, asUser(ADMIN_ID, { method }));
-    // Anything but the concealment 404: 200 for the read, 400/401 for
-    // writes missing an Idempotency-Key or a step-up header.
+    // Anything but the concealment 404: 200 for the read, 400/401 for writes missing an Idempotency-Key or a step-up header.
     expect(res.status).not.toBe(404);
   });
 
@@ -235,9 +204,7 @@ describe('ADR 037 tier behaviour', () => {
     },
   );
 
-  // The support-tier delivery unstick: a 400 for the missing
-  // Idempotency-Key proves the gate passed and the handler's own
-  // validation is what answered, which a 404 would not.
+  // The support-tier delivery unstick: a 400 for the missing Idempotency-Key proves the gate passed and the handler's own validation is what answered, which a 404 would not.
   it('support can reach the redemption re-fetch past the gate', async () => {
     const res = await app.request(
       `/api/admin/orders/${ORDER_ID}/refetch-redemption`,
@@ -288,8 +255,7 @@ describe('ADR 037 mount inventory (default-deny)', () => {
     for (const g of adminRouteGroups()) {
       if (g.gates.includes('requireStaff(admin)')) continue;
       if (g.gates.includes('requireStaff(support)')) continue;
-      // Blanket rider — must be a support-readable surface per the
-      // ADR 037 matrix: a GET, and not a bulk CSV export.
+      // Blanket rider — must be a support-readable surface per the ADR 037 matrix: a GET, and not a bulk CSV export.
       if (g.method !== 'GET' || g.path.endsWith('.csv')) {
         offenders.push(`${g.method} ${g.path}`);
       }
@@ -298,10 +264,7 @@ describe('ADR 037 mount inventory (default-deny)', () => {
   });
 
   it('every destructive write carries its correctly-SCOPED step-up gate (ADR 028 / CF-08)', () => {
-    // The scope is pinned per route, not merely its presence: merge
-    // history has produced both failure modes this guards — a route
-    // losing its step-up gate entirely, and a route keeping the gate
-    // but losing its CF-08 scope binding.
+    // The scope is pinned per route, not merely its presence: merge history has produced both failure modes this guards — a route losing its step-up gate entirely, and a route keeping the gate but losing its CF-08 scope binding.
     const mustCarryStepUp: Record<string, string> = {
       'PUT /api/admin/staff/:userId/role': 'requireAdminStepUp(staff-role-grant)',
       'DELETE /api/admin/staff/:userId/role': 'requireAdminStepUp(staff-role-revoke)',
@@ -321,34 +284,19 @@ describe('ADR 037 mount inventory (default-deny)', () => {
   });
 
   it('default-deny: a NEW admin-tier write must declare step-up or join the explicit exempt list', () => {
-    // Any non-GET admin mount either carries a named step-up gate or
-    // is listed here WITH its reason. Adding a destructive admin write
-    // without step-up requires editing this list — which is exactly
-    // the review conversation ADR 028 wants to force.
+    // Any non-GET admin mount either carries a named step-up gate or is listed here WITH its reason. Adding a destructive admin write without step-up requires editing this list — which is exactly the review conversation ADR 028 wants to force.
     const STEP_UP_EXEMPT = new Set<string>([
-      // Mints the step-up token itself — gating it on step-up would be
-      // circular; it re-authenticates with a fresh OTP instead.
+      // Mints the step-up token itself — gating it on step-up would be circular; it re-authenticates with a fresh OTP instead.
       'POST /api/admin/step-up',
-      // B4 incident response: moves no value, and the user simply
-      // signs back in. Step-up friction in the first minute of "their
-      // laptop was stolen" is the wrong trade.
+      // B4 incident response: moves no value, and the user simply signs back in. Step-up friction in the first minute of "their laptop was stolen" is the wrong trade.
       'POST /api/admin/users/:userId/revoke-sessions',
-      // A5-3: same rationale as revoke-sessions — clearing the counter
-      // grants no access by itself, it only re-opens the guess budget,
-      // and a wrong guess re-arms the lockout from a clean window. Its
-      // own per-target velocity cap is what bounds abuse.
+      // A5-3: same rationale as revoke-sessions — clearing the counter grants no access by itself, it only re-opens the guess budget, and a wrong guess re-arms the lockout from a clean window. Its own per-target velocity cap is what bounds abuse.
       'POST /api/admin/users/:userId/clear-otp-lockout',
-      // ADR 037 support-tier delivery unstick: re-drives work the
-      // customer already paid for and creates nothing. Adding step-up
-      // would push it back to admin-only, which is the opposite of
-      // what the tier is for.
+      // ADR 037 support-tier delivery unstick: re-drives work the customer already paid for and creates nothing. Adding step-up would push it back to admin-only, which is the opposite of what the tier is for.
       'POST /api/admin/orders/:orderId/refetch-redemption',
-      // Catalog refresh: no money path, self-correcting (the worst
-      // outcome is that the catalog matches CTX sooner), and already
-      // the tightest rate limit on the surface.
+      // Catalog refresh: no money path, self-correcting (the worst outcome is that the catalog matches CTX sooner), and already the tightest rate limit on the surface.
       'POST /api/admin/merchants/resync',
-      // Sends one test embed to an already-configured webhook — no
-      // state change beyond the outbound message.
+      // Sends one test embed to an already-configured webhook — no state change beyond the outbound message.
       'POST /api/admin/discord/test',
     ]);
     const offenders: string[] = [];

@@ -1,13 +1,4 @@
-/**
- * MongoDB driver for the document store (`DB_DRIVER=mongo`).
- *
- * The store's filter/update language is already a Mongo subset, so
- * calls pass through nearly verbatim. App-level ids are the identity —
- * Mongo's `_id` is stripped from every read and the unique specs in
- * `COLLECTION_SPECS` are materialised as unique indexes at init
- * (sparse-like partial filters for tuples with nullable members, e.g.
- * the orders idempotency fence).
- */
+// MongoDB driver for the document store (`DB_DRIVER=mongo`)
 import {
   MongoClient,
   MongoServerError,

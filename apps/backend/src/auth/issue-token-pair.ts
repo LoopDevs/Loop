@@ -1,26 +1,4 @@
-/**
- * Mints + persists a Loop access/refresh token pair (ADR 013).
- *
- * Lifted out of `./native.ts` and `./social.ts`, both of which
- * shipped near-identical local copies (the social file's docstring
- * explicitly noted "factored here so social-login calls don't
- * re-import auth/native.ts"). Sharing the helper closes the DRY
- * gap and ensures both sides of the auth surface use the same
- * refresh-token persistence shape.
- *
- * Used by:
- *   - `nativeVerifyOtpHandler` (first issue on OTP success)
- *   - `nativeRefreshHandler` (rotation: also reads `refreshJti` to
- *     populate the prior row's `replacedByJti` link, A2-557)
- *   - `googleSocialLoginHandler` / `appleSocialLoginHandler`
- *     (first issue on social-login success — discards `refreshJti`,
- *     mirroring the OTP first-issue path)
- *
- * Re-exported from `./native.ts` so existing import sites (the
- * verify + refresh handlers in their post-lift form) keep
- * resolving against the historical path; social.ts imports
- * directly from this module.
- */
+// mint + persist Loop access/refresh token pair — ADR 013, A2-557, A4-098, NS-09
 import {
   signLoopToken,
   DEFAULT_ACCESS_TTL_SECONDS,

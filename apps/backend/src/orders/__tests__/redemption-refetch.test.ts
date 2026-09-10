@@ -1,11 +1,4 @@
-/**
- * refetchOrderRedemption (ADR 037) — the one-shot admin re-drive
- * through the backfill machinery. Sibling of
- * redemption-backfill.test.ts (which covers the sweeper tick);
- * this covers the per-order eligibility gates, the no-cap /
- * no-backoff contract, and the attempt bookkeeping shared with the
- * sweeper. Runs against the real in-memory document store.
- */
+// refetchOrderRedemption (ADR 037) — admin re-drive through backfill machinery
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../../logger.js', () => ({
@@ -135,14 +128,12 @@ describe('refetchOrderRedemption — recovery + bookkeeping', () => {
       hasUrl: false,
     });
     const stored = (await getRow())!;
-    expect(stored.redeemCode).toBe('CODE'); // no envelope key in this env → plaintext
+    expect(stored.redeemCode).toBe('CODE');
     expect(stored.redemptionBackfillAttempts).toBe(4);
   });
 
   it('losing the persist race still reports recovered (concurrent writer won)', async () => {
     await seedRow({ attempts: 3 });
-    // The guarded persist misses because a concurrent writer landed a
-    // payload between the eligibility read and the write.
     const orders = db.collection('orders');
     const realUpdateOne = orders.updateOne.bind(orders);
     vi.spyOn(orders, 'updateOne').mockImplementationOnce(async (filter, update, options) => {
@@ -152,7 +143,6 @@ describe('refetchOrderRedemption — recovery + bookkeeping', () => {
     fetchRedemptionMock.mockResolvedValue({ code: 'CODE', pin: null, url: null });
     const out = await refetchOrderRedemption(ORDER_ID, NOW);
     expect(out).toMatchObject({ kind: 'recovered', attempts: 3 });
-    // The concurrent writer's payload survives.
     expect((await getRow())!.redeemCode).toBe('RACED-IN');
   });
 
@@ -166,9 +156,6 @@ describe('refetchOrderRedemption — recovery + bookkeeping', () => {
   });
 
   it('runs past the sweeper cap without re-paging ops (no-cap contract)', async () => {
-    // attempts already AT the cap — the sweeper would never pick
-    // this doc; the admin action must still drive it, and the bump
-    // to cap+1 must not re-fire the exhaustion page.
     await seedRow({ attempts: REDEMPTION_BACKFILL_MAX_ATTEMPTS });
     fetchRedemptionMock.mockResolvedValue({ code: null, pin: null, url: null });
     const out = await refetchOrderRedemption(ORDER_ID, NOW);

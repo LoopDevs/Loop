@@ -1,34 +1,8 @@
-/**
- * `notifyVaultShareDrift` / `notifyVaultShareDriftRecovered` /
- * `notifyVaultSolvencyBreach` / `notifyVaultSolvencyRecovered` —
- * paired open-and-close notifiers for `credits/vaults/
- * vault-drift-watcher.ts` (ADR 031 §D4, V5). Same shape as
- * `monitoring-asset-drift.ts`'s `notifyAssetDrift` /
- * `notifyAssetDriftRecovered` pair, split into two independent
- * dimensions (INV-V1 share-count drift vs INV-V2 solvency) since a
- * vault can breach one without the other.
- *
- * Re-exported through `discord/monitoring.ts` (and by extension the
- * top-level `discord.ts` barrel).
- *
- * Return the `sendWebhook` delivery result (hardening A2 pattern) so
- * the watcher marks a transition as paged ONLY after a confirmed
- * send — an undelivered page is re-attempted on the next tick rather
- * than lost.
- */
+// vault drift/solvency/float notifiers — ADR 031 §D4, V5, A2, R3-1
 import { config } from '../config/index.js';
 import { GREEN, ORANGE, escapeMarkdown, sendWebhook } from './shared.js';
 
-/**
- * Notify: INV-V1 breach — the on-chain shares held by users (derived
- * as `totalSupply - operatorShareBalance`) has drifted from the
- * off-chain-tracked net shares (emitted-transferred minus
- * redeemed-collected) beyond the configured threshold. Either
- * direction is worth paging: on-chain > tracked means unaccounted
- * shares exist somewhere (a potential unbacked-share event); tracked
- * > on-chain means the mirror thinks users hold more than they
- * actually do on-chain (a stuck/lost transfer).
- */
+// INV-V1: on-chain vs off-chain share count drift; both directions indicate failure
 export function notifyVaultShareDrift(args: {
   assetCode: string;
   network: string;
@@ -63,7 +37,6 @@ export function notifyVaultShareDrift(args: {
   });
 }
 
-/** Sibling of `notifyVaultShareDrift` — fires on over→ok. */
 export function notifyVaultShareDriftRecovered(args: {
   assetCode: string;
   network: string;
@@ -83,17 +56,7 @@ export function notifyVaultShareDriftRecovered(args: {
   });
 }
 
-/**
- * Notify: INV-V2 breach — the vault path's own off-chain USD liability
- * (fixed cashback we credited, minus what we debited on redemption)
- * exceeds the vault's redeemable backing (`totalManaged`) plus the
- * currency's hot float, beyond the configured tolerance. This is the
- * solvency signal: a genuine Blend/DeFindex strategy impairment drops
- * `totalManaged` below the fixed liability and fires here. (The
- * liability is INDEPENDENT of the vault's self-reported share price —
- * see `vault-drift-watcher.ts`'s header for why the tempting
- * on-chain-share-value formulation is tautologically dead.)
- */
+// INV-V2: off-chain USD liability exceeds redeemable backing + hot float; independent of vault share price
 export function notifyVaultSolvencyBreach(args: {
   assetCode: string;
   network: string;
@@ -131,7 +94,6 @@ export function notifyVaultSolvencyBreach(args: {
   });
 }
 
-/** Sibling of `notifyVaultSolvencyBreach` — fires on breach→ok. */
 export function notifyVaultSolvencyRecovered(args: {
   assetCode: string;
   network: string;
@@ -147,20 +109,7 @@ export function notifyVaultSolvencyRecovered(args: {
   });
 }
 
-/**
- * Notify: `treasury/hot-float-reconciliation.ts`'s float/pool desync
- * check — the operator's ACTUAL on-chain vault-share balance
- * disagrees with what the emission/redemption bookkeeping says it
- * should currently be holding (in-flight deposited shares + hot-float
- * pending-unredeemed shares), beyond tolerance. This is the reconciler
- * for the V4-accepted "Known residual" documented under Vault
- * redemptions in docs/invariants.md — a genuine float/pool desync
- * (e.g. a double-withdraw race) with no other detector. Unlike the
- * fire-once watchdogs above, this pages on EVERY bad-state run
- * (same at-least-once-reminder posture as `notifyOperatorFloatDrift`
- * — R3-1's own pattern) rather than deduping to one page per incident,
- * since this check runs on a slow (daily-default) cadence.
- */
+// V4-accepted "Known residual" reconciler; pages on every bad-state run (R3-1 pattern) due to slow cadence
 export function notifyVaultFloatDesync(args: {
   assetCode: string;
   network: string;

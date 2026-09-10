@@ -1,20 +1,4 @@
-/**
- * `/api/admin/orders*` route mounts — order triage.
- *
- * Reads and the stuck-order queue ride the support blanket (ADR 037
- * §3): an operator cannot explain a stuck order without first seeing
- * it. The CSV export is admin-tier, because a bulk export of every
- * order is a different risk from one drill.
- *
- * Of the two actions, the redemption re-fetch is support-tier — it
- * re-drives work the customer already paid for and touches no security
- * control, which is exactly the shape ADR 037 puts in the support
- * remit. The re-drive is admin-tier and step-up gated, because it runs
- * a real CTX sweep step that can move the order's state.
- *
- * Mount order: `/orders.csv` and `/orders-activity` are literals that
- * must register before the `/orders/:orderId` param family.
- */
+// `/api/admin/orders*` route mounts — order triage — ADR 037
 import type { Hono } from 'hono';
 import { rateLimit } from '../middleware/rate-limit.js';
 import { requireStaff } from '../auth/require-staff.js';
@@ -66,7 +50,6 @@ export function mountAdminOrderRoutes(app: Hono): void {
     '/api/admin/orders/:orderId/redrive',
     rateLimit('POST /api/admin/orders/:orderId/redrive', 10, 60_000),
     requireStaff('admin'),
-    // A5-1: bound to the `'order-redrive'` scope.
     requireAdminStepUp('order-redrive'),
     adminOrderRedriveHandler,
   );

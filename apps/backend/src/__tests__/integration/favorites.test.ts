@@ -1,23 +1,4 @@
-/**
- * Caller-scoped favourites integration tests on the real document store.
- *
- * Covers the three `/api/users/me/favorites` handlers:
- *
- *   - GET    /api/users/me/favorites
- *   - POST   /api/users/me/favorites
- *   - DELETE /api/users/me/favorites/:merchantId
- *
- * Real concerns the unit-shaped mocks would miss:
- *   - The `(userId, merchantId)` unique-spec semantics — concurrent
- *     adds of the same merchant land exactly one row, the loser
- *     replayed as `added: false`.
- *   - The per-user 50-favourite cap at the boundary (49 → 50 → 409).
- *   - The DESC-by-createdAt ordering of the only read shape.
- *   - Scope: caller A cannot read or remove caller B's favourites.
- *
- * Runs through the REAL `app` (full middleware + routing) against the
- * ephemeral in-memory document store.
- */
+// caller-scoped favourites integration tests — real document store
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 // Catalog stub — handler reads `getMerchants().merchantsById` to

@@ -1,38 +1,15 @@
-/**
- * Upstream CTX merchant Zod schemas + the mapper that converts a
- * parsed upstream record to our internal `Merchant` shape.
- *
- * Lifted out of `apps/backend/src/merchants/sync.ts` so the parsing
- * + mapping logic has a focused home, separate from the refresh
- * loop / pagination / store-replacement plumbing in the parent
- * file.
- *
- * `UpstreamMerchantSchema` and `UpstreamListResponseSchema` are
- * re-exported from `sync.ts` so the existing import path used by
- * the CTX contract test (`apps/backend/src/__tests__/ctx-contract.test.ts`)
- * keeps working without changes.
- */
+// Upstream CTX merchant Zod schemas + mapper — A2-1706
 import type { Merchant, MerchantDenominations } from '@loop/shared';
 import { z } from 'zod';
 
-// Size caps stop a compromised or buggy upstream from bloating every merchant
-// list response (which we cache and serve to every client). Generous relative
-// to real merchant data but tight enough to catch "CTX returns a 1MB string".
+// Caps prevent compromised/buggy upstream from bloating cached merchant lists
 const MAX_NAME_LENGTH = 256;
 const MAX_ID_LENGTH = 128;
 const MAX_URL_LENGTH = 2048;
 const MAX_CURRENCY_LENGTH = 10;
 const MAX_INFO_LENGTH = 50_000;
 
-/**
- * Zod schema for upstream CTX merchants. Required fields (id, name, enabled)
- * are validated strictly; everything else is optional because CTX sometimes
- * omits them. `.passthrough()` preserves unknown fields without rejection.
- *
- * A2-1706: exported (and re-exported from `sync.ts`) so the contract-test
- * suite can parse recorded CTX fixtures through it at PR-time and detect
- * schema drift.
- */
+// A2-1706: exported for contract-test schema drift detection
 export const UpstreamMerchantSchema = z
   .object({
     id: z.string().min(1).max(MAX_ID_LENGTH),
@@ -42,18 +19,9 @@ export const UpstreamMerchantSchema = z
     cardImageUrl: z.string().max(MAX_URL_LENGTH).optional(),
     mapPinUrl: z.string().max(MAX_URL_LENGTH).optional(),
     enabled: z.boolean(),
-    // Operator-scoped rows only (creds-authenticated sweep + ws events):
-    // the merchant's EFFECTIVE status for this operator, resolved through
-    // the merchant link. Authoritative over the global `enabled` flag
-    // when present.
+    // Operator-scoped: effective status for this operator, authoritative over `enabled`
     status: z.string().max(32).optional(),
-    // Operator-scoped rows only: this operator's merchant link. CTX
-    // includes the discount fields only when the link overrides the
-    // merchant default (operator discounts are system-set on Loop's
-    // links, so `operatorDiscountBasisPoints` is present in
-    // practice). `id` is the link row's own id — the bulk
-    // `PUT /merchant-links` update key for the ADR 052 cashback
-    // push.
+    // Operator-scoped: link row id is the bulk `PUT /merchant-links` key for ADR 052 cashback push
     link: z
       .object({
         id: z.string().optional(),
@@ -62,8 +30,7 @@ export const UpstreamMerchantSchema = z
       })
       .passthrough()
       .optional(),
-    // RFC 3339 timestamp CTX bumps on every merchant edit. Carried onto
-    // `Merchant.updatedAt` as the image cache-busting version.
+    // RFC 3339 timestamp; carried to `Merchant.updatedAt` for image cache-busting
     updated: z.string().max(64).optional(),
     country: z.string().max(MAX_CURRENCY_LENGTH).optional(),
     currency: z.string().max(MAX_CURRENCY_LENGTH).optional(),
@@ -89,8 +56,7 @@ export const UpstreamMerchantSchema = z
 
 export type UpstreamMerchant = z.infer<typeof UpstreamMerchantSchema>;
 
-// Wrap individual merchants in .safeParse so one malformed entry does not
-// poison the whole page — we skip it and keep going.
+// `.safeParse` per merchant so one malformed entry doesn't poison the page
 export const UpstreamListResponseSchema = z
   .object({
     pagination: z.object({
@@ -103,19 +69,12 @@ export const UpstreamListResponseSchema = z
   })
   .passthrough();
 
-/**
- * Maps an upstream CTX merchant to our Merchant type.
- * The upstream returns all fields flat (no nested `data` JSON blob).
- */
 export function mapUpstreamMerchant(item: UpstreamMerchant): Merchant | null {
   if (!item.name) return null;
-  // `status` is the per-operator effective status (resolved through
-  // Loop's merchant link) — authoritative over the global `enabled`
-  // flag when present.
+  // `status` is per-operator effective status, authoritative over `enabled`
   const effectivelyEnabled = item.status !== undefined ? item.status === 'enabled' : item.enabled;
   if (!effectivelyEnabled) return null;
 
-  // Parse denominations from the flat upstream fields
   let denominations: MerchantDenominations | undefined;
   const currency = item.currency ?? 'USD';
 
@@ -140,10 +99,7 @@ export function mapUpstreamMerchant(item: UpstreamMerchant): Merchant | null {
     };
   }
 
-  // savingsPercentage from upstream is in hundredths (e.g. 400 = 4.00%).
-  // Convert to percentage for display (4.0). A per-link user-discount
-  // override (operator-scoped rows, ctx-interop) beats the merchant
-  // default — it's the discount Loop's users actually get.
+  // Upstream `savingsPercentage` is in hundredths (400 = 4.00%); per-link override beats merchant default
   const savingsBasisPoints = item.link?.userDiscountBasisPoints ?? item.savingsPercentage;
   const savingsPercentage = savingsBasisPoints !== undefined ? savingsBasisPoints / 100 : undefined;
 
@@ -156,11 +112,7 @@ export function mapUpstreamMerchant(item: UpstreamMerchant): Merchant | null {
   return {
     id: item.id,
     name: item.name,
-    // CTX's own brand-country slug (e.g. `adidas-ca`). Carried through so
-    // `merchantSlug()` can prefer it over a derived value — CTX owns the
-    // merchant's country and regenerates the slug on its side, so deferring
-    // to it keeps Loop URLs aligned with CTX once the country-token rename
-    // runs. Absent on older records → `merchantSlug` derives brand-country.
+    // CTX brand-country slug; preferred over derived value to keep Loop URLs aligned with CTX
     ...(item.slug ? { slug: item.slug } : {}),
     ...(item.logoUrl ? { logoUrl: item.logoUrl } : {}),
     ...(item.cardImageUrl ? { cardImageUrl: item.cardImageUrl } : {}),

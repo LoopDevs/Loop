@@ -1,39 +1,4 @@
-/**
- * CTX `/ws` merchant-topic client — event-driven merchant-store
- * maintenance.
- *
- * The merchant catalog is fully loaded at boot (see `./sync.ts`) and
- * then kept current by subscribing to CTX's websocket merchant topic:
- *
- *   GET {GIFT_CARD_API_BASE_URL}/ws        (http → ws upgrade)
- *   headers: X-Api-Key / X-Api-Secret      (operator API creds)
- *   → send  {"action":"subscribe","topic":"merchant"}
- *   ← recv  {"type":"ok", ...}
- *   ← recv  {"type":"event","topic":"merchant",
- *            "event":"system.merchant.updated","data":{...merchant}}
- *
- * Event payloads are the same merchant JSON shape as the REST list
- * (spend-api builds both from `merchantToJson`), so they run through
- * the exact same Zod schema + `mapUpstreamMerchant` + denylist filter
- * as the sweep before touching the store. `system.merchant.deleted`
- * (and an update that maps to null, e.g. a merchant disabled upstream)
- * removes the record.
- *
- * Lifecycle:
- *   - Authenticates the upgrade with the operator API creds (the env
- *     schema guarantees them at boot). The interval sweep stays
- *     running alongside the maintainer as the missed-event safety net.
- *   - The socket is Node's built-in (undici) WebSocket — no new
- *     dependency; the non-standard `headers` init option carries the
- *     auth headers on the upgrade request.
- *   - Reconnect on close/error with exponential backoff (1s → 60s,
- *     ±25% jitter). Every reconnect after the first successful session
- *     triggers a full `refreshMerchants()` sweep, because events that
- *     fired while disconnected are gone — the ws has no replay.
- *   - CTX pings every 20s and drops the connection after 60s without a
- *     pong; undici answers pings automatically, so a dead TCP path
- *     surfaces as a close event → backoff → reconnect.
- */
+// CTX `/ws` merchant-topic client — event-driven merchant-store maintenance
 import { z } from 'zod';
 import { config } from '../config/index.js';
 import { logger } from '../logger.js';
@@ -51,15 +16,13 @@ const SUBSCRIBE_COMMAND = JSON.stringify({ action: 'subscribe', topic: 'merchant
 const BACKOFF_INITIAL_MS = 1_000;
 const BACKOFF_MAX_MS = 60_000;
 
-/** CTX event names carried by the `merchant` ws topic. */
 const EVENT_DELETED = 'system.merchant.deleted';
 const MERCHANT_EVENTS = new Set([
   'system.merchant.created',
   'system.merchant.updated',
   'system.merchant.status_changed',
   EVENT_DELETED,
-  // Merchant-LINK mutations (linking/unlinking Loop, per-link status +
-  // discount changes) arrive on the same topic with the same
+  // Merchant-LINK mutations arrive on the same topic with the same
   // merchant-shaped payload — CTX resolves the link to its merchant
   // before delivery, so the handling below is identical.
   'system.merchantlink.created',
@@ -67,10 +30,6 @@ const MERCHANT_EVENTS = new Set([
   'system.merchantlink.status_changed',
 ]);
 
-/**
- * Envelope for every server → client ws message. `data` stays untyped
- * here — merchant events run it through `UpstreamMerchantSchema`.
- */
 const WsMessageSchema = z
   .object({
     type: z.enum(['ok', 'error', 'event']),
@@ -89,21 +48,17 @@ let status: MerchantWsStatus = 'disabled';
 let reconnectTimer: NodeJS.Timeout | null = null;
 let backoffMs = BACKOFF_INITIAL_MS;
 let stopped = true;
-/** True once any session has subscribed OK — gates the reconnect resync. */
 let hadSession = false;
 
-/** Current connection state, surfaced by /health. */
 export function getMerchantWsStatus(): MerchantWsStatus {
   return status;
 }
 
-/** Starts the maintainer. */
 export function startMerchantWs(): void {
   stopped = false;
   connect();
 }
 
-/** Stops the maintainer and closes the socket. For graceful shutdown. */
 export function stopMerchantWs(): void {
   stopped = true;
   status = 'disabled';
@@ -273,12 +228,10 @@ function handleMerchantEvent(eventName: string, data: unknown): void {
   );
 }
 
-/** Test seam: feeds a raw ws frame through the message handler. */
 export function __handleWsMessageForTests(raw: string): void {
   handleMessage(raw);
 }
 
-/** Test seam: resets module state between tests. */
 export function __resetMerchantWsForTests(): void {
   stopMerchantWs();
   backoffMs = BACKOFF_INITIAL_MS;

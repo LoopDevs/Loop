@@ -7,52 +7,11 @@ import { logger } from '../logger.js';
 
 const log = logger.child({ middleware: 'requireStaff' });
 
-/**
- * Staff middleware factory (ADR 037). `requireStaff('support')`
- * admits both roles (admin ⊇ support); `requireStaff('admin')`
- * admits admins only — `requireAdmin` (auth/require-admin.ts) is
- * an alias for the latter, so every pre-ADR-037 mount keeps its
- * exact semantics.
- *
- * Layered on top of `requireAuth` so the `auth` context value is
- * already set. Only Loop-verified auth contexts are eligible —
- * legacy CTX pass-through bearers are not cryptographically
- * anchored on this service and must not drive local authz
- * decisions (401).
- *
- * Role resolution (ADR 037 §1/§2):
- *   1. `staff_roles` row — authoritative when present.
- *   2. Allowlist shim — `users.isAdmin` ⇒ 'admin' when no row
- *      exists. That flag is re-derived from `admin.emails` /
- *      `admin.ctxUserIds` on every upsert (`db/users.ts`), so it is
- *      how the FIRST admin reaches this surface at all — before one
- *      exists there is nobody to grant a `staff_roles` row.
- *   3. Neither ⇒ not staff ⇒ 404, NOT 403 — don't leak the
- *      existence of the admin surface to a non-staff authenticated
- *      user. A wrong-TIER staff request (support hitting an
- *      admin-only mount) is also 404 for the same reason.
- *
- * If the `staff_roles` read itself fails, the resolver falls back
- * to the allowlist shim (pre-ADR-037 semantics) instead of failing
- * the request: admins flagged `isAdmin` keep access, support users
- * fail CLOSED to 404. The window where a row-demoted admin whose
- * `isAdmin` mirror is still true regains admin during such an
- * outage is accepted and logged loudly — the grant/revoke writers
- * keep the mirror in sync precisely to keep that window empty.
- *
- * On success sets `c.get('user')` (the resolved User row) and
- * `c.get('staffRole')` (the resolved role, for handler-side
- * redaction). When the chain already resolved both (the
- * `/api/admin/*` blanket runs before the per-mount gates), the
- * cached values are reused — no second DB round-trip.
- */
+// Staff middleware factory (ADR 037).
 export function requireStaff(minimum: StaffRole): MiddlewareHandler {
   const mw = async (c: Context, next: () => Promise<void>): Promise<Response | void> => {
     const auth = c.get('auth') as LoopAuthContext | undefined;
     if (auth === undefined) {
-      // requireAuth should have run before us. If it didn't, fail
-      // closed — a staff endpoint must never be reachable without
-      // auth state on the context.
       return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
     }
     if (auth.kind !== 'loop') {
@@ -82,8 +41,6 @@ export function requireStaff(minimum: StaffRole): MiddlewareHandler {
       try {
         staffRow = await getStaffRole(user.id);
       } catch (err) {
-        // Allowlist-shim fallback — see the module docstring.
-        // Support fails closed (404); isAdmin admins keep working.
         lookupFailed = true;
         log.warn(
           { err, userId: user.id },
@@ -92,7 +49,6 @@ export function requireStaff(minimum: StaffRole): MiddlewareHandler {
       }
       const resolvedRole: StaffRole | null = staffRow?.role ?? (user.isAdmin ? 'admin' : null);
       if (resolvedRole === null) {
-        // 404 not 403 — see docstring.
         return c.json({ code: 'NOT_FOUND', message: 'Not found' }, 404);
       }
       if (lookupFailed && resolvedRole === 'admin') {
@@ -107,14 +63,11 @@ export function requireStaff(minimum: StaffRole): MiddlewareHandler {
     }
 
     if (minimum === 'admin' && role !== 'admin') {
-      // Wrong tier — same concealment as non-staff.
       return c.json({ code: 'NOT_FOUND', message: 'Not found' }, 404);
     }
 
     await next();
   };
-  // Named so the route-inventory test (staff-route-gating.test.ts)
-  // can statically assert every /api/admin mount declares its tier.
   Object.defineProperty(mw, 'name', { value: `requireStaff(${minimum})` });
   return mw;
 }

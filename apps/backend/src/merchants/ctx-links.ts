@@ -1,29 +1,4 @@
-/**
- * CTX merchant-link registry + user-discount push (ADR 052).
- *
- * The single "User Cashback %" knob (merchant_cashback_configs.
- * user_cashback_pct — the share of Loop's margin given to the
- * customer) is delivered as CTX's native user discount: Loop pushes
- * `userDiscountBasisPoints = floor(operatorDiscountBp × pct / 100)`
- * onto its merchant link via the bulk `PUT /merchant-links`
- * endpoint (operator-permitted update; CTX enforces user ≤
- * operator).
- *
- * Two write paths, both fail-soft:
- *
- *   - Admin save (`upsert-config-handler.ts`) fires a push for that
- *     merchant immediately after commit.
- *   - The hourly catalog sweep (`sync.ts`) reconciles every active
- *     config against the link state CTX just reported, catching
- *     missed pushes, CTX-side edits, and operator-discount changes
- *     that alter the derived user bp.
- *
- * The registry is fed by the sweep (and is empty after a warm-start
- * until the first sweep lands) — a push with no registry entry is a
- * no-op logged at info; the next sweep closes the gap. Nothing here
- * throws to its caller: cashback delivery degrades to "eventually
- * consistent with CTX", never blocks an admin save or a sweep.
- */
+// CTX merchant-link registry + user-discount push — ADR 052
 import { logger } from '../logger.js';
 import { db } from '../db/client.js';
 import { ctxFetch } from '../ctx/api-fetch.js';
@@ -46,11 +21,7 @@ export function __resetCtxLinksForTests(): void {
   linksByMerchantId = new Map();
 }
 
-/**
- * Atomically replaces the registry — called by the sweep with the
- * links it just parsed, mirroring the merchant store's replace-not-
- * merge semantics so a merchant CTX stopped serving drops out.
- */
+// replace-not-merge: merchants CTX stopped serving drop out
 export function replaceMerchantLinks(links: Map<string, CtxMerchantLink>): void {
   linksByMerchantId = links;
 }
@@ -59,12 +30,7 @@ export function getMerchantLink(merchantId: string): CtxMerchantLink | undefined
   return linksByMerchantId.get(merchantId);
 }
 
-/**
- * The link-level user discount the config demands: floor(operator
- * discount × pct / 100). Null when the operator discount is unknown
- * (no link entry yet, or CTX hasn't set Loop's rate for this
- * merchant) — unknown never silently becomes zero.
- */
+// null when operator discount unknown — never silently becomes zero
 export function desiredUserDiscountBp(
   link: CtxMerchantLink | undefined,
   userCashbackPct: number,
@@ -111,12 +77,7 @@ async function pushLinkUserDiscount(link: CtxMerchantLink, userBp: number): Prom
   }
 }
 
-/**
- * Push one merchant's configured cashback share to CTX. Fired after
- * an admin config save. Inactive configs push 0 (no discount).
- * Returns whether a write landed — callers only log; the sweep is
- * the safety net.
- */
+// sweep is the safety net for missed pushes
 export async function pushUserDiscountForMerchant(
   merchantId: string,
   userCashbackPct: number,
@@ -140,13 +101,7 @@ export async function pushUserDiscountForMerchant(
   return pushed;
 }
 
-/**
- * Sweep-time reconcile: every active config's derived user bp is
- * compared against what CTX just reported on the link; drifted
- * links are pushed. Serial on purpose — this runs right after the
- * hourly catalog sweep and a config set is small; a burst of
- * parallel writes against CTX buys nothing.
- */
+// serial on purpose — small config set, burst of parallel writes buys nothing
 export async function reconcileUserDiscounts(): Promise<void> {
   let configs;
   try {

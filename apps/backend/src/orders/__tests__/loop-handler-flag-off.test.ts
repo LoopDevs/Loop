@@ -2,12 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import type { Context } from 'hono';
 import type * as ConfigModule from '../../config/index.js';
 
-/**
- * Feature-flag-off coverage for `loopCreateOrderHandler` lives in its
- * own file so the flag is pinned off for the whole module graph, with
- * no per-test toggling to leak into a sibling case. The flag-on suite
- * is `loop-handler.test.ts`.
- */
+// Flag pinned off for the whole module graph to prevent leakage into sibling cases
 vi.mock('../../config/index.js', async (importActual) => {
   const actual = await importActual<typeof ConfigModule>();
   return {
@@ -22,9 +17,7 @@ vi.mock('../../config/index.js', async (importActual) => {
   };
 });
 
-// The handler returns 404 before touching the DB, but its module
-// graph imports the db client at load time — stub it so this file
-// never constructs a store.
+// Stub db client to prevent store construction at load time
 vi.mock('../../db/client.js', () => ({ db: {} }));
 vi.mock('../../logger.js', () => ({
   logger: {

@@ -1,67 +1,11 @@
-/**
- * SSRF guard for the image proxy.
- *
- * Lifted out of `apps/backend/src/images/proxy.ts`. The helpers
- * share one concern — validating that a remote URL is safe to proxy:
- *
- *   - `validateResolvedImageUrl(rawUrl)` — protocol check, hostname
- *     resolution, IP-range check across every resolved address (the
- *     pre-flight check; production-only — see its doc comment).
- *   - `ssrfSafeLookup(hostname, …)` — the connecting socket's DNS
- *     resolver for the *actual* fetch: it re-range-checks the address
- *     the connection will use, so a DNS-rebind between the pre-flight
- *     check and the fetch cannot land on an internal target.
- *   - `isPrivateOrReservedIp(ip)` — IPv4 + IPv6 range check,
- *     covering RFC 1918 private, loopback, link-local, CGNAT,
- *     reserved, multicast, IPv4-mapped IPv6 forms, plus NAT64
- *     (64:ff9b::/96) and 6to4 (2002::/16) addresses whose embedded
- *     IPv4 falls in one of those ranges.
- *   - `extractEmbeddedIPv4(ipv6Lower)` — pulls the IPv4 out of
- *     `::ffff:a.b.c.d` / `::ffff:XXXX:YYYY` so the IPv4 range
- *     check can run.
- *
- * Pulled out to give the SSRF-defense logic its own focused
- * home — separate from the proxy\'s caching / fetch-with-limit
- * / sharp-resize plumbing in the parent file. The DNS-rebinding
- * TOCTOU gap that used to be a documented limitation is closed by
- * `ssrfSafeLookup` (wired into the proxy's fetch as the socket's
- * `lookup` in production). Since ADR 050 the proxy is reference-keyed
- * (clients send ids, never URLs), so this module is defense-in-depth
- * against bad CTX catalog data rather than the primary control
- * against client-driven SSRF.
- */
+// SSRF guard for the image proxy — ADR 050
 import { lookup } from 'node:dns/promises';
 import net from 'node:net';
 import type { LookupFunction } from 'node:net';
 import { config } from '../config/index.js';
 
-/**
- * Validates a SERVER-RESOLVED image URL before the proxy fetches it.
- *
- * ADR 050: the image proxy is reference-keyed — clients send a merchant
- * id / order id and the backend looks the URL up in its own stores
- * (merchant catalog, locations, CTX order). The URL under validation is
- * therefore CTX-supplied data, never client input, and this check is
- * defense-in-depth against a compromised or misbehaving upstream
- * pointing catalog URLs at internal targets — not the primary SSRF
- * control it was when the client chose the URL.
- *
- * Rules:
- * - Outside production: any http(s) URL passes — local CTX instances
- *   mint file URLs against their own dev base (e.g. a loopback host),
- *   and there is no internal network to protect.
- * - In production: must be https:, and every resolved address must be
- *   public (no loopback/private/link-local/CGNAT/multicast, including
- *   IPv4-mapped / NAT64 / 6to4 forms).
- *
- * Returns an error string if invalid, or null if valid.
- *
- * This is the pre-flight check: it rejects bad URLs before any socket
- * is opened. The DNS-rebinding TOCTOU window is closed at the
- * connection layer by `ssrfSafeLookup`, which the proxy wires in as the
- * connecting socket's `lookup` (in production), so the address the
- * request actually connects to is range-checked too.
- */
+// Pre-flight check: validates CTX-supplied URLs (defense-in-depth per ADR 050).
+// Closes DNS-rebinding TOCTOU via ssrfSafeLookup at the connection layer.
 export async function validateResolvedImageUrl(rawUrl: string): Promise<string | null> {
   let parsed: URL;
   try {
@@ -116,24 +60,7 @@ export async function validateResolvedImageUrl(rawUrl: string): Promise<string |
   return null;
 }
 
-/**
- * SSRF-safe DNS resolver for the image proxy's actual fetch — wired in
- * as the connecting socket's `lookup` (see `proxy.ts`).
- *
- * `validateImageUrl` above range-checks the IPs it resolves, but a plain
- * `fetch()` performs its OWN later DNS lookup that we don't control: an
- * attacker-run resolver can answer with a public IP during pre-flight and
- * a private one for the connection (DNS-rebinding TOCTOU). Because Node's
- * socket calls THIS function to resolve the host it is about to connect
- * to, doing the range check here means the address the request actually
- * reaches is validated — closing the rebind gap even when the host
- * allowlist is disabled. If any resolved address is private/reserved we
- * fail the lookup (the connection never opens) rather than hand it back.
- *
- * IP-literal hosts skip DNS entirely (Node connects directly), so this is
- * never called for them; `validateImageUrl` already range-checks literals
- * before the fetch is attempted.
- */
+// SSRF-safe DNS resolver: re-checks range at connection time to prevent DNS-rebinding.
 export const ssrfSafeLookup: LookupFunction = (hostname, options, callback) => {
   lookup(hostname, { all: true, family: options.family, hints: options.hints })
     .then((results) => {
@@ -163,16 +90,7 @@ export const ssrfSafeLookup: LookupFunction = (hostname, options, callback) => {
     });
 };
 
-/**
- * Returns true if `ip` belongs to a range we must not proxy to:
- * loopback, private, link-local, CGNAT, reserved, multicast, unspecified,
- * including IPv4-mapped IPv6 forms, and NAT64 / 6to4 addresses whose
- * embedded IPv4 falls in one of those ranges (which would otherwise bypass
- * the IPv4 checks entirely).
- *
- * Exported so the connection-layer resolver (`ssrfSafeLookup`) and its
- * tests can share exactly this range logic.
- */
+// Checks IPv4/IPv6 ranges including NAT64/6to4 embedded IPv4s to prevent bypass.
 export function isPrivateOrReservedIp(ip: string): boolean {
   if (net.isIPv4(ip)) {
     const parts = ip.split('.').map((p) => Number(p));
@@ -219,11 +137,7 @@ export function isPrivateOrReservedIp(ip: string): boolean {
   return true;
 }
 
-/**
- * Expands an IPv6 string to its eight 16-bit groups, handling `::`
- * compression and a trailing embedded dotted-quad (`…:a.b.c.d`). Returns
- * null if the input is not a well-formed IPv6 literal.
- */
+// Expands IPv6 to 8 groups, handling `::` and trailing dotted-quad.
 function expandIpv6(ipv6Lower: string): number[] | null {
   if (!net.isIPv6(ipv6Lower)) return null;
   let s = ipv6Lower;
@@ -264,11 +178,7 @@ function expandIpv6(ipv6Lower: string): number[] | null {
   return groups;
 }
 
-/**
- * If `ipv6Lower` is a NAT64 well-known-prefix (64:ff9b::/96) or a 6to4
- * (2002::/16) address, returns the dotted IPv4 it embeds; otherwise null.
- * NAT64 carries the v4 in the low 32 bits; 6to4 in bits 16-47.
- */
+// Extracts embedded IPv4 from NAT64 (64:ff9b::/96) or 6to4 (2002::/16).
 function extractNat64OrSixToFourIPv4(ipv6Lower: string): string | null {
   const groups = expandIpv6(ipv6Lower);
   if (groups === null) return null;
@@ -289,10 +199,7 @@ function extractNat64OrSixToFourIPv4(ipv6Lower: string): string | null {
   return null;
 }
 
-/**
- * Extracts the embedded IPv4 from IPv4-mapped (::ffff:a.b.c.d / ::ffff:XXXX:YYYY)
- * or IPv4-compatible (::a.b.c.d) IPv6 forms. Returns null if not embedded.
- */
+// Extracts embedded IPv4 from IPv4-mapped (::ffff:...) or IPv4-compatible (::...) forms.
 function extractEmbeddedIPv4(ipv6Lower: string): string | null {
   const dotted = ipv6Lower.match(/^::(?:ffff:)?(\d+\.\d+\.\d+\.\d+)$/);
   if (dotted?.[1] !== undefined) return dotted[1];

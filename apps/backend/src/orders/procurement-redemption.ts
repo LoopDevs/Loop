@@ -1,31 +1,4 @@
-/**
- * CTX gift-card-detail fetch + parsing — the redemption-side of
- * procurement (ADR 010 / ADR 015 follow-up).
- *
- * Lifted out of `apps/backend/src/orders/procurement.ts`. The
- * procurement worker calls `waitForRedemption(ctxOrderId)` per
- * successful order to wait out CTX's issuance latency and pull the
- * user-facing redeem code / PIN / URL — CTX returns the card number
- * as `number`, the PIN as `pin`, and (for URL merchants) a
- * tokenized `redeemUrl`; the parser collapses them into our internal
- * shape.
- *
- * This is the only place in the backend that decodes a CTX
- * `/gift-cards/:id` response. Pulling it out gives the parser a
- * focused home + makes the procurement worker file shorter and
- * easier to read.
- *
- * Two consumption shapes co-exist:
- *
- *   - `fetchRedemption` (legacy, exported for any one-shot caller):
- *     a single GET. Returns whatever the response holds at that
- *     instant — often null fields when CTX is still issuing.
- *   - `waitForRedemption` (used by the procurement worker): subscribes
- *     to CTX's SSE stream first, waits for terminal `fulfilled`,
- *     then runs one authoritative `fetchRedemption`. Falls back to
- *     1-second polling if the stream errors. 5-minute budget by
- *     default. Ported from VCC's `pollCtxForClaimUrl` pattern.
- */
+// CTX gift-card-detail fetch + parsing — ADR 010, ADR 015
 import { z } from 'zod';
 import { logger } from '../logger.js';
 import { ctxFetch, ctxApiCredentials } from '../ctx/api-fetch.js';
@@ -36,27 +9,13 @@ import { summariseZodIssues } from './handler-shared.js';
 
 const log = logger.child({ area: 'procurement-redemption' });
 
-/**
- * CTX response shape for GET /gift-cards/:id, narrowed to the
- * redemption fields we surface to the user. All fields are optional
- * — some merchant types redeem by URL + challenge, others by a
- * static number with or without a PIN.
- */
 const CtxGiftCardDetailResponse = z.object({
   number: z.string().optional(),
   pin: z.string().optional(),
   redeemUrl: z.string().optional(),
 });
 
-/**
- * The Zod field accepts any string (CTX has returned relative paths,
- * and rejecting them used to drop the still-usable code/PIN with
- * them), but what we PERSIST and hand to the web `<a href>` / native
- * WebView must be a real http(s) URL — a hostile or drifted CTX
- * response must not be able to plant `javascript:` (or garbage) into
- * a clickable link (money review 2026-07-08, upstream-validation
- * boundary). Anything else → null; code/PIN survive independently.
- */
+// Rejects non-http(s) protocols to prevent javascript: injection in clickable links (money review 2026-07-08)
 export function sanitizeRedeemUrl(raw: string | null): string | null {
   if (raw === null) return null;
   let parsed: URL;
@@ -68,11 +27,6 @@ export function sanitizeRedeemUrl(raw: string | null): string | null {
   return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? raw : null;
 }
 
-/**
- * Fetches the gift-card detail from CTX and maps its redemption
- * fields (`number`, `pin`, `redeemUrl`) into our internal
- * `redeemCode / redeemPin / redeemUrl` shape.
- */
 export async function fetchRedemption(ctxOrderId: string): Promise<{
   code: string | null;
   pin: string | null;
@@ -108,20 +62,7 @@ export async function fetchRedemption(ctxOrderId: string): Promise<{
     pin: parsed.data.pin ?? null,
     url: sanitizeRedeemUrl(parsed.data.redeemUrl ?? null),
   };
-  // Diagnostic: CTX has been returning 200 with all redemption fields
-  // missing across long polling windows for operator-account orders.
-  // When that happens, log the response's top-level KEY NAMES so ops
-  // can tell `wrong field name` (drift) from `genuinely empty`.
-  //
-  // FT-14: never log the raw body or any value here. This branch fires
-  // exactly when all of OUR known fields parsed to null — which is also
-  // precisely what a field-name drift produces (e.g. CTX renames
-  // `number` → `cardNumber`), and the drifted field then holds a
-  // LIVE gift-card code/PIN. Logging the raw body would leak that
-  // code/PIN. The key names alone answer the drift-vs-empty question
-  // without exposing any value; scrubbing the body would not be enough —
-  // a short numeric PIN or a hyphenated code slips past the token /
-  // card-shape patterns in `scrubUpstreamBody`.
+  // Logs key names only to distinguish field-name drift from empty response without leaking live codes/PINs (FT-14)
   if (out.code === null && out.pin === null && out.url === null) {
     const keys = raw !== null && typeof raw === 'object' ? Object.keys(raw) : [];
     log.info(
@@ -132,27 +73,6 @@ export async function fetchRedemption(ctxOrderId: string): Promise<{
   return out;
 }
 
-/**
- * Stream-first redemption wait. Mirrors VCC's `pollCtxForClaimUrl`
- * (`vcc/api/src/ctx/client.js` + `vcc/api/src/fulfillment.js`):
- *
- *   1. Subscribe to CTX's SSE stream
- *      (`GET /gift-cards/:id?stream=true&token=...`).
- *   2. On terminal `fulfilled`/`complete`, do one authoritative
- *      `fetchRedemption` — SSE frames don't always carry the
- *      redemption fields, so this is the canonical read.
- *   3. If the stream throws a benign transient error (network blip,
- *      timeout, envoy hiccup), fall back to polling `fetchRedemption`
- *      every second for the remaining budget.
- *   4. Bail with the most-recent redemption payload (which may still
- *      be empty) when the total budget is exhausted — the order will
- *      transition to `fulfilled` either way; redemption fields can
- *      be backfilled later by a sweep if needed.
- *
- * Terminal CTX-side rejections (`rejected`/`failed`/`error` from the
- * stream) propagate as exceptions — the procurement worker catches
- * those and transitions the order to `failed`.
- */
 export interface WaitForRedemptionOptions {
   /** Total wall-clock budget across stream + polling fallback (ms). Default 5 min. */
   totalTimeoutMs?: number;
@@ -160,12 +80,7 @@ export interface WaitForRedemptionOptions {
   pollIntervalMs?: number;
 }
 
-// Test seam: the procurement tick test suite drives many orders
-// through `waitForRedemption` synchronously. Reading the defaults
-// from env at call time lets tests collapse the 5-min / 1-s timing
-// into a few ms without binding test concerns into the function
-// signature. Production never sets these; the 5-min budget + 1-s
-// polling stays the operator-facing default.
+// Reads timing defaults from env to allow tests to collapse 5-min/1-s budgets without changing function signature
 function numericEnv(name: string, fallback: number): number {
   const raw = process.env[name];
   if (raw === undefined || raw === '') return fallback;
@@ -210,12 +125,9 @@ export async function waitForRedemption(
     } finally {
       clearTimeout(timer);
     }
-    // Stream confirmed terminal status. Do the canonical read.
     return await fetchRedemption(ctxOrderId);
   } catch (err) {
-    // CTX-side rejections must propagate so the procurement worker
-    // transitions the order to `failed`. Stream-transport errors
-    // (network/timeout/etc.) fall through to the polling loop.
+    // Propagates CTX-side rejections to trigger order failure; falls back to polling for transport errors
     const msg = err instanceof Error ? err.message : String(err);
     if (/^CTX order .* (rejected|failed|error)/.test(msg)) {
       throw err;
@@ -223,11 +135,6 @@ export async function waitForRedemption(
     log.warn({ ctxOrderId, err: msg }, 'CTX SSE stream errored — falling back to polling');
   }
 
-  // Polling fallback. Re-fetches `/gift-cards/:id` every
-  // `pollIntervalMs` until we see a non-null redemption field or the
-  // budget runs out. We deliberately return whatever payload we have
-  // when the budget exhausts — the procurement worker will still
-  // mark the order `fulfilled` and a follow-up sweep can backfill.
   let last: { code: string | null; pin: string | null; url: string | null } = {
     code: null,
     pin: null,

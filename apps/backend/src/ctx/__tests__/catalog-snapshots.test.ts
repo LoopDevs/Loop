@@ -11,16 +11,11 @@ import {
   MAX_WARM_START_AGE_MS,
 } from '../catalog-snapshots.js';
 
-/**
- * R3-3 warm-start snapshots (last-good CTX catalog), against the real
- * in-memory document store: freshness gate, payload validation, and
- * the save→load round trip through the upserting writer.
- */
+// R3-3 warm-start snapshots (last-good CTX catalog)
 const NOW = 1_780_188_400_000;
 
 const merchant = { id: 'm-1', name: 'Store', enabled: true };
 
-/** Seeds a snapshot doc directly (bypassing the writer under test). */
 async function seedSnapshot(
   name: 'merchants' | 'locations',
   payload: unknown[],

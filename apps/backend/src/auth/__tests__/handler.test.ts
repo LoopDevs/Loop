@@ -2,10 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type * as ConfigModule from '../../config/index.js';
 import type * as RefreshTokensModule from '../refresh-tokens.js';
 
-// The HS256 signing key is per-test mutable: most of this suite runs
-// with Loop-native auth unconfigured (so the handlers take the legacy
-// CTX-proxy path), and a couple of cases turn it on to mint a
-// Loop-signed token.
 const { configState } = vi.hoisted(() => ({
   configState: { hs256Current: undefined as string | undefined },
 }));
@@ -18,12 +14,7 @@ vi.mock('../../config/index.js', async (importActual) => {
       return {
         ...actual.config,
         ctx: { ...actual.config.ctx, baseUrl: 'http://test-upstream.local' },
-        // Audit A-023 / FT-08 — the rate limiter keys on the client IP only
-        // when this is true; behind a trusted proxy it reads the spoof-proof
-        // `Fly-Client-IP` header (NOT the client-controllable
-        // X-Forwarded-For). These auth tests inject synthetic Fly-Client-IP
-        // values to get per-"client" isolation, so trust is on for the
-        // test harness.
+        // Audit A-023 / FT-08 — trustProxy reads Fly-Client-IP (spoof-proof) instead of X-Forwarded-For
         server: { ...actual.config.server, trustProxy: true },
         auth: {
           ...actual.config.auth,
@@ -102,7 +93,6 @@ function post(
   body: unknown,
   headers: Record<string, string> = {},
 ): Promise<Response> | Response {
-  // Unique IP per test so rate-limiter state does not leak between cases.
   const ip = `10.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`;
   return app.request(path, {
     method: 'POST',
@@ -142,7 +132,6 @@ describe('POST /api/auth/request-otp', () => {
       email: 'unknown@example.com',
       platform: 'web',
     });
-    // Must look identical to a successful request so an attacker cannot enumerate.
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, string>;
     expect(body.message).toContain('Verification');
@@ -155,11 +144,6 @@ describe('POST /api/auth/request-otp', () => {
   });
 
   it('A2-558: collapses fetch network failures to the generic 200 envelope (no enumeration sidechannel)', async () => {
-    // A fetch rejection simulates a transient network / DNS / timeout
-    // error. Prior behaviour returned 500 which diverges from the 200
-    // "Verification code sent" envelope used for 2xx + 4xx, letting
-    // an attacker distinguish "backend networking broken" from
-    // "email valid/invalid". Collapse to 200.
     mockFetch.mockRejectedValueOnce(new Error('DNS failure'));
     const res = await post('/api/auth/request-otp', { email: 'u@example.com', platform: 'web' });
     expect(res.status).toBe(200);
@@ -222,9 +206,6 @@ describe('POST /api/auth/verify-otp', () => {
     const body = (await res.json()) as Record<string, string>;
     expect(body.accessToken).toBe('AAA.BBB.CCC');
     expect(body.refreshToken).toBe('r-token');
-    // Auth responses carry tokens — make sure a misconfigured proxy that
-    // treats any response as cacheable doesn't serve one user's
-    // just-minted tokens to the next caller.
     expect(res.headers.get('Cache-Control')).toBe('no-store');
   });
 
@@ -303,11 +284,6 @@ describe('POST /api/auth/refresh', () => {
   });
 
   it('returns 502 UPSTREAM_ERROR on upstream 5xx (not 401 UNAUTHORIZED)', async () => {
-    // A 5xx from the upstream is a server-side problem — the user's refresh
-    // token is presumably still valid. Previously we returned 401 here,
-    // which would have logged a user out on every transient upstream blip
-    // (causing a re-auth loop). Must now surface as UPSTREAM_ERROR so the
-    // client can retry instead of clearing session.
     mockFetch.mockResolvedValueOnce(
       new Response('upstream boom', { status: 502, statusText: 'Bad Gateway' }),
     );
@@ -381,8 +357,6 @@ describe('DELETE /api/auth/session', () => {
     const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
     expect(url).toContain('/logout');
     expect(init.method).toBe('POST');
-    // `upstreamFetch` normalises init.headers to a Headers instance
-    // when it stamps the outbound X-Request-Id.
     const headers = new Headers(init.headers);
     expect(headers.get('Authorization')).toBe('Bearer ctx-access-token');
     expect(headers.get('X-Client-Id')).toBe('loopweb');
@@ -406,8 +380,6 @@ describe('DELETE /api/auth/session', () => {
   });
 
   it('succeeds without calling upstream when no bearer is presented', async () => {
-    // A body refreshToken alone no longer reaches CTX — the upstream
-    // contract revokes by access token in the Authorization header.
     const res = await app.request('/api/auth/session', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json', 'fly-client-ip': '10.0.0.3' },
@@ -445,9 +417,6 @@ describe('DELETE /api/auth/session', () => {
   });
 
   it('A2-565: revokes the Loop-native refresh-token row when the token is Loop-signed', async () => {
-    // Turn on Loop-native auth just for this test. The signing key
-    // must be ≥32 chars. Use a fixed value so the token below is
-    // deterministic across reruns.
     const key = 'k'.repeat(32);
     configState.hs256Current = key;
     const { signLoopToken } = await import('../tokens.js');
@@ -466,7 +435,6 @@ describe('DELETE /api/auth/session', () => {
     });
     expect(res.status).toBe(200);
     expect(revokeRefreshMock).toHaveBeenCalledWith(expect.objectContaining({ jti: claims.jti }));
-    // Undo the override so downstream tests see no Loop auth config.
     configState.hs256Current = undefined;
   });
 

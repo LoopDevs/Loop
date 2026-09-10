@@ -1,16 +1,4 @@
-/**
- * Login / OTP support state (readiness-backlog A5-3).
- *
- * `GET /api/admin/users/:userId/auth-state` — read-only snapshot of an
- * account's verify-OTP lockout state, OTP issuance/verify history, and
- * live-session count, so support can answer "is this user locked out
- * right now, and why" without a database console. Support-tier
- * (ADR 037 §3 — read views are shared).
- *
- * NEVER returns an OTP code, a code hash, or a refresh-token hash.
- * That is the point of the endpoint: support sees STATE, and cannot
- * reconstruct or replay a login from what they see.
- */
+// Login / OTP support state — A5-3, ADR 037 §3
 import type { Context } from 'hono';
 import type { AdminUserAuthStateResponse } from '@loop/shared';
 import { UUID_RE } from '../uuid.js';
@@ -61,8 +49,6 @@ export async function adminUserAuthStateHandler(c: Context): Promise<Response> {
       otpLock: {
         locked,
         lockedUntil: lockedUntil !== null ? lockedUntil.toISOString() : null,
-        // The window may have lapsed without the counter being reset;
-        // that's the same number the limiter itself would read.
         failedAttempts: lock?.failedAttempts ?? 0,
       },
       lastOtpRequestedAt: lastRequested?.createdAt.toISOString() ?? null,

@@ -1,20 +1,6 @@
-/**
- * The document-store abstraction every repository module talks to.
- *
- * Two drivers implement it:
- *   - `memory-store.ts` — the whole database lives in process memory,
- *     hydrated from (and flushed back to) a single JSON file. The
- *     default for dev/test and the current undeployed posture.
- *   - `mongo-store.ts` — MongoDB via the official driver.
- *
- * The filter/update language is a deliberately tiny Mongo subset
- * (equality + `$lt/$lte/$gt/$gte/$ne/$in`, updates via `$set/$inc`) so
- * the memory driver can implement it in a few dozen lines and the
- * Mongo driver can pass it through untouched.
- */
+// document-store abstraction — memory + mongo drivers
 import type { CollectionDocs, CollectionName } from './types.js';
 
-/** Field predicate: a bare value means equality (null matches null/missing). */
 export type FieldFilter<V> =
   | V
   | null
@@ -25,22 +11,13 @@ export type FieldFilter<V> =
       $gte?: V;
       $ne?: V | null;
       $in?: ReadonlyArray<V | null>;
-      /**
-       * Case-insensitivity and other flags for `$regex`. Mongo reads
-       * this natively; the memory driver passes it to `RegExp`.
-       */
       $options?: string;
       /**
-       * Substring / pattern match on a string field, in Mongo's own
-       * spelling so the filter still passes straight through to the
-       * driver. Build it with `containsFilter()` rather than by hand —
-       * an unescaped operator-supplied term would be both a wrong
-       * match (`a.b` matching `axb`) and a ReDoS surface.
+       * Build with `containsFilter()` — unescaped operator input is a wrong match and ReDoS surface.
        */
       $regex?: string;
     };
 
-/** Implicit AND across fields. */
 export type Filter<T> = {
   [K in keyof T]?: FieldFilter<NonNullable<T[K]>>;
 };
@@ -59,7 +36,6 @@ export interface FindOptions<T> {
   skip?: number;
 }
 
-/** Thrown by `insertOne` when a `COLLECTION_SPECS` unique tuple is violated. */
 export class UniqueViolationError extends Error {
   constructor(
     public readonly collection: string,
@@ -74,30 +50,21 @@ export interface Collection<T extends object> {
   findOne(filter: Filter<T>, options?: FindOptions<T>): Promise<T | null>;
   findMany(filter?: Filter<T>, options?: FindOptions<T>): Promise<T[]>;
   count(filter?: Filter<T>): Promise<number>;
-  /** Inserts a fully-formed doc. Throws `UniqueViolationError` on a unique-spec collision. */
   insertOne(doc: T): Promise<void>;
   /**
-   * Atomically updates the first doc matching `filter` (respecting
-   * `options.sort`) and returns the updated doc, or `null` when nothing
-   * matched. This is the CAS primitive: put the "still live" predicate
-   * in the filter and a `null` result means another caller won.
+   * CAS primitive: put the "still live" predicate in the filter; `null` result means another caller won.
    */
   updateOne(filter: Filter<T>, update: Update<T>, options?: FindOptions<T>): Promise<T | null>;
   updateMany(filter: Filter<T>, update: Update<T>): Promise<number>;
-  /** Replace-by-filter; with `upsert` inserts when nothing matches. */
   replaceOne(filter: Filter<T>, doc: T, options?: { upsert?: boolean }): Promise<void>;
   deleteMany(filter: Filter<T>): Promise<number>;
 }
 
 export interface DataStore {
   collection<Name extends CollectionName>(name: Name): Collection<CollectionDocs[Name]>;
-  /** Connect / hydrate. Must be called (and awaited) before any collection use. */
   init(): Promise<void>;
-  /** Flush + disconnect. Safe to call more than once. */
   close(): Promise<void>;
 }
-
-// ─── Shared matcher / update helpers (used by the memory driver) ────────────
 
 function isOperatorObject(v: unknown): v is Record<string, unknown> {
   return (
@@ -121,7 +88,6 @@ function valuesEqual(a: unknown, b: unknown): boolean {
   if (a instanceof Date || b instanceof Date) {
     return a instanceof Date && b instanceof Date && a.getTime() === b.getTime();
   }
-  // Missing fields and explicit nulls are the same thing to a filter.
   if ((a === null || a === undefined) && (b === null || b === undefined)) return true;
   return a === b;
 }
@@ -136,7 +102,6 @@ export function matchesFilter<T extends object>(doc: T, filter: Filter<T> | unde
       continue;
     }
     const ops = predicate;
-    // Range operators never match null/missing values (SQL comparison semantics).
     const missing = value === null || value === undefined;
     if (ops['$lt'] !== undefined && (missing || compareValues(value, ops['$lt']) >= 0))
       return false;
@@ -152,8 +117,6 @@ export function matchesFilter<T extends object>(doc: T, filter: Filter<T> | unde
       if (!list.some((candidate) => valuesEqual(value, candidate))) return false;
     }
     if (ops['$regex'] !== undefined) {
-      // Only strings can match a pattern; null/missing/non-string
-      // never does, mirroring Mongo.
       if (typeof value !== 'string') return false;
       const flags = typeof ops['$options'] === 'string' ? ops['$options'] : '';
       if (!new RegExp(ops['$regex'] as string, flags).test(value)) return false;
@@ -193,27 +156,13 @@ export function sortDocs<T extends object>(docs: T[], sort: Sort<T> | undefined)
   });
 }
 
-/**
- * Escapes every regex metacharacter so a term is matched literally.
- * Exported for tests; handlers should reach for `containsFilter`.
- */
 export function escapeRegex(term: string): string {
   return term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**
- * Case-insensitive "field contains this literal text" predicate — the
- * document-store stand-in for SQL `ILIKE '%term%'`.
- *
- * The term is escaped, so an operator searching for `a.b` matches the
- * literal `a.b` rather than `axb`, and no operator-supplied input can
- * reach the regex engine as syntax (a pathological pattern would be a
- * ReDoS on the memory driver and a scan amplifier on Mongo).
- *
- * This is a collection scan on both drivers. That is fine for the
- * admin surfaces that use it — operator-facing, low-frequency, and
- * bounded by an explicit row cap — and would want an index (or a
- * proper text search) before it went anywhere near a hot path.
+ * Case-insensitive literal substring match. Escaped to prevent ReDoS and wrong matches.
+ * Collection scan on both drivers; fine for low-frequency admin surfaces.
  */
 export function containsFilter(term: string): { $regex: string; $options: string } {
   return { $regex: escapeRegex(term), $options: 'i' };

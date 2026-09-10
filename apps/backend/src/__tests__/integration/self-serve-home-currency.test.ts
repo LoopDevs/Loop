@@ -1,21 +1,4 @@
-/**
- * Self-serve home-currency change integration tests on the real
- * document store.
- *
- * `POST /api/users/me/home-currency` is the onboarding-time region
- * picker. It refuses the change once the user has placed an order
- * (A2-552 order guard → HOME_CURRENCY_LOCKED) because pricing history
- * pins currency at order creation.
- *
- * (The DOM-03 live-credit-balance guard these tests used to also pin
- * died with the credits ledger under ADR 052 — there is no
- * `user_credits` balance to orphan any more; the order guard is the
- * remaining precondition.)
- *
- * Runs through the REAL `app` (routing + requireAuth + rate limiting)
- * against the ephemeral in-memory store — the unit suite covers the
- * handler in isolation; this pins the mounted route end-to-end.
- */
+// self-serve home-currency change integration tests — A2-552, ADR 052
 import { describe, it, expect, beforeEach } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { db, __resetDbForTests } from '../../db/client.js';
@@ -116,7 +99,6 @@ describe('self-serve home-currency change — document store', () => {
     const body = (await res.json()) as { code: string };
     expect(body.code).toBe('HOME_CURRENCY_LOCKED');
 
-    // Critical: no transition happened.
     const after = await db.collection('users').findOne({ id: me.userId });
     expect(after?.homeCurrency).toBe('USD');
   });

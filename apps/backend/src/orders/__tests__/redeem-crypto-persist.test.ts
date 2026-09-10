@@ -2,19 +2,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type * as ConfigModule from '../../config/index.js';
 import { randomBytes, randomUUID } from 'node:crypto';
 
-/**
- * CF-25 / X-PRIV-03 persistence test: proves the redeem code + PIN are
- * ciphertext *at rest* (the value stored in the document store) but
- * recoverable via the read-path decrypt. Exercises the real
- * `markOrderFulfilled` write against the real in-memory store, with
- * the envelope key set.
- */
+// CF-25 / X-PRIV-03: proves redeem code + PIN are ciphertext at rest but recoverable via read-path decrypt.
 const { redeemState } = vi.hoisted(() => ({
   redeemState: { key: undefined as string | undefined },
 }));
-// Partial config mock: only the redeem key is per-test mutable — the
-// rest of the real (test-fixture) config stays intact so logger/db keep
-// booting.
 vi.mock('../../config/index.js', async (importActual) => {
   const actual = await importActual<typeof ConfigModule>();
   return {
@@ -28,7 +19,6 @@ vi.mock('../../config/index.js', async (importActual) => {
   };
 });
 
-// 32-byte key, assigned into `redeemState` in `beforeEach` below.
 const KEY_B64 = randomBytes(32).toString('base64');
 
 import { db, __resetDbForTests } from '../../db/client.js';
@@ -47,7 +37,6 @@ beforeEach(() => {
   resetRedeemKeyCache();
 });
 
-/** Seeds a paid mirror doc ready to fulfil; returns its id. */
 async function seedPaidOrder(): Promise<string> {
   const id = randomUUID();
   const now = new Date();
@@ -98,17 +87,14 @@ describe('markOrderFulfilled — redeem secrets encrypted at rest', () => {
     const storedCode = stored.redeemCode as string;
     const storedPin = stored.redeemPin as string;
 
-    // At rest: code + PIN are enveloped ciphertext, not the plaintext.
     expect(isEncryptedRedeemField(storedCode)).toBe(true);
     expect(storedCode.startsWith(REDEEM_ENVELOPE_PREFIX)).toBe(true);
     expect(storedCode).not.toContain('PLAINTEXT-GIFT-CODE');
     expect(isEncryptedRedeemField(storedPin)).toBe(true);
     expect(storedPin).not.toContain('4242');
 
-    // URL stays plaintext (it's the landing page, not the secret).
     expect(stored.redeemUrl).toBe('https://merchant.example/redeem/abc');
 
-    // The read path recovers the originals.
     expect(decryptRedeemField(storedCode)).toBe('PLAINTEXT-GIFT-CODE');
     expect(decryptRedeemField(storedPin)).toBe('4242');
   });

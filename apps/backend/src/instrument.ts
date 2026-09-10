@@ -1,16 +1,4 @@
-/**
- * Sentry SDK initialization for the backend (ADR-... / A2-1308 / A2-1309 / A2-1310).
- *
- * `@sentry/hono` 10.51 split init from middleware: `init()` must run
- * BEFORE any user code so OpenTelemetry's auto-instrumentation can
- * patch the http/https modules at first import. This file is loaded
- * via Node's `--import` flag (see backend `package.json` scripts +
- * `Dockerfile` CMD) so the side-effect runs before `src/index.ts`.
- *
- * Pre-10.51 the equivalent config lived inline in `app.ts` next to
- * `app.use(sentry(app, {...}))`. The middleware config has been
- * preserved verbatim here; the only change is the location.
- */
+// Sentry SDK init — A2-1308, A2-1309, A2-1310
 import { init } from '@sentry/hono/node';
 import { config } from './config/index.js';
 import { scrubSentryEvent } from './sentry-scrubber.js';
@@ -18,31 +6,14 @@ import { scrubSentryEvent } from './sentry-scrubber.js';
 if (config.observability.sentry.dsn) {
   init({
     dsn: config.observability.sentry.dsn,
-    // A2-1310: `LOOP_ENV` is the explicit logical-env tag so a
-    // staging deploy that sets `NODE_ENV=production` can still
-    // bucket events as `staging`. Falls back to NODE_ENV so
-    // existing prod + dev deploys are unaffected.
+    // A2-1310: explicit logical-env tag so staging with NODE_ENV=production buckets as staging
     environment: config.observability.environmentTag ?? config.env,
-    // A2-1309: release tag pivots a Sentry event back to the
-    // deploy artifact. CI/CD sets `SENTRY_RELEASE` to the git SHA.
-    // Absent → Sentry omits the attribute (pre-launch default; dev
-    // runs don't poison the release pivot).
+    // A2-1309: release tag pivots events to deploy artifact; CI/CD sets SENTRY_RELEASE to git SHA
     ...(config.observability.sentry.release !== undefined
       ? { release: config.observability.sentry.release }
       : {}),
     tracesSampleRate: config.env === 'production' ? 0.1 : 1.0,
-    // A2-1308: scrub known-secret keys out of every captured event
-    // before it leaves the process. Sentry's sendDefaultPii:false
-    // default handles the well-known PII fields; this catches the
-    // Loop-specific secrets (env-named signing keys, CTX API
-    // credentials, DATABASE_URL, Discord webhooks) that would
-    // otherwise land in `extra` / `contexts` / `request.headers`.
-    // Cast through `unknown` because Sentry's `ErrorEvent` type
-    // has many optional fields we don't read; `SentryEventLike` is
-    // the minimal subset the scrubber walks. The cast is sound as
-    // long as we only return a value with all the keys Sentry
-    // expects on the event, which scrubSentryEvent does
-    // (it returns the input shape with selected fields rewritten).
+    // A2-1308: scrub Loop-specific secrets (signing keys, CTX creds, DATABASE_URL, Discord webhooks)
     beforeSend: (event) =>
       scrubSentryEvent(
         event as unknown as Parameters<typeof scrubSentryEvent>[0],

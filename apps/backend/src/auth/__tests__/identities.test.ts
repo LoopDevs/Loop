@@ -3,11 +3,7 @@ import { db, __resetDbForTests } from '../../db/client.js';
 import type { UserDoc, UserIdentityDoc } from '../../db/types.js';
 import { resolveOrCreateUserForIdentity, listLinkedIdentities } from '../identities.js';
 
-/**
- * Social-provider identity linking (ADR 014), exercised against the
- * real in-memory document store — the (provider, providerSub) unique
- * spec and the three-step resolution both run for real, no mocks.
- */
+// Social-provider identity linking (ADR 014) — real in-memory store, no mocks
 beforeEach(() => {
   __resetDbForTests();
 });
@@ -54,7 +50,6 @@ describe('resolveOrCreateUserForIdentity', () => {
     });
     expect(out.created).toBe(false);
     expect(out.user.id).toBe('u-1');
-    // No extra rows created.
     expect(await db.collection('users').count()).toBe(1);
     expect(await db.collection('user_identities').count()).toBe(1);
   });
@@ -68,14 +63,12 @@ describe('resolveOrCreateUserForIdentity', () => {
     });
     expect(out.created).toBe(false);
     expect(out.user.id).toBe('u-2');
-    // The link row was written — with the normalised (lower-cased) email.
     const link = await db
       .collection('user_identities')
       .findOne({ provider: 'google', providerSub: 'sub-new' });
     expect(link).not.toBeNull();
     expect(link?.userId).toBe('u-2');
     expect(link?.emailAtLink).toBe('same@b.com');
-    // No shadow-duplicate user.
     expect(await db.collection('users').count()).toBe(1);
   });
 
@@ -86,7 +79,6 @@ describe('resolveOrCreateUserForIdentity', () => {
       email: 'Fresh@B.com',
     });
     expect(out.created).toBe(true);
-    // Lower-cased email on both the user row and the link row.
     expect(out.user.email).toBe('fresh@b.com');
     const storedUser = await db.collection('users').findOne({ email: 'fresh@b.com' });
     expect(storedUser?.id).toBe(out.user.id);
@@ -116,8 +108,6 @@ describe('resolveOrCreateUserForIdentity', () => {
     // violation must be swallowed and the login succeed.
     await seedUser({ id: 'u-race', email: 'race@b.com' });
     await seedIdentity({ userId: 'u-race', provider: 'google', providerSub: 'sub-race' });
-    // Delete no users: the email lookup (step 2) hits u-race but the
-    // identity insert collides with the seeded row.
     const out = await resolveOrCreateUserForIdentity({
       provider: 'google',
       providerSub: 'sub-race',
@@ -136,7 +126,6 @@ describe('resolveOrCreateUserForIdentity', () => {
         email: 'паypal@b.com',
       }),
     ).rejects.toThrow();
-    // Nothing was persisted.
     expect(await db.collection('users').count()).toBe(0);
     expect(await db.collection('user_identities').count()).toBe(0);
   });
@@ -152,7 +141,6 @@ describe('listLinkedIdentities', () => {
       emailAtLink: 'a@b.com',
       createdAt: new Date('2026-04-21T00:00:00Z'),
     });
-    // Another user's link must not leak into the listing.
     await seedIdentity({ id: 'ident-2', userId: 'u-other', providerSub: 'sub-other' });
     const rows = await listLinkedIdentities('u-1');
     expect(rows).toHaveLength(1);

@@ -1,19 +1,4 @@
-/**
- * `POST /api/orders/loop` — create a Loop order (ADR 052).
- *
- * ctx is the payment processor: this handler validates the request
- * against Loop's own gates (velocity, freeze, merchant catalog,
- * face-value ceiling), inserts the local mirror row, creates the
- * gift card at CTX acting-as the customer (`operatorReference` =
- * the row id), and relays CTX's payment instructions back to the
- * client. The customer pays CTX directly; the giftcard ws
- * maintainer + mirror sweep keep the local row in sync from there.
- *
- * `X-Client-Id` is REQUIRED and must be one of the trusted platform
- * client ids (loopweb / loopios / loopandroid — `require-auth.ts`
- * allowlist): CTX attributes the purchase to the originating
- * platform and rejects creates without it.
- */
+// POST /api/orders/loop — create a Loop order — ADR 052
 import type { Context } from 'hono';
 import { config } from '../config/index.js';
 import { logger } from '../logger.js';
@@ -58,16 +43,11 @@ export const ORDER_IDEMPOTENCY_KEY_MAX = 128;
 
 const CTX_CREATE_TIMEOUT_MS = 20_000;
 
-/** Chain-qualified CTX payment currencies Loop offers, from config. */
 export function ctxPaymentCurrencies(): string[] {
   return config.ctx.paymentCurrencies.map((currency) => currency.trim().toUpperCase());
 }
 
-/**
- * A4-103: validate the requested amount against the merchant's
- * denomination contract from the synced catalog. Pure / exported so
- * tests can pin the parsing rules without going through the handler.
- */
+// A4-103: exported for tests to pin parsing rules without handler
 export function validateMerchantDenomination(
   amountMinor: bigint,
   requestedCurrency: string,
@@ -106,13 +86,7 @@ function minorToMajor(minor: bigint): string {
   return `${units.toString()}.${cents.toString().padStart(2, '0')}`;
 }
 
-/**
- * Resolves the caller's CTX customer id, provisioning synchronously
- * when the login-time fire-and-forget hook hasn't landed yet. One
- * awaited attempt — a still-missing mapping is a 503-shaped outcome
- * the caller surfaces, never an anonymous operator purchase (the
- * card must belong to the customer for payment + attribution).
- */
+// One awaited attempt; missing mapping is 503, never anonymous operator purchase
 async function resolveCtxUserId(userId: string): Promise<string | null> {
   const existing = await getUserCtxUserId(userId);
   if (existing !== null) return existing;
@@ -126,12 +100,6 @@ async function resolveCtxUserId(userId: string): Promise<string | null> {
   return getUserCtxUserId(userId);
 }
 
-/**
- * Builds the wire response for an order row: view + live CTX payment
- * instructions while `unpaid`. Used by the fresh-create path (with
- * the create-time card already in hand) and the idempotent replay
- * (which re-reads the card operator-scope).
- */
 async function createResponseForOrder(
   order: Order,
   card: CtxGiftCard | null,
@@ -174,11 +142,7 @@ async function createResponseForOrder(
   };
 }
 
-/**
- * Best-effort operator read-back: captures the per-order economics
- * (user cashback + expected commission) CTX hides from the act-as
- * create response. Failures only log — the mirror sweep retries.
- */
+// Best-effort; failures only log — mirror sweep retries
 async function captureOrderEconomics(orderId: string, ctxOrderId: string): Promise<void> {
   try {
     const [card, profitShareBp] = await Promise.all([
@@ -262,9 +226,7 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
     );
   }
 
-  // Validate the merchant exists + is enabled in the in-memory cache
-  // — the sync job is the source of truth; a merchant absent from
-  // cache is one the operator has already decided to hide.
+  // Sync job is source of truth; absent merchant is operator-hidden
   const merchant = getMerchants().merchantsById.get(parsed.data.merchantId);
   if (merchant === undefined || merchant.enabled === false) {
     return c.json({ code: 'VALIDATION_ERROR', message: 'Unknown or disabled merchant' }, 400);

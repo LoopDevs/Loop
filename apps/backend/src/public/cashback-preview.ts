@@ -1,39 +1,4 @@
-/**
- * Public cashback-preview endpoint (ADR 011 / 015 / 020).
- *
- * `GET /api/public/cashback-preview?merchantId=<id-or-slug>&amountMinor=<n>`
- * — returns the cashback a user would earn on a would-be order of
- * `amountMinor` at `merchantId`. Unauthenticated, CDN-friendly;
- * drives marketing-site calculators and pre-signup conversion
- * copy ("you'd earn $2.50 cashback on a $100 Amazon gift card").
- *
- * Shape:
- *   {
- *     merchantId: "amazon-us",
- *     merchantName: "Amazon",
- *     orderAmountMinor: "10000",     // echo of the requested amount
- *     cashbackPct: "2.50" | null,     // numeric string or null when no config
- *     cashbackMinor: "250",           // floor(amount × pct / 10000)
- *     currency: "USD",                // merchant's catalog currency
- *   }
- *
- * Cashback math matches `orders/cashback-split.ts`:
- *   cashbackMinor = floor(amountMinor × userCashbackPct × 100 / 10_000)
- * — keeping the same rounding direction as the order-insert path
- * so the preview never promises more than the user will actually
- * earn.
- *
- * Public-first conventions (ADR 020):
- *   - Never 500; malformed params get 400 with a stable error code.
- *   - Unknown merchant id → 404.
- *   - Missing active config → 200 with `cashbackPct: null,
- *     cashbackMinor: "0"` so the caller can still render the
- *     "no active cashback" empty state without a second query.
- *   - `Cache-Control: public, max-age=60` — shorter than
- *     `/api/public/merchants/:id` (300s) because the amount is a
- *     URL param and a stale preview is user-visible.
- *   - No PII, no commercial-terms (wholesale/margin) fields.
- */
+// public cashback-preview — ADR 011, ADR 015, ADR 020
 import type { Context } from 'hono';
 import { merchantSlug } from '@loop/shared';
 import { db } from '../db/client.js';
@@ -45,28 +10,13 @@ const log = logger.child({ handler: 'public-cashback-preview' });
 const MERCHANT_ID_RE = /^[A-Za-z0-9._-]+$/;
 const MERCHANT_ID_MAX = 128;
 
-/**
- * Max amount accepted by `?amountMinor=`. 10 000 000 minor = $100 000,
- * well above realistic gift-card sizes. Rejects accidental overflows /
- * bigint-smuggling attempts while staying safely inside JS-number
- * precision for the multiplication.
- */
+// 100k USD cap prevents bigint-smuggling and stays within JS-number precision
 const AMOUNT_MINOR_MAX = 10_000_000;
 
-// A2-676 + ADR 019: PublicCashbackPreview was duplicated across
-// backend + openapi + web. Single source of truth now lives in
-// `@loop/shared`; re-export here so the many existing backend
-// imports keep resolving without a rename.
+// A2-676 + ADR 019: single source of truth in @loop/shared
 export type { PublicCashbackPreview } from '@loop/shared';
 import type { PublicCashbackPreview } from '@loop/shared';
 
-/**
- * `Merchant.denominations.currency` is where the merchant's catalog
- * currency lives. A merchant without denominations configured falls
- * back to USD — upstream CTX catalog is US-based by default and the
- * cashback amount is what a pre-signup visitor sees, not a ledger
- * number, so defensive-defaulting is fine here.
- */
 function resolveMerchant(
   idOrSlug: string,
 ): { id: string; name: string; slug: string; currency: string } | null {
@@ -76,32 +26,18 @@ function resolveMerchant(
   return {
     id: m.id,
     name: m.name,
-    // Country-aware slug (CTX slug, else brand+country) so the echoed
-    // `merchantId` round-trips through the country-aware by-slug index.
+    // Country-aware slug ensures round-trip through by-slug index
     slug: merchantSlug(m),
     currency: m.denominations?.currency ?? 'USD',
   };
 }
 
-/**
- * `pct` is a `numeric(5,2)` string — "2.50", "10.00". Multiplying by
- * 100 turns it into hundredths of a percent (bps compatible with the
- * 10_000 scale used elsewhere): "2.50" → 250 bps.
- *
- * Returns null on malformed input so the caller can shortcut to the
- * "no cashback" response without exploding.
- */
 export function cashbackPctToBps(pct: string): number | null {
   const parsed = Number(pct);
   if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100) return null;
   return Math.round(parsed * 100);
 }
 
-/**
- * Amount × bps / 10 000, rounded down to the nearest minor unit.
- * BigInt math end-to-end so a $100 000 amount at 2.50% doesn't lose
- * precision. Exported for unit testing the rounding contract.
- */
 export function previewCashbackMinor(amountMinor: bigint, bps: number): bigint {
   if (amountMinor <= 0n) return 0n;
   if (bps <= 0) return 0n;
@@ -109,12 +45,7 @@ export function previewCashbackMinor(amountMinor: bigint, bps: number): bigint {
 }
 
 export async function publicCashbackPreviewHandler(c: Context): Promise<Response> {
-  // A4-094: even validation-failure 4xx envelopes carry a short
-  // public Cache-Control header. Hono's default is no Cache-Control,
-  // so a CDN keyed on URL alone could otherwise either NOT cache
-  // (most safe defaults) or cache an error envelope past the source
-  // of the typo. A 60s public TTL on bad-input matches the 200 path
-  // and gives the CDN a stable cacheability signal.
+  // A4-094: 4xx envelopes carry short public Cache-Control to stabilize CDN cacheability
   const setShortPublicCache = (): void => {
     c.header('cache-control', 'public, max-age=60');
   };
@@ -134,9 +65,7 @@ export async function publicCashbackPreviewHandler(c: Context): Promise<Response
     setShortPublicCache();
     return c.json({ code: 'VALIDATION_ERROR', message: 'amountMinor is required' }, 400);
   }
-  // Only accept non-negative integer strings so "1e5", "0x10", and
-  // bigint-smuggling "99999999999999999999" (past JS-number precision
-  // AND the ceiling) all fail validation uniformly.
+  // Rejects scientific notation, hex, and values past JS-number precision
   if (!/^\d+$/.test(amountRaw)) {
     setShortPublicCache();
     return c.json(
@@ -169,9 +98,7 @@ export async function publicCashbackPreviewHandler(c: Context): Promise<Response
       .findOne({ merchantId: resolved.id, active: true });
     cashbackPct = config !== null ? config.userCashbackPct.toFixed(2) : null;
   } catch (err) {
-    // Ledger-side failure → serve a soft "no cashback" response
-    // rather than 500 per ADR 020 never-500. Cache short so we
-    // don't pin the degraded answer for long.
+    // ADR 020: never 500; serve soft empty on ledger failure
     log.warn({ err, merchantId: resolved.id }, 'Cashback config read failed — soft empty');
     c.header('cache-control', 'public, max-age=60');
     return c.json<PublicCashbackPreview>({

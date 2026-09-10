@@ -1,19 +1,4 @@
-/**
- * Admin orders surface — list, drill, activity, and the CSV export.
- *
- * `GET /api/admin/orders`             — paginated across every user
- * `GET /api/admin/orders/:orderId`    — one order
- * `GET /api/admin/orders-activity`    — counts per state over a window
- * `GET /api/admin/orders.csv`         — the same list as a CSV export
- *
- * The user-facing `/api/orders/*` endpoints are scoped to the caller;
- * these deliberately are not, because ops needs to see across
- * accounts. What they never carry is the gift card itself: `redeemCode`
- * and `redeemPin` are spendable bearer secrets, and no amount of
- * triage needs them — the view reports only WHETHER redemption
- * details have landed, which is the thing that actually matters when
- * a customer says their card never arrived.
- */
+// Admin orders surface — list, drill, activity, CSV export
 import type { Context } from 'hono';
 import { ORDER_STATES, isOrderState, type OrderState } from '@loop/shared';
 import { db } from '../db/client.js';
@@ -27,29 +12,20 @@ const log = logger.child({ handler: 'admin-orders' });
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
-/** CSV exports are a bulk surface by definition; cap the pull. */
 const CSV_MAX_ROWS = 5000;
 
-/**
- * Compact admin view of an order. Minor-unit amounts stay integers in
- * their own currency's minor units — never floats, per the CSV/report
- * conventions — and every timestamp is ISO-8601.
- */
 export interface AdminOrderView {
   id: string;
   userId: string;
   merchantId: string;
   state: OrderState;
-  /** ISO currency of the face value (the merchant's region). */
   currency: string;
   faceValueMinor: number;
-  /** ISO currency the user was charged in (their home region). */
   chargeCurrency: string;
   chargeMinor: number;
   userCashbackMinor: number;
   /** Null until the operator economics read-back succeeds (ADR 052). */
   expectedCommissionMinor: number | null;
-  /** CTX-side records. Null until the card is created upstream. */
   ctxOrderId: string | null;
   ctxPaymentId: string | null;
   paymentCryptoCurrency: string | null;
@@ -94,11 +70,6 @@ export function rowToView(row: OrderDoc): AdminOrderView {
   };
 }
 
-/**
- * Shared query-string parsing for the list and its CSV twin, so the
- * two can never disagree about what `?state=` or `?before=` mean.
- * Returns the error Response, or the filter plus the row cap.
- */
 function parseListQuery(
   c: Context,
   maxLimit: number,
@@ -154,7 +125,6 @@ function parseListQuery(
   return { filter, limit };
 }
 
-/** GET /api/admin/orders */
 export async function adminListOrdersHandler(c: Context): Promise<Response> {
   const parsed = parseListQuery(c, MAX_LIMIT);
   if (parsed instanceof Response) return parsed;
@@ -170,7 +140,6 @@ export async function adminListOrdersHandler(c: Context): Promise<Response> {
   }
 }
 
-/** GET /api/admin/orders/:orderId */
 export async function adminGetOrderHandler(c: Context): Promise<Response> {
   const orderId = c.req.param('orderId');
   if (orderId === undefined || !UUID_RE.test(orderId)) {
@@ -190,7 +159,6 @@ export async function adminGetOrderHandler(c: Context): Promise<Response> {
 
 export interface AdminOrdersActivityResponse {
   windowHours: number;
-  /** One entry per order state, including the states with no rows. */
   counts: Record<OrderState, number>;
   total: number;
 }
@@ -198,13 +166,6 @@ export interface AdminOrdersActivityResponse {
 const DEFAULT_ACTIVITY_WINDOW_HOURS = 24;
 const MAX_ACTIVITY_WINDOW_HOURS = 24 * 90;
 
-/**
- * GET /api/admin/orders-activity — how many orders landed in each
- * state over a trailing window. The dashboard's "is anything moving"
- * card: a window where `fulfilled` is zero and `paid` is not is the
- * signal that fulfilment has stalled fleet-wide, which no single
- * order's drill would show.
- */
 export async function adminOrdersActivityHandler(c: Context): Promise<Response> {
   const raw = c.req.query('windowHours');
   const parsed = Number.parseInt(raw ?? String(DEFAULT_ACTIVITY_WINDOW_HOURS), 10);
@@ -259,16 +220,6 @@ const CSV_HEADER = [
   'failed_at',
 ];
 
-/**
- * GET /api/admin/orders.csv — the same rows as the list, for finance.
- *
- * Admin-tier (a bulk export is a different risk from a drill) and
- * always logged as a bulk read by the namespace audit middleware. The
- * row cap is high enough to be useful and low enough that a runaway
- * export can't pull the whole collection into one response; when it
- * bites, the last line says so rather than the file simply ending —
- * a silently-truncated financial export is worse than no export.
- */
 export async function adminOrdersCsvHandler(c: Context): Promise<Response> {
   const parsed = parseListQuery(c, CSV_MAX_ROWS);
   if (parsed instanceof Response) return parsed;

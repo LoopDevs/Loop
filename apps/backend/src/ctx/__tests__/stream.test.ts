@@ -1,15 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { streamGiftCardStatus } from '../stream.js';
 
-// `upstreamUrl` resolves against `ctx.baseUrl`, which the committed
-// test fixture (`config.test.yaml`, wired up by the vitest setup file)
-// already supplies — this suite never asserts on the base itself.
-
 function sseResponse(frames: string[]): Response {
-  // Stream the frames out one chunk at a time, mimicking real SSE
-  // boundaries. Frames are joined with \n\n (the SSE record
-  // separator) and emitted as a single body — the parser is line-
-  // oriented so this is enough.
   const body = frames.join('\n\n') + '\n\n';
   return new Response(new TextEncoder().encode(body), {
     status: 200,
@@ -106,10 +98,7 @@ describe('streamGiftCardStatus', () => {
   });
 
   it('aborts when a degenerate upstream never emits a frame delimiter (buffer cap)', async () => {
-    // A hostile/degenerate CTX upstream that streams bytes but never a
-    // `\n` delimiter. Without a cap the reader accumulates this into an
-    // unbounded in-memory buffer until the worker OOMs. Emit ~576 KiB of
-    // delimiter-free bytes (past the 512 KiB cap) then end the body.
+    // Prevents OOM from unbounded buffer accumulation if upstream streams bytes without newlines
     const noDelimiter = 'x'.repeat(576 * 1024);
     fetchSpy.mockResolvedValueOnce(
       new Response(new TextEncoder().encode(noDelimiter), {

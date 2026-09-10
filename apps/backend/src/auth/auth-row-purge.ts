@@ -1,35 +1,4 @@
-/**
- * Auth-row retention purge sweeper (CF-26 / X-PRIV-07 + X-PRIV-08).
- *
- * Two PII-bearing auth tables grew without bound because nothing ever
- * deleted dead rows:
- *
- *   - `otps` — holds `email` + a SHA-256 code hash. An expired or
- *     consumed OTP is never re-used (verify-otp only matches live,
- *     unconsumed rows), yet the row sat forever. (X-PRIV-07)
- *   - `refresh_tokens` — holds `token_hash` + `user_id`. The
- *     `refresh_tokens_expires` index docstring promised a "periodic
- *     cleanup job that trims fully-expired rows" that never existed.
- *     (X-PRIV-08)
- *   - `social_id_token_uses` — holds a sha256 id-token digest keyed by
- *     `expires_at` (the token's own `exp`). Its docstring likewise
- *     promised a sweep that never existed, so it grew one row per
- *     social login forever. (AGT-06)
- *
- * This sweeper periodically deletes dead rows in each table past a
- * retention grace, via `purgeExpiredOtps` / `purgeDeadRefreshTokens` /
- * `purgeStaleOtpAttemptCounters` / `purgeExpiredIdTokenUses`.
- * DELETE-only — no migration needed.
- *
- * Wiring mirrors the sibling sweeps (`redemption-backfill.ts`,
- * `asset-drift-watcher.ts`): a `start…/stop…` timer pair started
- * unconditionally in `index.ts` (DELETE-only, no Stellar / CTX
- * dependency, so there is no config for it to gate on), registered
- * with the runtime-health worker registry, with per-tick errors
- * swallowed so a transient DB blip doesn't kill the interval — the
- * next tick retries. See `docs/runbooks/dsr.md` for the manual
- * one-shot sweep.
- */
+// Auth-row retention purge sweeper — CF-26, X-PRIV-07, X-PRIV-08, AGT-06
 import { config } from '../config/index.js';
 import { logger } from '../logger.js';
 import { purgeExpiredOtps } from './otps.js';
@@ -46,34 +15,13 @@ import {
 const log = logger.child({ area: 'auth-row-purge' });
 
 export interface AuthRowPurgeTickResult {
-  /** OTP rows deleted this tick. */
   otpsDeleted: number;
-  /** Refresh-token rows deleted this tick. */
   refreshTokensDeleted: number;
-  /** B5: stale per-email OTP attempt counters deleted this tick. */
   otpAttemptCountersDeleted: number;
-  /** AGT-06: expired social id-token replay-guard rows deleted this tick. */
   idTokenUsesDeleted: number;
 }
 
-/**
- * Single purge tick. Exported so tests (and the runbook one-shot) can
- * drive it directly. Each table is swept independently so a failure on
- * one still reclaims the other; the OTP delete runs first, then the
- * refresh-token delete, and either error propagates to the caller (the
- * interval loop swallows it for the next tick).
- *
- * CF-14 (x-concurrency-financial X-2) cross-instance safety: already
- * safe without `SKIP LOCKED`. Both sweeps are pure `DELETE ... WHERE
- * <expired/dead past grace>` — there is no SELECT-then-mutate gap and
- * no shared sequenced resource. Two Fly machines running the purge at
- * once just contend on Postgres row locks for the same dead rows; a
- * row one machine deletes is simply not re-deleted by the other.
- * DELETE-WHERE is inherently idempotent across instances.
- *
- * @param retentionMs grace before a dead row is eligible for deletion.
- *        Defaults to `LOOP_AUTH_ROW_RETENTION_DAYS`.
- */
+// CF-14 (X-2): DELETE-WHERE is idempotent across instances; no SKIP LOCKED needed.
 export async function runAuthRowPurgeTick(args?: {
   retentionMs?: number;
   now?: Date;
@@ -101,15 +49,8 @@ export async function runAuthRowPurgeTick(args?: {
   };
 }
 
-// ─── Interval loop ────────────────────────────────────────────────────────
-
 let purgeTimer: ReturnType<typeof setInterval> | null = null;
 
-/**
- * Starts the periodic auth-row purge sweeper. Started
- * unconditionally from `index.ts`. Per-tick errors are swallowed
- * so a transient DB blip doesn't kill the interval.
- */
 export function startAuthRowPurge(args?: { intervalMs?: number }): void {
   if (purgeTimer !== null) return;
   const intervalMs = args?.intervalMs ?? config.auth.retention.purgeIntervalHours * 60 * 60 * 1000;

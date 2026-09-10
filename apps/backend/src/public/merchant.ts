@@ -1,32 +1,4 @@
-/**
- * Public per-merchant detail endpoint (ADR 011 / 020).
- *
- * `GET /api/public/merchants/:id` — unauthenticated single-merchant
- * view for SEO landing pages (e.g. `/cashback/amazon-us`). Backs
- * the marketing pitch for one merchant — "earn 5.5% cashback at
- * Amazon" — with a narrow, PII-free payload that sits behind a
- * CDN.
- *
- * Resolves the merchant via the in-memory catalog (id OR slug,
- * so /cashback/<slug> SSR pages can pass the slug directly
- * without a second catalog lookup) and joins the active
- * merchant_cashback_configs.user_cashback_pct. A merchant with
- * no active config returns `userCashbackPct: null` — the "coming
- * soon" SEO state rather than 404, so the landing page can
- * render before commercial terms are finalised.
- *
- * Public-first conventions (ADR 020):
- *   - Never 500 — DB trouble → serve a last-known-good cached
- *     snapshot per merchantId; first-miss bootstrap → serve the
- *     catalog row with a null pct. SEO crawlers get a clean
- *     signal either way.
- *   - 404 only for unknown merchantId (evicted / typo slug).
- *     Keeps SEO crawlers' broken-link reports meaningful.
- *   - `Cache-Control: public, max-age=300` on the happy path,
- *     `max-age=60` on the fallback path.
- *   - No commercial-terms fields (wholesale/margin). Only the
- *     user-facing pct a visitor sees.
- */
+// public per-merchant detail endpoint — ADR 011, ADR 020
 import type { Context } from 'hono';
 import type { PublicMerchantDetail } from '@loop/shared';
 import { isSupportedCountryCode, merchantInCountry, merchantSlug } from '@loop/shared';
@@ -46,12 +18,6 @@ export function __resetPublicMerchantCache(): void {
   lastKnownGood.clear();
 }
 
-/**
- * Resolved merchant for the public detail view. Carries `slug` — the
- * country-aware {@link merchantSlug} computed from the full catalog row
- * (CTX slug, else brand+country) — so the SEO landing page emits a URL
- * that round-trips through the country-aware `merchantsBySlug` index.
- */
 interface ResolvedMerchant {
   id: string;
   name: string;
@@ -59,15 +25,7 @@ interface ResolvedMerchant {
   logoUrl: string | null;
 }
 
-/**
- * CAT-02 (2026-06-30 cold audit): `country` applies the same
- * country↔merchant visibility rule `home.tsx` / `brand.$slug.tsx`
- * already use — resolving to `null` (404 at the handler) for a
- * merchant tagged to a different country/currency than the caller's,
- * so `/cashback/:slug` can't reveal a merchant that's out of scope
- * for the visitor's locale, matching brand.$slug.tsx's existing
- * filter-then-find pattern instead of resolving unconditionally.
- */
+// CAT-02: country filter prevents revealing out-of-scope merchants, matching brand.$slug.tsx
 function resolveMerchant(idOrSlug: string, country: string | null): ResolvedMerchant | null {
   const { merchantsById, merchantsBySlug } = getMerchants();
   const m = merchantsById.get(idOrSlug) ?? merchantsBySlug.get(idOrSlug);
@@ -77,7 +35,6 @@ function resolveMerchant(idOrSlug: string, country: string | null): ResolvedMerc
 }
 
 async function compute(resolved: ResolvedMerchant): Promise<PublicMerchantDetail> {
-  // Active config is 0 or 1 doc per merchantId.
   const config = await db
     .collection('merchant_cashback_configs')
     .findOne({ merchantId: resolved.id, active: true });
@@ -101,10 +58,7 @@ export async function publicMerchantHandler(c: Context): Promise<Response> {
     return c.json({ code: 'VALIDATION_ERROR', message: 'id is malformed' }, 400);
   }
 
-  // CAT-02: optional `?country=` filter. Lenient parsing (unrecognised
-  // code → no filter) matching top-cashback-merchants.ts and the rest
-  // of the public surface's precedent (ADR 020) — never 400 a visitor
-  // over a malformed locale hint.
+  // CAT-02: lenient country parsing (unrecognised code → no filter) per ADR 020
   const countryRaw = c.req.query('country');
   const country =
     countryRaw !== undefined && isSupportedCountryCode(countryRaw)
@@ -131,7 +85,6 @@ export async function publicMerchantHandler(c: Context): Promise<Response> {
     if (fallback !== undefined) {
       return c.json<PublicMerchantDetail>(fallback);
     }
-    // First-miss bootstrap fallback: catalog row + null pct.
     return c.json<PublicMerchantDetail>({
       id: resolved.id,
       name: resolved.name,

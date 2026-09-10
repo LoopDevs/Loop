@@ -1,8 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type * as ConfigModule from '../../config/index.js';
 
-// The admin bootstrap allowlist is re-read on every upsert, so the
-// tests below drive it at runtime rather than through the fixture file.
 const { adminState } = vi.hoisted(() => ({
   adminState: { emails: [] as string[], ctxUserIds: [] as string[] },
 }));
@@ -31,18 +29,12 @@ import {
 } from '../users.js';
 import type { UserDoc } from '../types.js';
 
-/**
- * Users repository, run against the real in-memory document store —
- * no mocks. `__resetDbForTests()` swaps in a fresh empty store per
- * test, so each case starts from an empty `users` collection.
- */
 beforeEach(() => {
   __resetDbForTests();
   adminState.emails = [];
   adminState.ctxUserIds = [];
 });
 
-/** Seeds a user doc directly, bypassing the repo under test. */
 async function seedUser(overrides: Partial<UserDoc> = {}): Promise<UserDoc> {
   const now = new Date();
   const doc: UserDoc = {
@@ -67,7 +59,6 @@ describe('upsertUserFromCtx', () => {
     expect(user.email).toBe('a@b.com');
     expect(user.tokenVersion).toBe(0);
     expect(user.homeCurrency).toBe('USD');
-    // The row is really persisted, not just returned.
     const stored = await db.collection('users').findOne({ ctxUserId: 'ctx-1' });
     expect(stored?.id).toBe(user.id);
   });
@@ -86,10 +77,8 @@ describe('upsertUserFromCtx', () => {
 
   it('refreshes the stored email only when the token actually carried one', async () => {
     await upsertUserFromCtx({ ctxUserId: 'ctx-4', email: '' });
-    // Later request has the email claim → fix-up.
     const fixed = await upsertUserFromCtx({ ctxUserId: 'ctx-4', email: 'now@b.com' });
     expect(fixed.email).toBe('now@b.com');
-    // A subsequent email-less token must NOT blank it back out.
     const kept = await upsertUserFromCtx({ ctxUserId: 'ctx-4', email: undefined });
     expect(kept.email).toBe('now@b.com');
   });
@@ -117,7 +106,6 @@ describe('getUserCtxUserId / setUserCtxUserId', () => {
   it('records the provisioned CTX id exactly once — first write wins', async () => {
     await seedUser({ id: 'uuid-c2', ctxUserId: null });
     expect(await setUserCtxUserId('uuid-c2', 'ctx-prov-1')).toBe(true);
-    // A concurrent provision (or a legacy mapping) must never clobber.
     expect(await setUserCtxUserId('uuid-c2', 'ctx-prov-2')).toBe(false);
     expect(await getUserCtxUserId('uuid-c2')).toBe('ctx-prov-1');
   });
@@ -160,12 +148,6 @@ describe('findOrCreateUserByEmail', () => {
   });
 
   it('A2-706: the losing side of a signup race re-selects the winner instead of throwing', async () => {
-    // Concurrent-signup scenario: the pre-insert lookup misses, but by
-    // the time this caller's insert lands the winner's row exists and
-    // the insert trips the unique spec. Simulated by stubbing the
-    // collection's insertOne to land the winner's row and then throw
-    // the driver's UniqueViolationError — the repo must recover by
-    // returning the winner's row, not surface the error.
     const users = db.collection('users');
     const realInsert = users.insertOne.bind(users);
     const insertSpy = vi.spyOn(users, 'insertOne').mockImplementationOnce(async () => {
@@ -189,14 +171,6 @@ describe('findOrCreateUserByEmail', () => {
   });
 });
 
-/**
- * The `admin.emails` / `admin.ctxUserIds` bootstrap allowlist. This is
- * the only route to the FIRST admin — before one exists there is
- * nobody to grant a `staff_roles` row — so the cases that matter are
- * that it is evaluated against an already-verified identity, and that
- * it is RE-evaluated on every upsert so a config edit lands without a
- * manual database touch.
- */
 describe('isAllowlistedAdmin', () => {
   it('matches an email case-insensitively and ignores surrounding whitespace', () => {
     adminState.emails = ['  Ops@Loop.TEST '];
@@ -210,8 +184,6 @@ describe('isAllowlistedAdmin', () => {
   });
 
   it('never matches on an empty or absent identity', () => {
-    // An empty allowlist entry paired with an empty email must not
-    // silently promote every user who has no email on their row.
     adminState.emails = [''];
     adminState.ctxUserIds = [''];
     expect(isAllowlistedAdmin({ email: '', ctxUserId: '' })).toBe(false);

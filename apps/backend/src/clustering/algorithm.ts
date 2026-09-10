@@ -1,13 +1,8 @@
 // A2-814: `LocationPoint` + `ClusterPoint` come from `@loop/shared/merchants`.
-// The two declarations were structurally identical; the shared
-// version is the wire contract the web client + the openapi schema
-// already consume, so the backend clusterer now imports rather
-// than re-declaring them.
 import type { LocationPoint, ClusterPoint } from '@loop/shared';
 
 export type { LocationPoint, ClusterPoint };
 
-/** A single merchant location from the in-memory store. */
 export interface Location {
   merchantId: string;
   mapPinUrl: string | null;
@@ -20,7 +15,6 @@ export interface ClusteringResult {
   clusterPoints: ClusterPoint[];
 }
 
-/** Bounding box for a cluster request. */
 export interface Bounds {
   west: number;
   south: number;
@@ -28,10 +22,6 @@ export interface Bounds {
   north: number;
 }
 
-/**
- * Returns the grid cell size in degrees for a given map zoom level.
- * Larger cells → fewer, bigger clusters.
- */
 export function gridSizeForZoom(zoom: number): number {
   if (zoom <= 3) return 20.0;
   if (zoom <= 5) return 10.0;
@@ -43,13 +33,6 @@ export function gridSizeForZoom(zoom: number): number {
   return 0.0; // zoom ≥ 14: individual points, no clustering
 }
 
-/**
- * Clusters locations within the given bounding box at the specified zoom level.
- *
- * The caller is expected to pass an *expanded* set of locations (bbox inflated
- * by 50% for pre-loading), but only points within the *original* bounds appear
- * in the output — matching the Go reference implementation's behaviour.
- */
 export function clusterLocations(
   locations: Location[],
   bounds: Bounds,

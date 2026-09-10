@@ -1,20 +1,9 @@
-/**
- * `GET /.well-known/jwks.json` endpoint tests (ADR 030 Phase A).
- *
- * Drives the real route module (`routes/well-known.ts`, including the
- * rate-limit middleware) mounted on a minimal Hono app — the same
- * shape `app.ts` produces, without the unrelated background-task
- * imports the full app would drag in.
- *
- * Keys are generated at runtime — never commit a PEM fixture.
- */
+// `GET /.well-known/jwks.json` endpoint tests — ADR 030 Phase A
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
 import type * as ConfigModule from '../../config/index.js';
 import { generateKeyPairSync } from 'node:crypto';
 import { Hono } from 'hono';
 
-// Module scope (not vi.hoisted) is fine: the route module is only
-// ever imported dynamically inside appWithKeys, after the keys exist.
 const gen = (): string =>
   generateKeyPairSync('rsa', { modulusLength: 2048 })
     .privateKey.export({ type: 'pkcs8', format: 'pem' })
@@ -22,11 +11,6 @@ const gen = (): string =>
 const CURRENT_PEM = gen();
 const PREVIOUS_PEM = gen();
 
-/**
- * The signing keys are the only config these tests vary. The mock
- * serves a mutable `jwt` block over the real (test-fixture) config, so
- * `loadWithKeys` below only has to assign into it.
- */
 const { jwtState } = vi.hoisted(() => ({
   jwtState: {
     hs256: { current: undefined as string | undefined, previous: undefined as string | undefined },
@@ -50,7 +34,6 @@ vi.mock('../../config/index.js', async (importActual) => {
   };
 });
 
-/** The signing keys `loadWithKeys` accepts, mirroring `auth.native.jwt`. */
 interface JwtKeys {
   hs256?: string;
   hs256Previous?: string;
@@ -58,7 +41,6 @@ interface JwtKeys {
   rs256Previous?: string;
 }
 
-/** Applies exactly the given keys, clearing every slot not named. */
 function applyKeys(keys: JwtKeys): void {
   jwtState.hs256.current = keys.hs256;
   jwtState.hs256.previous = keys.hs256Previous;
@@ -66,7 +48,6 @@ function applyKeys(keys: JwtKeys): void {
   jwtState.rs256.previous = keys.rs256Previous;
 }
 
-/** Re-imports the routes with exactly the given keys and mounts the app. */
 async function appWithKeys(keys: JwtKeys): Promise<Hono> {
   vi.resetModules();
   applyKeys(keys);

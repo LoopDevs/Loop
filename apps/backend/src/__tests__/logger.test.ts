@@ -4,16 +4,7 @@ import pino from 'pino';
 
 import { REDACT_PATHS } from '../logger.js';
 
-/**
- * Rebuild a pino logger that uses the *same* REDACT_PATHS as the production
- * logger, but writes to an in-memory stream so we can inspect the produced
- * JSON. Importing the real logger directly would send output to stdout or
- * pino-pretty and make assertions brittle.
- *
- * Critical: we import REDACT_PATHS from `../logger.js` rather than keeping a
- * copy here. If the production list grows or shrinks, these tests follow —
- * no drift.
- */
+// Imports REDACT_PATHS from production to prevent drift if the list changes
 function makeLogger(): { logger: pino.Logger; records: Record<string, unknown>[] } {
   const records: Record<string, unknown>[] = [];
   const stream = new Writable({
@@ -217,7 +208,6 @@ describe('logger redaction', () => {
           DISCORD_WEBHOOK_ORDERS: 'https://discord.com/api/webhooks/123/abc',
           DISCORD_WEBHOOK_MONITORING: 'https://discord.com/api/webhooks/456/def',
           DISCORD_WEBHOOK_ADMIN_AUDIT: 'https://discord.com/api/webhooks/789/ghi',
-          // A non-secret field should still pass through.
           PORT: 8080,
         },
       },
@@ -233,7 +223,6 @@ describe('logger redaction', () => {
     expect(e['DISCORD_WEBHOOK_ORDERS']).toBe('[REDACTED]');
     expect(e['DISCORD_WEBHOOK_MONITORING']).toBe('[REDACTED]');
     expect(e['DISCORD_WEBHOOK_ADMIN_AUDIT']).toBe('[REDACTED]');
-    // PORT survives — only secret-bearing env keys are redacted.
     expect(e['PORT']).toBe(8080);
   });
 

@@ -2,22 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type * as ConfigModule from '../config/index.js';
 import type { Context } from 'hono';
 
-/**
- * CF2-10 (2026-06-30 cold audit): `rate-limit.ts` had zero dedicated
- * test coverage — only `clientIpFor` was exercised directly (via
- * `trust-proxy.test.ts`), never the `rateLimit()` factory's actual
- * budget-enforcement/429 logic. Added alongside the
- * RATE_LIMIT_MACHINE_COUNT_ESTIMATE stopgap so both the pre-existing
- * behavior and the machine-count division are locked in.
- *
- * S4-4 (2026-07-09): the divisor's SOURCE moved to a dynamic fleet-size
- * estimate (`middleware/fleet-size.ts`, unit-tested on its own in
- * `fleet-size.test.ts` — DNS reads, grace period, clamping, the static
- * fallback's defensiveness). This file mocks that module to a plain
- * controllable number so the tests here stay focused on what
- * `rateLimit()` itself is responsible for: applying the divisor
- * correctly, per request, to the budget/429 logic.
- */
+// CF2-10, S4-4
 
 const { configState } = vi.hoisted(() => ({
   configState: {
@@ -60,12 +45,7 @@ vi.mock('../metrics.js', () => ({
   incrementRateLimitHit: () => metricsMock.incrementRateLimitHit(),
 }));
 
-// S4-4: the fleet-size estimator is unit-tested on its own
-// (`fleet-size.test.ts` covers DNS/grace-period/clamping behaviour in
-// isolation) — here it's mocked so these tests keep exercising exactly
-// what they did before the dynamic-estimate wiring (a plain numeric
-// divisor), plus a couple of tests below that lock in that the divisor
-// is read fresh per-request rather than frozen at factory time.
+// S4-4: mocked to isolate rateLimit logic from fleet-size estimation
 const { fleetSizeState } = vi.hoisted(() => ({
   fleetSizeState: { estimate: 1 },
 }));
@@ -96,7 +76,6 @@ beforeEach(() => {
 
 describe('rateLimit middleware', () => {
   it('allows requests under the (machine-count-divided) budget', async () => {
-    // maxRequests=10, estimate=2 → effective budget 5.
     const mw = rateLimit('test-route-a', 10, 60_000);
     const next = vi.fn(async () => {});
     for (let i = 0; i < 5; i++) {
@@ -111,7 +90,6 @@ describe('rateLimit middleware', () => {
     fleetSizeState.estimate = 2;
     const mw = rateLimit('test-route-b', 10, 60_000);
     const next = vi.fn(async () => {});
-    // Effective budget is 10/2 = 5 — the 6th request in the window must 429.
     for (let i = 0; i < 5; i++) {
       const { ctx } = makeCtx();
       await mw(ctx, next);
@@ -124,8 +102,6 @@ describe('rateLimit middleware', () => {
   });
 
   it('floors the effective budget at 1 rather than 0', async () => {
-    // maxRequests=1, estimate=10 → naive division would be 0, which
-    // would reject every single request including the first.
     fleetSizeState.estimate = 10;
     const mw = rateLimit('test-route-c', 1, 60_000);
     const next = vi.fn(async () => {});
@@ -135,16 +111,7 @@ describe('rateLimit middleware', () => {
     expect(next).toHaveBeenCalledTimes(1);
   });
 
-  // S4-4: this is the wiring bug the dynamic-estimate fix had to avoid
-  // reintroducing. Before this fix, `rateLimit()` computed the
-  // machine-count divisor ONCE at factory-creation time (i.e. once per
-  // route, at app boot) and closed over it forever — fine for a static
-  // env var that never changes for the life of the process, but wrong
-  // once the divisor is a live fleet-size estimate that changes while
-  // the process runs. This test creates the middleware once (like a
-  // route mount does) and changes the estimate BETWEEN requests,
-  // proving the effective budget is recomputed on every call rather
-  // than frozen at creation.
+  // S4-4: ensures divisor is read per-request, not frozen at factory time
   it("S4-4: reads the fleet-size estimate fresh on every request, not once at the route's creation", async () => {
     fleetSizeState.estimate = 1; // effective budget = 10
     const mw = rateLimit('test-route-live', 10, 60_000);
@@ -154,9 +121,6 @@ describe('rateLimit middleware', () => {
       const res = await mw(ctx, next);
       expect(res).toBeUndefined();
     }
-    // Fleet scales up mid-process — effective budget drops to 10/5=2,
-    // and the 3 requests already consumed this window must count
-    // against the NEW effective budget, tripping the 429 immediately.
     fleetSizeState.estimate = 5;
     const { ctx } = makeCtx();
     const res = await mw(ctx, next);
@@ -185,7 +149,6 @@ describe('rateLimit middleware', () => {
     const next = vi.fn(async () => {});
     const { ctx: ctx1 } = makeCtx();
     await mwA(ctx1, next);
-    // Same IP, different route name — must not share a bucket.
     const { ctx: ctx2 } = makeCtx();
     const res = await mwB(ctx2, next);
     expect(res).toBeUndefined();
@@ -206,7 +169,6 @@ describe('rateLimit middleware', () => {
 
   describe('globalRateLimit (hardening B6)', () => {
     it('enforces the generous per-IP ceiling as a volumetric backstop', async () => {
-      // maxRequests=4, estimate=2 → effective 2 (kept tiny for the test).
       const mw = globalRateLimit({ maxRequests: 4, windowMs: 60_000 });
       const next = vi.fn(async () => {});
       const a = await mw(makeCtx().ctx, next);
@@ -221,7 +183,6 @@ describe('rateLimit middleware', () => {
     it('exempts /health so the Fly liveness probe is never throttled', async () => {
       const mw = globalRateLimit({ maxRequests: 2, windowMs: 60_000 });
       const next = vi.fn(async () => {});
-      // Well past the ceiling — every /health call must still pass.
       for (let i = 0; i < 10; i++) {
         const res = await mw(makeCtx('/health').ctx, next);
         expect(res).toBeUndefined();
@@ -233,11 +194,9 @@ describe('rateLimit middleware', () => {
       const global = globalRateLimit({ maxRequests: 4, windowMs: 60_000 });
       const route = rateLimit('some-route', 4, 60_000); // effective 2 (÷2)
       const next = vi.fn(async () => {});
-      // Exhaust the global backstop on one path...
       await global(makeCtx('/api/x').ctx, next);
       await global(makeCtx('/api/x').ctx, next);
       await global(makeCtx('/api/x').ctx, next); // 429 on global
-      // ...the per-route limiter for a different route is untouched.
       const r1 = await route(makeCtx('/api/y').ctx, next);
       const r2 = await route(makeCtx('/api/y').ctx, next);
       expect(r1).toBeUndefined();

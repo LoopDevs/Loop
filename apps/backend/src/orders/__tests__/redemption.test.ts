@@ -5,8 +5,6 @@ vi.hoisted(() => {
   process.env['DATABASE_URL'] ??= 'postgres://placeholder@localhost/test';
 });
 
-// Mock the operator credentials (boot-required, so always present)
-// and the ctxFetch responses the polling fallback consumes.
 const { ctxFetchMock } = vi.hoisted(() => ({
   ctxFetchMock: vi.fn(),
 }));
@@ -15,8 +13,6 @@ vi.mock('../../ctx/api-fetch.js', () => ({
   ctxApiCredentials: () => ({ apiKey: 'key', apiSecret: 'secret', clientId: 'loopweb' }),
 }));
 
-// Mock the SSE stream client — tests choose whether it resolves,
-// throws transient, or throws terminal.
 const { streamMock } = vi.hoisted(() => ({ streamMock: vi.fn() }));
 vi.mock('../../ctx/stream.js', () => ({
   streamGiftCardStatus: (...args: unknown[]) => streamMock(...args),
@@ -65,7 +61,6 @@ describe('waitForRedemption', () => {
     );
     const result = await waitForRedemption('o-1');
     expect(result).toEqual({ code: 'C', pin: 'P', url: 'https://x.example' });
-    // Exactly one CTX call after the stream — the authoritative GET.
     expect(ctxFetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -74,7 +69,6 @@ describe('waitForRedemption', () => {
     await expect(
       waitForRedemption('o-1', { pollIntervalMs: 1, totalTimeoutMs: 20 }),
     ).rejects.toThrow(/rejected/);
-    // No polling after a terminal CTX rejection.
     expect(ctxFetchMock).not.toHaveBeenCalled();
   });
 
@@ -121,10 +115,6 @@ describe('waitForRedemption', () => {
   });
 
   it('barcode-merchant shape: `number` + `pin` collapse into code + pin', async () => {
-    // CTX returns barcode-merchant cards as `number` (the card number)
-    // + `pin` + `barcodeType` / `barcodeUrl` — not `redeemCode`. The
-    // number must surface as the user-facing code, or the user gets a
-    // PIN with no card number.
     ctxFetchMock.mockResolvedValueOnce(
       detailResponse({
         number: '8711653414464265',
@@ -138,12 +128,6 @@ describe('waitForRedemption', () => {
   });
 
   it('C2-1: never logs the raw response body once a redemption field is present (codes are PII)', async () => {
-    // procurement-redemption.ts's diagnostic "capturing shape for
-    // diagnosis" log is gated on ALL THREE fields being null — its own
-    // doc-comment says this is deliberate ("once any code/pin/url is
-    // populated the codes are PII and must not land in logs"). Pin
-    // that contract directly: a response carrying a real code/PIN must
-    // never surface in any log call, at any level.
     ctxFetchMock.mockResolvedValueOnce(detailResponse({ number: 'SECRET-CODE-1234', pin: '9999' }));
     const result = await fetchRedemption('o-1');
     expect(result).toEqual({ code: 'SECRET-CODE-1234', pin: '9999', url: null });
@@ -169,28 +153,17 @@ describe('waitForRedemption', () => {
   });
 
   it('FT-14: an all-null redemption with a DRIFTED field name never leaks the live code/PIN in the diagnostic log', async () => {
-    // Field-name drift: CTX renames number→cardNumber /
-    // pin→securityPin. Our parser sees all KNOWN fields absent, so
-    // `out` is all-null and the "capturing shape" diagnostic fires — which
-    // is *exactly* the branch where the drifted field is still carrying a
-    // LIVE gift-card code/PIN. The old code logged the raw body here,
-    // leaking it. The key NAMES may be logged (they answer drift-vs-empty);
-    // the VALUES must never appear in any log call. Note the shapes below
-    // (a hyphenated code, a 4-digit PIN) deliberately slip past the token /
-    // card-shape scrubber, proving keys-only is required, not just scrubbing.
     ctxFetchMock.mockResolvedValueOnce(
       detailResponse({ cardNumber: 'LIVE-CODE-4242', securityPin: '7788' }),
     );
     const result = await fetchRedemption('o-1');
     expect(result).toEqual({ code: null, pin: null, url: null });
 
-    // Diagnostic still fires (all-null) and still records the key names.
     expect(logMock.info).toHaveBeenCalledTimes(1);
     const [meta, message] = logMock.info.mock.calls[0] as [Record<string, unknown>, string];
     expect(message).toContain('no redemption fields');
     expect(meta['keys']).toEqual(['cardNumber', 'securityPin']);
 
-    // ...but the live code + PIN must not surface in ANY log call/level.
     const allCalls = [
       ...logMock.info.mock.calls,
       ...logMock.warn.mock.calls,
@@ -205,7 +178,7 @@ describe('waitForRedemption', () => {
     streamMock.mockRejectedValueOnce(new Error('socket hang up'));
     ctxFetchMock
       .mockResolvedValueOnce(new Response('boom', { status: 500 }))
-      .mockResolvedValueOnce(detailResponse({})) // empty fields — polling continues
+      .mockResolvedValueOnce(detailResponse({}))
       .mockResolvedValueOnce(detailResponse({ number: 'C', redeemUrl: 'https://x.example' }));
     const result = await waitForRedemption('o-1', { pollIntervalMs: 1, totalTimeoutMs: 200 });
     expect(result.code).toBe('C');
@@ -214,25 +187,13 @@ describe('waitForRedemption', () => {
 
   it('returns the last (possibly empty) payload when the budget exhausts', async () => {
     streamMock.mockRejectedValueOnce(new Error('socket hang up'));
-    // Audit 2026-06 regression guard: build a FRESH Response per tick.
-    // The previous fixture resolved one shared Response object via
-    // `mockResolvedValue(detailResponse({}))`, so every tick after the
-    // first threw `Body is unusable: Body has already been read` inside
-    // fetchRedemption — the catch-and-continue in the polling loop
-    // swallowed it and the suite passed while the retry path was never
-    // actually exercised.
-    ctxFetchMock.mockImplementation(async () => detailResponse({})); // always empty
+    ctxFetchMock.mockImplementation(async () => detailResponse({}));
     const result = await waitForRedemption('o-1', { pollIntervalMs: 1, totalTimeoutMs: 10 });
     expect(result).toEqual({ code: null, pin: null, url: null });
   });
 
   it('each poll tick performs a genuinely fresh fetch+read (N ticks → N fetches)', async () => {
     streamMock.mockRejectedValueOnce(new Error('socket hang up'));
-    // Empty payloads for the first three ticks, codes on the fourth.
-    // Every Response is a fresh object so every tick must complete a
-    // full fetch + json() parse — if any tick re-read a consumed body
-    // (the audited "Body is unusable" bug) the code would never be
-    // observed and the budget would exhaust to nulls.
     let calls = 0;
     ctxFetchMock.mockImplementation(async () => {
       calls++;
@@ -240,19 +201,13 @@ describe('waitForRedemption', () => {
     });
     const result = await waitForRedemption('o-1', { pollIntervalMs: 1, totalTimeoutMs: 5_000 });
     expect(result).toEqual({ code: 'LATE-CODE', pin: '9876', url: null });
-    // Exactly one fetch per poll tick — the recovery tick is the 4th.
     expect(ctxFetchMock).toHaveBeenCalledTimes(4);
   });
 
   it('a consumed-body failure on one tick does not poison subsequent ticks', async () => {
     streamMock.mockRejectedValueOnce(new Error('socket hang up'));
-    // Defence-in-depth for the audited bug class: tick 1 receives a
-    // Response whose body was already consumed (simulating any future
-    // shared-Response regression); tick 2 gets a healthy fresh one.
-    // The loop must survive the body-reuse error and recover on the
-    // next genuinely fresh fetch.
     const consumed = detailResponse({});
-    await consumed.json(); // consume the body up-front
+    await consumed.json();
     ctxFetchMock
       .mockResolvedValueOnce(consumed)
       .mockResolvedValueOnce(detailResponse({ redeemUrl: 'https://x.example' }));

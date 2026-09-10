@@ -11,22 +11,18 @@ describe('normalizeEmail (A2-2002)', () => {
   });
 
   it('NFKC-collapses fullwidth characters to ASCII', () => {
-    // ＡＤＭＩＮ@example.com → ADMIN@example.com → admin@example.com
     expect(normalizeEmail('ＡＤＭＩＮ@example.com')).toBe('admin@example.com');
   });
 
   it('NFKC-collapses ligatures (ﬃ → ffi)', () => {
-    // U+FB03 LATIN SMALL LIGATURE FFI
     expect(normalizeEmail('o\uFB03ce@example.com')).toBe('office@example.com');
   });
 
   it('rejects Cyrillic-confusable email (homograph attack)', () => {
-    // U+0430 CYRILLIC SMALL LETTER A — looks like ASCII a but isn't
     expect(() => normalizeEmail('\u0430dmin@example.com')).toThrow(NonAsciiEmailError);
   });
 
   it('rejects an email with a non-ASCII suffix', () => {
-    // German ß — not an ASCII letter, NFKC keeps it as ß
     expect(() => normalizeEmail('user@exämple.com')).toThrow(NonAsciiEmailError);
   });
 

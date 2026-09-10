@@ -1,44 +1,5 @@
-/**
- * Public cashback-stats endpoint (ADR 009 / 015).
- *
- * `GET /api/public/cashback-stats` — fleet-wide aggregate for the
- * unauthenticated landing page:
- *   - totalUsersWithCashback: distinct users with a `cashback`
- *     credit_transactions row.
- *   - totalCashbackPaidMinor: sum of positive `cashback`-type
- *     movements across all currencies, grouped. Denominated per-
- *     currency because fleet-wide "total" only makes sense when
- *     you know the denomination.
- *   - fulfilledOrders: count of `state = fulfilled` orders.
- *
- * Public-first conventions (ADR 020):
- *   - Never 500. DB errors fall back to a last-known-good snapshot
- *     if we have one; otherwise return zeros. An unauthenticated
- *     visitor should never see a server error on the landing page
- *     regardless of backend health.
- *   - `Cache-Control: public, max-age=300` (5 min). This is
- *     marketing data, not transactional — a brief staleness is
- *     preferable to hammering the DB on every landing-page hit.
- *   - On the fallback path we emit `max-age=60` instead — serve
- *     stale briefly, refresh soon.
- *
- * CF-29 / x-perf PERF-001: this is a crawler-exposed surface whose
- * three aggregates scan the full `credit_transactions` / `orders`
- * tables. The HTTP `Cache-Control` only deduplicates at a CDN edge —
- * a crawler storm (or many edge regions) still triggers a real
- * recompute per cache-miss. We add a process-level TTL compute cache:
- * `computeStats()` runs at most once per `COMPUTE_TTL_MS`; every other
- * request inside the window serves the memoised snapshot without
- * touching the DB. The three aggregates also now run via `Promise.all`
- * (independent reads, were awaited sequentially), and migration 0036
- * adds `credit_transactions(type, created_at)` so the cashback roll-up
- * is an index range scan rather than a full-table seq scan. Response
- * shape is unchanged.
- */
+// public cashback-stats endpoint — ADR 009, 015, 020, 052; CF-29, PERF-001
 import type { Context } from 'hono';
-// Response shape lives in `@loop/shared` alongside the web's consumer
-// (ADR 019 single-source rule). Re-exported below for existing backend
-// imports that reference the symbol relative to this module.
 import type { PerCurrencyCashback, PublicCashbackStats } from '@loop/shared';
 import { db } from '../db/client.js';
 import { logger } from '../logger.js';
@@ -47,26 +8,14 @@ export type { PerCurrencyCashback, PublicCashbackStats };
 
 const log = logger.child({ handler: 'public-cashback-stats' });
 
-// CF-29 / PERF-001: how long a freshly-computed snapshot is served
-// from process memory before the next request triggers a recompute.
-// Matches the 5-min HTTP `Cache-Control` so the in-process memo and the
-// CDN TTL expire together; a crawler storm inside the window costs zero
-// DB queries.
+// CF-29 / PERF-001: matches 5-min HTTP Cache-Control so in-process memo and CDN TTL expire together
 const COMPUTE_TTL_MS = 5 * 60 * 1000;
 
-// In-memory snapshot. Two roles in one cell:
-//   1. TTL compute cache (CF-29 / PERF-001) — `computedAt` gates when a
-//      recompute is allowed; inside the window we serve `value` straight
-//      back without a DB round-trip.
-//   2. Last-known-good fallback — the tier that makes this "never 500":
-//      if a recompute throws, we serve the last good `value` instead.
-// Reset on process restart; fallback-to-zero is the bootstrap state.
+// CF-29 / PERF-001: TTL compute cache + last-known-good fallback for "never 500"
 let cache: { value: PublicCashbackStats; computedAt: number } | null = null;
 
 async function computeStats(): Promise<PublicCashbackStats> {
-  // ADR 052: cashback is the per-order checkout discount pinned on the
-  // order doc (`userCashbackMinor`), so all three aggregates come from
-  // one fulfilled-orders scan.
+  // ADR 052: cashback is per-order checkout discount, so all aggregates come from one fulfilled-orders scan
   const fulfilled = await db.collection('orders').findMany({ state: 'fulfilled' });
   const usersWithCashback = new Set<string>();
   const totals = new Map<string, number>();
@@ -97,10 +46,7 @@ export function __expirePublicCashbackStatsCache(): void {
 }
 
 export async function publicCashbackStatsHandler(c: Context): Promise<Response> {
-  // CF-29 / PERF-001: serve the memoised snapshot without a DB round-trip
-  // while it is still fresh. This is the storm guard — a crawler burst
-  // inside the TTL window costs zero queries regardless of how many
-  // requests slip past the CDN edge.
+  // CF-29 / PERF-001: serve memoised snapshot while fresh; storm guard for crawler bursts
   if (cache !== null && Date.now() - cache.computedAt < COMPUTE_TTL_MS) {
     c.header('cache-control', 'public, max-age=300');
     return c.json<PublicCashbackStats>(cache.value);
@@ -113,16 +59,13 @@ export async function publicCashbackStatsHandler(c: Context): Promise<Response> 
     return c.json<PublicCashbackStats>(snapshot);
   } catch (err) {
     log.error({ err }, 'Public cashback-stats computation failed — serving fallback');
-    // Fallback cadence: serve stale briefly so the DB has time to
-    // recover before the CDN asks again.
+    // Fallback cadence: serve stale briefly so DB has time to recover
     c.header('cache-control', 'public, max-age=60');
     if (cache !== null) {
-      // Last-known-good — a recompute failed but we have a prior good
-      // snapshot. (Its TTL has lapsed, hence we got here.)
+      // Last-known-good — recompute failed but prior good snapshot exists
       return c.json<PublicCashbackStats>(cache.value);
     }
-    // Bootstrap path — no prior snapshot. Serve zeros rather than
-    // 5xx; the landing page renders "— cashback earned so far" etc.
+    // Bootstrap path — no prior snapshot; serve zeros rather than 5xx
     return c.json<PublicCashbackStats>({
       totalUsersWithCashback: 0,
       fulfilledOrders: 0,

@@ -1,18 +1,4 @@
-/**
- * A2-1905 — deleteUserViaAnonymisation tests.
- *
- * Critical invariants (post-ADR-052 shape — the payout / credit-balance
- * blockers died with the credits ledger; the only remaining blocker is
- * an order mid-fulfilment):
- *   - blocks deletion when an order is mid-flight (`unpaid` / `paid`)
- *   - on success, the user's email is replaced with the synthetic
- *     placeholder and ctxUserId nulls out
- *   - identities are deleted, refresh tokens revoked
- *   - a revoke failure surfaces loudly (A4-086) after the writes
- *
- * Runs against the real in-memory document store; only the
- * refresh-token revoke is mocked (its own suite covers it).
- */
+// A2-1905 — deleteUserViaAnonymisation tests
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { db, __resetDbForTests } from '../../db/client.js';
 import type { OrderDoc, UserDoc } from '../../db/types.js';
@@ -87,7 +73,6 @@ describe('deleteUserViaAnonymisation (A2-1905)', () => {
       await seedOrder({ state });
       const out = await deleteUserViaAnonymisation('u-1');
       expect(out).toEqual({ ok: false, blockedBy: 'in_flight_orders' });
-      // A block does NO writes and never revokes sessions.
       const user = await db.collection('users').findOne({ id: 'u-1' });
       expect(user?.email).toBe('real@b.com');
       expect(user?.ctxUserId).toBe('ctx-1');
@@ -122,7 +107,6 @@ describe('deleteUserViaAnonymisation (A2-1905)', () => {
       emailAtLink: 'real@b.com',
       createdAt: new Date(),
     });
-    // Another user's identity must survive.
     await db.collection('user_identities').insertOne({
       id: 'ident-2',
       userId: 'u-other',
@@ -135,16 +119,13 @@ describe('deleteUserViaAnonymisation (A2-1905)', () => {
     const out = await deleteUserViaAnonymisation('u-1');
     expect(out).toEqual({ ok: true });
 
-    // PII anchors gone: synthetic email, null ctxUserId.
     const user = await db.collection('users').findOne({ id: 'u-1' });
     expect(user?.email).toBe('deleted-u-1@deleted.loopfinance.io');
     expect(user?.ctxUserId).toBeNull();
 
-    // OAuth links deleted — only for the target user.
     expect(await db.collection('user_identities').count({ userId: 'u-1' })).toBe(0);
     expect(await db.collection('user_identities').count({ userId: 'u-other' })).toBe(1);
 
-    // Sessions dead.
     expect(revokeMock).toHaveBeenCalledWith('u-1');
   });
 
@@ -152,8 +133,7 @@ describe('deleteUserViaAnonymisation (A2-1905)', () => {
     await seedUser();
     revokeMock.mockRejectedValue(new Error('db down'));
     await expect(deleteUserViaAnonymisation('u-1')).rejects.toThrow('db down');
-    // The anonymisation already landed — the failure must not roll it
-    // back (operators re-run the revoke manually).
+    // Anonymisation is not rolled back on revoke failure; operators re-run revoke manually.
     const user = await db.collection('users').findOne({ id: 'u-1' });
     expect(user?.email).toBe(deletedEmailFor('u-1'));
   });
@@ -161,7 +141,6 @@ describe('deleteUserViaAnonymisation (A2-1905)', () => {
   it('deletedEmailFor produces a unique synthetic email per userId', () => {
     expect(deletedEmailFor('u-1')).toBe('deleted-u-1@deleted.loopfinance.io');
     expect(deletedEmailFor('u-1')).not.toEqual(deletedEmailFor('u-2'));
-    // Synthetic email is well-formed for the email regex used in OTP request.
     expect(deletedEmailFor('u-1')).toMatch(/^[\w.+-]+@[\w.-]+\.\w+$/);
   });
 });

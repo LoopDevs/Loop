@@ -20,14 +20,11 @@ describe('scrubUpstreamBody (A2-555 + A2-1306)', () => {
 
   it('leaves short hex-shaped values alone (not a token)', () => {
     const body = 'error code 0x1234abcd — see docs';
-    // "0x1234abcd" is 10 chars — below the 32-char threshold.
     expect(scrubUpstreamBody(body)).toBe(body);
   });
 
   it('caps output at maxLen when scrubbing leaves a long benign body', () => {
-    // A 1000-char body that doesn't match any token shape — just
-    // "a b c d ..." — should cap at maxLen=500.
-    const body = 'x '.repeat(500); // 1000 chars of "x " alternation
+    const body = 'x '.repeat(500);
     expect(scrubUpstreamBody(body)).toHaveLength(500);
   });
 
@@ -40,7 +37,6 @@ describe('scrubUpstreamBody (A2-555 + A2-1306)', () => {
     expect(scrubUpstreamBody('')).toBe('');
   });
 
-  // A2-1306 — email + card-shape redaction
   it('redacts an email address (A2-1306)', () => {
     const body = 'no such user alice@example.com in catalog';
     expect(scrubUpstreamBody(body)).toBe('no such user [REDACTED_EMAIL] in catalog');
@@ -52,7 +48,6 @@ describe('scrubUpstreamBody (A2-555 + A2-1306)', () => {
   });
 
   it('does not false-positive on @-mentions without a TLD (A2-1306)', () => {
-    // No dotted host → not an email.
     const body = 'mention @someone at standup';
     expect(scrubUpstreamBody(body)).toBe(body);
   });
@@ -68,7 +63,6 @@ describe('scrubUpstreamBody (A2-555 + A2-1306)', () => {
   });
 
   it('does not redact short numeric ids (under 13 digits)', () => {
-    // 12-digit run is below the card threshold.
     const body = 'order 123456789012 paid';
     expect(scrubUpstreamBody(body)).toBe(body);
   });

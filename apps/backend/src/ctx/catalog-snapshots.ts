@@ -7,15 +7,7 @@ const log = logger.child({ module: 'ctx-catalog-snapshots' });
 
 export type CatalogSnapshotName = 'merchants' | 'locations';
 
-/**
- * Warm-start max-age (money review 2026-07-08). R3-3's job is to
- * survive a restart DURING a CTX outage, not to sell from an
- * arbitrarily old catalog: orders pin `wholesale_pct`/cashback from
- * whatever the store serves, so a weeks-stale snapshot quietly prices
- * real money. 7 days is ~28 merchant refresh cycles — far beyond any
- * plausible CTX outage; past that, an empty store (loud, obvious) is
- * safer than a stale one (silent, mispriced).
- */
+// Orders pin prices from the served catalog; a stale snapshot silently misprices real money.
 export const MAX_WARM_START_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 export interface CatalogSnapshot<T> {

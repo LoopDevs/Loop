@@ -1,20 +1,4 @@
-/**
- * Fire-once/re-arm alert gate for the standing watchdogs. Callers:
- *   - `health.ts` (`routeHealthChangeNotify`) — the health-change page.
- *
- * Successor to the old Postgres-backed `watchdog_alert_state` gate:
- * with the fleet-wide constraint gone (Loop is single-process while
- * undeployed) the fired-state is a process-local map, and callers of
- * the same gate are serialised by a per-name promise chain so
- * overlapping ticks can't double-page one transition.
- *
- * Contract: at-least-once, confirmed-delivery. `alertActive` flips
- * only AFTER the notifier resolves `true`; an undelivered page
- * (Discord outage, timeout) leaves the state unchanged so the next
- * tick re-attempts — never silently dropped, never double-fired once
- * delivered.
- */
-
+// Fire-once/re-arm alert gate for standing watchdogs — at-least-once, confirmed-delivery
 export interface ApplyBinaryWatchdogAlertArgs {
   /** Stable, unique key for this incident dimension, e.g. `health-change:upstream`. */
   watchdogName: string;
@@ -29,12 +13,6 @@ export interface ApplyBinaryWatchdogAlertArgs {
 const alertActiveByName = new Map<string, boolean>();
 const gateChainByName = new Map<string, Promise<unknown>>();
 
-/**
- * Returns `true` when a page was sent AND confirmed delivered this
- * call (i.e. the state actually moved); `false` when nothing was due,
- * or a due page failed to deliver (state left unchanged for the next
- * tick to retry).
- */
 export async function applyBinaryWatchdogAlert(
   args: ApplyBinaryWatchdogAlertArgs,
 ): Promise<boolean> {

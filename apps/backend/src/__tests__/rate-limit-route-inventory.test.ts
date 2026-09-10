@@ -1,18 +1,4 @@
-/**
- * Rate-limit route inventory (hardening C6, 2026-07 plan).
- *
- * The middleware stack has NO global fallback limiter — a route
- * without an explicit `rateLimit('METHOD /path', max, windowMs)`
- * mount has no per-IP budget at all, and nothing caught that until
- * now (AGENTS.md documents the per-route convention, but docs don't
- * fail CI). This default-deny walk over the real app's route table
- * asserts every concrete mount either carries a named `rateLimit(…)`
- * gate or sits on the explicit, reasoned allowlist below.
- *
- * Same harness pattern as `staff-route-gating.test.ts`: the real
- * `app` is imported with only the boot-side effects mocked, so the
- * inventory can't drift from what actually serves traffic.
- */
+// rate-limit route inventory — hardening C6, 2026-07 plan
 import { describe, it, expect, vi } from 'vitest';
 import type * as ConfigModule from '../config/index.js';
 
@@ -22,10 +8,7 @@ vi.mock('../config/index.js', async (importActual) => {
     ...actual,
     config: {
       ...actual.config,
-      // AUDIT-2-E: test-endpoints.ts also requires this secret to mount
-      // `/__test__/*` at all — without it the two routes below wouldn't
-      // appear in `app.routes` and this inventory's assertions that
-      // they're present-but-unlimited would fail.
+      // AUDIT-2-E: required for test-endpoints.ts to mount /__test__/*
       testing: { endpointsSecret: 'rate-limit-inventory-test-secret' },
     },
   };
@@ -69,11 +52,6 @@ vi.mock('../db/client.js', () => ({
 
 import { app } from '../app.js';
 
-/**
- * Mounts deliberately serving without a per-IP budget. Every entry
- * needs a reason — adding a new unlimited route is a review
- * conversation, not an accident.
- */
 const UNLIMITED_ALLOWLIST = new Set<string>([
   // Fly.io health checks probe this every few seconds from the
   // platform's own addresses; a per-IP budget would page ops on the

@@ -31,9 +31,7 @@ describe('merchantSlug', () => {
     expect(merchantSlug('target')).toBe('target');
   });
 
-  // Non-ASCII handling: matches the Go reference on upstream CTX — characters
-  // outside [a-z0-9-] are dropped rather than transliterated. Anything that
-  // needs Unicode support has to normalise upstream.
+  // Non-ASCII: dropped rather than transliterated to match Go reference.
   it('drops unicode characters (ASCII-only output)', () => {
     expect(merchantSlug('Café')).toBe('caf');
     expect(merchantSlug('Pokémon')).toBe('pokmon');
@@ -53,19 +51,13 @@ describe('merchantSlug', () => {
     }
   });
 
-  // Documented behaviour: leading/trailing whitespace becomes leading/trailing
-  // hyphens. We don't trim because the Go reference doesn't either, and
-  // changing it would break every cached slug on clients and in the backend
-  // store. Upstream merchant names don't currently have leading/trailing
-  // whitespace; this test pins the behaviour so any change is deliberate.
+  // Leading/trailing whitespace becomes hyphens; not trimmed to match Go reference.
   it('does not trim leading/trailing hyphens produced by whitespace', () => {
     expect(merchantSlug(' Home Depot ')).toBe('-home-depot-');
     expect(merchantSlug('Home Depot ')).toBe('home-depot-');
   });
 
-  // Idempotency: a slug fed back through the function should be stable. This
-  // matters because we sometimes canonicalise values defensively; if the
-  // function weren't idempotent, repeated canonicalisation would drift.
+  // Idempotency: repeated canonicalisation must not drift.
   it('is idempotent — slug(slug(x)) === slug(x)', () => {
     const inputs = ['Home Depot', "Dunkin' Donuts", '7-Eleven', 'Some   Store', 'UPPER CASE', ''];
     for (const input of inputs) {

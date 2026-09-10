@@ -1,26 +1,4 @@
-/**
- * Staff role management handlers (ADR 037 §1).
- *
- * `GET    /api/admin/staff`              — list with grant metadata
- * `PUT    /api/admin/staff/:userId/role` — grant / change a role
- * `DELETE /api/admin/staff/:userId/role` — revoke staff access
- *
- * The writes are the first self-serve alternative to the
- * direct-SQL escalation noted in the audit, so they carry the FULL
- * ADR 017 contract (actor from context, Idempotency-Key, reason,
- * Discord audit fanout after commit, `{ result, audit }` envelope)
- * AND the ADR 028 step-up gate (mounted at the route) — a captured
- * bearer alone must not be able to mint itself a colleague.
- *
- * Two safety invariants live in the repo (`db/staff-roles.ts`),
- * indivisible under the staff-write lock:
- *   - last-admin protection — refuse to demote/revoke the final
- *     effective admin (`STAFF_LAST_ADMIN`, 409);
- * and one lives here, where the actor is known:
- *   - self-demotion guard — an admin cannot revoke or demote their
- *     OWN admin role (`STAFF_SELF_REVOKE`, 409). Another admin has
- *     to do it, which is exactly the audit trail we want.
- */
+// Staff role management handlers — ADR 037 §1, ADR 017, ADR 028
 import type { Context } from 'hono';
 import { z } from 'zod';
 import {
@@ -69,10 +47,6 @@ const RevokeBodySchema = z.object({
   reason: z.string().min(2).max(500),
 });
 
-/**
- * Shared request-edge validation for the two writes. Returns the
- * error Response, or the validated pieces.
- */
 function validateWriteEdge(c: Context):
   | Response
   | {

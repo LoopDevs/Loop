@@ -1,31 +1,4 @@
-/**
- * Merchant cashback configuration — the admin CRUD behind ADR 011's
- * single "User Cashback %" knob.
- *
- * `GET /api/admin/merchant-cashback-configs`               — list
- * `GET /api/admin/merchant-cashback-configs.csv`           — export
- * `PUT /api/admin/merchant-cashback-configs/:merchantId`   — upsert
- * `GET /api/admin/merchant-cashback-configs/:merchantId/history`
- *
- * This is the only way the rate gets set. `merchant_cashback_configs`
- * is read on the order path (what the customer is promised), on the
- * public catalog (what the marketing surfaces advertise) and by the
- * CTX link builder — but nothing writes it, so without this endpoint
- * every merchant sits on the fallback split from
- * `orders.cashbackDefaults` forever.
- *
- * The write carries the full ADR 017 contract — actor from the staff
- * gate, Idempotency-Key, a required reason, `{ result, audit }`, a
- * post-write Discord line — plus the ADR 028 step-up gate, because it
- * sets the split that FUTURE orders stamp at creation. That is
- * squarely the stolen-bearer threat: nobody notices a rate quietly
- * moved to 0% until the customers do.
- *
- * Every edit writes a history entry BEFORE touching the live row, so
- * a crash between the two leaves a history entry with no change
- * rather than a change with no history. Over-recording is auditable;
- * under-recording is not.
- */
+// Merchant cashback config admin CRUD — ADR 011, ADR 017, ADR 028
 import { randomUUID } from 'node:crypto';
 import type { Context } from 'hono';
 import { z } from 'zod';

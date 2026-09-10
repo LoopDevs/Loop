@@ -2,12 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type * as ConfigModule from '../../config/index.js';
 import type { LookupAddress, LookupOptions } from 'node:dns';
 
-// Mirror proxy.test.ts's env/dns mocking so the guard can be exercised in
-// isolation. Default: production mode — the IP-range defence only runs
-// there (ADR 050: outside production the resolved-URL check is
-// deliberately permissive so local CTX file hosts work).
-// `ssrf-guard.ts` only branches on the deployment environment (private
-// ranges stay reachable in development).
+// IP-range defence only runs in production (ADR 050: local CTX file hosts work in dev).
 const { configState } = vi.hoisted(() => ({
   configState: { env: 'production' as 'development' | 'production' | 'test' },
 }));
@@ -31,8 +26,6 @@ beforeEach(() => {
   configState.env = 'production';
 });
 
-// Promise wrapper around the node `LookupFunction` callback so tests can
-// await the resolver's decision.
 interface LookupOutcome {
   err: Error | null;
   address: string | LookupAddress[];
@@ -47,11 +40,8 @@ function callLookup(host: string, options: LookupOptions): Promise<LookupOutcome
 }
 
 describe('isPrivateOrReservedIp — NAT64 / 6to4 embedded IPv4 (SEC-SSRF-nat64)', () => {
-  // Each of these v6 literals looks like an ordinary public address but,
-  // once the embedded IPv4 is decoded, targets an internal host. Before the
-  // fix the guard returned false for all of them → SSRF to internal IPv4.
+  // Decodes embedded IPv4 to catch internal hosts hidden in public-looking v6 literals.
   it('rejects NAT64 (64:ff9b::/96) embedding the cloud-metadata IP', () => {
-    // 64:ff9b::a9fe:a9fe decodes to 169.254.169.254
     expect(isPrivateOrReservedIp('64:ff9b::a9fe:a9fe')).toBe(true);
   });
 
@@ -65,17 +55,14 @@ describe('isPrivateOrReservedIp — NAT64 / 6to4 embedded IPv4 (SEC-SSRF-nat64)'
   });
 
   it('rejects 6to4 (2002::/16) embedding an RFC1918 IPv4', () => {
-    // 2002:c0a8:101:: decodes to 192.168.1.1
     expect(isPrivateOrReservedIp('2002:c0a8:101::')).toBe(true);
   });
 
   it('rejects 6to4 embedding the cloud-metadata IP', () => {
-    // 2002:a9fe:a9fe:: decodes to 169.254.169.254
     expect(isPrivateOrReservedIp('2002:a9fe:a9fe::')).toBe(true);
   });
 
   it('still ALLOWS a NAT64/6to4 address whose embedded IPv4 is public (range-check, not blanket-block)', () => {
-    // 93.184.216.34 (example.com) embedded — legitimately public.
     expect(isPrivateOrReservedIp('64:ff9b::5db8:d822')).toBe(false);
     expect(isPrivateOrReservedIp('2002:5db8:d822::')).toBe(false);
   });
@@ -94,16 +81,12 @@ describe('isPrivateOrReservedIp — NAT64 / 6to4 embedded IPv4 (SEC-SSRF-nat64)'
 });
 
 describe('ssrfSafeLookup — connect-time rebind defence (SEC-SSRF-allowlist)', () => {
-  // This is the resolver Node's socket calls to decide the address the
-  // request ACTUALLY connects to. A DNS-rebind resolver answers public
-  // during pre-flight and private at connect time; this function is the one
-  // the connection uses, so it must refuse the private answer.
+  // Refuses private answers at connect time to prevent DNS-rebind attacks.
   it('fails the lookup when the host resolves to a private/metadata IP (rebind)', async () => {
     mockDnsLookup.mockResolvedValueOnce([{ address: '169.254.169.254', family: 4 }]);
     const { err, address } = await callLookup('rebind.evil.com', { all: true });
     expect(err).toBeInstanceOf(Error);
     expect(err?.message).toContain('169.254.169.254');
-    // Must NOT have handed back a connectable address.
     expect(address).toBe('');
   });
 
@@ -149,8 +132,6 @@ describe('ssrfSafeLookup — connect-time rebind defence (SEC-SSRF-allowlist)', 
 
 describe('validateResolvedImageUrl — production pre-flight defence (ADR 050)', () => {
   it('rejects a hostname that resolves to the metadata IP even with no allowlist', async () => {
-    // Allowlist unset (deleted in beforeEach). A public-looking host that
-    // resolves to 169.254.169.254 must still be rejected.
     mockDnsLookup.mockResolvedValueOnce([{ address: '169.254.169.254', family: 4 }]);
     const err = await validateResolvedImageUrl('https://metadata.evil.com/latest/meta-data/');
     expect(err).toContain('Private and loopback');
@@ -159,7 +140,6 @@ describe('validateResolvedImageUrl — production pre-flight defence (ADR 050)',
   it('rejects a NAT64-embedded metadata IPv6 literal with no allowlist (SEC-SSRF-nat64)', async () => {
     const err = await validateResolvedImageUrl('https://[64:ff9b::a9fe:a9fe]/x.png');
     expect(err).toContain('Private and loopback');
-    // IP literal → no DNS roundtrip needed.
     expect(mockDnsLookup).not.toHaveBeenCalled();
   });
 

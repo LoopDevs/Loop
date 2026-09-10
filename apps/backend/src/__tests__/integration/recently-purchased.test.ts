@@ -1,19 +1,4 @@
-/**
- * Caller-scoped recently-purchased integration tests on the real
- * document store.
- *
- * Covers `GET /api/users/me/recently-purchased`:
- *   - Group by merchantId: multiple orders to the same merchant
- *     collapse to one chip ordered by max(createdAt) DESC.
- *   - State filter: only `paid` / `fulfilled` count;
- *     `unpaid` / `rejected` / `expired` are excluded.
- *   - Catalog join: known merchants surface with `merchant` set;
- *     evicted merchants surface with `merchant: null`.
- *   - Limit: default 8, clamped to [1, 20] via `?limit=`.
- *   - Scope: caller A never sees caller B's orders.
- *
- * Runs through the REAL `app` against the ephemeral in-memory store.
- */
+// caller-scoped recently-purchased integration tests — NS-09
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 
@@ -108,8 +93,6 @@ describe('user recently-purchased — document store', () => {
   it('collapses repeat-merchant orders to one entry ordered by MAX(created_at) DESC', async () => {
     const me = await seedUser('rp-collapse@test.local');
     const base = new Date('2026-01-01T00:00:00Z').getTime();
-    // Three Amazon orders, two Starbucks. Most-recent Amazon is older
-    // than most-recent Starbucks, so Starbucks ranks first.
     await seedOrder({
       userId: me.userId,
       merchantId: 'amazon',
@@ -214,26 +197,22 @@ describe('user recently-purchased — document store', () => {
 
   it('honours ?limit= clamped to [1, 20]', async () => {
     const me = await seedUser('rp-limit@test.local');
-    // 4 distinct merchants, fulfilled.
     for (const id of ['amazon', 'starbucks', 'home-depot', 'target']) {
       await seedOrder({ userId: me.userId, merchantId: id, state: 'fulfilled' });
     }
 
-    // limit=2 → 2 rows
     const small = await app.request('http://localhost/api/users/me/recently-purchased?limit=2', {
       headers: { Authorization: `Bearer ${me.bearer}` },
     });
     const smallBody = (await small.json()) as { merchants: unknown[] };
     expect(smallBody.merchants).toHaveLength(2);
 
-    // limit=999 → clamped to 20 (well below the 4 we seeded, so all 4)
     const big = await app.request('http://localhost/api/users/me/recently-purchased?limit=999', {
       headers: { Authorization: `Bearer ${me.bearer}` },
     });
     const bigBody = (await big.json()) as { merchants: unknown[] };
     expect(bigBody.merchants).toHaveLength(4);
 
-    // limit=NaN → defaults to 8
     const bad = await app.request('http://localhost/api/users/me/recently-purchased?limit=abc', {
       headers: { Authorization: `Bearer ${me.bearer}` },
     });

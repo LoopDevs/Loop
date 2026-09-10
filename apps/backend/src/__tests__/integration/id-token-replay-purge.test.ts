@@ -1,12 +1,4 @@
-/**
- * Integration test for the `social_id_token_uses` retention sweep
- * (AGT-06). This pins that a row past the retention grace is reaped
- * while any row still inside the window (or whose token is still
- * valid) is spared, so the sweep never weakens replay protection.
- *
- * Runs under `vitest.integration.config.ts` against the ephemeral
- * in-memory document store — no external database required.
- */
+// Integration test for `social_id_token_uses` retention sweep (AGT-06)
 import { describe, it, expect, beforeEach } from 'vitest';
 import { db, __resetDbForTests } from '../../db/client.js';
 import { purgeExpiredIdTokenUses } from '../../auth/id-token-replay.js';

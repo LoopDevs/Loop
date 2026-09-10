@@ -13,7 +13,7 @@ function sign(id: string, timestamp: string, body: string): string {
 }
 
 const FIXED_NOW = 1_800_000_000;
-const RECENT_TS = String(FIXED_NOW - 30); // 30 s ago — well inside default window
+const RECENT_TS = String(FIXED_NOW - 30);
 
 describe('verifyHmacWebhook', () => {
   describe('happy path', () => {
@@ -32,12 +32,9 @@ describe('verifyHmacWebhook', () => {
     });
 
     it('accepts the signature when the header carries multiple v1 candidates (rotation)', () => {
-      // Vendor sends both old + new key signatures during a rotation
-      // window. The new key matches; the old one is wrong but the
-      // function should accept on first match.
       const body = '{}';
       const sigNew = sign('msg_x', RECENT_TS, body);
-      const sigOld = 'AAAA'.repeat(11); // 44 base64 chars = 33 bytes — wrong length, won't match
+      const sigOld = 'AAAA'.repeat(11);
       const result = verifyHmacWebhook({
         secret: SECRET,
         id: 'msg_x',
@@ -67,8 +64,6 @@ describe('verifyHmacWebhook', () => {
   describe('signature rejection', () => {
     it('rejects a delivery with a tampered signature', () => {
       const body = '{}';
-      // Sign for a different body — re-encode the captured signature
-      // and present it as if it were for `body`.
       const sig = sign('msg', RECENT_TS, '{"different":"payload"}');
       const result = verifyHmacWebhook({
         secret: SECRET,
@@ -134,8 +129,6 @@ describe('verifyHmacWebhook', () => {
       const oldTs = String(FIXED_NOW - 11 * 60);
       const body = '{}';
       const sig = sign('msg', oldTs, body);
-      // Caller asks for an hour-long window; the clamp cuts it to 10
-      // min, so an 11-min-old timestamp still fails.
       const result = verifyHmacWebhook({
         secret: SECRET,
         id: 'msg',
@@ -149,7 +142,7 @@ describe('verifyHmacWebhook', () => {
     });
 
     it('respects a tighter caller-requested tolerance', () => {
-      const oldTs = String(FIXED_NOW - 90); // 90s ago
+      const oldTs = String(FIXED_NOW - 90);
       const body = '{}';
       const sig = sign('msg', oldTs, body);
       const result = verifyHmacWebhook({
@@ -158,7 +151,7 @@ describe('verifyHmacWebhook', () => {
         timestamp: oldTs,
         body,
         signatureHeader: `v1,${sig}`,
-        toleranceSeconds: 60, // 60s window
+        toleranceSeconds: 60,
         nowSeconds: FIXED_NOW,
       });
       expect(result).toEqual({ ok: false, reason: 'replay_window_exceeded' });
@@ -196,7 +189,7 @@ describe('verifyHmacWebhook', () => {
         id: 'msg',
         timestamp: RECENT_TS,
         body: '{}',
-        signatureHeader: 'A'.repeat(44), // no `v1,`
+        signatureHeader: 'A'.repeat(44),
         nowSeconds: FIXED_NOW,
       });
       expect(result).toEqual({ ok: false, reason: 'malformed_signature_header' });

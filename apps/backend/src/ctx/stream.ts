@@ -1,60 +1,12 @@
-/**
- * CTX SSE stream client — push-based gift-card status feed.
- *
- * `spend.ctx.com` exposes a Server-Sent Events variant of the
- * gift-card lookup at:
- *
- *   GET /gift-cards/{id}?stream=true
- *   Accept:        text/event-stream
- *   Cache-Control: no-cache
- *   X-Api-Key:     <operator API key>
- *   X-Api-Secret:  <operator API secret>
- *   X-Client-Id:   <request-origin client under Loop's CTX company>
- *
- * ADR 051: auth is the operator API-key header pair. CTX's reference
- * web client passes a bearer in `?token=` instead — a workaround for
- * the browser EventSource API (which can't set custom request
- * headers) that we don't need in a server-side fetch.
- *
- * Each SSE frame is a plain `data: {json}` line, where the JSON
- * carries fields like `{fulfilmentStatus, paymentStatus, ...}`.
- * The status timeline is `unpaid → paid → fulfilled`. Frames
- * may or may not include the redemption fields (`redeemUrl`,
- * `number`, `pin`) — the caller follows up with one authoritative
- * `GET /gift-cards/:id` to pull those.
- *
- * Ported from `vcc/api/src/ctx/client.js:362-431` (the working
- * reference implementation). Credential wiring is at the call-site:
- * pick the API-key pair via `ctxApiCredentials()` from
- * `./api-fetch.js` and pass it in.
- *
- * On any stream error (network blip, timeout, abort), the caller is
- * expected to fall back to polling via `ctxFetch` — the stream is
- * opportunistic, polling is the safety net.
- */
+// CTX SSE stream client — push-based gift-card status feed — ADR 051
 import { upstreamUrl } from '../upstream.js';
 import { logger } from '../logger.js';
 
 const log = logger.child({ area: 'ctx-stream' });
 
-/**
- * Upper bound on the in-memory SSE accumulation buffer (in decoded
- * chars). The reader only drains `buffer` when it finds a `\n`
- * delimiter, so a hostile or degenerate upstream that never emits a
- * delimiter — or emits one enormous single frame — would otherwise
- * grow `buffer` without limit until the worker OOMs. Real CTX `data:`
- * frames are small JSON status objects (a few hundred bytes), so
- * 512 KiB is orders of magnitude of headroom: exceeding it means the
- * stream is degenerate, and we abort so the caller falls back to
- * polling rather than accumulating unbounded memory.
- */
+// Cap prevents OOM if upstream emits no delimiters or one oversized frame.
 const MAX_SSE_BUFFER_CHARS = 512 * 1024;
 
-/**
- * Subset of fields the stream surfaces that the orchestration layer
- * needs. CTX may include other fields; we accept the frame as
- * `Record<string, unknown>` and only narrow what we read.
- */
 export interface StreamFrame {
   fulfilmentStatus?: string;
   paymentStatus?: string;
@@ -63,45 +15,21 @@ export interface StreamFrame {
 }
 
 export interface StreamCredentials {
-  /** Operator API key (`X-Api-Key`). */
   apiKey: string;
-  /** Operator API secret (`X-Api-Secret`). */
   apiSecret: string;
-  /** Request-origin client under Loop's CTX company (`X-Client-Id`). */
   clientId: string;
 }
 
 export interface StreamGiftCardOptions extends StreamCredentials {
-  /** Abort signal to terminate the stream mid-read. */
   signal?: AbortSignal;
-  /** Called for every parsed frame — useful for observability. */
   onUpdate?: (frame: StreamFrame) => void;
 }
 
-/**
- * Reads `data:`-prefixed lines off the SSE stream and dispatches
- * parsed JSON frames to the caller. The function resolves when CTX
- * announces a terminal `fulfilled`/`complete` status — at which point
- * the caller should run a single follow-up `GET /gift-cards/:id` to
- * pull the redemption fields (codes/PIN/URL aren't always present in
- * the SSE frames).
- *
- * Throws when:
- *   - the stream returns non-2xx (e.g. 401 token-mismatch, 5xx)
- *   - CTX announces a terminal `rejected`/`failed`/`error` status
- *   - the underlying body ends before a terminal status arrives
- *   - the abort signal fires
- *
- * In every error path the caller is expected to fall back to polling.
- */
 export async function streamGiftCardStatus(
   ctxOrderId: string,
   opts: StreamGiftCardOptions,
 ): Promise<StreamFrame> {
-  // ADR 051: authenticate with the operator API-key headers. The
-  // `?token=` query form CTX's reference web client uses exists only
-  // because browser EventSource can't set request headers — this is
-  // a server-side fetch, so the credential stays out of the URL.
+  // ADR 051: server-side fetch uses header auth; `?token=` is only for browser EventSource.
   const base = upstreamUrl(`/gift-cards/${encodeURIComponent(ctxOrderId)}`);
   const url = `${base}?stream=true`;
 
@@ -115,9 +43,6 @@ export async function streamGiftCardStatus(
       'X-Client-Id': opts.clientId,
     },
   };
-  // `exactOptionalPropertyTypes` forbids assigning `undefined` to
-  // `signal: AbortSignal | null` — set it only when the caller
-  // provided one.
   if (opts.signal !== undefined) init.signal = opts.signal;
   const res = await fetch(url, init);
   if (!res.ok || res.body === null) {
@@ -139,10 +64,6 @@ export async function streamGiftCardStatus(
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
 
-      // SSE frames are separated by `\n\n`; within a frame, lines
-      // starting with `data: ` carry the JSON payload. Process every
-      // complete line; leave the trailing partial in `buffer` for the
-      // next read.
       let idx;
       while ((idx = buffer.indexOf('\n')) !== -1) {
         const line = buffer.slice(0, idx).replace(/\r$/, '');
@@ -155,9 +76,6 @@ export async function streamGiftCardStatus(
         try {
           frame = JSON.parse(payload) as StreamFrame;
         } catch {
-          // Malformed frame — skip it. The next valid frame will
-          // resync. We don't log because a noisy upstream could
-          // flood the log.
           continue;
         }
         last = frame;
@@ -165,9 +83,6 @@ export async function streamGiftCardStatus(
 
         const status = pickStatus(frame);
         if (status === 'fulfilled' || status === 'complete') {
-          // Best-effort release of the upstream socket so undici can
-          // recycle the connection. `cancel()` may throw if the
-          // stream is already closed — swallow.
           try {
             await reader.cancel();
           } catch {
@@ -185,11 +100,6 @@ export async function streamGiftCardStatus(
         }
       }
 
-      // After draining every complete line, `buffer` holds only the
-      // trailing partial frame (no `\n` yet). If that partial exceeds
-      // the cap, the upstream is either withholding delimiters or
-      // emitting a single oversized frame — bail rather than let the
-      // buffer grow toward an OOM.
       if (buffer.length > MAX_SSE_BUFFER_CHARS) {
         try {
           await reader.cancel();
@@ -206,8 +116,6 @@ export async function streamGiftCardStatus(
       }
     }
   } finally {
-    // Reader is automatically released when cancel/read-done completes,
-    // but if we throw mid-iteration the lock may still be held.
     try {
       reader.releaseLock();
     } catch {
@@ -222,11 +130,7 @@ export async function streamGiftCardStatus(
   );
 }
 
-/**
- * CTX uses both `fulfilmentStatus` and `status` field names across
- * different endpoint versions. Prefer `fulfilmentStatus` when both
- * are present (it's the canonical column); fall back to `status`.
- */
+// `fulfilmentStatus` is canonical; `status` is a fallback for older endpoint versions.
 function pickStatus(frame: StreamFrame): string | undefined {
   if (typeof frame.fulfilmentStatus === 'string') return frame.fulfilmentStatus;
   if (typeof frame.status === 'string') return frame.status;

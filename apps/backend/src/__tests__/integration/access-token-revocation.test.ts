@@ -1,33 +1,4 @@
-/**
- * NS-09 — integration test for ACCESS-TOKEN REVOCATION.
- *
- * The gap: access tokens are 15-min, signature-only, and carry no
- * per-token DB row, so before NS-09 `verifyLoopToken` checked only the
- * signature + expiry — NOT liveness. A logout, a "sign out everywhere",
- * or a compromise event could not invalidate an already-issued,
- * still-signed access token: it stayed valid for its full TTL. (Refresh
- * tokens were already DB-revocable; the gap was the ACCESS token.)
- *
- * The fix: a per-user `users.tokenVersion` counter that is
- *   - stamped as the `tv` claim on every minted access token,
- *   - compared against the doc's CURRENT value on every authenticated
- *     request in `requireAuth`, and
- *   - bumped (atomic +1) on logout / sign-out-all / refresh-reuse.
- *
- * These tests drive the REAL enforcement point (`requireAuth`) against a
- * live `users` doc and pin the security property directly:
- *   (a) a valid access token whose `tv` matches verifies OK;
- *   (b) after a bump (revoke-all AND logout), the SAME previously-valid
- *       token is REJECTED 401 — the load-bearing assertion, red against
- *       the un-enforced code (where the token stays valid);
- *   (c) a token minted AFTER the bump (carrying the new `tv`) verifies OK;
- *   (d) a legacy access token with NO `tv` claim fails closed (401).
- *
- * Runs under `vitest.integration.config.ts` against the ephemeral
- * in-memory document store. `requireAuth` is exercised through a
- * minimal Hono-context stub — the same pattern as
- * `logout-preserves-rotation-lineage.test.ts`.
- */
+// NS-09 — integration test for ACCESS-TOKEN REVOCATION
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import type { Context } from 'hono';

@@ -1,26 +1,4 @@
-/**
- * Per-user merchant favourites — `/api/users/me/favorites`.
- *
- * Three small handlers backed by `user_favorite_merchants`:
- *
- *   - `GET    /api/users/me/favorites`             — list, newest first
- *   - `POST   /api/users/me/favorites`             — add (idempotent)
- *   - `DELETE /api/users/me/favorites/:merchantId` — remove
- *
- * The list response joins the catalog (`MerchantCatalogStore`) at
- * read-time so the client gets ready-to-render `Merchant` rows
- * without a follow-up by-id fetch. Favourites pinned for merchants
- * that have temporarily evicted from the catalog (ADR 021) are
- * filtered out of the list response — the row stays in the table so
- * the favourite re-appears once the merchant is back, but a stale
- * id never crashes the UI render path.
- *
- * `merchantId` validation reuses the catalog's `merchantsById` Map:
- * an unknown id returns `MERCHANT_NOT_FOUND`. We deliberately don't
- * fetch from upstream — favouriting a merchant that doesn't exist in
- * our catalog is a guaranteed UX dead-end and would let attackers
- * pin garbage strings.
- */
+// per-user merchant favourites — ADR 021, ADR 019
 import type { Context } from 'hono';
 import { z } from 'zod';
 import type {
@@ -40,18 +18,13 @@ const log = logger.child({ handler: 'user-favorites' });
 const MAX_FAVORITES_PER_USER = 50;
 
 // `text` columns make merchant_id arbitrary length; cap it at the
-// boundary so a request with a 1MB id can't reach the DB at all. The
-// catalog's CTX-issued ids are ~25 chars in practice; 256 is far
-// above that and below any pathological size.
+// boundary so a request with a 1MB id can't reach the DB at all.
 const MERCHANT_ID_MAX = 256;
 
 const AddFavoriteBody = z.object({
   merchantId: z.string().min(1).max(MERCHANT_ID_MAX),
 });
 
-// FavoriteMerchantView, ListFavoritesResponse, AddFavoriteResult, and
-// RemoveFavoriteResult are now the single source of truth from @loop/shared
-// (packages/shared/src/user-favorites.ts — ADR 019).
 export type {
   AddFavoriteResult,
   FavoriteMerchantView,
@@ -59,10 +32,6 @@ export type {
   RemoveFavoriteResult,
 };
 
-/**
- * `GET /api/users/me/favorites` — list the caller's favourite merchants
- * newest first, joined to the in-memory catalog.
- */
 export async function listFavoritesHandler(c: Context): Promise<Response> {
   const user = await resolveCallingUser(c).catch((err: unknown) => {
     log.error({ err }, 'Failed to resolve calling user');
@@ -86,14 +55,6 @@ export async function listFavoritesHandler(c: Context): Promise<Response> {
   return c.json<ListFavoritesResponse>({ favorites, total: rows.length });
 }
 
-/**
- * `POST /api/users/me/favorites` — add a merchant to the caller's
- * favourites. Idempotent on `(user_id, merchant_id)`: a re-add returns
- * the existing row's `createdAt` and `added: false`.
- *
- * 404 if the merchant id isn't in the in-memory catalog. 409 if the
- * user is already at the per-account cap.
- */
 export async function addFavoriteHandler(c: Context): Promise<Response> {
   const user = await resolveCallingUser(c).catch((err: unknown) => {
     log.error({ err }, 'Failed to resolve calling user');
@@ -169,11 +130,6 @@ export async function addFavoriteHandler(c: Context): Promise<Response> {
   });
 }
 
-/**
- * `DELETE /api/users/me/favorites/:merchantId` — remove a merchant from
- * the caller's favourites. Idempotent: removing a non-existent
- * favourite is `removed: false`, not a 404.
- */
 export async function removeFavoriteHandler(c: Context): Promise<Response> {
   const merchantId = c.req.param('merchantId');
   if (merchantId === undefined || merchantId.length === 0 || merchantId.length > MERCHANT_ID_MAX) {

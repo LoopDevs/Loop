@@ -8,10 +8,10 @@ import { logger } from '../logger.js';
 import { getMerchants } from '../merchants/sync.js';
 import { getMapPinUrl } from '../clustering/data-store.js';
 
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10 MB
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_DIMENSION = 2000;
-const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-const MAX_CACHE_BYTES = 100 * 1024 * 1024; // 100 MB
+const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const MAX_CACHE_BYTES = 100 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 10_000;
 
 interface CacheEntry {
@@ -47,7 +47,6 @@ function evictLruUntilFits(requiredBytes: number): void {
   }
 }
 
-/** Merchant image kinds the reference-keyed proxy can resolve. */
 const IMAGE_KINDS = ['logo', 'card', 'pin'] as const;
 type ImageKind = (typeof IMAGE_KINDS)[number];
 
@@ -58,27 +57,7 @@ function isImageKind(v: string): v is ImageKind {
 // Mirrors the sync layer's MAX_ID_LENGTH bound on upstream merchant ids.
 const MERCHANT_ID_RE = /^[\w.-]{1,128}$/;
 
-/**
- * GET /api/image — reference-keyed merchant-image proxy (ADR 050).
- *
- * The client names an image by reference; the backend resolves the
- * actual upstream URL from its own stores, fetches, resizes with
- * sharp, caches, and serves it. Clients never supply URLs — the
- * URL-shaped API this replaced was an SSRF surface that needed a host
- * allowlist and unconditional private-IP rejection to stay safe.
- *
- * Query params:
- *   merchantId — catalog merchant id (required)
- *   kind       — logo | card | pin (required). `pin` resolves from the
- *                locations feed, falling back to the merchant's logo —
- *                the same precedence the cluster store applies.
- *   width      — target width in px (optional, max 2000)
- *   height     — target height in px (optional, max 2000)
- *   quality    — JPEG/WebP quality 1–100 (optional, default 80)
- *   v          — cache-busting version token (optional; typically the
- *                merchant's `updatedAt`). Part of the LRU cache key and
- *                of the browser-cached URL, never sent upstream.
- */
+// ADR 050
 export async function imageProxyHandler(c: Context): Promise<Response> {
   const log = logger.child({ handler: 'image-proxy' });
 
@@ -166,17 +145,6 @@ export type ImageFetchResult =
   | { ok: true; data: Uint8Array; mimeType: string }
   | { ok: false; status: 413 | 500 | 502; code: string; message: string };
 
-/**
- * Fetches a server-resolved image URL and re-encodes it with sharp.
- * Shared by the catalog handler above and the authed order-barcode
- * handler (`orders/barcode-image-handler.ts`). The caller has already
- * run `validateResolvedImageUrl`; this adds the transport-level
- * hardening (redirect rejection, content-type check, size caps).
- *
- * `forceJpeg` flattens any alpha onto white and always emits JPEG —
- * used for barcodes, where the caller needs a statically known MIME
- * type and a white quiet zone is what scanners want anyway.
- */
 export async function fetchAndTransformImage(
   imageUrl: string,
   opts: { width: number; height: number; quality: number; forceJpeg?: boolean },
@@ -281,11 +249,9 @@ export async function fetchAndTransformImage(
   }
 }
 
-/**
- * Test seam: byte-counter + entry-count snapshot so the LRU
- * accounting (incl. the overwrite path above) can be asserted
- * without exporting the cache map itself.
- */
+// Test seam: byte-counter + entry-count snapshot so the LRU
+// accounting (incl. the overwrite path above) can be asserted
+// without exporting the cache map itself.
 export function __getImageCacheStatsForTests(): { entries: number; totalBytes: number } {
   return { entries: cache.size, totalBytes: totalCacheBytes };
 }
@@ -321,11 +287,7 @@ export function imageResponse(
   });
 }
 
-/**
- * Reads the response body into a Buffer, aborting if the running byte total
- * exceeds `limit`. Returns null if the limit is exceeded. Streaming read
- * ensures we do not buffer a multi-GB response into memory just to reject it.
- */
+// Streaming read ensures we do not buffer a multi-GB response into memory just to reject it.
 async function readBodyWithLimit(res: Response, limit: number): Promise<Buffer | null> {
   const reader = res.body?.getReader();
   if (!reader) {
@@ -369,17 +331,15 @@ interface UpstreamFetchInit {
 // and hand back a bodiless Response.
 const NULL_BODY_STATUSES = new Set([101, 103, 204, 205, 304]);
 
-/**
- * Upstream fetch on node core. In production the connecting socket
- * resolves DNS through `ssrfSafeLookup`, which range-checks the address
- * the request will actually connect to — closing the DNS-rebinding
- * TOCTOU where a resolver answers public to `validateResolvedImageUrl`
- * and private to the fetch. Outside production the default resolver is
- * used so local CTX file hosts work. `agent: false` forces a fresh
- * lookup per request (no keep-alive socket reuse). Node core never
- * auto-follows redirects, so a 3xx surfaces as a status the handler
- * rejects.
- */
+// Upstream fetch on node core. In production the connecting socket
+// resolves DNS through `ssrfSafeLookup`, which range-checks the address
+// the request will actually connect to — closing the DNS-rebinding
+// TOCTOU where a resolver answers public to `validateResolvedImageUrl`
+// and private to the fetch. Outside production the default resolver is
+// used so local CTX file hosts work. `agent: false` forces a fresh
+// lookup per request (no keep-alive socket reuse). Node core never
+// auto-follows redirects, so a 3xx surfaces as a status the handler
+// rejects.
 function upstreamImageFetch(rawUrl: string, init: UpstreamFetchInit): Promise<Response> {
   const transport = new URL(rawUrl).protocol === 'http:' ? http : https;
   return new Promise<Response>((resolve, reject) => {
@@ -412,12 +372,10 @@ function upstreamImageFetch(rawUrl: string, init: UpstreamFetchInit): Promise<Re
   });
 }
 
-/**
- * Test seam: the proxy tests replace `fetch` here with a stub returning
- * a synthetic `Response` so they exercise the resize/cache/redirect
- * handling without real sockets. The connect-time rebind defence itself
- * is proven directly in `ssrf-guard.test.ts`.
- */
+// Test seam: the proxy tests replace `fetch` here with a stub returning
+// a synthetic `Response` so they exercise the resize/cache/redirect
+// handling without real sockets. The connect-time rebind defence itself
+// is proven directly in `ssrf-guard.test.ts`.
 export const __imageUpstream: {
   fetch: (url: string, init: UpstreamFetchInit) => Promise<Response>;
 } = { fetch: upstreamImageFetch };

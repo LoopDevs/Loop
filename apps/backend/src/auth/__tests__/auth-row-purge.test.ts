@@ -22,7 +22,6 @@ vi.mock('../../logger.js', () => ({
     child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
   },
 }));
-// Pin env so the default-retention math is deterministic.
 vi.mock('../../config/index.js', async (importActual) => {
   const actual = await importActual<typeof ConfigModule>();
   return {
@@ -36,8 +35,6 @@ vi.mock('../../config/index.js', async (importActual) => {
     },
   };
 });
-// runtime-health markers are fire-and-forget; stub them so the tick
-// doesn't touch the real registry.
 vi.mock('../../runtime-health.js', () => ({
   markWorkerStarted: vi.fn(),
   markWorkerStopped: vi.fn(),

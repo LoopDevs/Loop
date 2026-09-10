@@ -1,9 +1,4 @@
-/**
- * Order-repository tests (ADR 052 mirror model): the create insert
- * shape, the idempotency-conflict resolution contract, and the
- * guarded CTX-identifier / economics writers, against the real
- * in-memory document store.
- */
+// Order-repository tests (ADR 052 mirror model)
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { db, __resetDbForTests } from '../../db/client.js';
 import {
@@ -41,7 +36,6 @@ describe('createOrder', () => {
       userCashbackMinor: 0,
       paymentCryptoCurrency: 'XLM',
       state: 'unpaid',
-      // No key supplied → explicit null (the unique tuple is exempt).
       idempotencyKey: null,
       ctxOrderId: null,
     });
@@ -83,7 +77,6 @@ describe('createOrder', () => {
       expect((err as IdempotentOrderConflictError).existing.id).toBe(prior.id);
       return true;
     });
-    // Exactly one doc exists for the pair.
     expect(await db.collection('orders').count({ userId: 'u-1' })).toBe(1);
   });
 
@@ -184,7 +177,6 @@ describe('recordCtxCreate', () => {
     const stored = await db.collection('orders').findOne({ id });
     expect(stored?.ctxOrderId).toBe('ctx-1');
     expect(stored?.ctxPaymentId).toBeNull();
-    // The provisional face-value charge survives.
     expect(stored?.chargeMinor).toBe(2500);
     expect(stored?.chargeCurrency).toBe('USD');
   });
@@ -244,7 +236,6 @@ describe('read helpers', () => {
     expect(await getOrderById('missing')).toBeNull();
     expect((await getOrderByCtxOrderId('ctx-42'))?.id).toBe(row.id);
     expect((await findOwnedOrder('u-1', row.id))?.id).toBe(row.id);
-    // Ownership is part of the filter — another user's lookup misses.
     expect(await findOwnedOrder('u-2', row.id)).toBeNull();
   });
 
@@ -270,7 +261,6 @@ describe('read helpers', () => {
       currency: 'USD',
       paymentCryptoCurrency: 'XLM',
     });
-    // Force distinct createdAt ordering + one terminal doc.
     const orders = db.collection('orders');
     await orders.updateOne({ id: a.id }, { $set: { createdAt: new Date('2026-01-01T00:00:00Z') } });
     await orders.updateOne(

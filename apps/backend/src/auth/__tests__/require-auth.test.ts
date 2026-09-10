@@ -2,8 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type * as ConfigModule from '../../config/index.js';
 import type { Context } from 'hono';
 
-// requireAuth's Loop-token path needs a configured signer; everything
-// else comes from the real (test-fixture) config.
 const { jwtState } = vi.hoisted(() => ({
   jwtState: {
     hs256: {
@@ -39,11 +37,7 @@ vi.mock('../../logger.js', () => ({
   },
 }));
 
-// NS-09: requireAuth now reads the user's current token_version on the
-// Loop-token path to enforce access-token revocation. Mock it so this
-// unit suite doesn't need a live DB; `mockTokenVersion` / `throwOnRead`
-// let each test drive the compare (match → accept, mismatch/null →
-// reject, throw → 500).
+// NS-09: mock token_version reads to drive revocation logic without a live DB.
 let mockTokenVersion: number | null = 0;
 let throwOnRead = false;
 vi.mock('../../db/users.js', () => ({
@@ -84,9 +78,6 @@ function makeCtx(headers: Record<string, string | undefined>): FakeCtx {
 }
 
 beforeEach(() => {
-  // Ensure the module reads the signing key we set up-front.
-  // NS-09: default the mocked token_version read to a matching value so
-  // the pre-existing accept tests stay green; individual tests override.
   mockTokenVersion = 0;
   throwOnRead = false;
 });
@@ -129,9 +120,6 @@ describe('requireAuth', () => {
   });
 
   it('NS-09: rejects a token whose tv is stale (< current token_version) with 401', async () => {
-    // Token minted at tv=0; the user's token_version was since bumped to
-    // 1 (a logout / sign-out-all). The still-signed, still-unexpired
-    // access token must now be rejected — the core NS-09 property.
     mockTokenVersion = 1;
     const { token } = signLoopToken({
       sub: 'user-uuid',
@@ -148,15 +136,12 @@ describe('requireAuth', () => {
   });
 
   it('NS-09: fails a legacy access token with no tv claim closed (401)', async () => {
-    // Pre-NS-09 token: valid signature + unexpired, but no `tv`. Must be
-    // treated as a version mismatch, not silently honoured.
     mockTokenVersion = 0;
     const { token } = signLoopToken({
       sub: 'user-uuid',
       email: 'a@b.com',
       typ: 'access',
       ttlSeconds: 300,
-      // no tv
     });
     const fake = makeCtx({ Authorization: `Bearer ${token}` });
     const next = vi.fn();
@@ -166,7 +151,7 @@ describe('requireAuth', () => {
   });
 
   it('NS-09: rejects a token whose user row no longer exists (401)', async () => {
-    mockTokenVersion = null; // getUserTokenVersion → no row
+    mockTokenVersion = null;
     const { token } = signLoopToken({
       sub: 'ghost-user',
       email: 'a@b.com',
@@ -224,7 +209,7 @@ describe('requireAuth', () => {
   });
 
   it('falls through to the CTX pass-through path for a non-Loop bearer', async () => {
-    const ctxLike = 'header.payload.signature'; // looks like a JWT, not Loop-signed
+    const ctxLike = 'header.payload.signature';
     const fake = makeCtx({ Authorization: `Bearer ${ctxLike}` });
     const next = vi.fn().mockResolvedValue(undefined);
     await requireAuth(fake.ctx, next);
@@ -254,10 +239,7 @@ describe('requireAuth', () => {
   });
 
   it('honours an allowlisted X-Client-Id on the Loop-native JWT path', async () => {
-    // Regression guard: the Loop-token branch returns early on success,
-    // so the client-id forwarding must run BEFORE the auth-path fork —
-    // otherwise every loop-native session reaches handlers that require
-    // attribution (POST /api/orders/loop) with clientId undefined.
+    // Client-id forwarding must run before the auth-path fork to ensure loop-native sessions have attribution.
     mockTokenVersion = 0;
     const { token } = signLoopToken({
       sub: 'user-uuid',

@@ -1,15 +1,4 @@
-/**
- * Admin write envelope (ADR 017).
- *
- * Uniform shape for every admin mutation response:
- *   `{ result, audit: { actorUserId, actorEmail, idempotencyKey,
- *                        appliedAt, replayed } }`
- *
- * The UI renders "action applied" confirmations without endpoint
- * branching; `replayed: true` distinguishes a snapshot replay from
- * a fresh write so the UI can render a subtle indicator ("already
- * applied 3 minutes ago").
- */
+// Admin write envelope — ADR 017
 import type { User } from '../db/users.js';
 
 export interface AdminAuditEnvelope<T> {

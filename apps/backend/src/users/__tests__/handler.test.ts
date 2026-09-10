@@ -12,14 +12,7 @@ vi.mock('../../logger.js', () => ({
 
 import { getMeHandler, setHomeCurrencyHandler } from '../handler.js';
 
-/**
- * User profile handlers, run against the real in-memory document
- * store. Identity resolution goes through the REAL
- * `resolveLoopAuthenticatedUser` (A2-550/A2-551: the context's
- * cryptographically-verified `auth.userId`, then a `users` lookup) —
- * so these tests seed the store and supply a LoopAuthContext fixture,
- * mirroring what `requireAuth` puts on the context in production.
- */
+// User profile handlers — A2-550, A2-551
 function makeCtx(auth: LoopAuthContext | undefined, body?: unknown): Context {
   const store = new Map<string, unknown>();
   if (auth !== undefined) store.set('auth', auth);
@@ -142,9 +135,7 @@ describe('getMeHandler', () => {
     expect(JSON.stringify(body)).not.toContain('ctx-123');
   });
 
-  // ADR 037: the web admin shell gates its navigation on `staffRole`,
-  // so a staff member whose row says 'admin' must see it here — the
-  // shim (`users.isAdmin`) only decides when there is no row.
+  // ADR 037: web admin shell gates navigation on staffRole
   it('reports the staff tier from a staff_roles row', async () => {
     await seedUser();
     await db.collection('staff_roles').insertOne({
@@ -157,7 +148,6 @@ describe('getMeHandler', () => {
     const res = await getMeHandler(makeCtx(loopAuth));
     const body = (await res.json()) as Record<string, unknown>;
     expect(body['staffRole']).toBe('support');
-    // isAdmin is the 'admin'-only compat shim — support is not admin.
     expect(body['isAdmin']).toBe(false);
   });
 
@@ -206,7 +196,6 @@ describe('setHomeCurrencyHandler', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
     expect(body['homeCurrency']).toBe('GBP');
-    // Persisted, not just echoed.
     const stored = await db.collection('users').findOne({ id: UID });
     expect(stored?.homeCurrency).toBe('GBP');
   });
@@ -218,29 +207,23 @@ describe('setHomeCurrencyHandler', () => {
     expect(res.status).toBe(409);
     const body = (await res.json()) as Record<string, unknown>;
     expect(body['code']).toBe('HOME_CURRENCY_LOCKED');
-    // The write did NOT land.
     const stored = await db.collection('users').findOne({ id: UID });
     expect(stored?.homeCurrency).toBe('USD');
   });
 
   it('short-circuits when the requested currency already matches — no write, even with orders present', async () => {
     const seeded = await seedUser({ homeCurrency: 'GBP' });
-    // An order exists, but the no-op path must still succeed so the
-    // client can call this unconditionally from onboarding.
     await seedOrder();
     const res = await setHomeCurrencyHandler(makeCtx(loopAuth, { currency: 'GBP' }));
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
     expect(body['homeCurrency']).toBe('GBP');
-    // No-op: updatedAt untouched proves no write happened.
     const stored = await db.collection('users').findOne({ id: UID });
     expect(stored?.updatedAt).toEqual(seeded.updatedAt);
   });
 
   it('404 when the user row disappears between resolve and update (race with deletion)', async () => {
     await seedUser({ homeCurrency: 'USD' });
-    // Simulate the race: the resolve sees the user, then the doc
-    // vanishes before the guarded update runs.
     const users = db.collection('users');
     const realUpdateOne = users.updateOne.bind(users);
     vi.spyOn(users, 'updateOne').mockImplementationOnce(async (filter, update, options) => {

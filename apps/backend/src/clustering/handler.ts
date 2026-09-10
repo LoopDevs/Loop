@@ -5,13 +5,7 @@ import { logger } from '../logger.js';
 
 const PROTOBUF_MIME = 'application/x-protobuf';
 
-/**
- * GET /api/clusters
- *
- * Query params: west, south, east, north (float), zoom (int)
- * Responds with protobuf when Accept header includes application/x-protobuf,
- * otherwise JSON.
- */
+// GET /api/clusters — protobuf/JSON negotiation
 export async function clustersHandler(c: Context): Promise<Response> {
   const log = logger.child({ handler: 'clusters' });
 
@@ -31,9 +25,7 @@ export async function clustersHandler(c: Context): Promise<Response> {
     );
   }
 
-  // Reject physically-impossible coordinate ranges. These would otherwise pass
-  // through and silently produce an empty result (south > north) or random
-  // output (lat/lng outside the globe) without telling the client why.
+  // Reject physically-impossible coordinate ranges to avoid silent empty results or random output.
   if (
     south < -90 ||
     south > 90 ||
@@ -49,18 +41,11 @@ export async function clustersHandler(c: Context): Promise<Response> {
   if (south > north) {
     return c.json({ code: 'VALIDATION_ERROR', message: 'south must be <= north' }, 400);
   }
-  // Note: west > east is not rejected here — some map clients legitimately
-  // send date-line-crossing bounds. The current algorithm returns empty for
-  // that case (documented limitation); see algorithm.ts audit notes.
+  // west > east is allowed for date-line-crossing bounds; algorithm returns empty (documented limitation).
 
   const zoom = Math.max(0, Math.min(28, rawZoom));
 
-  // Extend each side of the bbox by 50% of its dimension for pre-loading —
-  // matching the Go reference behaviour. Each side grows by 0.5 × the
-  // viewport's height/width, so the resulting bbox is 2× the original on
-  // both axes (4× area). Clamp the expansion to the globe so the filter
-  // below doesn't waste work walking through points that couldn't be valid
-  // anyway (e.g. south-buffered past -90° with a zoomed-out bbox).
+  // Expand bbox by 50% per side for pre-loading (matches Go reference); clamp to globe to avoid wasted filtering.
   const latBuf = (north - south) * 0.5;
   const lngBuf = (east - west) * 0.5;
   const expandedBounds = {
@@ -72,7 +57,6 @@ export async function clustersHandler(c: Context): Promise<Response> {
 
   const { locations, loadedAt } = getLocations();
 
-  // Filter to expanded bounds
   const filtered = locations.filter(
     (loc) =>
       loc.latitude >= expandedBounds.south &&
@@ -98,22 +82,7 @@ export async function clustersHandler(c: Context): Promise<Response> {
   const wantsProtobuf = c.req.header('Accept')?.includes(PROTOBUF_MIME) ?? false;
 
   if (wantsProtobuf) {
-    // A4-115: protobuf-es v2 generates a schema descriptor +
-    // create/toBinary/fromBinary helpers, NOT a class. The earlier
-    // code constructed `new ProtobufClusterResponse(...)` which is
-    // a v1-style API; the v2-generated module exports
-    // `ProtobufClusterResponseSchema` plus runtime helpers. The
-    // earlier `typeof ProtobufClusterResponse === 'function'`
-    // check was always false (it's a TYPE-only export under v2),
-    // so every protobuf-Accept request silently fell back to JSON
-    // — the protobuf rail was dead.
-    //
-    // Lazy-import: keeps the module out of cold-start path and
-    // tolerates a fresh checkout without `npm run proto:generate`
-    // having run. The two failure modes:
-    //   (a) module not present (codegen never ran) — fall back to JSON.
-    //   (b) construction or encoding failure — propagate so a real
-    //       schema drift loud-fails rather than silently masquerading.
+    // A4-115: protobuf-es v2 exports schema + helpers, not a class. Lazy import to tolerate missing codegen.
     /* eslint-disable @typescript-eslint/no-explicit-any */
     let create: any = null;
     let toBinary: any = null;
@@ -173,19 +142,15 @@ export async function clustersHandler(c: Context): Promise<Response> {
         headers: {
           'Content-Type': PROTOBUF_MIME,
           'Cache-Control': 'public, max-age=60',
-          // The endpoint negotiates protobuf vs JSON on `Accept`. Without
-          // this, a browser/CDN cache that served one variant would hand
-          // the wrong bytes to a client that asked for the other — the
-          // protobuf-expecting client would get raw JSON, fail to decode,
-          // and the map would silently stop updating.
+          // Vary: Accept prevents CDN/browser cache from serving wrong content type to clients expecting different format.
           Vary: 'Accept',
         },
       });
     }
   }
 
-  c.header('Cache-Control', 'public, max-age=60'); // 1 minute cache for clusters
-  c.header('Vary', 'Accept'); // See the protobuf branch above for rationale
+  c.header('Cache-Control', 'public, max-age=60');
+  c.header('Vary', 'Accept');
   return c.json({
     locationPoints: result.locationPoints,
     clusterPoints: result.clusterPoints,

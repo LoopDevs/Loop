@@ -1,10 +1,4 @@
-/**
- * CTX contract helper tests (ADR 052): major→minor parsing, the
- * displayStatus mapping, payment-instruction assembly, and the
- * user-cashback / expected-commission derivation that mirrors CTX's
- * accrual math (`flow_commission.go`: CardFiat.Split(spread)
- * .Split(profitShare), floors at each step).
- */
+// CTX contract helper tests — ADR 052
 import { describe, it, expect } from 'vitest';
 import {
   deriveOrderEconomics,
@@ -97,7 +91,6 @@ describe('deriveOrderEconomics', () => {
   });
 
   it('derives cashback + commission (spread × profit share, floored)', () => {
-    // face 10000 minor; user 2.5% → 250; spread 5% → 500; 50% share → 250.
     expect(deriveOrderEconomics(card(), 5000)).toEqual({
       userCashbackMinor: 250n,
       expectedCommissionMinor: 250n,

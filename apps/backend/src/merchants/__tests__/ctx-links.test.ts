@@ -1,16 +1,4 @@
-/**
- * ADR 052 cashback delivery — `ctx-links.ts`.
- *
- * Pins the three things that matter commercially:
- *
- *   1. `desiredUserDiscountBp` floors and never invents a value when
- *      the operator discount is unknown (unknown ≠ zero).
- *   2. The push writes the bulk `PUT /merchant-links` body CTX
- *      expects (company-targeted, link-id-keyed, user bp only) and
- *      is a no-op when the link already matches.
- *   3. The sweep reconcile pushes only drifted active configs and
- *      swallows every failure (fail-soft — the next sweep retries).
- */
+// ADR 052 cashback delivery — `ctx-links.ts`
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const { ctxFetchMock, companyIdMock } = vi.hoisted(() => ({
@@ -48,7 +36,6 @@ function okResponse(): Response {
   return new Response('{}', { status: 200 });
 }
 
-/** Seeds a cashback config doc the reconcile sweep will read. */
 async function seedConfig(
   merchantId: string,
   userCashbackPct: number,
@@ -75,7 +62,7 @@ beforeEach(() => {
 describe('desiredUserDiscountBp', () => {
   it('floors operator bp × pct / 100', () => {
     const link = { id: 'l1', operatorDiscountBasisPoints: 750, userDiscountBasisPoints: null };
-    expect(desiredUserDiscountBp(link, 33)).toBe(247); // floor(247.5)
+    expect(desiredUserDiscountBp(link, 33)).toBe(247);
     expect(desiredUserDiscountBp(link, 0)).toBe(0);
     expect(desiredUserDiscountBp(link, 100)).toBe(750);
   });
@@ -109,7 +96,6 @@ describe('pushUserDiscountForMerchant', () => {
       targetEntityId: 'company-1',
       update: [{ id: 'link-1', userDiscountBasisPoints: 200 }],
     });
-    // Registry reflects the landed write so a same-value re-save no-ops.
     expect(getMerchantLink('m1')?.userDiscountBasisPoints).toBe(200);
   });
 
@@ -152,7 +138,6 @@ describe('pushUserDiscountForMerchant', () => {
     ctxFetchMock.mockResolvedValue(new Response('{"error":"nope"}', { status: 422 }));
     const pushed = await pushUserDiscountForMerchant('m1', 25, true);
     expect(pushed).toBe(false);
-    // Registry NOT updated — the sweep will retry.
     expect(getMerchantLink('m1')?.userDiscountBasisPoints).toBeNull();
   });
 
@@ -180,7 +165,6 @@ describe('reconcileUserDiscounts', () => {
     await seedConfig('m-drifted', 50, true);
     await seedConfig('m-ok', 50, true);
     await seedConfig('m-no-link', 10, true);
-    // Inactive configs are excluded from the reconcile query entirely.
     await seedConfig('m-inactive', 50, false);
     await reconcileUserDiscounts();
     expect(ctxFetchMock).toHaveBeenCalledTimes(1);

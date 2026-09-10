@@ -90,7 +90,6 @@ describe('provisionCtxUser', () => {
 
     await provisionCtxUser(user);
     expect(setUserCtxUserIdMock).not.toHaveBeenCalled();
-    // No adoption lookup either — only the email-exists 400 triggers it.
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
@@ -104,10 +103,7 @@ describe('provisionCtxUser', () => {
   });
 });
 
-/**
- * Route a mocked upstream by method + path. Each entry returns a FRESH
- * Response per call — Response bodies are single-use.
- */
+// Response bodies are single-use; each route entry returns a fresh Response per call.
 function routeFetch(
   routes: Array<{ method: string; match: (url: string) => boolean; respond: () => Response }>,
 ): MockInstance<typeof globalThis.fetch> {
@@ -159,12 +155,10 @@ describe('adoption on email-exists 400', () => {
 
     await provisionCtxUser(user);
 
-    // Lookup is regex-escaped + type-narrowed.
     const getCall = fetchSpy.mock.calls.find(([, init]) => (init?.method ?? 'GET') === 'GET');
     expect(String(getCall?.[0])).toBe(
       `http://ctx.test/users?type=customer&email=${encodeURIComponent('u1@test\\.io')}`,
     );
-    // The claim carries our Loop user id.
     const putCall = fetchSpy.mock.calls.find(([, init]) => init?.method === 'PUT');
     expect(JSON.parse((putCall?.[1] as RequestInit).body as string)).toEqual({
       operatorUserId: 'loop-u1',

@@ -1,19 +1,4 @@
-/**
- * In-memory document store hydrated from a single JSON file.
- *
- * The whole database is loaded into memory at boot; every mutation
- * updates the in-memory arrays and schedules a debounced flush of the
- * ENTIRE database back to the file (atomic tmp-file + rename). With no
- * file path configured the store is purely ephemeral — the right shape
- * for unit tests.
- *
- * Concurrency: Node is single-threaded and every operation here is
- * synchronous between awaits, so each call is atomic by construction —
- * which is exactly what the `updateOne` CAS contract needs.
- *
- * Dates are serialised as `{"$date": "<iso>"}` markers so they revive
- * as real `Date` objects on load.
- */
+// in-memory document store — atomic tmp-file + rename flush
 import { mkdirSync, readFileSync, renameSync, writeFileSync, existsSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { COLLECTION_SPECS, type CollectionDocs, type CollectionName } from './types.js';
@@ -172,7 +157,6 @@ export class MemoryStore implements DataStore {
   private flushTimer: NodeJS.Timeout | null = null;
   private dirty = false;
 
-  /** `filePath: null` → ephemeral (no persistence). */
   constructor(private readonly filePath: string | null) {}
 
   init(): Promise<void> {
@@ -212,7 +196,6 @@ export class MemoryStore implements DataStore {
     this.flushTimer.unref();
   }
 
-  /** Atomic write: serialise everything, write a tmp file, rename over. */
   private flushSync(): void {
     if (this.filePath === null || !this.dirty) return;
     this.dirty = false;

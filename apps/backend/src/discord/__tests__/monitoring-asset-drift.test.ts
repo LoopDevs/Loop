@@ -1,9 +1,4 @@
-/**
- * `notifyAssetDrift` / `notifyAssetDriftRecovered` body tests.
- * Pins title / color / direction-flip / field set so a regression
- * surfaces in CI rather than landing as a malformed alert in
- * production Discord.
- */
+// notifyAssetDrift / notifyAssetDriftRecovered body tests
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type * as ConfigModule from '../../config/index.js';
 

@@ -1,21 +1,4 @@
-/**
- * Social-login handlers — Google + Apple (ADR 014).
- *
- * Both providers share the same flow:
- *   1. Client sends `{ idToken }` minted by Google / Apple on device.
- *   2. We verify the id_token against the provider's JWKS
- *      (`verifyIdToken`, ADR 014 slice 2).
- *   3. We extract `sub`, `email`, `email_verified` and resolve-or-
- *      create a Loop user (`resolveOrCreateUserForIdentity`, slice 1).
- *   4. We mint a Loop access + refresh pair and persist the refresh
- *      row — identical to the OTP path's final leg (ADR 013).
- *
- * Handlers live behind `LOOP_AUTH_NATIVE_ENABLED`. Each provider's
- * handler additionally 404s if its own audience is unconfigured —
- * that keeps a partially-deployed environment (Google set up but
- * not Apple, for example) from leaking endpoints that would only
- * 401 the client.
- */
+// Social-login handlers — Google + Apple — ADR 014
 import type { Context } from 'hono';
 import { logger } from '../logger.js';
 import { config } from '../config/index.js';
@@ -26,44 +9,19 @@ import { isLoopAuthConfigured } from './tokens.js';
 import { issueTokenPair } from './issue-token-pair.js';
 import { enqueueCtxUserProvisioning } from '../ctx/user-provisioning.js';
 import type { SocialProvider } from '../db/types.js';
-// D1: the request body is the schema-only `./social-schemas.ts`, the
-// same schema the OpenAPI spec registers — so the spec derives from
-// what this handler parses.
+// D1: request body schema matches OpenAPI spec
 import { SocialLoginBody as Body } from './social-schemas.js';
 
 const log = logger.child({ handler: 'auth-social' });
 
 export interface SocialProviderConfig {
   provider: SocialProvider;
-  /** URL of the provider's JWKS. */
   jwksUrl: string;
-  /**
-   * A2-567: list of acceptable `iss` values. Google's id_token is
-   * documented to carry either `https://accounts.google.com` or
-   * `accounts.google.com` depending on SDK version, and exact-match
-   * on a single string rejected the scheme-less variant. Pass the
-   * set of valid strings; verification accepts any member.
-   */
+  /** A2-567: Google id_token iss varies by SDK version; accept both scheme and scheme-less forms */
   expectedIssuers: string[];
-  /**
-   * Resolves the allowed `aud` list from the environment. An empty
-   * array means this provider isn't configured in this deployment —
-   * the handler returns 404.
-   */
   resolveAudiences: () => string[];
 }
 
-// `issueTokenPair` lives in `./issue-token-pair.ts` — shared with
-// the native verify-otp + refresh handlers in `./native.ts`. Both
-// surfaces previously shipped near-identical local copies; lifting
-// the helper closes the DRY gap.
-
-/**
- * Factory: given a provider config, returns a Hono handler for
- * `POST /api/auth/social/<provider>`. Every reject path maps to a
- * 401 with a generic "Invalid id_token" message so a probe can't
- * tell which check (iss / aud / expiry / signature) failed.
- */
 export function makeSocialLoginHandler(providerConfig: SocialProviderConfig) {
   return async function socialLoginHandler(c: Context): Promise<Response> {
     if (!config.auth.native.enabled) {
@@ -75,9 +33,7 @@ export function makeSocialLoginHandler(providerConfig: SocialProviderConfig) {
     }
     const audiences = providerConfig.resolveAudiences();
     if (audiences.length === 0) {
-      // Provider isn't configured in this deployment — 404 rather
-      // than "configured but wrong aud" so a probe can't learn which
-      // providers are live.
+      // 404 rather than 401 to prevent probing for live providers
       return c.json({ code: 'NOT_FOUND', message: 'Not found' }, 404);
     }
 
@@ -95,10 +51,7 @@ export function makeSocialLoginHandler(providerConfig: SocialProviderConfig) {
         expectedAudiences: audiences,
       });
     } catch (err) {
-      // JWKS fetch failed or schema drift. The id_token may be
-      // perfectly valid — we just can't reach the provider. 503
-      // lets the client retry instead of the user thinking the
-      // token was bad.
+      // 503 allows client retry; token may be valid but provider unreachable
       log.error(
         { err, provider: providerConfig.provider },
         'JWKS fetch failed during social verify',
@@ -117,11 +70,7 @@ export function makeSocialLoginHandler(providerConfig: SocialProviderConfig) {
     }
     const claims = verified.claims;
 
-    // A2-566: one-shot consume. A verified-once id_token is replayable
-    // within its provider TTL without this — sha256(token) goes into
-    // social_id_token_uses; a second attempt with the same token hits
-    // the PK conflict and we reject with the same generic 401 as a
-    // verify failure (don't tell the caller it was a replay).
+    // A2-566: one-shot consume; replay rejected with generic 401
     let firstUse: boolean;
     try {
       firstUse = await consumeIdToken({
@@ -130,8 +79,7 @@ export function makeSocialLoginHandler(providerConfig: SocialProviderConfig) {
         expSeconds: claims.exp,
       });
     } catch {
-      // DB error is operational, not a replay. Surface as 503 so the
-      // caller retries — silently passing would open a replay window.
+      // DB error is operational; 503 prevents replay window
       return c.json(
         { code: 'SERVICE_UNAVAILABLE', message: 'Auth service temporarily unavailable' },
         503,
@@ -141,21 +89,12 @@ export function makeSocialLoginHandler(providerConfig: SocialProviderConfig) {
       return c.json({ code: 'UNAUTHORIZED', message: 'Invalid id_token' }, 401);
     }
 
-    // `email` + `email_verified` are optional in the id_token spec
-    // but required for our resolve-or-create policy: step 2 (link
-    // by email) is only sound when the provider asserts
-    // email_verified. Apple's relay emails come back with
-    // email_verified=true (Apple has already validated deliverability).
     const email = typeof claims['email'] === 'string' ? claims['email'] : null;
     if (email === null) {
       log.warn({ provider: providerConfig.provider }, 'Social id_token missing email claim');
       return c.json({ code: 'UNAUTHORIZED', message: 'Provider did not share email' }, 401);
     }
-    // Apple sometimes emits email_verified as a string "true"/"false";
-    // coerce both shapes. Cast through unknown because the typed
-    // IdTokenClaims shape narrows to boolean but Apple's JSON can
-    // arrive as a string — the verifier preserves whatever was on
-    // the wire.
+    // Apple may emit email_verified as string; coerce both shapes
     const raw = claims['email_verified'] as unknown;
     const emailVerified = raw === true || raw === 'true';
     if (!emailVerified) {
@@ -169,22 +108,13 @@ export function makeSocialLoginHandler(providerConfig: SocialProviderConfig) {
         providerSub: claims.sub,
         email,
       });
-      // NS-09: stamp the user's current token_version (0 for a brand-new
-      // social signup) so the access token is revocable via logout /
-      // sign-out-all like the OTP path's.
+      // NS-09: stamp token_version for revocability
       const pair = await issueTokenPair({
         id: user.id,
         email: user.email,
         tokenVersion: user.tokenVersion,
       });
-      // Attributed-operator-traffic: fire-and-forget CTX customer
-      // provisioning (see native.ts verify-otp for rationale).
       enqueueCtxUserProvisioning(user);
-      // Include email so the client can persist the session without
-      // having to decode the Loop access JWT — mirrors what OTP users
-      // get back (they typed their email; social users never did).
-      // Strip `refreshJti` from the wire response — it's an internal
-      // rotation-chain field, not part of the client contract.
       return c.json({
         accessToken: pair.accessToken,
         refreshToken: pair.refreshToken,
@@ -197,19 +127,10 @@ export function makeSocialLoginHandler(providerConfig: SocialProviderConfig) {
   };
 }
 
-// ─── Per-provider wiring ──────────────────────────────────────────────────────
-
-/**
- * Google social-login handler. Accepts id_tokens from any of the
- * configured per-platform client IDs — the mobile apps and the web
- * bundle each have their own OAuth client.
- */
 export const googleSocialLoginHandler = makeSocialLoginHandler({
   provider: 'google',
   jwksUrl: 'https://www.googleapis.com/oauth2/v3/certs',
-  // A2-567: Google's documented `iss` values. The scheme-less form
-  // still ships from older SDKs and server-side verification guides
-  // explicitly list both — rejecting either breaks real users.
+  // A2-567: scheme-less iss still ships from older SDKs
   expectedIssuers: ['https://accounts.google.com', 'accounts.google.com'],
   resolveAudiences: () =>
     [
@@ -219,11 +140,6 @@ export const googleSocialLoginHandler = makeSocialLoginHandler({
     ].filter((v): v is string => typeof v === 'string' && v.length > 0),
 });
 
-/**
- * Apple Sign In handler. The service ID (web) or bundle id (native)
- * is the one audience we accept; Apple uses a single identifier
- * across platforms for a given app.
- */
 export const appleSocialLoginHandler = makeSocialLoginHandler({
   provider: 'apple',
   jwksUrl: 'https://appleid.apple.com/auth/keys',

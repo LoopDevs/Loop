@@ -1,27 +1,11 @@
-/**
- * Loop-order repository (ADR 052).
- *
- * Owns writes against the `orders` collection — a local mirror of a
- * CTX gift card plus Loop's commission log for it. The create handler
- * inserts the doc first (its uuid becomes the CTX
- * `operatorReference`), calls CTX, then records the CTX identifiers;
- * everything downstream (ws maintainer, mirror sweep) keys on either
- * the doc id or `ctxOrderId`.
- *
- * Money fields are integer minor units held as `number` in the store;
- * the create-path arguments still accept `bigint` (the zod layer
- * coerces to bigint) and are narrowed here at the boundary.
- */
+// Loop-order repository — ADR 052, A2-2003
 import { randomUUID } from 'node:crypto';
 import { db } from '../db/client.js';
 import type { OrderDoc } from '../db/types.js';
 
 export type Order = OrderDoc;
 
-// A2-2003 idempotency primitives (error type + pre-write lookup +
-// post-insert conflict resolver) live in `./repo-idempotency.ts`.
-// Re-exported here so the existing import paths used by
-// loop-handler.ts and the test suite keep resolving.
+// A2-2003 idempotency primitives live in `./repo-idempotency.ts`.
 import {
   IdempotentOrderConflictError,
   findOrderByIdempotencyKey,
@@ -34,7 +18,6 @@ export interface CreateOrderArgs {
   merchantId: string;
   faceValueMinor: bigint;
   currency: string;
-  /** Chain-qualified CTX payment currency the customer chose. */
   paymentCryptoCurrency: string;
   /**
    * A2-2003: optional client-supplied idempotency key. When set, the

@@ -1,28 +1,4 @@
-/**
- * `GET /api/orders/:id/barcode-image` — authed barcode-image proxy
- * (ADR 050).
- *
- * The reference-keyed sibling of `GET /api/image`: the client names the
- * order, the backend fetches the order from CTX with the caller's own
- * upstream bearer, extracts the barcode image URL CTX put on the
- * record, and proxies/re-encodes the image. The client never sees or
- * supplies the URL — the previous flow forwarded the raw CTX URL to the
- * client, which then bounced it through the unauthenticated URL-driven
- * proxy.
- *
- * Access control matches `GET /api/orders/:id` exactly (same R3-11
- * trust boundary): the route mounts under the `/api/orders/*`
- * `requireAuth` middleware, and CTX's bearer-scoping decides which
- * orders the caller can see — a foreign order id is a CTX 404.
- *
- * Output is always JPEG (`forceJpeg`): barcodes want an opaque white
- * quiet zone, and the client needs a statically known MIME type for the
- * blob it renders. `private, no-store` — this is redemption material.
- *
- * Barcode images only exist on the legacy CTX-proxy order path;
- * loop-native orders carry no barcode fields, so their ids simply 404
- * here (CTX doesn't know them).
- */
+// `GET /api/orders/:id/barcode-image` — authed barcode-image proxy (ADR 050)
 import type { Context } from 'hono';
 import { z } from 'zod';
 import { logger } from '../logger.js';
@@ -40,8 +16,6 @@ import { validateResolvedImageUrl } from '../images/ssrf-guard.js';
 
 const log = logger.child({ handler: 'orders-barcode-image' });
 
-// The handler only reads the barcode-image field, but the upstream body
-// is still Zod-validated at the trust boundary per repo convention.
 const UpstreamGiftCardRecord = z.record(z.string(), z.unknown());
 
 export async function orderBarcodeImageHandler(c: Context): Promise<Response> {
@@ -53,7 +27,6 @@ export async function orderBarcodeImageHandler(c: Context): Promise<Response> {
 
   const headers = await upstreamHeaders(c);
   if (headers === null) {
-    // Loop-native user with no CTX mapping: no CTX order can be theirs.
     return c.json({ code: 'NOT_FOUND', message: 'Order not found' }, 404);
   }
 

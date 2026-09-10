@@ -1,11 +1,4 @@
-/**
- * `containsFilter` — the document-store stand-in for SQL
- * `ILIKE '%term%'`, used by the admin search surfaces.
- *
- * The escaping is the point: the term comes from an operator's query
- * string, so an unescaped one would both match the wrong rows and hand
- * a caller the regex engine.
- */
+// `containsFilter` — document-store stand-in for SQL `ILIKE '%term%'`; escaping prevents regex injection from operator input
 import { describe, it, expect, beforeEach } from 'vitest';
 import { db, __resetDbForTests } from '../client.js';
 import { containsFilter, escapeRegex, matchesFilter } from '../store.js';

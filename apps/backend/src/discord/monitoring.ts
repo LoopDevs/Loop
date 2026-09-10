@@ -1,39 +1,4 @@
-/**
- * Monitoring-channel Discord notifiers — fires to
- * `config.observability.discord.monitoringWebhook`. Signals covering the
- * fleet-health surfaces operators watch for incidents:
- *
- *   - **Service health flap** — `notifyHealthChange`
- *     (healthy ↔ degraded transitions emitted by the /health
- *     handler's flap-damping window in `health.ts`).
- *   - **Stellar payouts** — `notifyPayoutFailed` (transition to
- *     `failed` with kind/reason for ops triage),
- *     `notifyUsdcBelowFloor` (operator USDC reserve dipped below
- *     the configured floor — procurement falls back to XLM).
- *   - **LOOP asset drift** — `notifyAssetDrift` /
- *     `notifyAssetDriftRecovered` (over→ok closes the incident
- *     so the channel reads as paired open + close events).
- *   - **Stuck-row sweepers** — `notifyStuckProcurementSwept`
- *     (A2-621 — `procuring` → `failed` per-row drilldown),
- *     `notifyPaymentWatcherStuck` (A2-626 — Horizon cursor age
- *     past stale-threshold), `notifyRedemptionBackfillExhausted`
- *     (redemption-backfill sweeper hit the attempts cap with the
- *     order still missing its redemption payload).
- *   - **Upstream contract** — `notifyCtxSchemaDrift` (A2-1915 —
- *     CTX response failed Zod validation against a recorded
- *     fixture; per-surface 10-minute dedup),
- *     `notifyOperatorPoolExhausted` (every operator in the pool
- *     unhealthy).
- *
- * Test seams (`__resetCtxSchemaDriftDedupForTests` /
- * `__resetUnrecognizedDepositDedupForTests`) wipe the per-process
- * dedup state so tests can exercise the throttles deterministically.
- *
- * Pulled out of `discord.ts` so the per-channel surfaces are
- * traceable to one file each. Shared infrastructure
- * (`sendWebhook`, `truncate`, `escapeMarkdown`, colour constants)
- * lives in `./shared.ts`.
- */
+// Monitoring-channel Discord notifiers (fleet health, payouts, reserve floor)
 import { config } from '../config/index.js';
 import {
   DESCRIPTION_MAX,
@@ -46,7 +11,6 @@ import {
   truncate,
 } from './shared.js';
 
-/** Notify: health status changed */
 export function notifyHealthChange(status: 'healthy' | 'degraded', details: string): void {
   void sendWebhook(config.observability.discord.monitoringWebhook, {
     title: status === 'healthy' ? '💚 Service Healthy' : '🟠 Service Degraded',
@@ -55,17 +19,7 @@ export function notifyHealthChange(status: 'healthy' | 'degraded', details: stri
   });
 }
 
-/**
- * Notify: the operator-provided GeoLite2-Country `.mmdb` is stale (built
- * more than `thresholdDays` ago) or configured-but-unopenable
- * (`buildEpoch: null` — bad path / unreadable file / a deploy that forgot
- * the BuildKit secrets). go-live-plan §T1-F: the fix is always the same —
- * redeploy with the two `--build-secret` flags (docs/deployment.md
- * §GeoLite2). This is a "remember to redeploy" nudge, not an incident, so
- * the call site (`health.ts`) throttles it to once per
- * `GEO_DB_NOTIFY_COOLDOWN_MS` (7 days) rather than firing on every
- * `/health` probe while the condition persists.
- */
+// go-live-plan §T1-F: throttled to once per 7 days at call site
 export function notifyGeoDbStale(args: {
   buildEpoch: string | null;
   ageDays: number | null;
@@ -92,16 +46,6 @@ export function notifyGeoDbStale(args: {
   });
 }
 
-/**
- * Notify: an outbound Stellar payout has transitioned to `failed`
- * (ADR 015/016). Pages the monitoring channel so ops sees it
- * real-time rather than discovering failed rows on the next
- * admin-treasury refresh. The `kind` (from PayoutSubmitError) tells
- * ops whether it's an ops-actionable issue (op_no_trust,
- * op_underfunded) or a retry-exhausted transient — the former
- * often needs the user to add a trustline, the latter is a cue to
- * check Horizon / operator reserves.
- */
 export function notifyPayoutFailed(args: {
   payoutId: string;
   userId: string;
@@ -153,20 +97,7 @@ export function notifyPayoutFailed(args: {
   });
 }
 
-/**
- * PAYOUT-HASHHISTORY: a re-submit tried to overwrite a payout's durable
- * tx-hash anchor with a DIFFERING hash, and `recordPayoutTxHash` refused —
- * the anchor (the link to the funds that first moved) was preserved and the
- * new hash appended to the `payout_tx_hashes` history. This is rare and
- * benign in the normal case (the prior tx provably expired before the
- * re-submit), but under deep Horizon ingestion lag the prior tx may have
- * actually LANDED while reading 404 past its timebound — in which case the
- * fresh submit is a potential DOUBLE-PAY. Page ops so they can reconcile
- * both hashes against Horizon via `payout_tx_hashes`.
- *
- * Not throttled: a genuine anchor-overwrite refusal is a money-integrity
- * event worth one page each; it fires at most once per re-submit attempt.
- */
+// PAYOUT-HASHHISTORY: potential double-pay if prior tx landed during Horizon lag
 export function notifyPayoutTxHashOverwriteRefused(args: {
   payoutId: string;
   userId: string;
@@ -193,17 +124,7 @@ export function notifyPayoutTxHashOverwriteRefused(args: {
   });
 }
 
-/**
- * Notify: a payout's destination account is missing the required
- * trustline (ADR 015 / ADR 016 §"trustline-probe before payout
- * submit"). The payout-worker holds the row in `pending` rather
- * than burning it on `op_no_trust`; ops is paged so the user can
- * be nudged to add the trustline.
- *
- * Throttled to once per (userId, assetCode) per process so a stuck
- * row that the worker re-probes every tick doesn't flood the
- * channel. Reset by `__resetAwaitingTrustlineDedupForTests`.
- */
+// Throttled to once per (userId, assetCode) per process
 const awaitingTrustlineFired = new Set<string>();
 export function __resetAwaitingTrustlineDedupForTests(): void {
   awaitingTrustlineFired.clear();
@@ -240,32 +161,7 @@ export function notifyPayoutAwaitingTrustline(args: {
   });
 }
 
-/**
- * Notify: operator USDC balance has dropped below the configured
- * floor (ADR 015). Procurement is now paying CTX in XLM until the
- * reserve is topped up. Ops needs to know because XLM is the
- * break-glass rail — we're burning the (smaller) XLM reserve to
- * keep orders flowing and the USDC pile isn't earning defindex
- * yield while it's empty.
- *
- * Throttled at the caller (once per `LOOP_BELOW_FLOOR_ALERT_INTERVAL_MS`
- * per process) — this function itself fires every time.
- */
-/**
- * Interest-pool depletion alert (ADR 009 / 015 forward-mint pool).
- *
- * Fires when the on-chain pool balance can cover fewer than the
- * configured minimum days of forecast daily interest. Operator's
- * action: mint the next batch into the pool before users would be
- * under-allocated.
- *
- * C10a: these are now PURE SENDERS — the low↔ok transition dedup moved
- * to `interest_pool_alert_state` (durable + fleet-consistent +
- * at-least-once). They return the `sendWebhook` promise so the watcher
- * only advances `last_paged_state` after delivery confirms. No
- * internal Set: a per-process Set made the recovery close drop
- * whenever a different machine handled it than had paged the low.
- */
+// C10a: PURE SENDERS — dedup moved to `interest_pool_alert_state`
 export function notifyInterestPoolLow(args: {
   assetCode: string;
   poolStroops: string;
@@ -299,10 +195,7 @@ export function notifyInterestPoolRecovered(args: {
   poolStroops: string;
   daysOfCover: number;
 }): Promise<boolean> {
-  // C10a: recovery is now driven by persisted state, so it can fire on
-  // a low→ok flip where daily interest has since dropped to 0 (cohort
-  // drained) → daysOfCover = +Infinity. Render that as "ample" rather
-  // than the literal "Infinity".
+  // C10a: recovery driven by persisted state; daysOfCover may be Infinity
   const coverText = Number.isFinite(args.daysOfCover) ? args.daysOfCover.toFixed(1) : 'ample';
   const coverField = Number.isFinite(args.daysOfCover) ? args.daysOfCover.toFixed(2) : 'ample';
   return sendWebhook(config.observability.discord.monitoringWebhook, {
@@ -320,17 +213,7 @@ export function notifyInterestPoolRecovered(args: {
   });
 }
 
-/**
- * A4-023: notify ops when an order's pinned `chargeCurrency`
- * diverges from the user's `homeCurrency` at fulfillment time.
- * The cashback ledger row still writes (off-chain liability is
- * the source of truth, ADR-009) but the on-chain LOOP-asset
- * payout is skipped — the 1:1 peg is broken until ops manually
- * issues the on-chain payout in the right currency. Fires once
- * per affected order; the operator decides whether to manually
- * compensate, change the user's home currency back, or accept
- * the divergence.
- */
+// A4-023: on-chain payout skipped due to currency divergence
 export function notifyPegBreakOnFulfillment(args: {
   orderId: string;
   userId: string;
@@ -355,17 +238,7 @@ export function notifyPegBreakOnFulfillment(args: {
   });
 }
 
-/**
- * Notify: the off-chain ledger invariant is violated (hardening C1;
- * ADR 009). `user_credits.balance_minor` no longer equals
- * `SUM(credit_transactions.amount_minor)` for at least one
- * (user, currency) pair — a writer desynced the mirror or the DB was
- * hand-edited; either way the money ledger cannot be trusted until
- * explained. Fired by the ledger-invariant watcher every tick
- * (default daily) WHILE the drift persists — deliberately no
- * transition dedup: an unresolved ledger-integrity incident should
- * re-page daily, not go quiet after one message.
- */
+// C1: no transition dedup — re-pages daily while drift persists
 export function notifyLedgerDrift(args: {
   driftCount: number;
   /** True when the query limit was hit — the real count may be higher. */
@@ -396,10 +269,6 @@ export function notifyLedgerDrift(args: {
   });
 }
 
-// `notifyAssetDrift` and `notifyAssetDriftRecovered` (the paired
-// open-and-close drift-watcher notifiers, ADR 015) live in
-// `./monitoring-asset-drift.ts`. Re-exported below so existing
-// import sites resolve unchanged.
 export {
   notifyAssetDrift,
   notifyAssetDriftRecovered,
@@ -407,11 +276,6 @@ export {
   notifyDriftFailedRowsCleared,
 } from './monitoring-asset-drift.js';
 
-// `notifyVaultShareDrift` / `notifyVaultShareDriftRecovered` /
-// `notifyVaultSolvencyBreach` / `notifyVaultSolvencyRecovered` (the
-// paired open-and-close vault-drift-watcher notifiers, ADR 031 §D4,
-// V5) live in `./monitoring-vault-drift.ts`. Re-exported below so
-// existing import sites resolve unchanged.
 export {
   notifyVaultShareDrift,
   notifyVaultShareDriftRecovered,
@@ -420,48 +284,25 @@ export {
   notifyVaultFloatDesync,
 } from './monitoring-vault-drift.js';
 
-// `notifyHotFloatBackingShortfall` (NS-06) — the pager for the hot-float
-// USDC-BACKING reconciler (`treasury/hot-float-backing-reconciliation.ts`),
-// the balance twin of `notifyVaultFloatDesync`. Lives in its own leaf
-// module; re-exported so existing import sites resolve unchanged.
 export {
   notifyHotFloatBackingShortfall,
   type HotFloatBackingShortfallArgs,
 } from './monitoring-hot-float-backing.js';
 
-// `notifyCtxSchemaDrift` (A2-1915) and its per-surface dedup state
-// live in `./monitoring-ctx-schema-drift.ts`. Re-exported below
-// alongside `__resetCtxSchemaDriftDedupForTests` so existing import
-// sites keep resolving against `discord/monitoring.ts`.
 export {
   notifyCtxSchemaDrift,
   __resetCtxSchemaDriftDedupForTests,
 } from './monitoring-ctx-schema-drift.js';
 
-/**
- * CF-13 (single-key form): dedup so a rejected API key doesn't flood
- * `#monitoring` with one alert per request while it keeps returning
- * 401. 10-minute window matches the CTX-schema-drift dedup
- * cadence — long enough to stay quiet during
- * a sustained outage, short enough that "still rejected" fires within
- * an ops rotation.
- */
+// CF-13: 10-minute dedup window
 const CTX_CREDENTIAL_DEDUP_MS = 10 * 60 * 1000;
 let ctxCredentialLastNotified = 0;
 
-/** Test helper — reset the credential-alert dedup window. */
 export function __resetCtxCredentialDedupForTests(): void {
   ctxCredentialLastNotified = 0;
 }
 
-/**
- * Notify: CTX returned 401 — the operator API key was rejected
- * (revoked, rotated on the CTX side, or misconfigured). ADR 051:
- * Loop authenticates with a single API key, so this is a full outage
- * of every CTX call until `ctx.credentials` is restored. `ctxFetch` has already forced the upstream breaker
- * OPEN so procurement defers (orders stay retryable) instead of
- * failing paid orders. 10-minute dedup.
- */
+// ADR 051: full outage of CTX calls until credentials restored
 export function notifyCtxCredentialInvalid(): void {
   const now = Date.now();
   if (now - ctxCredentialLastNotified < CTX_CREDENTIAL_DEDUP_MS) {
@@ -478,9 +319,6 @@ export function notifyCtxCredentialInvalid(): void {
   });
 }
 
-// The sweeper/backfill/vault/wallet stuck-row notifiers live in
-// `./monitoring-stuck-sweepers.ts`. Re-exported here so existing
-// import sites keep resolving.
 export {
   notifyRedemptionBackfillExhausted,
   notifyStuckPayouts,
@@ -491,14 +329,7 @@ export {
   notifyWalletProvisioningStuck,
 } from './monitoring-stuck-sweepers.js';
 
-/**
- * Notify: ADR 045 (B-3) duplicate-account signal — a fresh
- * `fraud_signals` row (first occurrence of this user pair, never a
- * re-page for an already-known pair; see
- * `fraud/duplicate-account-signals.ts`). Flag only — this is ops
- * visibility, not an automated account action; nothing about either
- * user's ability to transact changes because of this page.
- */
+// ADR 045 (B-3): flag only, no automated account action
 export function notifyDuplicateAccountSignal(args: {
   userId: string;
   relatedUserId: string;

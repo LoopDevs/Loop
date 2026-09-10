@@ -1,19 +1,4 @@
-/**
- * `/api/admin/users*` route mounts — the user-360 surface.
- *
- * Reads ride the namespace's `requireStaff('support')` blanket:
- * ADR 037 §3 makes the read views shared, because support cannot do
- * the find-explain-unstick job without being able to look the customer
- * up. The three writes are admin-tier, and two of them are deliberate
- * exemptions from the step-up gate — see each mount.
- *
- * Mount order is the contract: Hono resolves in registration order, so
- * every literal path (`/search`, `/by-email`) has to register before
- * `/:userId` or the literal gets captured as a uuid param.
- *
- * Called from `mountAdminRoutes` after the namespace middleware stack
- * is in place.
- */
+// /api/admin/users* route mounts — ADR 037 §3, ADR 015, A5-3
 import type { Hono } from 'hono';
 import { rateLimit } from '../middleware/rate-limit.js';
 import { requireStaff } from '../auth/require-staff.js';
@@ -27,7 +12,7 @@ import { adminHomeCurrencySetHandler } from '../admin/home-currency-set.js';
 import { adminRevokeUserSessionsHandler } from '../auth/revoke-sessions-handler.js';
 
 export function mountAdminUserRoutes(app: Hono): void {
-  // ─── Literal paths, before the /:userId param ─────────────────────
+  // Hono resolves in registration order; literals must precede /:userId
   app.get(
     '/api/admin/users/search',
     rateLimit('GET /api/admin/users/search', 60, 60_000),
@@ -40,7 +25,6 @@ export function mountAdminUserRoutes(app: Hono): void {
   );
   app.get('/api/admin/users', rateLimit('GET /api/admin/users', 60, 60_000), adminListUsersHandler);
 
-  // ─── Per-user drills ──────────────────────────────────────────────
   app.get(
     '/api/admin/users/:userId',
     rateLimit('GET /api/admin/users/:userId', 60, 60_000),
@@ -52,28 +36,21 @@ export function mountAdminUserRoutes(app: Hono): void {
     adminUserAuthStateHandler,
   );
 
-  // ─── Writes ───────────────────────────────────────────────────────
-  // B4 incident response. Admin-tier but NOT step-up gated: it moves
-  // no value, the user simply signs back in, and step-up friction in
-  // the first minute of "their laptop was stolen" is the wrong trade.
+  // B4 incident response; no step-up to avoid friction during immediate recovery
   app.post(
     '/api/admin/users/:userId/revoke-sessions',
     rateLimit('POST /api/admin/users/:userId/revoke-sessions', 20, 60_000),
     requireStaff('admin'),
     adminRevokeUserSessionsHandler,
   );
-  // A5-3. Admin-tier and NOT step-up gated for the same reason as
-  // revoke-sessions — clearing the counter grants no access by itself.
-  // Its own per-target velocity cap is what bounds abuse here; see the
-  // handler.
+  // A5-3; no step-up as clearing counter grants no access; handler enforces velocity cap
   app.post(
     '/api/admin/users/:userId/clear-otp-lockout',
     rateLimit('POST /api/admin/users/:userId/clear-otp-lockout', 20, 60_000),
     requireStaff('admin'),
     adminClearOtpLockoutHandler,
   );
-  // ADR 015. Step-up gated: it re-denominates what the customer is
-  // quoted and charged.
+  // ADR 015; step-up gated because it re-denominates customer charges
   app.post(
     '/api/admin/users/:userId/home-currency',
     rateLimit('POST /api/admin/users/:userId/home-currency', 10, 60_000),

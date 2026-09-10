@@ -2,26 +2,9 @@ import { describe, it, expect, vi } from 'vitest';
 import type * as ConfigModule from '../config/index.js';
 import type { Context } from 'hono';
 
-/**
- * A2-1526 / FT-08 — companion file to `trust-proxy.test.ts`. This one
- * mocks `config.server.trustProxy = true` at module-load and verifies that the
- * bucket-selection logic keys on the spoof-proof `Fly-Client-IP`
- * header under Fly deployments — and specifically that a client-
- * supplied `X-Forwarded-For` can NOT influence the bucket. Without
- * both flavours of test, a regression that silently inverted the flag
- * (or reverted to trusting leftmost XFF) would only surface the wrong
- * half of the behaviour.
- *
- * FT-08 threat model: Fly's edge *appends* the real peer to
- * `X-Forwarded-For`, so the leftmost XFF entry is whatever the client
- * sent. Trusting it let an attacker rotate their bucket at will and
- * pin a victim's IP into the request-otp bucket to force the OTP
- * lockout. `Fly-Client-IP` is written by the edge and unforgeable, so
- * the limiter keys on that instead.
- */
+// A2-1526 / FT-08 — Fly edge appends real peer to XFF, so leftmost XFF is client-controlled.
+// Key on unforgeable Fly-Client-IP to prevent bucket rotation and OTP lockout pinning.
 
-// Only `server.trustProxy` is under test — everything else the import
-// chain reads comes from the real (test-fixture) config.
 vi.mock('../config/index.js', async (importActual) => {
   const actual = await importActual<typeof ConfigModule>();
   return {
@@ -88,9 +71,6 @@ describe('clientIpFor — TRUST_PROXY=true (A2-1526 / FT-08)', () => {
   });
 
   it('IGNORES a spoofed X-Forwarded-For — Fly-Client-IP wins (FT-08 core defense)', () => {
-    // Attacker sends `X-Forwarded-For: <victim-or-rotating-ip>`; Fly appends
-    // the real peer and sets Fly-Client-IP. The limiter must bucket on the
-    // unforgeable Fly-Client-IP, never the client-supplied XFF.
     const ctx = makeCtx({
       xForwardedFor: '1.2.3.4',
       flyClientIp: '203.0.113.7',
@@ -101,8 +81,6 @@ describe('clientIpFor — TRUST_PROXY=true (A2-1526 / FT-08)', () => {
   });
 
   it('does NOT fall back to X-Forwarded-For when Fly-Client-IP is absent — uses the socket peer', () => {
-    // No Fly-Client-IP (non-Fly path / internal call). A spoofable XFF is
-    // present but must be ignored; we key on the TCP socket instead.
     const ctx = makeCtx({
       xForwardedFor: '1.2.3.4',
       socketAddress: '10.0.0.1',
@@ -125,9 +103,6 @@ describe('clientIpFor — TRUST_PROXY=true (A2-1526 / FT-08)', () => {
   });
 
   it('an attacker rotating X-Forwarded-For maps to the SAME bucket (spoof cannot fan out)', () => {
-    // Same real peer (Fly-Client-IP), two different forged XFF values → one
-    // bucket. Under the old leftmost-XFF logic these would have been two
-    // buckets, defeating the per-IP limit.
     const a = clientIpFor(
       makeCtx({ xForwardedFor: '1.2.3.4', flyClientIp: '203.0.113.7', socketAddress: '10.0.0.1' }),
     );

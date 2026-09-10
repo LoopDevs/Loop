@@ -1,32 +1,17 @@
-/**
- * Merchant-sync interval-loop bootstrap (ADR 011).
- *
- * Lifted out of `./sync.ts` so the periodic-refresh timer
- * (start/stop) lives separately from the request-time refresh
- * logic. Mirrors the pattern used by the procurement worker
- * (`procurement-worker.ts`), the asset-drift watcher's interval
- * loop, and the pending-payouts state-transition split — request-
- * time work in the primary file, scheduling concerns alongside.
- *
- * Re-exported from `./sync.ts` so existing import sites (`index.ts`,
- * graceful shutdown) keep resolving against the historical path.
- */
+// Merchant-sync interval-loop bootstrap — ADR 011
 import { logger } from '../logger.js';
 import { getMerchants, refreshMerchants, warmStartMerchantsFromSnapshot } from './sync.js';
 
 const log = logger.child({ module: 'merchants-sync' });
 
-/**
- * Fixed hourly sweep — deliberately NOT configurable. The sweep is only
- * the fallback reconciler behind the ws maintainer (./ws-maintainer.ts),
- * so a cadence knob would be dead config; one full catalog request per
- * hour is negligible load either way.
- */
+// Fixed hourly sweep — deliberately NOT configurable. The sweep is only
+// the fallback reconciler behind the ws maintainer (./ws-maintainer.ts),
+// so a cadence knob would be dead config; one full catalog request per
+// hour is negligible load either way.
 export const MERCHANT_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
 
 let refreshInterval: NodeJS.Timeout | null = null;
 
-/** Starts the background refresh timer. Call once at startup. */
 export async function startMerchantRefresh(): Promise<void> {
   await warmStartMerchantsFromSnapshot();
   void refreshMerchants();
@@ -45,7 +30,6 @@ export async function startMerchantRefresh(): Promise<void> {
   }, intervalMs);
 }
 
-/** Stops the background refresh timer. Intended for graceful shutdown. */
 export function stopMerchantRefresh(): void {
   if (refreshInterval !== null) {
     clearInterval(refreshInterval);

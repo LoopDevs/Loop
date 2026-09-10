@@ -2,20 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type * as ConfigModule from '../config/index.js';
 import { Hono } from 'hono';
 
-/**
- * AUDIT-2-E — coverage for the defense-in-depth gate on the
- * `/__test__/*` surface (`test-endpoints.ts`).
- *
- * Before this fix, the ONLY thing standing between an unauthenticated
- * caller and `/__test__/mint-loop-token` (which mints a full session
- * token pair for any allowlisted email with zero credential check)
- * was a single `config.env === 'test'` string compare at the
- * `app.ts` call site. This suite drives `mountTestEndpoints` directly
- * against a bare Hono app (not the full `app.ts` import graph) with a
- * mutable config mock, so each case can flip `env` /
- * `testing.endpointsSecret` independently and assert the router's
- * own belt-and-suspenders checks — not just the app.ts call site.
- */
+// AUDIT-2-E — drives mountTestEndpoints directly to verify the router's own secret gate, independent of app.ts call-site checks.
 
 const { configState } = vi.hoisted(() => ({
   configState: {

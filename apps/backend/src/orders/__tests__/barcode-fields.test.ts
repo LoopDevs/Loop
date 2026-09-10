@@ -31,10 +31,7 @@ describe('applyBarcodeFields', () => {
   });
 
   it('ignores field names CTX does not return', () => {
-    // The extractor reads `number` / `pin` / `barcodeUrl` and nothing
-    // else. A CTX rename has to fail loudly here — a visibly empty
-    // extraction in the ops log — rather than be absorbed by a
-    // speculative fallback list that keeps working until it doesn't.
+    // No fallback list — a CTX rename must fail loudly in the ops log rather than be silently absorbed.
     const order: Record<string, unknown> = {};
     applyBarcodeFields({
       upstream: {

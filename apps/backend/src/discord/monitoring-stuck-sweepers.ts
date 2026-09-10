@@ -1,19 +1,4 @@
-/**
- * `notifyStuckProcurementSwept` (A2-621) and
- * `notifyPaymentWatcherStuck` (A2-626) — the two stuck-row
- * sweeper notifiers.
- *
- * Lifted out of `apps/backend/src/discord/monitoring.ts` because
- * both notifiers cover the same concern: a worker has noticed that
- * a row that *should* have advanced past a transient state hasn't,
- * and ops needs the per-row drill-down so they can reconcile (in
- * the procurement case) or restart the watcher (in the cursor
- * case).
- *
- * Re-exported through `discord/monitoring.ts` (and by extension
- * the top-level `discord.ts` barrel) so existing import sites
- * keep working unchanged.
- */
+// stuck-row sweeper notifiers — A2-621, A2-626, ADR 031, ADR 030
 import { config } from '../config/index.js';
 import {
   DESCRIPTION_MAX,
@@ -24,22 +9,6 @@ import {
   truncate,
 } from './shared.js';
 
-/**
- * Redemption-backfill exhaustion (comprehensive audit 2026-06-11
- * §redemption follow-up): a `fulfilled` order has had its CTX
- * gift-card detail re-fetched `attempts` times by the backfill
- * sweeper and STILL carries no redeem code / PIN / URL. The user
- * paid and the order fulfilled, but there is nothing to show on the
- * "Ready" screen — ops must reconcile against CTX support with the
- * supplier-side order id.
- *
- * Per-row (not aggregated) for the same reason as
- * `notifyStuckProcurementSwept`: exhaustion is rare and each row
- * needs its own CTX-side investigation. Loop-side ids follow the
- * A2-1314 last-8 convention; `ctxOrderId` is emitted in full because
- * it is the supplier's id (not Loop PII) and is exactly what the CTX
- * support ticket needs.
- */
 export function notifyRedemptionBackfillExhausted(args: {
   orderId: string;
   userId: string;
@@ -75,15 +44,7 @@ export function notifyRedemptionBackfillExhausted(args: {
   });
 }
 
-/**
- * Stuck-payout backlog alert. Fired once per incident by
- * `stuck-payout-watchdog.ts`, whose fired/re-arm dedup lives in
- * `watchdog_alert_state` (S4-8 follow-up).
- *
- * PURE SENDER (same contract as `notifyPaymentWatcherStuck` above):
- * returns the `sendWebhook` promise so the watchdog only persists
- * `alert_active=true` after delivery confirms — at-least-once.
- */
+// returns promise so watchdog persists alert_active only after delivery confirms
 export function notifyStuckPayouts(args: {
   rowCount: number;
   thresholdMinutes: number;
@@ -120,23 +81,7 @@ export function notifyStuckPayouts(args: {
   });
 }
 
-/**
- * ADR 031 V3 (money-review #1647 P1-2a): a vault cashback emission
- * reached the terminal `failed` state (mirror step failed
- * `VAULT_EMISSION_MAX_ATTEMPTS` times, or a step kept erroring). The
- * user's cashback for this order is stuck — neither the on-chain
- * share transfer NOR the off-chain mirror credit is guaranteed
- * complete, and the row is NOT auto-retried. Ops must inspect the
- * row's `last_error` + tx hashes and reconcile (the admin re-drive
- * endpoint is a V5 follow-up).
- *
- * Per-row (not aggregated) like `notifyStuckProcurementSwept` — a
- * terminal vault emission is rare and each needs individual
- * investigation. Fire-and-forget void (not the pure-sender shape):
- * this fires INLINE from `recordStepFailure` on the terminal
- * transition, not from a fire-once watchdog, so there's no
- * `watchdog_alert_state` delivery-confirmation contract to honour.
- */
+// ADR 031 V3: terminal failed state, no auto-retry
 export function notifyVaultEmissionFailed(args: {
   vaultEmissionId: string;
   orderId: string;
@@ -176,31 +121,7 @@ export function notifyVaultEmissionFailed(args: {
   });
 }
 
-/**
- * ADR 031 V3 (money-review #1647 P1-2b): one or more vault emissions
- * have sat in a non-terminal in-flight state
- * (`depositing`/`deposited`/`transferred`) past the watchdog window —
- * the sweep isn't making progress on them (worker down, Soroban RPC
- * unreachable, operator-account sequence contention, …). Distinct
- * from `notifyVaultEmissionFailed` (which fires on a row that reached
- * terminal `failed`): this catches rows that are STUCK without having
- * exhausted their attempts, which `failed`-paging alone would never
- * surface.
- *
- * PURE SENDER (same contract as `notifyStuckPayouts` / `notifyPaymentWatcherStuck`):
- * returns the `sendWebhook` promise so `vault-emission-stuck-watchdog`
- * only persists `alert_active=true` after delivery confirms —
- * at-least-once per incident, fleet-wide.
- */
-/**
- * ADR 031 V4 — the withdraw/redeem twin of `notifyVaultEmissionFailed`:
- * a vault-share redemption (`credits/vaults/vault-redemptions.ts`)
- * reached the terminal `failed` state. Either the user's shares were
- * never collected, or they were collected but the payout/mirror never
- * landed — ops must inspect the row's `last_error` + tx hashes and
- * reconcile (no admin re-drive endpoint ships in V4, same known gap
- * as the emission side).
- */
+// ADR 031 V4: terminal failed state for vault-share redemption
 export function notifyVaultRedemptionFailed(args: {
   vaultRedemptionId: string;
   sourceType: string;
@@ -241,13 +162,7 @@ export function notifyVaultRedemptionFailed(args: {
   });
 }
 
-/**
- * ADR 031 V4 — the withdraw/redeem twin of `notifyVaultEmissionsStuck`:
- * one or more vault redemptions have sat in a non-terminal in-flight
- * state (`collecting`/`redeemed`) past the watchdog window. PURE
- * SENDER (same contract as its siblings) so the watchdog only persists
- * `alert_active=true` after delivery confirms.
- */
+// ADR 031 V4: stuck in-flight redemptions
 export function notifyVaultRedemptionsStuck(args: {
   rowCount: number;
   thresholdMinutes: number;
@@ -285,6 +200,7 @@ export function notifyVaultRedemptionsStuck(args: {
   });
 }
 
+// ADR 031 V3: stuck in-flight emissions
 export function notifyVaultEmissionsStuck(args: {
   rowCount: number;
   thresholdMinutes: number;
@@ -320,19 +236,7 @@ export function notifyVaultEmissionsStuck(args: {
   });
 }
 
-/**
- * Wallet-provisioning exhaustion (ADR 030 Phase C1): a user's
- * embedded-wallet provisioning has failed `attempts` consecutive
- * drives (provider createWallet, sponsored activation submit, or
- * Horizon reads) and the sweeper has stopped retrying. The user can
- * still browse + buy — only on-chain payouts wait on the wallet —
- * but cashback emission for them is parked until ops intervenes.
- *
- * Per-row for the same reason as the redemption-backfill alert:
- * exhaustion is rare and each row needs its own investigation
- * (Privy dashboard state, operator account funding, Horizon health).
- * Runbook: docs/runbooks/wallet-provisioning-stuck.md.
- */
+// ADR 030 Phase C1: wallet provisioning exhaustion
 export function notifyWalletProvisioningStuck(args: {
   userId: string;
   walletId: string | null;

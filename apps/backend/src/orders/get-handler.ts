@@ -1,34 +1,4 @@
-/**
- * `GET /api/orders/:id` handler — single-order detail proxy.
- *
- * Lifted out of `apps/backend/src/orders/handler.ts`. Validates
- * the orderId path param, proxies to upstream
- * `/gift-cards/:id`, validates the response with Zod, and shapes
- * the row into the Loop OrderDetail contract — including the
- * barcode + redeem-URL extraction logic that fires once on the
- * first observed `completed` status, plus the
- * `notifyOrderFulfilled` Discord ping which is dedup\'d via
- * the bounded `notifiedFulfilled` set so repeated polls of the
- * same order don\'t spam the channel.
- *
- * Helpers shared with the create/list handlers
- * (`summariseZodIssues`, `upstreamHeaders`, `mapStatus`) are
- * imported from `./handler.ts` so all three handlers stay in
- * lockstep on schema/header/status conventions.
- *
- * TRUST BOUNDARY (R3-11): this handler does no local ownership check —
- * it fetches whatever order the upstream bearer token is authorized to
- * see. IDOR defense is delegated entirely to CTX's bearer-scoping (the
- * upstream only returns orders belonging to the token's account) plus
- * `orderId` being an unguessable UUID; there is no Loop-side
- * `eq(orders.userId, ...)` filter to bypass. Contrast the loop-native
- * path (`orders/loop-read-handlers.ts`), which pins
- * `and(eq(orders.id, id), eq(orders.userId, auth.userId))` locally.
- * This is a deliberate accepted-risk trust boundary, not an oversight —
- * see docs/threat-model.md ("Accepted risks") and ADR-039
- * (docs/adr/039-legacy-order-path-retirement.md), which retires this
- * whole path once its criteria are met.
- */
+// GET /api/orders/:id — single-order detail proxy — ADR-039, R3-11
 import type { Context } from 'hono';
 import { z } from 'zod';
 import { logger } from '../logger.js';
@@ -40,8 +10,7 @@ import { applyBarcodeFields } from './barcode-fields.js';
 
 const log = logger.child({ handler: 'orders' });
 
-// Upstream response schema for `/gift-cards/:id`. A2-1706: exported
-// so the contract test can parse recorded fixtures through it.
+// A2-1706
 export const GetOrderUpstreamResponse = z
   .object({
     id: z.string(),
@@ -56,10 +25,7 @@ export const GetOrderUpstreamResponse = z
     redeemType: z.string().optional(),
     redeemUrl: z.string().optional(),
     redeemUrlChallenge: z.string().optional(),
-    // CF-02: cap the CTX-supplied inject/scrape scripts at the trust boundary.
-    // These run in the merchant redemption WebView, so bound their size here
-    // (100KB is generous for a real auto-fill/scrape snippet) rather than
-    // forward an unbounded blob from upstream to the client.
+    // CF-02: cap CTX-supplied scripts at trust boundary (run in merchant WebView)
     redeemScripts: z
       .object({
         injectChallenge: z.string().max(100_000).optional(),
@@ -70,13 +36,7 @@ export const GetOrderUpstreamResponse = z
   })
   .passthrough();
 
-/**
- * Parses a money string from upstream. Returns 0 only for missing/
- * empty values. Throws on a non-numeric string so the single-order
- * handler never silently treats corrupt data as $0. The list handler
- * has its own list-safe variant (`parseMoneyOrNull`) that keeps one
- * bad row from 500-ing the whole page.
- */
+// Throws on non-numeric to prevent silent $0 treatment of corrupt data
 function parseMoney(raw: string | undefined): number {
   if (raw === undefined || raw === '') return 0;
   const n = parseFloat(raw);
@@ -86,13 +46,6 @@ function parseMoney(raw: string | undefined): number {
   return n;
 }
 
-/**
- * Tracks which order ids we\'ve already Discord-notified as fulfilled,
- * so repeated PaymentStep / orders-page polls of a completed order
- * don\'t spam the channel. Keyed on `orderId` alone (status is
- * implicit: entry exists iff we\'ve notified). Bounded so a holder
- * of a valid bearer can\'t exhaust memory by polling synthetic ids.
- */
 const notifiedFulfilled = new Set<string>();
 const NOTIFIED_FULFILLED_MAX = 10_000;
 
@@ -104,23 +57,16 @@ function markFulfilledNotified(orderId: string): void {
   notifiedFulfilled.add(orderId);
 }
 
-/**
- * GET /api/orders/:id
- * Authenticated. Proxies to upstream GET /gift-cards/:id.
- */
 export async function getOrderHandler(c: Context): Promise<Response> {
-  // bearerToken + clientId handled by upstreamHeaders(c)
   const orderId = c.req.param('id') ?? '';
 
-  // Sanitize order ID — reject path traversal or non-alphanumeric/dash/underscore
   if (!/^[\w-]+$/.test(orderId)) {
     return c.json({ code: 'VALIDATION_ERROR', message: 'Invalid order ID' }, 400);
   }
 
   const headers = await upstreamHeaders(c);
   if (headers === null) {
-    // Loop-native user with no CTX mapping yet: the order can't belong
-    // to a CTX identity we can name, so it's not found for them.
+    // Loop-native user with no CTX mapping: order cannot belong to a CTX identity
     return c.json({ code: 'NOT_FOUND', message: 'Order not found' }, 404);
   }
 
@@ -165,14 +111,6 @@ export async function getOrderHandler(c: Context): Promise<Response> {
     const amount = parseMoney(validated.data.cardFiatAmount);
     const currency = validated.data.cardFiatCurrency ?? 'USD';
 
-    // Diagnostic: on every completed order, log the raw CTX response's
-    // key set + redeemType value so we can see what the upstream
-    // actually returns. PaymentStep only transitions out of "waiting"
-    // when it finds (a) redeemUrl + redeemChallengeCode, (b)
-    // giftCardCode, or (c) an error. If none of those are populated
-    // here, the user sees the "details unavailable" failure branch —
-    // these logs tell us which field mapping is missing. Dedup'd
-    // against `notifiedFulfilled` so we only log once per order.
     if (status === 'completed' && !notifiedFulfilled.has(validated.data.id)) {
       log.info(
         {
@@ -200,7 +138,6 @@ export async function getOrderHandler(c: Context): Promise<Response> {
       createdAt: validated.data.created,
     };
 
-    // Add redemption fields based on type
     if (validated.data.redeemUrl) {
       order.redeemUrl = validated.data.redeemUrl;
     }
@@ -211,13 +148,7 @@ export async function getOrderHandler(c: Context): Promise<Response> {
       order.redeemScripts = validated.data.redeemScripts;
     }
 
-    // ADR-005 §2 — barcode merchants: extract card `number` + `pin`
-    // + image URL from the same `/gift-cards/{id}` response (CTX
-    // populates them via passthrough once fulfilmentStatus flips to
-    // completed). The frontend's PurchaseComplete renders the code +
-    // jsbarcode canvas whenever `giftCardCode` is present, so once
-    // we populate it here the barcode-merchant flow completes
-    // end-to-end. Lives in `./barcode-fields.ts`.
+    // ADR-005 §2
     if (status === 'completed' && validated.data.redeemType === 'barcode') {
       applyBarcodeFields({
         upstream: validated.data as unknown as Record<string, unknown>,
@@ -227,12 +158,6 @@ export async function getOrderHandler(c: Context): Promise<Response> {
       });
     }
 
-    // Wire up the fulfilled-order Discord notification. This handler is
-    // the only place that sees upstream status transitions — PaymentStep
-    // polls here every 3s during a purchase, so the first poll after
-    // CTX flips to `fulfilled` is the right fire-once hook. A bounded
-    // in-memory set prevents repeated notifications for the same order
-    // on subsequent polls or a returning user refreshing orders.
     if (status === 'completed' && !notifiedFulfilled.has(validated.data.id)) {
       markFulfilledNotified(validated.data.id);
       notifyOrderFulfilled({

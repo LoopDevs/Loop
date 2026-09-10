@@ -12,12 +12,7 @@ import {
   purgeDeadRefreshTokens,
 } from '../refresh-tokens.js';
 
-/**
- * Refresh-token repository (ADR 013), against the real in-memory
- * document store — the live-row predicate, the rotation CAS, the
- * COR-11 lineage preservation, and the retention sweep all run for
- * real.
- */
+// refresh-token repository tests — ADR 013, COR-11, NS-09, A2-1608
 beforeEach(() => {
   __resetDbForTests();
 });
@@ -125,7 +120,6 @@ describe('revokeRefreshToken', () => {
   });
 
   it('COR-11: does NOT write replacedByJti when omitted — preserves rotation-chain lineage', async () => {
-    // An already-rotated row carrying its successor link.
     await recordRefreshToken({ jti: 'jti-1', userId: 'u-1', token: 't', expiresAt: FUTURE });
     await revokeRefreshToken({ jti: 'jti-1', replacedByJti: 'jti-successor' });
     // Logout revokes by jti with no successor. The update must leave
@@ -133,7 +127,6 @@ describe('revokeRefreshToken', () => {
     await revokeRefreshToken({ jti: 'jti-1' });
     const row = await db.collection('refresh_tokens').findOne({ jti: 'jti-1' });
     expect(row?.replacedByJti).toBe('jti-successor');
-    // Still a genuine revoke: the terminal marker + last-used stamp.
     expect(row?.revokedAt).toBeInstanceOf(Date);
     expect(row?.lastUsedAt).toBeInstanceOf(Date);
   });
@@ -205,7 +198,6 @@ describe('revokeAllRefreshTokensForUser', () => {
     await seedUser('user-uuid');
     await recordRefreshToken({ jti: 'jti-1', userId: 'user-uuid', token: 'a', expiresAt: FUTURE });
     await recordRefreshToken({ jti: 'jti-2', userId: 'user-uuid', token: 'b', expiresAt: FUTURE });
-    // Another user's session must survive.
     await recordRefreshToken({ jti: 'jti-x', userId: 'other-user', token: 'c', expiresAt: FUTURE });
 
     await revokeAllRefreshTokensForUser('user-uuid');
@@ -226,14 +218,12 @@ describe('purgeDeadRefreshTokens', () => {
   const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
   it('reaps long-expired and long-revoked rows, returning the count', async () => {
-    // Dead row 1: expired past the grace.
     await recordRefreshToken({
       jti: 'jti-dead-1',
       userId: 'u-1',
       token: 'a',
       expiresAt: new Date(NOW.getTime() - RETENTION_MS - 1000),
     });
-    // Dead row 2: revoked past the grace (expiry still ahead).
     await recordRefreshToken({
       jti: 'jti-dead-2',
       userId: 'u-1',
@@ -244,7 +234,6 @@ describe('purgeDeadRefreshTokens', () => {
       jti: 'jti-dead-2',
       now: new Date(NOW.getTime() - RETENTION_MS - 1000),
     });
-    // Live row: neither expired nor revoked — never touched.
     await recordRefreshToken({
       jti: 'jti-live',
       userId: 'u-1',

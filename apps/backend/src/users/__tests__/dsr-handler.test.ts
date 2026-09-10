@@ -1,32 +1,14 @@
-/**
- * Handler-layer tests for `dsrExportHandler` + `dsrDeleteHandler`
- * (A2-1905 / A2-1906). These complement the helper-layer tests in
- * `dsr-export.test.ts` + `dsr-delete.test.ts` which exercise the
- * underlying anonymisation + export logic; this file covers the
- * thin wrapper that sits in front (auth resolution, status mapping,
- * the 401 / 404 / 409 / 500 envelopes, and the Content-Disposition
- * header on the export download).
- *
- * Closes the per-file coverage gap on `dsr-handler.ts` (was 3% per
- * the `npm run test:coverage` snapshot — every wrapper branch was
- * untested).
- */
+// handler-layer tests for dsrExportHandler + dsrDeleteHandler — A2-1905, A2-1906
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Context } from 'hono';
 import type { LoopAuthContext } from '../../auth/handler.js';
 
 const state = vi.hoisted(() => ({
-  /** When false, `c.get('auth')` returns undefined → 401 path. */
   authPresent: true,
-  /** When false, `getUserById` returns null → 401 path. */
   userPresent: true,
-  /** When set, `getUserById` throws → 500 path on auth-resolve. */
   authResolveError: null as Error | null,
-  /** Return value (or null) of buildDsrExport. */
   exportPayload: { schemaVersion: 1 as const } as Record<string, unknown> | null,
-  /** When set, buildDsrExport throws → 500 path. */
   exportError: null as Error | null,
-  /** Result for deleteUserViaAnonymisation. */
   deleteResult: { ok: true } as
     | { ok: true }
     | {
@@ -37,7 +19,6 @@ const state = vi.hoisted(() => ({
           | 'failed_uncompensated_withdrawals'
           | 'non_zero_credit_balance';
       },
-  /** When set, deleteUserViaAnonymisation throws → 500 path. */
   deleteError: null as Error | null,
 }));
 
@@ -123,9 +104,6 @@ describe('dsrExportHandler', () => {
   });
 
   it('401s when the bearer is loop-shaped but the user row is missing', async () => {
-    // `resolveLoopAuthenticatedUser` returns null when getUserById
-    // returns null — the wrapper treats that as 401, same as no
-    // auth context.
     state.userPresent = false;
     const res = await dsrExportHandler(makeCtx());
     expect(res.status).toBe(401);

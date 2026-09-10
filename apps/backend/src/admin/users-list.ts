@@ -1,15 +1,4 @@
-/**
- * Admin user list (paginated).
- *
- * `GET /api/admin/users` — newest-first page of Loop users, optionally
- * filtered by an email fragment (`?q=`). Complements the exact drill
- * at `/api/admin/users/:userId`: this is the browse surface for the
- * admin panel's user directory, where `users/search` is the
- * type-ahead.
- *
- * Cursor pagination on `createdAt`: `?before=<iso>` returns rows
- * strictly older. Limit clamps 1..100, default 20.
- */
+// Admin user list (paginated)
 import type { Context } from 'hono';
 import { db } from '../db/client.js';
 import { containsFilter } from '../db/store.js';

@@ -2,11 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type * as ConfigModule from '../config/index.js';
 import type { Context } from 'hono';
 
-/**
- * `/health` had zero test coverage before this file. Added alongside
- * CF2-01 (2026-06-30 cold audit) to protect the CTX-upstream
- * exposure, and to close the pre-existing gap while touching this file.
- */
+// /health coverage — CF2-01
 
 const {
   locationsState,
@@ -33,9 +29,7 @@ const {
   },
   dbState: { shouldFail: false },
   ctxApiHealthMock: vi.fn(() => ({ configured: true, state: 'closed' })),
-  // Defaults mirror the "unconfigured" GeoDbStatus (public/geo.ts) —
-  // most tests don't care about geo staleness, so the baseline must not
-  // spuriously soft-degrade / page.
+  // Baseline must not spuriously soft-degrade / page
   geoDbState: {
     available: false,
     buildEpoch: null as string | null,
@@ -43,9 +37,7 @@ const {
     stale: false,
   },
   notifyGeoDbStaleMock: vi.fn(),
-  // S4-4: default mirrors the "static fallback" posture — most tests
-  // don't care about the fleet-size source, so the baseline must not
-  // spuriously imply a live DNS read is in effect.
+  // S4-4: baseline must not spuriously imply a live DNS read is in effect
   fleetSizeState: { estimate: 1, source: 'static' as 'dynamic' | 'static' },
 }));
 
@@ -67,13 +59,7 @@ vi.mock('../discord.js', () => ({
   notifyGeoDbStale: notifyGeoDbStaleMock,
 }));
 
-// CONV-WATCH-02: the health-change page is now routed through the
-// fleet-wide `watchdog_alert_state` dedup gate instead of a per-process
-// notify cooldown. Mock the gate so a transition doesn't touch the DB;
-// the tests assert the gate is invoked with the fleet-wide key/state.
-// (The real gate + real `watchdog_alert_state` persistence/dedup/re-arm
-// is covered end-to-end by
-// `__tests__/integration/health-change-dedup.test.ts`.)
+// CONV-WATCH-02: gate mocked so transition doesn't touch DB; end-to-end covered in __tests__/integration/health-change-dedup.test.ts
 const applyBinaryWatchdogAlertMock = vi.hoisted(() =>
   vi.fn<
     (args: {
@@ -88,9 +74,7 @@ vi.mock('../discord/watchdog-alert.js', () => ({
   applyBinaryWatchdogAlert: applyBinaryWatchdogAlertMock,
 }));
 
-// Spy on the raw webhook send so the DB-down fallback (a direct,
-// un-deduped send when the gate throws) is observable. Colours/truncate
-// stay real via `...actual`.
+// Spy on raw webhook send to observe DB-down fallback (un-deduped send when gate throws)
 const sendWebhookSpy = vi.hoisted(() => vi.fn(async () => true));
 vi.mock('../discord/shared.js', async (importActual) => {
   const actual = (await importActual()) as Record<string, unknown>;
@@ -112,9 +96,7 @@ vi.mock('../upstream.js', async (importOriginal) => ({
   upstreamUrl: (path: string) => `https://upstream.example.com${path}`,
 }));
 
-// `probeDb` does a cheap `db.collection('users').count({})`. Stub at
-// that shape so `dbState.shouldFail` can drive the unreachable branch
-// without standing up a store.
+// Stub db.collection('users').count({}) so dbState.shouldFail drives unreachable branch without a store
 vi.mock('../db/client.js', () => ({
   db: {
     collection: () => ({
@@ -177,20 +159,11 @@ beforeEach(() => {
   __resetDbProbeCacheForTests();
 });
 
-/**
- * Drives `/health` from a fresh (seeded-healthy) state through a
- * critical (DB-down) rolling window until it flips healthy→degraded,
- * which is the ONLY path that fires a health-change page. The DB probe
- * caches for 10s, so its cache is cleared before each degraded probe so
- * the toggled `dbState` is actually observed.
- */
+// DB probe caches for 10s; cache cleared before each degraded probe so toggled dbState is observed
 async function driveHealthTransitionToDegraded(): Promise<void> {
-  // Seed one healthy reading → lastHealthStatus becomes 'healthy'.
   dbState.shouldFail = false;
   __resetDbProbeCacheForTests();
   await healthHandler(makeCtx().ctx);
-  // 5 of 10 degraded readings flips healthy→degraded (the file's
-  // HEALTH_FLIP_TO_DEGRADED_THRESHOLD). DB unreachable = critical.
   dbState.shouldFail = true;
   for (let i = 0; i < 5; i++) {
     __resetDbProbeCacheForTests();
@@ -225,13 +198,7 @@ describe('healthHandler', () => {
     expect(body.databaseReachable).toBe(false);
   });
 
-  // CONV-WATCH-02: a shared-dependency outage (e.g. DB down) flips every
-  // machine to critical. The page must be routed through the fleet-wide
-  // `watchdog_alert_state` dedup gate so it fires ONCE fleet-wide, not
-  // once per machine. This pins that the health-change page goes through
-  // the gate (keyed 'health-change', shouldBeActive on degraded) rather
-  // than the old per-process notify. Pre-fix this path called
-  // `notifyHealthChange` directly and never touched the gate.
+  // CONV-WATCH-02: page must route through fleet-wide dedup gate, not per-process notify
   describe('health-change fleet dedup (CONV-WATCH-02)', () => {
     it('routes the healthy→degraded page through the fleet-wide dedup gate', async () => {
       await driveHealthTransitionToDegraded();
@@ -244,17 +211,13 @@ describe('healthHandler', () => {
     it('passes the gate a delivery-confirming degraded notifier (fleet at-least-once contract)', async () => {
       await driveHealthTransitionToDegraded();
       const arg = applyBinaryWatchdogAlertMock.mock.calls[0]![0];
-      // Both branches must be async delivery-reporting closures — the
-      // gate latches alert_active only on a confirmed (true) delivery.
+      // Gate latches alert_active only on confirmed (true) delivery
       expect(typeof arg.notifyActive).toBe('function');
       expect(typeof arg.notifyRecovered).toBe('function');
       await expect(arg.notifyActive()).resolves.toEqual(expect.any(Boolean));
     });
 
-    // The dedup gate READS the DB, but a DB outage is itself the critical
-    // incident. If the gate throws (DB down), the page must NOT be
-    // dropped — fall back to a direct un-deduped send so the incident
-    // still surfaces on the monitoring channel.
+    // If gate throws (DB down), page must not be dropped — fall back to direct un-deduped send
     it('falls back to a direct send when the dedup gate throws (DB-down incident still pages)', async () => {
       applyBinaryWatchdogAlertMock.mockRejectedValue(new Error('db unreachable'));
       await driveHealthTransitionToDegraded();
@@ -264,12 +227,7 @@ describe('healthHandler', () => {
     });
   });
 
-  // `getCtxApiHealth()` reports constants now that the CTX-upstream
-  // breaker it used to read is gone, so `ctxApiDown` can no longer
-  // become true. What's left to pin is that the fields the shared
-  // `TreasurySnapshot` type and the admin UI read are still present
-  // and still report healthy. Live CTX reachability is covered by the
-  // `upstreamReachable` probe cases elsewhere in this file.
+  // ctxApiDown can no longer become true; pins fields read by TreasurySnapshot and admin UI
   describe('CTX upstream exposure', () => {
     it('surfaces the credential state in the response body', async () => {
       const { ctx } = makeCtx();
@@ -294,12 +252,7 @@ describe('healthHandler', () => {
     expect(headers.get('Cache-Control')).toBe('no-store');
   });
 
-  // S4-4: purely informational exposure of the rate limiter's current
-  // fleet-size divisor (middleware/fleet-size.ts) — mirrors the
-  // geoDbStale/geoDbBuildEpoch shape added in PR #1588. Neither field
-  // affects softDegraded/criticalDegraded/status; these tests pin that
-  // as well as the plumbing from the (mocked) estimator through to the
-  // response body.
+  // S4-4: informational exposure of rate limiter fleet-size divisor; neither field affects status
   describe('rate limit fleet estimate', () => {
     it('reports the dynamic estimate + source when a live DNS read is in effect', async () => {
       fleetSizeState.estimate = 4;
@@ -349,13 +302,9 @@ describe('healthHandler', () => {
     });
   });
 
-  // go-live-plan §T1-F: GeoLite2 staleness/absence signal. Pins the
-  // three-way distinction in `GeoDbStatus.stale` (public/geo.ts) —
-  // "unconfigured" must read as healthy/quiet, "stale" and
-  // "configured-but-unopenable" must both soft-degrade + eventually page.
+  // go-live-plan §T1-F: GeoLite2 staleness/absence signal
   describe('geo db staleness', () => {
     it('does not soft-degrade when MAXMIND_GEOLITE2_PATH was never configured', async () => {
-      // geoDbState defaults to the "unconfigured" shape (see beforeEach).
       const { ctx } = makeCtx();
       const res = await healthHandler(ctx);
       expect(res.status).toBe(200);
@@ -425,9 +374,7 @@ describe('healthHandler', () => {
         thresholdDays: 45,
       });
 
-      // Condition still persists on the very next probe — cooldown
-      // withholds the repage so a sustained "forgot to redeploy" state
-      // doesn't spam the channel every request.
+      // Cooldown withholds repage so sustained state doesn't spam channel
       const second = makeCtx();
       await healthHandler(second.ctx);
       expect(notifyGeoDbStaleMock).toHaveBeenCalledTimes(1);
@@ -446,20 +393,7 @@ describe('healthHandler', () => {
   });
 });
 
-// BK-healthrecon: /health leaked a full operational snapshot (per-operator
-// breaker states, internal worker names + degradation, the fleet machine
-// count, raw OTP-delivery error strings, DB/upstream reachability) to any
-// unauthenticated internet caller. The fix gates that detail behind the same
-// ops-probe bearer that already guards /metrics: external callers get only a
-// minimal ok/degraded liveness signal (which is all Fly / CI probes read),
-// authenticated ops callers still get the full snapshot.
-//
-// These run through a fresh module graph with `env: production` + a
-// configured `observability.metrics.bearerToken` so the probe gate is
-// CLOSED for a caller with no bearer — the real production posture. (In
-// the default test config the token is unset and the gate stays open,
-// which is why the suite above still sees the full body.) Same
-// resetModules + doMock isolation the email/otp suites use.
+// BK-healthrecon: /health leaked operational snapshot to unauthenticated callers; fix gates detail behind ops-probe bearer
 describe('BK-healthrecon: probe-gated /health body', () => {
   const TOKEN = 'a'.repeat(32);
 

@@ -1,25 +1,4 @@
-/**
- * `/api/public/*` route mounts. Pulled out of `app.ts` as the
- * first per-domain route module — small (6 reads), no auth, no
- * cross-namespace mount-order dependencies, so a clean probe for
- * the larger route-module split.
- *
- * Every endpoint here follows the ADR 020 "public surface"
- * discipline:
- * - Unauthenticated — backs landing pages + pre-signup widgets
- *   that have no user context yet.
- * - Never-500 — the handlers fall back to a stale snapshot or a
- *   safe-empty payload rather than 5xx, so a backend hiccup
- *   doesn't blank the marketing page.
- * - Cache-Control set on the handler — the matching CDN respects
- *   the per-handler TTL so origin load stays low.
- * - 60/min per-IP rate limit on every endpoint — generous for a
- *   landing-page widget that renders once per visit.
- *
- * The `Hono` instance is passed in so the mount factory can be
- * called from `app.ts` at the right point in the middleware
- * chain (after global middleware, before authenticated routes).
- */
+// no auth — ADR 020
 import type { Hono } from 'hono';
 import { rateLimit } from '../middleware/rate-limit.js';
 import { publicCashbackStatsHandler } from '../public/cashback-stats.js';
@@ -29,63 +8,27 @@ import { publicMerchantHandler } from '../public/merchant.js';
 import { publicRumHandler } from '../public/rum.js';
 import { publicTopCashbackMerchantsHandler } from '../public/top-cashback-merchants.js';
 
-/**
- * Mounts all `/api/public/*` routes on the supplied Hono app.
- * Idempotent on a fresh app, but mounting twice on the same app
- * would double-register — caller is expected to invoke once.
- */
 export function mountPublicRoutes(app: Hono): void {
-  // Public, unauthenticated, marketing-facing cashback totals.
-  // 60/min per IP is generous for a landing-page widget that
-  // renders once per visit; edge-cache respects the handler's
-  // Cache-Control so real origin load will be much lower.
   app.get(
     '/api/public/cashback-stats',
     rateLimit('GET /api/public/cashback-stats', 60, 60_000),
     publicCashbackStatsHandler,
   );
-
-  // Best-guess region from the caller's IP to seed the region selector (ADR 033).
-  // Never-500: returns the US default when the GeoLite2 DB is absent or the lookup fails.
   app.get('/api/public/geo', rateLimit('GET /api/public/geo', 60, 60_000), publicGeoHandler);
-
-  // Public, unauthenticated, CDN-friendly "best cashback" list for
-  // the landing page. Same never-500 + Cache-Control discipline as
-  // the cashback-stats endpoint (ADR 020).
   app.get(
     '/api/public/top-cashback-merchants',
     rateLimit('GET /api/public/top-cashback-merchants', 60, 60_000),
     publicTopCashbackMerchantsHandler,
   );
-
-  // Per-merchant unauthenticated detail (#647) — backs the SEO
-  // landing pages at /cashback/:merchant-slug. Accepts merchant
-  // id OR slug so SSR can pass whichever form is on the URL.
-  // Same never-500 / cache-control discipline as the other
-  // public endpoints (ADR 020).
   app.get(
     '/api/public/merchants/:id',
     rateLimit('GET /api/public/merchants/:id', 60, 60_000),
     publicMerchantHandler,
   );
-
-  // Pre-signup "calculate your cashback" preview. Same never-500 +
-  // Cache-Control discipline as the other public endpoints (ADR
-  // 020). Accepts ?merchantId (id or slug) + ?amountMinor (integer
-  // minor units) and returns the projected cashback amount using
-  // the same floor-rounded math as the order-insert path, so the
-  // preview never promises more than the user will actually earn.
   app.get(
     '/api/public/cashback-preview',
     rateLimit('GET /api/public/cashback-preview', 60, 60_000),
     publicCashbackPreviewHandler,
   );
-
-  // First-party, cookieless RUM intake (ADR 048). Folds Core Web
-  // Vitals + a page-view marker into /metrics; no DB, no PII, no
-  // persistent id. 60/min per IP matches every other public endpoint
-  // — the client (apps/web app/utils/analytics-lazy.ts) fires at most
-  // ~6 events per page load (5 vitals + 1 page-view), well under
-  // budget for real traffic.
   app.post('/api/public/rum', rateLimit('POST /api/public/rum', 60, 60_000), publicRumHandler);
 }

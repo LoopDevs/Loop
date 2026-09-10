@@ -9,7 +9,6 @@ const { configState } = vi.hoisted(() => ({
       baseUrl: 'http://test',
       credentials: { key: 'test-key', secret: 'test-secret' },
     },
-    // Per-test mutable: the denylist tests push slugs in here.
     merchantDenylist: [] as string[],
   },
 }));
@@ -61,11 +60,8 @@ import {
   warmStartMerchantsFromSnapshot,
 } from '../sync.js';
 
-// --- Mock fetch globally ---
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
-
-// --- Helpers to build upstream API responses ---
 
 interface FakeUpstreamMerchant {
   id: string;
@@ -112,7 +108,6 @@ describe('refreshMerchants', () => {
   });
 
   it('fetches all pages and populates the merchant store', async () => {
-    // Page 1 of 2
     mockFetch.mockResolvedValueOnce(
       upstreamResponse(
         [
@@ -129,7 +124,6 @@ describe('refreshMerchants', () => {
       ),
     );
 
-    // Page 2 of 2
     mockFetch.mockResolvedValueOnce(
       upstreamResponse(
         [
@@ -158,10 +152,8 @@ describe('refreshMerchants', () => {
     expect(second.name).toBe('Target');
     expect(second.savingsPercentage).toBe(5.0);
 
-    // Verify both pages were fetched
     expect(mockFetch).toHaveBeenCalledTimes(2);
 
-    // Verify lookup maps are populated
     expect(store.merchantsById.get('merchant-1')?.name).toBe('Home Depot');
     expect(store.merchantsBySlug.get('home-depot')?.id).toBe('merchant-1');
     expect(store.merchantsBySlug.get('target')?.id).toBe('merchant-2');
@@ -228,7 +220,6 @@ describe('refreshMerchants', () => {
   });
 
   it('retains previous data when upstream returns an error', async () => {
-    // First: seed the store with a successful refresh
     mockFetch.mockResolvedValueOnce(
       upstreamResponse(
         [
@@ -245,11 +236,9 @@ describe('refreshMerchants', () => {
     await refreshMerchants();
     expect(getMerchants().merchants).toHaveLength(1);
 
-    // Second: upstream returns 500
     mockFetch.mockResolvedValueOnce(new Response('Internal Server Error', { status: 500 }));
     await refreshMerchants();
 
-    // Store should still have the previous data
     const store = getMerchants();
     expect(store.merchants).toHaveLength(1);
     expect(store.merchants[0]!.id).toBe('merchant-existing');
@@ -344,14 +333,12 @@ describe('refreshMerchants', () => {
   });
 
   it('prevents concurrent refreshes via isMerchantRefreshing guard', async () => {
-    // Create a fetch that we can manually control to keep the first refresh "in flight"
     let resolveFirst!: (value: Response) => void;
     const firstFetchPromise = new Promise<Response>((resolve) => {
       resolveFirst = resolve;
     });
     mockFetch.mockReturnValueOnce(firstFetchPromise);
 
-    // Also prepare a response for the second call in case the guard fails
     mockFetch.mockResolvedValueOnce(
       upstreamResponse(
         [
@@ -366,19 +353,14 @@ describe('refreshMerchants', () => {
       ),
     );
 
-    // Start the first refresh (will be stuck waiting on the fetch)
     const firstRefresh = refreshMerchants();
 
-    // Immediately start a second refresh — should be skipped by the guard
     const secondRefresh = refreshMerchants();
 
-    // Second refresh should return immediately (no-op)
     await secondRefresh;
 
-    // Fetch should only have been called once (the first refresh's fetch)
     expect(mockFetch).toHaveBeenCalledTimes(1);
 
-    // Now resolve the first fetch so it completes
     resolveFirst(
       upstreamResponse(
         [
@@ -395,7 +377,6 @@ describe('refreshMerchants', () => {
 
     await firstRefresh;
 
-    // Store should only contain the first call's merchant
     const store = getMerchants();
     expect(store.merchants).toHaveLength(1);
     expect(store.merchants[0]!.id).toBe('first-call');
@@ -409,9 +390,6 @@ describe('refreshMerchants', () => {
     await refreshMerchants();
 
     const store = getMerchants();
-    // Failure retains previous data — since tests share module state, this
-    // check is weak but the key thing is no throw propagated and no
-    // malformed data was admitted to the store.
     expect(Array.isArray(store.merchants)).toBe(true);
   });
 
@@ -422,8 +400,8 @@ describe('refreshMerchants', () => {
           pagination: { page: 1, pages: 1, perPage: 100, total: 3 },
           result: [
             { id: 'good-1', name: 'Good One', enabled: true },
-            { id: '', name: 'Missing ID', enabled: true }, // rejected
-            { name: 'No ID Field', enabled: true }, // rejected
+            { id: '', name: 'Missing ID', enabled: true },
+            { name: 'No ID Field', enabled: true },
             { id: 'good-2', name: 'Good Two', enabled: true },
           ],
         }),
@@ -451,7 +429,6 @@ describe('refreshMerchants', () => {
       ),
     );
 
-    // Disabled merchants are filtered out entirely.
     await refreshMerchants();
     expect(getMerchants().merchants.find((m) => m.id === 'm-disabled')).toBeUndefined();
   });
@@ -472,7 +449,6 @@ describe('refreshMerchants', () => {
                 savingsPercentage: 400,
                 link: { userDiscountBasisPoints: 750, userDiscountOverride: true },
               },
-              // Globally enabled but link-disabled for this operator.
               { id: 'm-link-off', name: 'Link Off', enabled: true, status: 'disabled' },
             ],
           }),
@@ -482,7 +458,6 @@ describe('refreshMerchants', () => {
 
       await refreshMerchants();
 
-      // The operator creds ride the catalog request.
       const [, init] = mockFetch.mock.calls[0]!;
       expect((init as RequestInit).headers).toMatchObject({
         'X-Api-Key': 'op-key',
@@ -490,16 +465,13 @@ describe('refreshMerchants', () => {
       });
 
       const store = getMerchants();
-      // Per-link user-discount override beats the merchant default.
       expect(store.merchantsById.get('m-linked')?.savingsPercentage).toBe(7.5);
-      // Effective status is authoritative over the global flag.
       expect(store.merchantsById.has('m-link-off')).toBe(false);
     } finally {
       configState.ctx.credentials = { key: 'test-key', secret: 'test-secret' };
     }
   });
 
-  // A2-1922: denylist filter
   describe('catalog.merchantDenylist (A2-1922)', () => {
     it('drops denylisted merchants from the catalog before they enter the store', async () => {
       configState.merchantDenylist = ['merchant-2', 'merchant-3'];
@@ -566,9 +538,6 @@ describe('refreshMerchants', () => {
     });
   });
 
-  // Country-aware slug index (feat/country-aware-merchant-slug). The
-  // by-slug map keys off merchantSlug(merchant) — CTX slug, else
-  // brand+country — so regional variants of one brand no longer collide.
   describe('country-aware merchantsBySlug', () => {
     it('gives same-brand-different-country merchants distinct slugs (no collision)', async () => {
       mockFetch.mockResolvedValueOnce(
@@ -588,9 +557,7 @@ describe('refreshMerchants', () => {
       expect(merchantsBySlug.get('adidas-ca')?.id).toBe('adidas-ca-id');
       expect(merchantsBySlug.get('adidas-us')?.id).toBe('adidas-us-id');
       expect(merchantsBySlug.get('adidas-gb')?.id).toBe('adidas-gb-id');
-      // No bare-brand collision — all three reachable, none clobbered.
       expect(merchantsBySlug.get('adidas')).toBeUndefined();
-      // ...and the collision warn does NOT fire for distinct (brand, country).
       expect(warnSpy).not.toHaveBeenCalled();
     });
 
@@ -613,10 +580,8 @@ describe('refreshMerchants', () => {
 
       await refreshMerchants();
       const { merchantsBySlug, merchantsById } = getMerchants();
-      // CTX slug wins — not the derived `nike-canada-ca`.
       expect(merchantsBySlug.get('nike-ca')?.id).toBe('nike-ca-id');
       expect(merchantsBySlug.get('nike-canada-ca')).toBeUndefined();
-      // The CTX slug is carried onto the Merchant record.
       expect(merchantsById.get('nike-ca-id')?.slug).toBe('nike-ca');
     });
 
@@ -624,7 +589,6 @@ describe('refreshMerchants', () => {
       mockFetch.mockResolvedValueOnce(
         upstreamResponse(
           [
-            // Old name form (country token still in the name), no CTX slug.
             { id: 'puma-ca-id', name: 'Puma Canada', country: 'CA', enabled: true },
             { id: 'puma-us-id', name: 'Puma', country: 'US', enabled: true },
           ],
@@ -654,7 +618,6 @@ describe('refreshMerchants', () => {
 
       await refreshMerchants();
       const { merchantsBySlug } = getMerchants();
-      // Last-write-wins on a true collision; the warn fires for the operator.
       expect(merchantsBySlug.get('lastminute-gb')?.id).toBe('lastminute-2');
       expect(warnSpy).toHaveBeenCalledTimes(1);
       expect(warnSpy.mock.calls[0]![0]).toMatchObject({
@@ -674,7 +637,6 @@ describe('ws-event store maintenance (applyMerchantUpsert / applyMerchantRemoval
     snapshotState.next = null;
     __resetMerchantStoreForTests();
     cancelPendingSnapshotPersist();
-    // Seed a three-merchant store through the normal sweep path.
     mockFetch.mockResolvedValueOnce(
       upstreamResponse(
         [
@@ -696,7 +658,6 @@ describe('ws-event store maintenance (applyMerchantUpsert / applyMerchantRemoval
     expect(store.merchants.map((m) => m.id)).toEqual(['m-1', 'm-2', 'm-3']);
     expect(store.merchantsById.get('m-2')?.name).toBe('Beta Updated');
     expect(store.merchantsBySlug.get('beta-updated')?.id).toBe('m-2');
-    // The old slug no longer resolves.
     expect(store.merchantsBySlug.has('beta')).toBe(false);
   });
 
@@ -729,10 +690,10 @@ describe('ws-event store maintenance (applyMerchantUpsert / applyMerchantRemoval
       applyMerchantUpsert({ id: 'm-1', name: 'Alpha 2', enabled: true });
       applyMerchantUpsert({ id: 'm-2', name: 'Beta 2', enabled: true });
       applyMerchantRemoval('m-3');
-      expect(snapshotState.saved).toHaveLength(1); // only the seed sweep's save
+      expect(snapshotState.saved).toHaveLength(1);
 
       await vi.advanceTimersByTimeAsync(31_000);
-      expect(snapshotState.saved).toHaveLength(2); // one coalesced event save
+      expect(snapshotState.saved).toHaveLength(2);
       expect(
         (snapshotState.saved[1]!.items as Array<{ id: string }>).map((m) => m.id).sort(),
       ).toEqual(['m-1', 'm-2']);

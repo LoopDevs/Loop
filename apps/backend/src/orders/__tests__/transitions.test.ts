@@ -1,11 +1,4 @@
-/**
- * Mirror-transition writer tests (ADR 052), against the real
- * in-memory document store. The writers are guarded single-doc
- * updates ("still in state X" predicates in the filter) — with the
- * real store both halves are pinned here: the $set payloads
- * (including the at-rest encryption of redemption secrets) AND the
- * guard membership / update-vs-null return contract.
- */
+// Mirror-transition writer tests (ADR 052)
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type * as ConfigModule from '../../config/index.js';
 import { randomUUID } from 'node:crypto';

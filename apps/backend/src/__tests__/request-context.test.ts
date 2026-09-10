@@ -41,7 +41,6 @@ describe('runWithRequestContext / getCurrentRequestId', () => {
     ]);
     expect(seen).toContain('a:a');
     expect(seen).toContain('b:b');
-    // No cross-contamination
     expect(seen).not.toContain('a:b');
     expect(seen).not.toContain('b:a');
   });

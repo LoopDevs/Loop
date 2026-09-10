@@ -2,24 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import type * as ConfigModule from '../config/index.js';
 import type { Context } from 'hono';
 
-/**
- * A2-1526 — end-to-end coverage of the `TRUST_PROXY` rate-limit
- * trust boundary. The audit flagged this as a defense that was never
- * exercised by a test: an attacker spoofing `X-Forwarded-For` against
- * a deployment where `TRUST_PROXY=false` (single-machine or non-Fly
- * setup) would rotate their per-IP bucket on every request and slip
- * past the rate limiter. If the env flag ever flipped or the
- * `clientIpFor` predicate regressed, no test would catch it.
- *
- * Two test files cover the two env modes (each mocks `config.server.trustProxy`
- * at module-load time):
- *   - trust-proxy.test.ts — TRUST_PROXY=false (this file)
- *   - trust-proxy-trusted.test.ts — TRUST_PROXY=true (sibling file)
- *
- * Both files drive the exported `clientIpFor(c)` directly with
- * synthetic Hono contexts — end-to-end enough to cover the branch
- * logic, fast enough to run in the unit suite.
- */
+// A2-1526 — TRUST_PROXY=false: spoofed X-Forwarded-For must not rotate per-IP buckets
 
 // Only `server.trustProxy` is under test — everything else the import
 // chain reads comes from the real (test-fixture) config.
@@ -86,21 +69,17 @@ describe('clientIpFor — TRUST_PROXY=false (A2-1526)', () => {
       xForwardedFor: '1.2.3.4',
       socketAddress: '10.0.0.1',
     });
-    // Defense: the spoofed XFF is present, but the socket address wins.
     expect(clientIpFor(ctx)).toBe('10.0.0.1');
   });
 
   it('falls back to `unknown` when the socket address is unavailable (dev/test harness)', () => {
     const ctx = makeCtx({ xForwardedFor: '1.2.3.4' });
-    // conninfo throws (no incoming.socket); XFF is ignored → all clients
-    // share the `'unknown'` bucket. Conservative by design.
     expect(clientIpFor(ctx)).toBe('unknown');
   });
 
   it('two requests with DIFFERENT X-Forwarded-For values map to the SAME bucket', () => {
     const a = clientIpFor(makeCtx({ xForwardedFor: '1.2.3.4', socketAddress: '10.0.0.1' }));
     const b = clientIpFor(makeCtx({ xForwardedFor: '5.6.7.8', socketAddress: '10.0.0.1' }));
-    // Both clients resolve to the socket IP — rate-limit budget shared.
     expect(a).toBe('10.0.0.1');
     expect(b).toBe('10.0.0.1');
     expect(a).toBe(b);

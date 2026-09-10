@@ -1,15 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type * as ConfigModule from '../config/index.js';
 
-/**
- * S4-4 (docs/readiness-backlog-2026-07-03.md): unit coverage for the
- * dynamic fleet-size estimator that feeds the rate limiter's
- * machine-count divisor. Companion to `rate-limit.test.ts`, which
- * covers the divisor being *applied*; this file covers the divisor
- * being *computed* — fresh DNS reads, failure/grace-period handling,
- * clamping, the FLY_APP_NAME-unset fallback, and the background
- * interval's lifecycle (including that it's `.unref()`'d).
- */
+// S4-4: unit coverage for the dynamic fleet-size estimator
 
 // `FLY_APP_NAME` is deliberately NOT part of the config file — Fly
 // injects it into the machine, so `fleet-size.ts` reads it straight
@@ -91,7 +83,7 @@ describe('refreshFleetSize', () => {
     delete process.env['FLY_APP_NAME'];
     await refreshFleetSize();
     expect(resolve6Mock).not.toHaveBeenCalled();
-    expect(currentFleetSizeEstimate()).toBe(2); // static fallback
+    expect(currentFleetSizeEstimate()).toBe(2);
     expect(currentFleetSizeSource()).toBe('static');
   });
 
@@ -122,8 +114,6 @@ describe('refreshFleetSize', () => {
     process.env['FLY_APP_NAME'] = 'loopfinance-api';
     resolve6Mock.mockResolvedValue([]);
     await refreshFleetSize();
-    // No prior dynamic value, so this must fall back to static rather
-    // than caching a bogus 0/clamped-to-1 "success".
     expect(currentFleetSizeSource()).toBe('static');
     expect(currentFleetSizeEstimate()).toBe(2);
   });
@@ -143,11 +133,10 @@ describe('grace-period fallback behaviour', () => {
 
   it('keeps the last-good dynamic estimate on a subsequent DNS failure within the grace period', async () => {
     process.env['FLY_APP_NAME'] = 'loopfinance-api';
-    resolve6Mock.mockResolvedValue(['a', 'b', 'c', 'd']); // 4 machines
+    resolve6Mock.mockResolvedValue(['a', 'b', 'c', 'd']);
     await refreshFleetSize();
     expect(currentFleetSizeEstimate()).toBe(4);
 
-    // Advance well within the grace period and fail the next refresh.
     vi.setSystemTime(new Date(Date.now() + FLEET_SIZE_STALE_GRACE_MS - 30_000));
     resolve6Mock.mockRejectedValue(new Error('timeout'));
     await refreshFleetSize();
@@ -158,11 +147,10 @@ describe('grace-period fallback behaviour', () => {
 
   it('reverts to the static fallback once the grace period elapses without a successful refresh', async () => {
     process.env['FLY_APP_NAME'] = 'loopfinance-api';
-    resolve6Mock.mockResolvedValue(['a', 'b', 'c', 'd']); // 4 machines
+    resolve6Mock.mockResolvedValue(['a', 'b', 'c', 'd']);
     await refreshFleetSize();
     expect(currentFleetSizeEstimate()).toBe(4);
 
-    // Advance PAST the grace period without ever succeeding again.
     vi.setSystemTime(new Date(Date.now() + FLEET_SIZE_STALE_GRACE_MS + 1));
 
     expect(currentFleetSizeSource()).toBe('static');
@@ -170,11 +158,6 @@ describe('grace-period fallback behaviour', () => {
   });
 
   it('never serves a value looser than the static estimate once stale — reverts down, not up', async () => {
-    // Dynamic estimate is lower than static (fleet shrank to 1,
-    // static configured for 2). After it goes stale, we must NOT
-    // keep serving the smaller (tighter) dynamic value forever nor
-    // jump to something looser — the fallback is exactly the
-    // documented static estimate.
     process.env['FLY_APP_NAME'] = 'loopfinance-api';
     resolve6Mock.mockResolvedValue(['a']);
     await refreshFleetSize();
@@ -193,24 +176,14 @@ describe('rapid scale-up bias (CF2-10)', () => {
   });
 
   it('holds the recent high-water fleet size through a transient trough so the divisor never briefly undercounts a scaling fleet', async () => {
-    // Fleet is large.
     resolve6Mock.mockResolvedValue(Array.from({ length: 10 }, (_, i) => `fdaa:1::${i}`));
     await refreshFleetSize();
     expect(currentFleetSizeEstimate()).toBe(10);
 
-    // A single refresh (one tick later, well within the bias window)
-    // happens to sample a trough of 1 — an autoscale dip, or the tick
-    // landing between a scale-down and the spike that follows. Serving
-    // this latest value directly would drop the divisor to 1 and hand
-    // every machine the full global budget: the under-throttle CF2-10
-    // exists to prevent.
     vi.setSystemTime(new Date(Date.now() + FLEET_SIZE_REFRESH_MS));
     resolve6Mock.mockResolvedValue(['fdaa:1::0']);
     await refreshFleetSize();
 
-    // Instead the estimate errs conservative — it holds the recent
-    // high-water mark within the scale-up window, dividing tight (safe),
-    // not loose. It's still a fresh dynamic reading, just a biased one.
     expect(currentFleetSizeSource()).toBe('dynamic');
     expect(currentFleetSizeEstimate()).toBe(10);
   });
@@ -220,8 +193,6 @@ describe('rapid scale-up bias (CF2-10)', () => {
     await refreshFleetSize();
     expect(currentFleetSizeEstimate()).toBe(10);
 
-    // The fleet stays genuinely small across refreshes spanning the
-    // whole bias window (a real downscale, not a one-tick dip).
     resolve6Mock.mockResolvedValue(['fdaa:1::0']);
     const start = Date.now();
     for (
@@ -233,9 +204,6 @@ describe('rapid scale-up bias (CF2-10)', () => {
       await refreshFleetSize();
     }
 
-    // The high-water sample is now older than the bias window, so the
-    // divisor settles onto the true, smaller fleet. The bias never wins
-    // forever — it only ever tightens for a bounded interval.
     expect(currentFleetSizeSource()).toBe('dynamic');
     expect(currentFleetSizeEstimate()).toBe(1);
   });
@@ -263,8 +231,6 @@ describe('startFleetSizeEstimator / stopFleetSizeEstimator lifecycle', () => {
     process.env['FLY_APP_NAME'] = 'loopfinance-api';
     resolve6Mock.mockResolvedValue(['a', 'b']);
     startFleetSizeEstimator();
-    // Flush the fire-and-forget refresh microtask queued synchronously
-    // by startFleetSizeEstimator.
     await Promise.resolve();
     await Promise.resolve();
     expect(currentFleetSizeEstimate()).toBe(2);

@@ -1,33 +1,18 @@
-/**
- * config section: `server:` — the HTTP listener and its trust boundary.
- *
- * A section module is a zod schema for one top-level key of
- * `config.yaml`, spread into the composed `ConfigSchema` in
- * `../schema.ts`. Add new keys for this group HERE — it keeps
- * `schema.ts` from being a merge-conflict magnet, and keeps the
- * schema's shape a 1:1 mirror of the YAML file's shape.
- */
+// config section: `server:` — HTTP listener and trust boundary
 import { z } from 'zod';
 
 export const serverSchema = z
   .object({
-    // The port the Hono server binds. Fly's `internal_port` in
-    // `apps/backend/fly.toml` must match this.
+    // Must match `internal_port` in `apps/backend/fly.toml`
     port: z.number().int().min(1).max(65535).default(8080),
 
-    // 'silent' and 'fatal' are valid pino levels; include them so tests
-    // and emergency ops configs don't require bypassing validation.
+    // Includes 'silent' and 'fatal' for test/emergency ops configs
     logLevel: z
       .enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent'])
       .default('info'),
 
-    // Rate-limiter trust boundary (audit A-023). When `true` the rate
-    // limiter reads the client IP from the first value in
-    // X-Forwarded-For (required when running behind Fly.io / a load
-    // balancer). When `false` it falls back to the TCP socket's remote
-    // address so an arbitrary client cannot spoof its own IP to bypass
-    // per-IP limits. Default `false` — a deployment behind a trusted
-    // edge sets it to `true` explicitly.
+    // Rate-limiter trust boundary (audit A-023). When `true`, reads client IP from X-Forwarded-For (required behind Fly.io/LB).
+    // When `false`, uses TCP socket remote address to prevent IP spoofing for per-IP limit bypass.
     trustProxy: z.boolean().default(false),
   })
   .prefault({});

@@ -6,7 +6,6 @@ interface FakeMerchant {
   name: string;
   logoUrl?: string | null;
   enabled: boolean;
-  // CAT-02: country↔merchant visibility fields merchantInCountry reads.
   country?: string;
   denominations?: { currency?: string };
 }
@@ -17,11 +16,7 @@ const state = vi.hoisted(() => ({
   merchants: new Map<string, FakeMerchant>(),
 }));
 
-// The handler pulls every active config, sorted by pct DESC, via
-// `db.collection('merchant_cashback_configs').findMany(...)` and calls
-// `.toFixed(2)` on the numeric pct. The mock honours the sort option
-// against the historical string fixtures (parsed to numbers) so the
-// ranking behaviour is still exercised.
+// Mock honours sort option against historical string fixtures (parsed to numbers) to exercise ranking behaviour.
 const findManyMock = vi.fn(
   async (_filter: unknown, options?: { sort?: ReadonlyArray<readonly [string, string]> }) => {
     if (state.throwErr !== null) throw state.throwErr;
@@ -122,7 +117,6 @@ describe('publicTopCashbackMerchantsHandler', () => {
       {
         id: 'argos',
         name: 'Argos',
-        // Country-aware slug; no country on the mock → bare brand slug.
         slug: 'argos',
         logoUrl: 'https://example.com/argos.png',
         userCashbackPct: '15.00',
@@ -180,10 +174,6 @@ describe('publicTopCashbackMerchantsHandler', () => {
   });
 
   it('sorts numerically so "9.50" never outranks "10.00" (the old string-sort trap)', async () => {
-    // The pct is stored as a real number in the document store; this
-    // pins the numeric-ordering behaviour the old ::numeric SQL cast
-    // existed to guarantee — lexicographically "9.50" > "10.00", so a
-    // string sort would rank them backwards.
     state.merchants = new Map([
       ['m-ten', { id: 'm-ten', name: 'Ten', enabled: true }],
       ['m-nine', { id: 'm-nine', name: 'Nine', enabled: true }],
@@ -245,10 +235,7 @@ describe('publicTopCashbackMerchantsHandler', () => {
     expect(body.merchants).toEqual([]);
   });
 
-  // CAT-02 (2026-06-30 cold audit): ?country= applies the same
-  // country↔merchant visibility rule as home.tsx / brand.$slug.tsx —
-  // the "best cashback" marketing band shouldn't feed a visitor a
-  // merchant tagged to a different country/currency.
+  // CAT-02: ?country= applies same visibility rule as home.tsx / brand.$slug.tsx
   describe('CAT-02: ?country= scoping', () => {
     it('drops a merchant tagged to a different country than ?country=', async () => {
       state.configRows = [
@@ -324,13 +311,10 @@ describe('publicTopCashbackMerchantsHandler', () => {
         enabled: true,
         country: 'US',
       });
-      // Seed the US-scoped cache.
       const seeded = await publicTopCashbackMerchantsHandler(makeCtx({ country: 'US' }));
       expect(seeded.status).toBe(200);
 
-      // A first-ever AE-scoped request during a DB outage must NOT
-      // fall back to the US-scoped cached snapshot — it has no cache
-      // entry of its own yet, so it must serve the empty fallback.
+      // First-ever AE-scoped request during DB outage must not fall back to US-scoped cache
       state.throwErr = new Error('db exploded');
       const aeDuringOutage = await publicTopCashbackMerchantsHandler(makeCtx({ country: 'AE' }));
       expect(aeDuringOutage.status).toBe(200);

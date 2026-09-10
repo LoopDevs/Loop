@@ -11,12 +11,6 @@ import { ctxActAsHeaders } from '../ctx/user-provisioning.js';
 
 const log = logger.child({ handler: 'merchants' });
 
-/**
- * Subset of CTX's `GET /merchants/:id` response we care about for
- * enriching the merchant detail. `.passthrough()` keeps anything we
- * don't know about so future CTX fields can be surfaced without a
- * schema bump.
- */
 const UpstreamMerchantDetailResponse = z
   .object({
     info: z
@@ -33,16 +27,9 @@ const UpstreamMerchantDetailResponse = z
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
-// Defensive cap on the search input. Merchant names are short and this keeps
-// a pathological `q` string (e.g. from a fuzzer) from running includes()
-// against an unbounded pattern.
+// Prevents pathological `q` strings from running includes() against an unbounded pattern
 const MAX_QUERY_LENGTH = 100;
 
-/**
- * GET /api/merchants
- *
- * Query params: page, limit, q (search)
- */
 export function merchantListHandler(c: Context): Response {
   const { merchants } = getMerchants();
 
@@ -77,48 +64,19 @@ export function merchantListHandler(c: Context): Response {
   });
 }
 
-/**
- * GET /api/merchants/all
- *
- * Returns the entire enabled merchant catalog in a single response.
- * Audit A-002: `/api/merchants` hard-caps at 100 items per page, which
- * silently truncated UI surfaces (home, map, navbar search) that need the
- * full catalog. This endpoint serves them directly, avoiding the need for
- * the client to page through. Response shape is `{ merchants: Merchant[] }`
- * — no pagination envelope, since the whole point is to skip paging.
- *
- * The catalog is already in memory (`getMerchants()`) so this is O(N) over
- * the live slice and costs no upstream call. No HTTP caching — the
- * store is ws-maintained, so responses are always current.
- */
+// Audit A-002: serves full catalog to avoid silent truncation by /api/merchants page cap
 export function merchantAllHandler(c: Context): Response {
   const { merchants } = getMerchants();
   c.header('Cache-Control', 'no-store');
-  // S4-7: browse surfaces (home, map, navbar/mobile search) need the whole
-  // catalog but never RENDER the long-form description/instructions/terms —
-  // only the detail page does, and it pulls those from /by-slug + /:id, not
-  // here. `?fields=lite` strips them from this whole-catalog payload, the
-  // single biggest browse-payload win as the catalog scales (they're capped at
-  // 50k chars each). Default (no param) is unchanged for any other consumer.
+  // S4-7: strips long-form fields for browse surfaces to reduce payload size
   if (c.req.query('fields') === 'lite') {
     return c.json({ merchants: merchants.map(toLiteMerchant), total: merchants.length });
   }
   return c.json({ merchants, total: merchants.length });
 }
 
-/**
- * GET /api/merchants/by-slug/:slug
- *
- * O(1) slug lookup — preferred over fetching all merchants client-side.
- * Slug format (lowercase, spaces→hyphens, strip non-alphanumeric) comes
- * from `merchantSlug()` in `@loop/shared/slugs.ts` — the single source
- * of truth shared with the frontend, so the backend index and frontend
- * links can't drift.
- */
 export function merchantBySlugHandler(c: Context): Response {
-  // Slugs in the index are always lowercase (see merchantSlug in @loop/shared).
-  // Accept a case-insensitive match so a hand-typed URL like `/by-slug/Target`
-  // still resolves instead of 404'ing.
+  // Accept case-insensitive match so hand-typed URLs resolve instead of 404'ing
   const slug = (c.req.param('slug') ?? '').toLowerCase();
   const { merchantsBySlug } = getMerchants();
 
@@ -131,20 +89,6 @@ export function merchantBySlugHandler(c: Context): Response {
   return c.json({ merchant });
 }
 
-/**
- * GET /api/merchants/:id
- *
- * Requires auth — we forward the user's bearer (+ X-Client-Id) to
- * CTX's `GET /merchants/:id` to pull the long-form content (info.
- * description, longDescription, terms, instructions) that the list
- * endpoint doesn't populate. The cached list-sync merchant is the
- * baseline; upstream info fields are merged over it.
- *
- * If the upstream call fails (network, shape drift, 404, timeout),
- * we fall back to the cached merchant rather than 502ing the page —
- * the user still sees the basics and we log the failure for
- * diagnosis.
- */
 export async function merchantDetailHandler(c: Context): Promise<Response> {
   const id = c.req.param('id') ?? '';
 
@@ -161,12 +105,7 @@ export async function merchantDetailHandler(c: Context): Promise<Response> {
   const merchant = { ...cached };
 
   try {
-    // Same auth split as the order handlers: act-as the user on the
-    // Loop-native path (the Loop JWT is not forwardable to CTX),
-    // forward the CTX bearer on the legacy path. When a native user
-    // has no CTX mapping yet, `headers` is null — we simply skip the
-    // enrichment and serve the cached merchant, which is this
-    // handler's fail-soft behaviour on any upstream miss anyway.
+    // Loop JWT is not forwardable to CTX; act-as headers required for native users
     const clientId = c.get('clientId') as string | undefined;
     const auth = c.get('auth') as LoopAuthContext | undefined;
     let headers: Record<string, string> | null;
@@ -190,9 +129,7 @@ export async function merchantDetailHandler(c: Context): Promise<Response> {
         const parsed = UpstreamMerchantDetailResponse.safeParse(raw);
         if (parsed.success && parsed.data.info) {
           const { intro, description, longDescription, terms, instructions } = parsed.data.info;
-          // longDescription wins when both are present — it's the
-          // full-length body copy, while `description` is often just a
-          // headline repeat. Fall back to `description` otherwise.
+          // longDescription is full-length body copy; description is often just a headline repeat
           if (longDescription) merchant.description = longDescription;
           else if (description) merchant.description = description;
           if (intro) merchant.intro = intro;
@@ -217,10 +154,7 @@ export async function merchantDetailHandler(c: Context): Promise<Response> {
   return c.json({ merchant });
 }
 
-// Public merchant-cashback-rate handlers (`GET /cashback-rates`
-// + `GET /:merchantId/cashback-rate`) live in
-// `./cashback-rate-handlers.ts`. Re-exported here so the routes
-// module + the historical test-import paths keep resolving.
+// Re-exported so routes module + historical test-import paths keep resolving
 export {
   merchantsCashbackRatesHandler,
   merchantCashbackRateHandler,

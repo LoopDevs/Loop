@@ -1,8 +1,4 @@
-/**
- * Bodies of `notifyStuckProcurementSwept`, `notifyPaymentWatcherStuck`,
- * `notifyStuckPayouts`. Pin embed shapes so a regression in field
- * naming, color, or "stuck-for-N-min" math surfaces in CI.
- */
+// Pin embed shapes so a regression in field naming, color, or "stuck-for-N-min" math surfaces in CI.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type * as ConfigModule from '../../config/index.js';
 

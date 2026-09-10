@@ -1,30 +1,4 @@
-/**
- * Generic HMAC + timestamp webhook verification (Tranche-2 Track A.3).
- *
- * The webhook-vendor-agnostic primitive Track B.3 will use to verify
- * inbound Privy webhooks (and any other modern webhook source). The
- * scheme matches the svix / Stripe / GitHub pattern:
- *
- *   1. Vendor signs `<id>.<timestamp>.<body>` with HMAC-SHA256 using
- *      a shared secret known only to vendor + Loop.
- *   2. Vendor sends the signature in a header (e.g. `Svix-Signature:
- *      v1,<base64>`) plus a timestamp header (e.g. `Svix-Timestamp:
- *      1700000000`) plus an event-id header (e.g. `Svix-Id: msg_…`).
- *   3. Receiver re-computes the HMAC and timing-safe-compares.
- *   4. Receiver rejects timestamps older than a replay window
- *      (default 5 min) so a captured signed message can't be
- *      indefinitely replayed.
- *
- * This module ships the pure-crypto verification logic. Wiring to a
- * specific vendor's header conventions, plus the idempotent
- * event-id dedupe (which needs a `webhook_events` table — out of
- * scope for Track A.3), happens in the per-vendor handler in
- * `webhooks/<vendor>.ts`.
- *
- * Dep-free: built on `node:crypto` primitives. No `svix` /
- * `@privy-io/server-auth` import — those carry vendor lock-in we
- * don't want at the verification layer.
- */
+// Generic HMAC + timestamp webhook verification — Tranche-2 Track A.3
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
 export type VerifyResult =

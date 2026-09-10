@@ -1,27 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type * as ConfigModule from '../config/index.js';
 
-// Take the real (test-fixture) config and change only what this suite
-// needs, before any other import pulls the module in.
 vi.mock('../config/index.js', async (importActual) => {
   const actual = await importActual<typeof ConfigModule>();
   return {
     ...actual,
     config: {
       ...actual.config,
-      // The suite asserts on the exact upstream URLs the proxy routes
-      // build, so it pins the base rather than inheriting the fixture's.
       ctx: { ...actual.config.ctx, baseUrl: 'http://test-upstream.local' },
-      // Audit A-023 / FT-08 — the rate limiter keys on the client IP only
-      // when this is true; behind a trusted proxy it reads the spoof-proof
-      // `Fly-Client-IP` header. Integration tests inject Fly-Client-IP
-      // values, so enable trust.
+      // Audit A-023 / FT-08 — trustProxy enables spoof-proof Fly-Client-IP header reading
       server: { ...actual.config.server, trustProxy: true },
     },
   };
 });
 
-// Mock logger to suppress output
 vi.mock('../logger.js', () => ({
   logger: {
     info: vi.fn(),
@@ -31,7 +23,6 @@ vi.mock('../logger.js', () => ({
   },
 }));
 
-// Mock background refresh to prevent timers and network calls
 vi.mock('../clustering/data-store.js', () => ({
   startLocationRefresh: vi.fn(),
   getLocations: () => ({ locations: [], loadedAt: Date.now() }),
@@ -48,16 +39,12 @@ vi.mock('../merchants/sync.js', () => ({
   }),
 }));
 
-// Mock image proxy eviction
 vi.mock('../images/proxy.js', async (importOriginal) => {
   const orig = await importOriginal();
   return { ...(orig as Record<string, unknown>), evictExpiredImageCache: vi.fn() };
 });
 
-// A4-034: /health probes the store with a cheap
-// `db.collection('users').count({})`. Mock at that shape so the
-// integration suite sees a happy probe by default; individual tests
-// can override via `dbCountMock` to exercise the degraded path.
+// A4-034: /health probes store with cheap count; mock shape for happy path
 const dbCountMock = vi.hoisted(() => vi.fn(async () => 0));
 vi.mock('../db/client.js', async (importOriginal) => {
   const orig = (await importOriginal()) as Record<string, unknown>;
@@ -69,22 +56,13 @@ vi.mock('../db/client.js', async (importOriginal) => {
   };
 });
 
-// Mock clustering handler to avoid proto import
 vi.mock('../clustering/handler.js', () => ({
   clustersHandler: vi.fn(async (c: { json: (data: unknown) => Response }) =>
     c.json({ clusterPoints: [], locationPoints: [] }),
   ),
 }));
 
-// CONV-WATCH-02: the health-change page is now routed through the
-// fleet-wide `watchdog_alert_state` dedup gate (`applyBinaryWatchdogAlert`)
-// instead of the old per-process `notifyHealthChange`. Mock the gate so
-// the flap-damping tests can observe the paging behavior via call
-// counts/args without hitting the DB or a webhook — a healthy→degraded
-// flip invokes it once with `shouldBeActive: true`, a degraded→healthy
-// flip once with `shouldBeActive: false`. (The real gate + real
-// `watchdog_alert_state` persistence/dedup/re-arm is covered end-to-end by
-// `__tests__/integration/health-change-dedup.test.ts`.)
+// CONV-WATCH-02: health-change routed through fleet-wide watchdog_alert_state dedup gate
 const applyBinaryWatchdogAlertMock = vi.hoisted(() =>
   vi.fn<
     (args: {
@@ -99,10 +77,7 @@ vi.mock('../discord/watchdog-alert.js', () => ({
   applyBinaryWatchdogAlert: applyBinaryWatchdogAlertMock,
 }));
 
-// The proxy routes call the REAL `upstreamFetch`, which does the
-// A2-1305 request-id capture on top of the stubbed global fetch —
-// so the X-Ctx-Request-Id round-trip below exercises the production
-// path rather than a mock re-implementation of it.
+// A2-1305: proxy routes use real upstreamFetch for request-id capture
 
 import {
   app,
@@ -120,30 +95,21 @@ import {
 } from '../runtime-health.js';
 import { __resetMetricsForTests, setMoneyIntegrityBreach } from '../metrics.js';
 
-// Mock global fetch for upstream proxy calls
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
 
 beforeEach(() => {
   mockFetch.mockReset();
   applyBinaryWatchdogAlertMock.mockReset().mockResolvedValue(true);
-  // /health caches the upstream reachability probe for 10s so external
-  // spammers don't turn into an outbound fetch amplifier. Invalidate the
-  // cache between cases so the reachable→unreachable transition is
-  // observable inside a single test run. Also resets the hysteresis
-  // streak counters + notify cooldown so each test case starts from a
-  // known state.
+  // Invalidate probe cache and reset hysteresis/cooldown for known state
   __resetHealthProbeCacheForTests();
   __resetRuntimeHealthForTests();
-  // A2-1005 body-limit tests need a clean per-IP counter; generally
-  // safer to reset between every case so rate-limit state doesn't
-  // bleed across describe blocks.
+  // A2-1005: reset per-IP counters to prevent state bleed
   __resetRateLimitsForTests();
 });
 
 describe('GET /health', () => {
   it('returns 200 with status healthy when upstream is reachable', async () => {
-    // Mock the upstream /status probe
     mockFetch.mockResolvedValueOnce(new Response('ok', { status: 200 }));
 
     const res = await app.request('/health');
@@ -161,11 +127,7 @@ describe('GET /health', () => {
     mockFetch.mockRejectedValueOnce(new Error('connection refused'));
 
     const res = await app.request('/health');
-    // Soft degradation (CTX `/status` slow / unreachable) used to
-    // flip the HTTP status to 503 → Fly cycled the machine → fresh
-    // process state → next transition fired Discord again. The fix
-    // is to keep the body's `degraded` for visibility but NOT cycle
-    // the machine on upstream-only issues.
+    // Keep HTTP 200 to prevent Fly cycling on upstream-only issues
     expect(res.status).toBe(200);
 
     const body = (await res.json()) as Record<string, unknown>;
@@ -177,16 +139,13 @@ describe('GET /health', () => {
   });
 
   it('surfaces OTP delivery degradation in /health with HTTP 503', async () => {
-    // The OTP kill-switch fix made `recordOtpSendFailure` stop
-    // re-arming the surface, so arm it explicitly (in production it
-    // arms via LOOP_AUTH_NATIVE_ENABLED at boot / a successful send).
+    // Arm OTP surface explicitly as recordOtpSendFailure no longer re-arms
     setOtpDeliveryEnabled(true);
     recordOtpSendFailure(new Error('provider down'));
     mockFetch.mockResolvedValueOnce(new Response('ok', { status: 200 }));
 
     const res = await app.request('/health');
-    // A4-035 / A4-073: a degraded OTP-delivery surface counts as
-    // a degraded backend; orchestrator sees 503.
+    // A4-035 / A4-073: degraded OTP counts as degraded backend
     expect(res.status).toBe(503);
 
     const body = (await res.json()) as {
@@ -210,42 +169,18 @@ describe('GET /health', () => {
   it('caches the upstream probe so bursts of /health do not amplify outbound traffic', async () => {
     mockFetch.mockResolvedValue(new Response('ok', { status: 200 }));
 
-    // First call triggers a probe; next 4 within the TTL should reuse it.
     await app.request('/health');
     await app.request('/health');
     await app.request('/health');
     await app.request('/health');
     await app.request('/health');
 
-    // The upstream status probe calls go through mockFetch; requireAuth
-    // and other handlers don't run for /health, so every fetch call is
-    // the probe. Exactly one probe should have fired for 5 inbound calls.
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
-  // ─── flap damping ─────────────────────────────────────────────────
-  // The Fly healthcheck hits /health every 15s with a 10s probe cache,
-  // so ~one fresh upstream probe per check. A CTX /status that briefly
-  // runs slow used to flip lastHealthStatus on every probe and spam
-  // the monitoring channel every minute. These tests exercise the
-  // rolling-window detector that replaced the consecutive-streak
-  // detector — a supermajority of last-10 readings decides the state,
-  // so one-off slow probes are absorbed without a transition. Thresholds
-  // are asymmetric: 5-of-10 degraded trips the alarm (~2–3 min of
-  // persistent badness), 8-of-10 healthy is needed to flip back.
-
-  // `__resetUpstreamProbeCacheOnlyForTests` drops the probe cache
-  // between calls *without* clearing the window, so a single test
-  // can drive a sequence of transitions.
-  //
-  // Flap-fix follow-up: the rolling-window detector now keys on
-  // criticalDegraded (DB / runtime) only — upstream-only blips no
-  // longer rotate the window. We simulate critical degradation by
-  // toggling OTP-delivery state, advancing `Date.now()` between
-  // calls so the success/failure timestamps order deterministically.
+  // Flap damping: rolling-window detector (5-of-10 degraded trips, 8-of-10 healthy recovers)
+  // Keys on criticalDegraded only; upstream blips do not rotate window.
   async function driveHealth(probes: Array<'ok' | 'fail'>): Promise<void> {
-    // `recordOtpSendFailure` no longer re-arms the surface (OTP
-    // kill-switch fix), so arm it explicitly before driving probes.
     setOtpDeliveryEnabled(true);
     for (const p of probes) {
       __resetUpstreamProbeCacheOnlyForTests();
@@ -255,19 +190,13 @@ describe('GET /health', () => {
       } else {
         recordOtpSendFailure(new Error('timeout'));
       }
-      // Sleep 2ms so each record* stamp lands on a distinct ms —
-      // OTP-delivery degraded computes by `lastFailureAtMs >
-      // lastSuccessAtMs` so identical timestamps create a false
-      // healthy reading on the failure side.
+      // Distinct ms timestamps prevent false healthy reading on failure side
       await new Promise((r) => setTimeout(r, 2));
       await app.request('/health');
     }
   }
 
   it('body always reflects raw reading — Fly liveness must not be debounced', async () => {
-    // First-ever call on a fresh process: the bootstrap seeds
-    // lastHealthStatus silently (no notify), but the response body
-    // still reports the raw reading so Fly can act on it.
     mockFetch.mockRejectedValueOnce(new Error('timeout'));
     const res = await app.request('/health');
     const body = (await res.json()) as { status: string };
@@ -281,18 +210,12 @@ describe('GET /health', () => {
   });
 
   it('4 of 5 bad probes does NOT trip degraded — threshold is 5-of-window', async () => {
-    // Seed healthy, then 4 bad readings. Window = [h,f,f,f,f] —
-    // 4 degraded < 5 threshold. The old streak detector would have
-    // fired on the 2nd failure in a row; the window tolerates it.
     await driveHealth(['ok', 'fail', 'fail', 'fail', 'fail']);
     expect(applyBinaryWatchdogAlertMock).not.toHaveBeenCalled();
   });
 
   it('5 of 10 bad probes fires degraded exactly once', async () => {
     await driveHealth(['ok', 'fail', 'fail', 'fail', 'fail', 'fail']);
-    // Window now has 5 degraded — at the threshold. The flip pages once
-    // through the fleet-wide gate, keyed 'health-change' with
-    // shouldBeActive=true (degraded).
     expect(applyBinaryWatchdogAlertMock).toHaveBeenCalledTimes(1);
     expect(applyBinaryWatchdogAlertMock).toHaveBeenCalledWith(
       expect.objectContaining({ watchdogName: 'health-change', shouldBeActive: true }),
@@ -300,43 +223,29 @@ describe('GET /health', () => {
   });
 
   it('one transient timeout inside a healthy run is absorbed — no flap to Discord', async () => {
-    // Drive a realistic "mostly fine, one blip" pattern. The
-    // supermajority stays healthy so nothing fires.
     await driveHealth(['ok', 'ok', 'ok', 'fail', 'ok', 'ok', 'ok', 'ok', 'ok', 'ok']);
     expect(applyBinaryWatchdogAlertMock).not.toHaveBeenCalled();
   });
 
   it('a partial recovery (4 successes after degraded) is NOT enough to flip back', async () => {
-    // Drive into degraded first (6 fails on top of 1 healthy seed).
     await driveHealth(['ok', 'fail', 'fail', 'fail', 'fail', 'fail']);
     expect(applyBinaryWatchdogAlertMock).toHaveBeenCalledTimes(1);
 
-    // 4 healthy readings — not enough (threshold is 8 healthy in the
-    // 10-wide window). No flip → the gate is not invoked again (still 1).
     await driveHealth(['ok', 'ok', 'ok', 'ok']);
     expect(applyBinaryWatchdogAlertMock).toHaveBeenCalledTimes(1);
   });
 
   it('8 of 10 healthy probes after a degraded flip eventually flip back to healthy', async () => {
-    // Drive degraded via 5 bad readings on top of 1 seed.
     await driveHealth(['ok', 'fail', 'fail', 'fail', 'fail', 'fail']);
     expect(applyBinaryWatchdogAlertMock).toHaveBeenCalledWith(
       expect.objectContaining({ watchdogName: 'health-change', shouldBeActive: true }),
     );
 
-    // The full-reset below clears the per-machine hysteresis state (this
-    // is what stands in the way of the recovery fire in a real process;
-    // the gate's own dedup is fleet-wide, not per-process). Reset the gate
-    // mock too so the recovery flip is observed in isolation.
     __resetHealthProbeCacheForTests();
     applyBinaryWatchdogAlertMock.mockReset().mockResolvedValue(true);
 
-    // Re-seed degraded, then push enough healthy probes to cross
-    // the 8-of-10 threshold.
-    await driveHealth(['fail', 'fail', 'fail', 'fail', 'fail']); // window = [d,d,d,d,d]
+    await driveHealth(['fail', 'fail', 'fail', 'fail', 'fail']);
     await driveHealth(['ok', 'ok', 'ok', 'ok', 'ok', 'ok', 'ok', 'ok']);
-    // Window now has 8 healthy out of last 10 → flip back. The recovery
-    // page routes through the same gate with shouldBeActive=false (healthy).
     expect(applyBinaryWatchdogAlertMock).toHaveBeenCalledWith(
       expect.objectContaining({ watchdogName: 'health-change', shouldBeActive: false }),
     );
@@ -363,10 +272,6 @@ describe('GET /api/merchants/by-slug/:slug', () => {
 
 describe('GET /api/merchants/:id', () => {
   it('returns 404 for unknown id', async () => {
-    // Auth-gated: proxies CTX with the user's bearer to enrich the
-    // cached merchant with long-form content. Supply a dummy bearer
-    // so requireAuth passes; the handler's cached-not-found branch
-    // then returns 404 before any upstream call.
     const res = await app.request('/api/merchants/unknown-id', {
       headers: { Authorization: 'Bearer test-token' },
     });
@@ -520,33 +425,24 @@ describe('app-level middleware', () => {
 
     mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
 
-    // Burn through the 5/min limit
     for (let i = 0; i < 5; i++) await doReq();
 
     const limited = await doReq();
     expect(limited.status).toBe(429);
     const retryAfter = limited.headers.get('Retry-After');
     expect(retryAfter).not.toBeNull();
-    // Retry-After is seconds; must be a positive integer
     expect(Number(retryAfter)).toBeGreaterThan(0);
     expect(Number.isInteger(Number(retryAfter))).toBe(true);
   });
 
   it('sets X-Request-Id header on every response', async () => {
     const res = await app.request('/health');
-    // requestId middleware generates an id even if the client did not send one
     const id = res.headers.get('X-Request-Id');
     expect(id).not.toBeNull();
     expect(id!.length).toBeGreaterThan(0);
   });
 
-  // A2-1305: end-to-end round-trip for the CTX response request-id
-  // echo. Outbound CTX call includes our X-Request-Id; inbound CTX
-  // response carries its own X-Request-Id; backend captures it and
-  // emits it back to the client as X-Ctx-Request-Id. Pairs with the
-  // unit tests in `__tests__/request-context.test.ts` (which lock
-  // the AsyncLocalStorage primitive in isolation) — this case
-  // exercises the full middleware chain.
+  // A2-1305: end-to-end round-trip for CTX response request-id echo
   it('A2-1305: echoes the CTX response X-Request-Id back as X-Ctx-Request-Id', async () => {
     mockFetch.mockResolvedValueOnce(
       new Response(JSON.stringify({ message: 'ok' }), {
@@ -564,22 +460,14 @@ describe('app-level middleware', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('X-Ctx-Request-Id')).toBe('ctx-req-abc123');
 
-    // Outbound side of the same round-trip: `upstreamFetch` stamps our
-    // own request id onto the CTX call. Now assertable here because the
-    // handler runs the real helper against the stubbed global fetch.
     const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
     const outbound = new Headers(init.headers);
     expect(outbound.get('X-Request-Id')).toBeTruthy();
   });
 
   it('A2-1305: omits X-Ctx-Request-Id when no CTX call happened', async () => {
-    // /health doesn't fire a CTX fetch (it has its own probe path
-    // that we mock separately). Confirm the header is not stamped
-    // unconditionally — only when an actual CTX response carries one.
     mockFetch.mockResolvedValueOnce(new Response('ok', { status: 200 }));
     const res = await app.request('/api/clusters');
-    // /api/clusters reads the in-memory merchant store; no outbound
-    // fetch fires, so no X-Ctx-Request-Id should be set.
     expect(res.headers.get('X-Ctx-Request-Id')).toBeNull();
   });
 
@@ -605,8 +493,6 @@ describe('app-level middleware', () => {
     const res = await app.request('/health');
     const csp = res.headers.get('Content-Security-Policy');
     expect(csp).not.toBeNull();
-    // API never serves HTML — default-src 'none' forbids every resource
-    // class unless we override it, which we do not.
     expect(csp).toContain("default-src 'none'");
     expect(csp).toContain("frame-ancestors 'none'");
     expect(csp).toContain("base-uri 'none'");
@@ -614,9 +500,6 @@ describe('app-level middleware', () => {
   });
 
   it('/metrics labels unmatched routes as NOT_FOUND (audit A-022)', async () => {
-    // Hit several random paths. Without the fix, each distinct path would
-    // create a separate metric key and balloon cardinality; with the fix,
-    // all of them collapse into a single {route="NOT_FOUND"} series.
     await app.request('/fuzz-path-1');
     await app.request('/fuzz-path-2');
     await app.request('/fuzz-path-3?q=abc');
@@ -625,7 +508,6 @@ describe('app-level middleware', () => {
     const res = await app.request('/metrics');
     const body = await res.text();
 
-    // No raw paths leak into label space.
     for (const path of [
       '/fuzz-path-1',
       '/fuzz-path-2',
@@ -634,33 +516,26 @@ describe('app-level middleware', () => {
     ]) {
       expect(body).not.toContain(`route="${path}"`);
     }
-    // All unmatched traffic lands on the single constant label.
     expect(body).toMatch(
       /loop_requests_total\{method="GET",route="NOT_FOUND",status="404"\} [1-9]/,
     );
   });
 
   it('/metrics exposes Prometheus-format counters', async () => {
-    // Drive one request through so requestsTotal has an entry, then scrape.
     mockFetch.mockResolvedValueOnce(new Response('ok', { status: 200 }));
     await app.request('/health');
 
     const res = await app.request('/metrics');
     expect(res.status).toBe(200);
     expect(res.headers.get('Content-Type')).toContain('text/plain');
-    // Live counter values — a cache in front must not serve a stale
-    // scrape to the next collector.
     expect(res.headers.get('Cache-Control')).toBe('no-store');
     const body = await res.text();
     expect(body).toContain('# TYPE loop_rate_limit_hits_total counter');
     expect(body).toContain('# TYPE loop_requests_total counter');
-    // The health request just counted above should appear.
     expect(body).toMatch(/loop_requests_total\{method="GET",route="\/health",status="200"\}/);
   });
 
   it('/metrics exposes runtime health gauges for OTP and workers', async () => {
-    // Arm the surface first — failures alone no longer re-arm it
-    // (OTP kill-switch fix).
     setOtpDeliveryEnabled(true);
     recordOtpSendFailure(new Error('provider down'));
     markWorkerStarted('payout_worker', { staleAfterMs: 60_000 });
@@ -677,9 +552,7 @@ describe('app-level middleware', () => {
     expect(body).toContain('loop_worker_degraded{worker="payout_worker"} 0');
     expect(body).toContain('# TYPE loop_worker_last_success_timestamp_ms gauge');
     expect(body).toMatch(/loop_worker_last_success_timestamp_ms\{worker="payout_worker"\} \d{13}/);
-    // B-5: the wedged-fleet lead-tick signal (S4-8) — a worker that
-    // ticked via markWorkerTickSuccess led this tick, so its lead-tick
-    // timestamp should be stamped alongside lastSuccessAtMs.
+    // B-5: wedged-fleet lead-tick signal (S4-8)
     expect(body).toContain('# TYPE loop_worker_last_lead_tick_timestamp_ms gauge');
     expect(body).toMatch(
       /loop_worker_last_lead_tick_timestamp_ms\{worker="payout_worker"\} \d{13}/,
@@ -689,9 +562,6 @@ describe('app-level middleware', () => {
   });
 
   it('/metrics exposes catalog freshness gauges (B-5, docs/slo.md §Freshness)', async () => {
-    // The integration harness mocks getMerchants()/getLocations() with a
-    // fresh loadedAt (Date.now()), so both catalogs should read as
-    // fresh (0) and their loaded timestamps should be present as gauges.
     const res = await app.request('/metrics');
     const body = await res.text();
 
@@ -704,11 +574,6 @@ describe('app-level middleware', () => {
   });
 
   it('/metrics exposes geo-db and rate-limit-fleet gauges (B-5)', async () => {
-    // MAXMIND_GEOLITE2_PATH is unset in the mocked env, so the geo DB
-    // reads as unconfigured (not stale — see GeoDbStatus's doc comment)
-    // and the age gauge is omitted entirely (ageDays is null). FLY_APP_NAME
-    // is also unset, so the fleet estimate falls back to the static
-    // default (1, source "static" → gauge value 0).
     const res = await app.request('/metrics');
     const body = await res.text();
 
@@ -723,11 +588,6 @@ describe('app-level middleware', () => {
   });
 
   it('/metrics exposes money-integrity breach gauges independent of Discord (FT-07/NS-02)', async () => {
-    // Simulate what a watcher does when it finds a standing breach: a
-    // ledger drift + a vault solvency breach are live, while asset
-    // drift last evaluated clean. Before FT-07 the /metrics surface
-    // carried NO money-integrity gauge at all, so a live ledger/
-    // solvency breach was a green dashboard detectable only via Discord.
     __resetMetricsForTests();
     setMoneyIntegrityBreach('ledger_invariant', true);
     setMoneyIntegrityBreach('vault_solvency', true);
@@ -737,15 +597,10 @@ describe('app-level middleware', () => {
     const body = await res.text();
 
     expect(body).toContain('# TYPE loop_money_integrity_breach_active gauge');
-    // The breached signals must read 1 — the whole point of the gauge.
     expect(body).toContain('loop_money_integrity_breach_active{signal="ledger_invariant"} 1');
     expect(body).toContain('loop_money_integrity_breach_active{signal="vault_solvency"} 1');
-    // An evaluated-clean signal reads 0 (checked, not breached) — not absent.
     expect(body).toContain('loop_money_integrity_breach_active{signal="asset_drift"} 0');
-    // A signal no watcher has evaluated yet is absent (no false "clean").
     expect(body).not.toContain('loop_money_integrity_breach_active{signal="operator_float"}');
-    // Freshness gauge so "checked and clean" is distinguishable from
-    // "not being checked" (absent).
     expect(body).toContain('# TYPE loop_money_integrity_last_evaluated_timestamp_ms gauge');
     expect(body).toMatch(
       /loop_money_integrity_last_evaluated_timestamp_ms\{signal="ledger_invariant"\} \d{13}/,
@@ -755,9 +610,6 @@ describe('app-level middleware', () => {
   });
 
   it('/metrics emits exactly one HELP line per metric (audit A-016)', async () => {
-    // Prometheus exposition format requires at most one HELP line per
-    // metric — some scrapers reject a metric that declares two. This
-    // test locks in the "exactly one" invariant across the surface.
     const res = await app.request('/metrics');
     const body = await res.text();
     for (const metric of [
@@ -780,11 +632,7 @@ describe('app-level middleware', () => {
 });
 
 describe('bodyLimit middleware (A2-1005)', () => {
-  // 1 MB + 1 byte — the smallest overflow the middleware must reject.
-  // Send an explicit Content-Length header so hono/bodyLimit's
-  // fast-path (which inspects the header) fires; without it the
-  // middleware would fall back to streaming the body, and app.request
-  // in this harness may hand the body through unparsed.
+  // 1 MB + 1 byte overflow; explicit Content-Length triggers fast-path
   it('returns 413 PAYLOAD_TOO_LARGE when body exceeds 1 MB, not 500', async () => {
     const oversized = 'a'.repeat(1024 * 1024 + 1);
     const res = await app.request('/api/auth/request-otp', {
@@ -802,53 +650,26 @@ describe('bodyLimit middleware (A2-1005)', () => {
   });
 
   it('passes through normal-sized bodies to the handler', async () => {
-    // Use a body small enough to pass the limit but malformed enough
-    // for the handler to reject — confirms the bodyLimit middleware
-    // isn't over-zealously rejecting legitimate requests.
     const res = await app.request('/api/auth/request-otp', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
     });
-    // Handler-level 400 for missing email — NOT the middleware's 413.
     expect(res.status).toBe(400);
   });
 
-  // BK-bodylimit: the global volumetric rate limiter (`globalRateLimit`,
-  // 600/min/IP) MUST sit ahead of the body-size check in the middleware
-  // chain. `bodyLimit` short-circuits an oversized request with a 413
-  // and never calls `next()`; if it ran first, an attacker flooding
-  // oversized bodies would be rejected by size before the rate limiter
-  // ever counted the traffic, so the volumetric backstop would never
-  // engage on that flood. This asserts the observable consequence of
-  // the correct order: once a client's global per-IP budget is spent,
-  // an oversized-body request is throttled (429) rather than slipping
-  // straight to the size backstop (413) — i.e. oversized bodies are
-  // still counted by, and subject to, the rate limiter.
+  // BK-bodylimit: globalRateLimit must sit ahead of bodyLimit to count oversized floods
   it('BK-bodylimit: oversized-body requests hit the global rate limit (429), not the size check (413), once the per-IP budget is spent', async () => {
     const ip = '198.51.100.200';
-    // `globalRateLimit()` is mounted with its documented default budget
-    // (600/min/IP); the test fleet-size estimate is 1, so the effective
-    // ceiling is exactly 600. Prime the global per-IP bucket to that
-    // ceiling with cheap, body-less requests to an unmatched route (a
-    // 404 still traverses every global middleware, including the
-    // limiter, but carries no per-route limiter of its own — so only
-    // the `__global__` bucket is spent).
-    // Sequential by design: each request must land in the same 60s
-    // window to accumulate into one shared per-IP bucket.
     const GLOBAL_BUDGET = 600;
     for (let i = 0; i < GLOBAL_BUDGET; i++) {
       const primer = await app.request('/api/bk-bodylimit-prime', {
         method: 'GET',
         headers: { 'fly-client-ip': ip },
       });
-      // Sanity: priming stays under budget, so none of these is itself a 429.
       expect(primer.status).toBe(404);
     }
 
-    // The bucket is now at its ceiling. The next request from this IP —
-    // an oversized-body POST — must be seen and rejected by the limiter
-    // (429) before the body-size check (413) can short-circuit it.
     const oversized = 'a'.repeat(1024 * 1024 + 1);
     const res = await app.request('/api/bk-bodylimit-prime', {
       method: 'POST',
@@ -860,9 +681,6 @@ describe('bodyLimit middleware (A2-1005)', () => {
       body: oversized,
     });
 
-    // Pre-fix (bodyLimit ahead of globalRateLimit) this is 413: the
-    // oversized body is rejected by size and never reaches — or is
-    // counted by — the limiter. Post-fix it is 429.
     expect(res.status).toBe(429);
     const body = (await res.json()) as { code: string; message: string };
     expect(body.code).toBe('RATE_LIMITED');

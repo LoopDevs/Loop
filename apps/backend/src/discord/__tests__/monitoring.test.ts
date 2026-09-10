@@ -1,16 +1,4 @@
-/**
- * `monitoring.ts` notifier-body tests. Covers the eight notifiers
- * defined in this file directly:
- *   - notifyHealthChange (status flip + color)
- *   - notifyPayoutFailed (last-8 redaction; emission vs order)
- *   - notifyInterestPoolLow / notifyInterestPoolRecovered (paired,
- *     dedup'd per asset)
- *   - notifyPegBreakOnFulfillment (cross-currency divergence)
- *   - notifyCtxCredentialInvalid
- *
- * Goal: pin embed shape so a future refactor can't silently rename
- * a field, drop a redaction, or flip a color without CI catching it.
- */
+// monitoring.ts notifier-body tests — ADR-018, CF-13, ADR 051
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type * as ConfigModule from '../../config/index.js';
 
@@ -47,8 +35,7 @@ vi.mock('../shared.js', () => ({
   RED: 0xe74c3c,
 }));
 
-// Sibling notifier modules imported by `monitoring.ts` for re-export.
-// We don't exercise them here; stub so imports resolve.
+// Stub sibling notifier modules so imports resolve
 vi.mock('../monitoring-asset-drift.js', () => ({
   notifyAssetDrift: vi.fn(),
   notifyAssetDriftRecovered: vi.fn(),

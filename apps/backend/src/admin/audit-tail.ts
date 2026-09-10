@@ -1,23 +1,4 @@
-/**
- * Admin write-audit tail (ADR 017 / 018).
- *
- * `GET /api/admin/audit-tail`     — newest admin writes, paginated
- * `GET /api/admin/audit-tail.csv` — the same, for finance and legal
- *
- * Reads `admin_idempotency_keys`, which doubles as the durable record
- * of every applied admin mutation: a row exists there only because its
- * write committed, and NS-03 retention keeps it long after its 24h
- * replay window has closed. So the same rows that make a retry safe
- * are also the answer to "what have admins actually done".
- *
- * The stored response body is deliberately NOT echoed. It is whatever
- * the endpoint returned, which for some writes includes the target's
- * details; the tail is a "who did what, when" index, and an operator
- * who needs the payload can pull the specific write. What it does
- * surface is the actor's email, resolved at read time rather than
- * stored — an actor who is later renamed should read correctly in the
- * history, and denormalising it would freeze a stale copy.
- */
+// Admin write-audit tail — ADR 017 / 018
 import type { Context } from 'hono';
 import { db } from '../db/client.js';
 import type { AdminIdempotencyKeyDoc } from '../db/types.js';
@@ -46,7 +27,6 @@ export interface AdminAuditTailResponse {
   rows: AdminAuditTailRow[];
 }
 
-/** Shared parse for the JSON tail and its CSV twin. */
 function parseQuery(
   c: Context,
   maxLimit: number,
@@ -80,7 +60,6 @@ function parseQuery(
   return { filter, limit };
 }
 
-/** Resolves actor emails for a page of rows in one pass. */
 async function resolveActorEmails(
   rows: readonly AdminIdempotencyKeyDoc[],
 ): Promise<Map<string, string>> {
@@ -108,7 +87,6 @@ function toRows(
   }));
 }
 
-/** GET /api/admin/audit-tail */
 export async function adminAuditTailHandler(c: Context): Promise<Response> {
   const parsed = parseQuery(c, MAX_LIMIT);
   if (parsed instanceof Response) return parsed;
@@ -126,7 +104,6 @@ export async function adminAuditTailHandler(c: Context): Promise<Response> {
   }
 }
 
-/** GET /api/admin/audit-tail.csv */
 export async function adminAuditTailCsvHandler(c: Context): Promise<Response> {
   const parsed = parseQuery(c, CSV_MAX_ROWS);
   if (parsed instanceof Response) return parsed;

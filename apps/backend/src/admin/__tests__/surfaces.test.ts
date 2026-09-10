@@ -1,14 +1,4 @@
-/**
- * The restored admin surfaces, driven end-to-end through the real Hono
- * app against the real in-memory store — only the boot-side edges and
- * the auth bearer are mocked.
- *
- * These cover the behaviour that would be quietly wrong rather than
- * loudly broken: search terms treated as patterns, a CSV cell that a
- * spreadsheet would execute, a rate edit that leaves no history, an
- * export that truncates without saying so, and the several places
- * where a redeem code must not appear.
- */
+// admin surfaces — real Hono app, real in-memory store; only boot edges and auth bearer mocked
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type * as ConfigModule from '../../config/index.js';
 
@@ -148,7 +138,6 @@ function orderDoc(overrides: Partial<OrderDoc> = {}): OrderDoc {
   };
 }
 
-/** Headers for an admin write: identity, idempotency key, JSON body. */
 function adminWrite(body: unknown, stepUpScope?: AdminStepUpScope): RequestInit {
   const headers: Record<string, string> = {
     'x-test-user': ADMIN_ID,
@@ -186,7 +175,6 @@ describe('user search', () => {
   });
 
   it('treats the term as literal text, not a pattern', async () => {
-    // `customer@example.com` would match `.` as a wildcard.
     const res = await app.request('/api/admin/users/search?q=r.e', asAdmin());
     expect(((await res.json()) as { users: unknown[] }).users).toEqual([]);
   });
@@ -362,8 +350,6 @@ describe('cashback config', () => {
         reason: string;
       }>;
     };
-    // Newest first: the second edit knows it came from 5, the first
-    // records that there was nothing before it.
     expect(body.history).toHaveLength(2);
     expect(body.history[0]).toMatchObject({
       priorUserCashbackPct: 5,
@@ -406,7 +392,6 @@ describe('CSV exports', () => {
     try {
       const res = await app.request('/api/admin/merchants-catalog.csv', asAdmin());
       const text = await res.text();
-      // The leading quote is what stops a spreadsheet evaluating it.
       expect(text).toContain(`"'=HYPERLINK(""http://evil/"",""click"")"`);
       expect(text).not.toMatch(/,=HYPERLINK/);
     } finally {

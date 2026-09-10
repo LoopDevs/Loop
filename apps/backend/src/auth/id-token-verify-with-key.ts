@@ -1,23 +1,4 @@
-/**
- * id_token signature + claim verification, given a chosen JWK
- * (ADR 014).
- *
- * Lifted out of `./id-token.ts`. The parent `verifyIdToken` does
- * the orchestration — splits the token, decodes the header, looks
- * up the JWKS, retries on unknown kid — and then hands the chosen
- * key + the three encoded segments to this function for the actual
- * verification: import the JWK, RSA-SHA256 verify the signature,
- * parse the payload, run all the claim-shape and time-bound checks
- * (iss / aud / exp / iat / nbf / lifetime, with clock-skew leeway).
- *
- * Pulling it out leaves the parent file focused on the lookup +
- * retry + error-mapping concerns; the crypto + claim-shape side
- * carries one direction of responsibility per file.
- *
- * Re-exported is unnecessary — `verifyWithKey` is module-private
- * to the parent today, and the lifted version stays the same shape:
- * called from `./id-token.ts` directly via `import`.
- */
+// id_token signature + claim verification, given a chosen JWK — ADR 014
 import { createPublicKey, verify as cryptoVerify } from 'node:crypto';
 import { logger } from '../logger.js';
 import type { Jwk } from './jwks.js';

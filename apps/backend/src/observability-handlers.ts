@@ -1,14 +1,4 @@
-/**
- * `/metrics` (Prometheus) + `/openapi.json` handlers. Both are
- * gated by `probeGateAllows()` (closed-by-default in production
- * unless the matching `*_BEARER_TOKEN` env var is set + sent).
- *
- * Pulled out of `app.ts` so the Prometheus exposition emitter +
- * the OpenAPI spec serializer live next to each other; both are
- * pure ops/observability surfaces with the same auth model and
- * the same caching characteristics (no-store for live counters,
- * no-store for the bearer-gated spec).
- */
+// /metrics + /openapi.json — probe-gated, no-store — A4-076, A4-048, B-5, FT-07, NS-02, ADR 048
 import type { Context } from 'hono';
 import { config } from './config/index.js';
 import {
@@ -27,7 +17,6 @@ import { merchantCatalogStaleAfterMs, locationCatalogStaleAfterMs } from './heal
 import { getGeoDbStatus } from './public/geo.js';
 import { currentFleetSizeEstimate, currentFleetSizeSource } from './middleware/fleet-size.js';
 
-/** Closed-by-default response when the gate rejects a request. */
 function gateRejection(c: Context, expected: string | undefined): Response {
   return expected === undefined
     ? c.json({ code: 'NOT_FOUND', message: 'Not found' }, 404, probeScopedHeaders())
@@ -41,10 +30,6 @@ function probeScopedHeaders(): Record<string, string> {
   };
 }
 
-/**
- * `GET /metrics` — Prometheus text exposition format. Counters
- * for rate-limit hits + per-(method, route, status) request totals.
- */
 export async function metricsHandler(c: Context): Promise<Response> {
   if (!probeGateAllows(c, config.observability.metrics.bearerToken)) {
     return gateRejection(c, config.observability.metrics.bearerToken);
@@ -59,14 +44,8 @@ export async function metricsHandler(c: Context): Promise<Response> {
   lines.push('# HELP loop_requests_total Total HTTP requests by method/route/status.');
   lines.push('# TYPE loop_requests_total counter');
   for (const [key, count] of metrics.requestsTotal) {
-    // A4-076: split on the Unit Separator (\x1f) used by
-    // `incrementRequest` so route patterns containing `:` (Hono's
-    // parameter syntax, e.g. `/api/orders/:id`) round-trip
-    // correctly. Earlier code split on `:` and truncated the route
-    // at the parameter, mislabelling the status as the parameter
-    // name. Escape Prometheus label values defensively so a route
-    // name with a `"` or `\` wouldn't break the line — none does
-    // today, but the cost is one regex per emit.
+    // A4-076: split on \x1f so Hono route params (e.g. `/api/orders/:id`) round-trip;
+    // escape labels defensively to prevent line-format breakage.
     const [method, route, status] = key.split(METRIC_KEY_SEPARATOR);
     const labels =
       `method="${escapePromLabel(method ?? '')}",` +
@@ -76,11 +55,7 @@ export async function metricsHandler(c: Context): Promise<Response> {
   }
   lines.push('');
 
-  // A4-048: per-(method, route) latency histogram. Operators paired
-  // with `loop_requests_total{status=~"5.."}` to compute the SLI
-  // pair the SLO doc commits to (p95 latency, 5xx rate). Bucket
-  // labels are `le=<seconds>` per Prometheus convention; the +Inf
-  // bucket is required and is sourced from the histogram's `count`.
+  // A4-048: latency histogram for SLO SLI pair (p95 latency, 5xx rate).
   lines.push(
     '# HELP loop_request_duration_seconds Request handler duration by method/route, in seconds.',
   );
@@ -137,11 +112,8 @@ export async function metricsHandler(c: Context): Promise<Response> {
   }
   lines.push('');
 
-  // B-5: S4-8's "alive but not leading" distinction wasn't previously
-  // scrapeable — only /health's JSON carried lastLeadTickAtMs/stale. A
-  // fleet where every machine is alive (lastSuccessAtMs fresh) but NONE
-  // of them has led a tick in a while is wedged even though the existing
-  // loop_worker_running/loop_worker_degraded gauges read healthy.
+  // B-5: exposes "alive but not leading" state to detect wedged fleets where
+  // all machines are fresh but none has won the single-flight lock recently.
   lines.push(
     "# HELP loop_worker_last_lead_tick_timestamp_ms Unix timestamp in ms this machine last won a single-flighted worker's fleet-wide lock (or last ticked, for workers with no lock).",
   );
@@ -162,24 +134,7 @@ export async function metricsHandler(c: Context): Promise<Response> {
   }
   lines.push('');
 
-  // FT-07 / NS-02: money-integrity breach gauges. Before this the
-  // /metrics surface carried request/latency/worker signals
-  // but NOT ONE money-integrity gauge — so a live ledger drift, asset
-  // drift, vault solvency breach, or operator-float divergence was a
-  // GREEN dashboard, detectable only if the Discord monitoring channel
-  // happened to be configured AND watched. The drift/solvency/
-  // reconciliation watchers now set `setMoneyIntegrityBreach(signal,
-  // active)` on every tick that actually evaluates their invariant, so
-  // a standing breach is scrapeable/alertable/dashboard-able
-  // independent of Discord. `active` is the STANDING state (a breach
-  // that already paged once but persists still reads 1), not "paged
-  // this tick". A signal only appears once its watcher has evaluated
-  // the invariant at least once (same lazy-registration posture as the
-  // loop_worker_* gauges); the last-evaluated gauge lets an operator
-  // distinguish "checked and clean" (0, fresh timestamp) from "not
-  // being checked" (absent). Alert with `max()` across the fleet — see
-  // the registry doc-comment in metrics.ts for why a follower's stale
-  // 0 can lag the single-flight lock winner's 1.
+  // FT-07 / NS-02: money-integrity breach gauges; scrapeable/alertable independent of Discord.
   lines.push(
     '# HELP loop_money_integrity_breach_active Money-integrity invariant breach state per watcher signal (1=standing breach, 0=clean). Independent of Discord delivery (FT-07/NS-02).',
   );
@@ -202,13 +157,7 @@ export async function metricsHandler(c: Context): Promise<Response> {
   }
   lines.push('');
 
-  // B-5: docs/slo.md §Freshness pins "merchant catalog age ≤ 2x
-  // the hourly sweep" / "location clusters age ≤ 2x
-  // LOCATION_REFRESH_INTERVAL_HOURS" as SLOs, but until now that data
-  // only reached operators via /health's JSON body (not scrapeable /
-  // dashboard-able / alertable via Prometheus). Both reads are in-memory
-  // cache lookups (merchants/sync.js, clustering/data-store.js) — no DB
-  // or upstream call, so this stays as cheap as the rest of /metrics.
+  // B-5: exposes catalog freshness SLOs (docs/slo.md) to Prometheus; in-memory lookups only.
   const { loadedAt: merchantsLoadedAtMs } = getMerchants();
   const { loadedAt: locationsLoadedAtMs } = getLocations();
   const merchantsStale = Date.now() - merchantsLoadedAtMs > merchantCatalogStaleAfterMs();
@@ -230,11 +179,7 @@ export async function metricsHandler(c: Context): Promise<Response> {
   lines.push(`loop_catalog_stale{catalog="locations"} ${locationsStale ? 1 : 0}`);
   lines.push('');
 
-  // B-5: mirrors /health's geoDbStale soft-degraded reason. `stale` is
-  // already false-for-both-fresh-and-unconfigured (see GeoDbStatus's doc
-  // comment in public/geo.ts) so this gauge can't false-alarm on a
-  // deployment that never configured `catalog.geoip.databasePath`. The reader
-  // is memoized after first open (no repeated file I/O per scrape).
+  // B-5: mirrors /health geoDbStale; `stale` is false for unconfigured deployments to prevent false alarms.
   const geoDbStatus = await getGeoDbStatus();
   lines.push('# HELP loop_geo_db_stale GeoLite2 database staleness state (1=stale, 0=fresh).');
   lines.push('# TYPE loop_geo_db_stale gauge');
@@ -247,10 +192,7 @@ export async function metricsHandler(c: Context): Promise<Response> {
     lines.push('');
   }
 
-  // B-5: S4-4's per-machine → fleet-wide rate-limit budget divisor,
-  // previously only visible via /health JSON. `source` is a label
-  // rather than folded into the gauge value so both facts stay queryable
-  // independently.
+  // B-5: exposes fleet-size divisor for rate-limit budget conversion to Prometheus.
   lines.push(
     '# HELP loop_rate_limit_fleet_estimate Current divisor the rate limiter uses for its per-machine to fleet-wide budget conversion.',
   );
@@ -267,10 +209,7 @@ export async function metricsHandler(c: Context): Promise<Response> {
   );
   lines.push('');
 
-  // ADR 048: Core Web Vitals captured via POST /api/public/rum. Unit
-  // varies by vital — ms for LCP/INP/FCP/TTFB, an unitless layout-
-  // shift score for CLS — called out in the HELP line since
-  // Prometheus has no native per-label-value unit concept.
+  // ADR 048: Core Web Vitals; unit varies by vital (ms vs unitless score).
   lines.push(
     '# HELP loop_web_vital Core Web Vital observations from real users (ms for LCP/INP/FCP/TTFB, unitless score for CLS).',
   );
@@ -295,22 +234,12 @@ export async function metricsHandler(c: Context): Promise<Response> {
 
   return c.text(lines.join('\n') + '\n', 200, {
     'Content-Type': 'text/plain; version=0.0.4',
-    // /metrics reports live counters + gauges. A CDN in front
-    // caching this would report stale numbers to the scraper;
-    // no-store makes that impossible without requiring specific
-    // scraper config.
+    // no-store prevents CDN from serving stale live counters to scrapers.
     'Cache-Control': 'no-store',
   });
 }
 
-/**
- * A4-076: escape a Prometheus exposition label value per
- * https://prometheus.io/docs/instrumenting/exposition_formats/.
- * Only `\\`, `"`, and `\n` need escaping inside a quoted label.
- * Defensive: route patterns from Hono never contain these today,
- * but a future router or a regression that put raw URL chunks into
- * the label would otherwise break the line format.
- */
+// A4-076: escape Prometheus label values per spec; defensive against future router changes.
 function escapePromLabel(s: string): string {
   return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
 }

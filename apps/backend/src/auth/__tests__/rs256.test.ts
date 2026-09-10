@@ -1,22 +1,11 @@
-/**
- * ADR 030 Phase A — RS256 signing + JWKS material tests.
- *
- * Kept separate from `signer.test.ts` / `tokens.test.ts` (which pin
- * the HS256 wire format and stay byte-for-byte untouched by Phase A)
- * so the legacy suites keep proving the HS256 path is unchanged.
- *
- * Keys are generated at runtime — never commit a PEM fixture, even a
- * test-only one (gitleaks / secret-scan would rightly flag it).
- */
+// ADR 030 Phase A — RS256 signing + JWKS material tests
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
 import type * as ConfigModule from '../../config/index.js';
 import { createHash, createVerify, generateKeyPairSync } from 'node:crypto';
 import type * as SignerModule from '../signer.js';
 import type * as TokensModule from '../tokens.js';
 
-// Generate once for the whole file — 2048-bit keygen is ~100ms each.
-// Module scope (not vi.hoisted) is fine: signer/tokens are only ever
-// imported dynamically inside loadWithKeys, after the keys exist.
+// Keys generated at runtime to avoid committing PEM fixtures (gitleaks/secret-scan)
 const gen = (): string =>
   generateKeyPairSync('rsa', { modulusLength: 2048 })
     .privateKey.export({ type: 'pkcs8', format: 'pem' })
@@ -25,11 +14,6 @@ const CURRENT_PEM = gen();
 const PREVIOUS_PEM = gen();
 const UNRELATED_PEM = gen();
 
-/**
- * The signing keys are the only config these tests vary. The mock
- * serves a mutable `jwt` block over the real (test-fixture) config, so
- * `loadWithKeys` below only has to assign into it.
- */
 const { jwtState } = vi.hoisted(() => ({
   jwtState: {
     hs256: { current: undefined as string | undefined, previous: undefined as string | undefined },
@@ -53,7 +37,6 @@ vi.mock('../../config/index.js', async (importActual) => {
   };
 });
 
-/** The signing keys `loadWithKeys` accepts, mirroring `auth.native.jwt`. */
 interface JwtKeys {
   hs256?: string;
   hs256Previous?: string;
@@ -61,7 +44,6 @@ interface JwtKeys {
   rs256Previous?: string;
 }
 
-/** Applies exactly the given keys, clearing every slot not named. */
 function applyKeys(keys: JwtKeys): void {
   jwtState.hs256.current = keys.hs256;
   jwtState.hs256.previous = keys.hs256Previous;
@@ -69,11 +51,6 @@ function applyKeys(keys: JwtKeys): void {
   jwtState.rs256.previous = keys.rs256Previous;
 }
 
-/**
- * Resets module state, applies exactly the given signing keys, and
- * re-imports signer + tokens. This is the documented test-reload
- * pattern (see tokens.test.ts's rotation test).
- */
 async function loadWithKeys(keys: JwtKeys): Promise<typeof SignerModule & typeof TokensModule> {
   vi.resetModules();
   applyKeys(keys);
@@ -87,7 +64,6 @@ function decodeHeader(token: string): Record<string, unknown> {
   return JSON.parse(Buffer.from(h!, 'base64url').toString('utf8')) as Record<string, unknown>;
 }
 
-/** Independent RFC 7638 §3.1 thumbprint over an RSA public JWK. */
 function rfc7638Thumbprint(jwk: { e: string; n: string }): string {
   return createHash('sha256')
     .update(JSON.stringify({ e: jwk.e, kty: 'RSA', n: jwk.n }))
@@ -193,7 +169,6 @@ describe('RS256 sign/verify roundtrip', () => {
 
 describe('rotation + migration windows', () => {
   it('verifies a token signed under the previous RSA key during rotation', async () => {
-    // Mint while PREVIOUS_PEM is the active key…
     const old = await loadWithKeys({ rs256: PREVIOUS_PEM });
     const { token } = old.signLoopToken({
       sub: 'u1',
@@ -201,7 +176,6 @@ describe('rotation + migration windows', () => {
       typ: 'access',
       ttlSeconds: 300,
     });
-    // …then rotate: new current key, old key in the PREVIOUS slot.
     const rotated = await loadWithKeys({
       rs256: CURRENT_PEM,
       rs256Previous: PREVIOUS_PEM,
@@ -209,14 +183,12 @@ describe('rotation + migration windows', () => {
     const result = rotated.verifyLoopToken(token, 'access');
     expect(result.ok).toBe(true);
 
-    // Without the PREVIOUS slot the old token must fail — proving the
-    // accept came from the previous-key verifier, not the current.
+    // Proves acceptance relies on the previous-key verifier, not the current
     const dropped = await loadWithKeys({ rs256: CURRENT_PEM });
     expect(dropped.verifyLoopToken(token, 'access').ok).toBe(false);
   });
 
   it('still verifies a legacy HS256 token during the HS256→RS256 cutover window', async () => {
-    // Mint under HS256-only config (the pre-cutover deployment)…
     const legacy = await loadWithKeys({ hs256: 'rs256-test-legacy-signing-key-x1' });
     const { token: hsToken } = legacy.signLoopToken({
       sub: 'u1',
@@ -226,7 +198,6 @@ describe('rotation + migration windows', () => {
     });
     expect(decodeHeader(hsToken)['alg']).toBe('HS256');
 
-    // …then cut over: RSA key set, HS256 key retained verify-only.
     const cutover = await loadWithKeys({
       rs256: CURRENT_PEM,
       hs256: 'rs256-test-legacy-signing-key-x1',
@@ -234,7 +205,6 @@ describe('rotation + migration windows', () => {
     const result = cutover.verifyLoopToken(hsToken, 'access');
     expect(result.ok).toBe(true);
 
-    // New tokens mint RS256 from the same deployment.
     const { token: rsToken } = cutover.signLoopToken({
       sub: 'u1',
       email: 'a@b.com',

@@ -4,8 +4,6 @@ import type { Location, Bounds } from '../algorithm.js';
 
 const BOUNDS: Bounds = { west: -180, south: -90, east: 180, north: 90 };
 
-// ─── Grid sizes ───────────────────────────────────────────────────────────────
-
 describe('gridSizeForZoom', () => {
   it.each([
     [0, 20.0],
@@ -27,8 +25,6 @@ describe('gridSizeForZoom', () => {
     expect(gridSizeForZoom(zoom)).toBe(expected);
   });
 });
-
-// ─── Clustering ───────────────────────────────────────────────────────────────
 
 describe('clusterLocations', () => {
   const loc = (id: string, lng: number, lat: number): Location => ({
@@ -52,7 +48,6 @@ describe('clusterLocations', () => {
   });
 
   it('clusters nearby points at low zoom', () => {
-    // Two points in the same 20° grid cell at zoom 1
     const locations = [loc('a', 1, 1), loc('b', 2, 2)];
     const result = clusterLocations(locations, BOUNDS, 1);
     expect(result.clusterPoints).toHaveLength(1);
@@ -61,7 +56,6 @@ describe('clusterLocations', () => {
   });
 
   it('returns individual point when a grid cell has only one location', () => {
-    // At zoom 10 (0.1° grid), points far enough apart to be in different cells
     const locations = [loc('a', 0, 0), loc('b', 10, 10)];
     const result = clusterLocations(locations, BOUNDS, 10);
     expect(result.locationPoints).toHaveLength(2);
@@ -70,14 +64,13 @@ describe('clusterLocations', () => {
 
   it('omits points outside the original bounds', () => {
     const bounds: Bounds = { west: 0, south: 0, east: 10, north: 10 };
-    const locations = [loc('a', -1, 5), loc('b', 5, 5)]; // -1,5 outside bounds
+    const locations = [loc('a', -1, 5), loc('b', 5, 5)];
     const result = clusterLocations(locations, bounds, 14);
     expect(result.locationPoints).toHaveLength(1);
     expect(result.locationPoints[0]!.properties.merchantId).toBe('b');
   });
 
   it('cluster centroid is the mean of visible points', () => {
-    // Both in the same 20° cell at zoom 1, both visible
     const locations = [loc('a', 0, 0), loc('b', 2, 4)];
     const result = clusterLocations(locations, BOUNDS, 1);
     expect(result.clusterPoints).toHaveLength(1);
@@ -98,8 +91,6 @@ describe('clusterLocations', () => {
   });
 
   it('assigns unique sequential ids to clusters', () => {
-    // Three points in three separate cells at zoom 14 won't cluster.
-    // Put them in cells that will cluster at zoom 1 — two pairs.
     const locations = [
       loc('a', 1, 1),
       loc('b', 2, 2), // same 20° cell
@@ -112,10 +103,8 @@ describe('clusterLocations', () => {
   });
 
   it('pointCount reflects full cell membership, not just visible subset', () => {
-    // Documented behaviour (matches Go reference impl): callers pre-load an
-    // expanded bbox, so a cell can contain points outside the visible bounds.
-    // The cluster's pointCount shows the TOTAL, while the centroid is the
-    // mean of only the visible points.
+    // Callers pre-load an expanded bbox, so a cell can contain points outside the visible bounds.
+    // pointCount shows the TOTAL, while the centroid is the mean of only the visible points.
     const bounds: Bounds = { west: 0, south: 0, east: 10, north: 10 };
     const locations = [
       loc('visible-1', 1, 1),
@@ -125,13 +114,11 @@ describe('clusterLocations', () => {
     const result = clusterLocations(locations, bounds, 1);
     expect(result.clusterPoints).toHaveLength(1);
     expect(result.clusterPoints[0]!.properties.pointCount).toBe(3);
-    // Centroid is mean of ONLY visible points: (1+2)/2, (1+2)/2
     expect(result.clusterPoints[0]!.geometry.coordinates.longitude).toBeCloseTo(1.5, 5);
     expect(result.clusterPoints[0]!.geometry.coordinates.latitude).toBeCloseTo(1.5, 5);
   });
 
   it('omits clusters whose every point is outside bounds', () => {
-    // Cell has 2+ points but none are visible → cluster is suppressed.
     // Prevents rendering a cluster pin that would appear in empty map space.
     const bounds: Bounds = { west: 0, south: 0, east: 10, north: 10 };
     const locations = [loc('hidden-1', 25, 25), loc('hidden-2', 26, 26)];
@@ -141,9 +128,7 @@ describe('clusterLocations', () => {
   });
 
   it('clusters negative coordinates correctly (southern/western hemispheres)', () => {
-    // Western hemisphere regression — Math.floor on negative numbers can be
-    // subtle. Two points at (-5, -5) and (-6, -6) must land in the same
-    // 20° cell at zoom 1: floor(-5/20) = floor(-6/20) = -1.
+    // Math.floor on negative numbers can be subtle.
     const locations = [loc('a', -5, -5), loc('b', -6, -6)];
     const result = clusterLocations(locations, BOUNDS, 1);
     expect(result.clusterPoints).toHaveLength(1);
@@ -151,16 +136,11 @@ describe('clusterLocations', () => {
   });
 
   it('assigns a point at exactly 0.3° to the correct cell at zoom 10 (FP precision)', () => {
-    // Regression: `Math.floor(0.3 / 0.1)` is 2 in IEEE-754 (0.3/0.1 yields
-    // 2.9999999999999996), but the mathematically correct cell is 3. The
-    // algorithm uses `Math.floor(lng * invGridSize)` to dodge the issue;
-    // this test pins that invariant. Two merchants sitting at exactly 0.3°
-    // must share a cell with a third at 0.31° (both in cell 3), not with
-    // a merchant at 0.25° (which belongs in cell 2).
+    // Math.floor(0.3 / 0.1) is 2 in IEEE-754, but the correct cell is 3.
+    // The algorithm uses Math.floor(lng * invGridSize) to dodge the issue.
     const bounds: Bounds = { west: 0, south: 0, east: 1, north: 1 };
     const locations = [loc('at-30', 0.3, 0.3), loc('near-31', 0.31, 0.31)];
     const result = clusterLocations(locations, bounds, 10);
-    // Both in cell (3,3) — should produce a cluster, not two lone points.
     expect(result.clusterPoints).toHaveLength(1);
     expect(result.clusterPoints[0]!.properties.pointCount).toBe(2);
   });
@@ -175,15 +155,13 @@ describe('clusterLocations', () => {
       loc('good2', 2, 2),
     ];
     const result = clusterLocations(locations, BOUNDS, 1);
-    // NaN/Infinity points must not form a bogus "NaN,NaN" cell that would
-    // cluster every invalid record together. Only the two valid points count.
+    // NaN/Infinity points must not form a bogus "NaN,NaN" cell that would cluster every invalid record together.
     expect(result.clusterPoints).toHaveLength(1);
     expect(result.clusterPoints[0]!.properties.pointCount).toBe(2);
   });
 
   it('includes points on the exact bounds edge (inclusive ≤)', () => {
     const bounds: Bounds = { west: 0, south: 0, east: 10, north: 10 };
-    // Points sitting exactly on each edge must be visible (the check is ≤).
     const locations = [
       loc('north-edge', 5, 10),
       loc('south-edge', 5, 0),

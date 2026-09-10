@@ -1,28 +1,4 @@
-/**
- * Per-request authentication middleware (`requireAuth`) +
- * `LoopAuthContext` shape it sets on the Hono context.
- *
- * Lifted out of `apps/backend/src/auth/handler.ts` to separate
- * the per-request auth check from the `/api/auth/*` route
- * handlers (request-otp / verify-otp / refresh / logout). It lives
- * next to the token / refresh-token primitives it composes.
- *
- * NS-09 update: the Loop-token branch is no longer DB-free. A
- * signature+expiry-valid access token proves it was minted by us and
- * is unexpired, but NOT that it is still LIVE — access tokens are
- * 15-min and carry no per-token DB row, so a logout / sign-out-all /
- * compromise could not previously invalidate an already-issued one.
- * We now compare the token's `tv` claim to the user's CURRENT
- * `users.token_version` (one column-scoped read per authenticated
- * request) and reject a stale or `tv`-less token. This is the single
- * enforcement point for access-token revocation — every authenticated
- * surface (/me*, /api/admin/*, staff) runs through `requireAuth`
- * first, so the check need not be repeated downstream.
- *
- * `LoopAuthContext` is re-exported from `auth/handler.ts` via the
- * barrel pattern so existing imports across the backend keep
- * working.
- */
+// per-request auth middleware — ADR 013, NS-09, A-036
 import type { Context } from 'hono';
 import { config } from '../config/index.js';
 import { logger } from '../logger.js';
@@ -31,14 +7,7 @@ import { getUserTokenVersion } from '../db/users.js';
 
 const log = logger.child({ handler: 'auth-middleware' });
 
-/**
- * Every client ID we're prepared to forward upstream. Audit A-036 flagged
- * that `requireAuth` previously echoed whatever `X-Client-Id` a client sent
- * straight into the upstream CTX request, so a compromised client could
- * pick an arbitrary entity context. Restrict to the three values we set at
- * auth time (web / ios / android), resolved from the same env vars used
- * by `clientIdForPlatform`.
- */
+// A-036: restrict to server-side allowlist to prevent arbitrary entity context injection
 function allowedClientIds(): ReadonlySet<string> {
   return new Set([
     config.ctx.clientIds.web,
@@ -47,16 +16,6 @@ function allowedClientIds(): ReadonlySet<string> {
   ]);
 }
 
-/**
- * Shape set on the Hono context by `requireAuth` — tells downstream
- * handlers whether the user authenticated with a Loop-signed token
- * or a legacy CTX-signed bearer.
- *
- * During the ADR 013 migration both are accepted. Handlers that need
- * to decide whether to hit CTX directly with the bearer (legacy
- * path) or route via the operator pool (Loop-native path) branch
- * on `kind`.
- */
 export type LoopAuthContext =
   | {
       kind: 'loop';
@@ -71,27 +30,6 @@ export type LoopAuthContext =
       bearerToken: string;
     };
 
-/**
- * Middleware: authenticates the request.
- *
- * During the ADR 013 migration this accepts either a Loop-signed
- * access token (verified in-process against `LOOP_JWT_SIGNING_KEY`)
- * or a legacy CTX-signed bearer (pass-through: CTX validates on
- * each proxied call).
- *
- * On success:
- *   - `c.set('auth', LoopAuthContext)` — full discriminated union,
- *     the preferred API for new handlers.
- *   - `c.set('bearerToken', token)` — raw bearer, preserved for
- *     existing CTX-proxy handlers that forward it upstream.
- *   - `c.set('clientId', platform)` when a trusted `X-Client-Id` is
- *     present.
- *
- * A Loop token whose signature verifies but is expired / wrong-typ
- * gets a specific 401. A string that's neither a valid Loop token
- * nor a plausible CTX JWT still gets the same 401 — we don't leak
- * which kind of auth is configured.
- */
 export async function requireAuth(c: Context, next: () => Promise<void>): Promise<Response | void> {
   const authHeader = c.req.header('Authorization');
   const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
@@ -100,15 +38,7 @@ export async function requireAuth(c: Context, next: () => Promise<void>): Promis
     return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
   }
 
-  // Forward X-Client-Id if present — CTX uses this to determine entity
-  // context. Only honor values from the server-side allowlist (audit A-036);
-  // an untrusted or unknown value is dropped rather than forwarded, which
-  // makes the downstream handler fall back to the default CTX client
-  // binding rather than a client-supplied one. This runs BEFORE the
-  // auth-path fork below: both the Loop-native JWT path (which returns
-  // early on success) and the CTX pass-through path need `clientId` —
-  // handlers that attribute proxied CTX traffic (`ctxActAsHeaders`)
-  // read it regardless of which token kind authenticated the request.
+  // Runs before auth fork: both Loop and CTX paths need clientId for downstream attribution
   const clientId = c.req.header('X-Client-Id');
   if (clientId !== undefined && allowedClientIds().has(clientId)) {
     c.set('clientId', clientId);
@@ -116,25 +46,15 @@ export async function requireAuth(c: Context, next: () => Promise<void>): Promis
     log.warn({ clientId }, 'Rejected untrusted X-Client-Id value on authenticated request');
   }
 
-  // Try Loop-signed JWT first — cheap in-process verify, no network.
-  // If the signing key isn't configured we can't accept Loop tokens,
-  // so the CTX pass-through is the only remaining path.
   if (isLoopAuthConfigured()) {
     const verified = verifyLoopToken(token, 'access');
     if (verified.ok) {
-      // NS-09: access-token revocation enforcement. The signature +
-      // expiry check above does not prove the token is still LIVE — a
-      // logout / sign-out-all / compromise bumps the user's
-      // `token_version`, and every access token minted before that bump
-      // must be rejected even while still inside its 15-min TTL. Compare
-      // the token's `tv` claim to the row's CURRENT value.
+      // NS-09: signature/expiry valid does not prove token is LIVE; must check current token_version
       let currentVersion: number | null;
       try {
         currentVersion = await getUserTokenVersion(verified.claims.sub);
       } catch (err) {
-        // DB read failed. Fail closed with a 500 (mirrors requireStaff's
-        // user-lookup-throw posture): we cannot prove the token is live,
-        // and a DB outage already breaks the wider request anyway.
+        // Fail closed: cannot prove token is live, and DB outage breaks wider request anyway
         log.error(
           { err, userId: verified.claims.sub },
           'NS-09: token_version read failed — rejecting request',
@@ -142,11 +62,7 @@ export async function requireAuth(c: Context, next: () => Promise<void>): Promis
         return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to verify session' }, 500);
       }
       if (currentVersion === null || verified.claims.tv !== currentVersion) {
-        // Fail closed on: no user row (deleted user), a legacy token
-        // with no `tv` claim (`undefined !== <number>`), or a token
-        // minted before the latest revocation (`tv` stale). The client's
-        // still-live refresh token, if any, re-mints an access token
-        // carrying the current `tv`.
+        // Reject stale/missing tv; client's refresh token will re-mint with current tv
         return c.json({ code: 'UNAUTHORIZED', message: 'Invalid or expired token' }, 401);
       }
       const authCtx: LoopAuthContext = {
@@ -160,20 +76,13 @@ export async function requireAuth(c: Context, next: () => Promise<void>): Promis
       await next();
       return;
     }
-    // Differentiate "looks like a Loop token but expired / wrong-type"
-    // from "this isn't our JWT" — the latter falls through to the CTX
-    // path, the former rejects now. A bad signature that happens to
-    // parse as a CTX JWT later would be rejected upstream anyway.
+    // Reject expired/wrong-type Loop tokens now; malformed/bad_signature fall through to CTX
     if (verified.reason === 'expired' || verified.reason === 'wrong_type') {
       return c.json({ code: 'UNAUTHORIZED', message: 'Invalid or expired token' }, 401);
     }
-    // `malformed` / `bad_signature` fall through to the CTX pass-
-    // through below; a genuine CTX bearer is malformed as a Loop JWT.
   }
 
-  // CTX pass-through path. We don't verify here — CTX validates on
-  // each proxied call. Preserved for the overlap window (ADR 013
-  // Phase A); removed in Phase C once all sessions have rotated.
+  // CTX pass-through: CTX validates on each proxied call; removed in ADR 013 Phase C
   const ctxAuth: LoopAuthContext = { kind: 'ctx', bearerToken: token };
   c.set('auth', ctxAuth);
   c.set('bearerToken', token);

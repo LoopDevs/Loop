@@ -1,36 +1,4 @@
-/**
- * Redemption-backfill sweeper (comprehensive audit 2026-06-11
- * §redemption follow-up to the 2026-05-14 e2e finding).
- *
- * `waitForRedemption` (procurement-redemption.ts) can exhaust its
- * budget while CTX is still issuing — the procurement worker then
- * marks the order `fulfilled` with `redeem_code / redeem_pin /
- * redeem_url` all NULL, and (before this module) nothing ever
- * re-fetched them. The user paid; the "Ready" screen has nothing to
- * show.
- *
- * This sweeper periodically finds fulfilled orders that captured a
- * `ctx_order_id` but no redemption payload, re-runs `fetchRedemption`
- * per order through the CTX API, and persists any recovered
- * fields. Per-order bookkeeping (migration 0034):
- *
- *   - `redemption_backfill_attempts` — bumped on every empty /
- *     failed attempt; drives the exponential-ish backoff
- *     (1 min · 2^attempts, capped at 8 h) and the hard cap of
- *     `REDEMPTION_BACKFILL_MAX_ATTEMPTS` (10).
- *   - `redemption_backfill_last_attempt_at` — anchor for the
- *     backoff's next-due computation.
- *
- * When an order crosses the cap still empty, ops is paged once via
- * `notifyRedemptionBackfillExhausted` (Discord monitoring channel) —
- * runbook: docs/runbooks/redemption-backfill-exhausted.md.
- *
- * Wiring follows the sibling sweeps (`sweepStuckProcurement`,
- * `sweepExpiredOrders`): a `start…/stop…` timer pair started
- * unconditionally in `index.ts` (ADR 052 order-mirror machinery),
- * with per-tick errors swallowed so a transient CTX / DB blip
- * doesn't kill the interval.
- */
+// redemption-backfill sweeper — ADR 052, S4-8, CF-14, CF-12, CF-25, ADR 037
 import { db, withSingleFlight } from '../db/client.js';
 import { logger } from '../logger.js';
 import { notifyRedemptionBackfillExhausted } from '../discord.js';
@@ -47,76 +15,33 @@ import {
 
 const log = logger.child({ area: 'redemption-backfill' });
 
-/**
- * Hard cap on backfill attempts per order. With the backoff schedule
- * below the tenth attempt lands ~17 h after fulfillment — long past
- * any plausible CTX issuance latency. Beyond that the row is a
- * supplier-side problem, not a retry problem; ops is paged instead.
- */
+// 10th attempt lands ~17h post-fulfillment; beyond that it's a supplier-side issue, not a retry issue
 export const REDEMPTION_BACKFILL_MAX_ATTEMPTS = 10;
 
-/**
- * Backoff base: the delay before attempt n+1 is `base · 2^n`, so
- * 1 min, 2 min, 4 min, … capped at `REDEMPTION_BACKFILL_MAX_DELAY_MS`.
- * Attempt 0 (first backfill after fulfillment) is due immediately —
- * `last_attempt_at IS NULL` short-circuits the gate.
- */
 const REDEMPTION_BACKFILL_BASE_DELAY_MS = 60_000;
 const REDEMPTION_BACKFILL_MAX_DELAY_MS = 8 * 60 * 60 * 1000;
 
-/** How often the sweeper polls. Mirrors the stuck-procurement sweep. */
 export const REDEMPTION_BACKFILL_INTERVAL_MS = 60_000;
 
-/** Max candidate rows considered per tick. */
 const REDEMPTION_BACKFILL_BATCH_LIMIT = 20;
 
-/** Delay before the (attempts+1)-th attempt is due. Exported for tests. */
 export function redemptionBackfillDelayMs(attempts: number): number {
   const exp = Math.min(attempts, 30); // 2^30 guard against overflow noise
   return Math.min(REDEMPTION_BACKFILL_BASE_DELAY_MS * 2 ** exp, REDEMPTION_BACKFILL_MAX_DELAY_MS);
 }
 
 export interface RedemptionBackfillTickResult {
-  /** Candidate rows matched by the SQL filter (pre-backoff). */
   picked: number;
-  /** Rows skipped because their backoff window hasn't elapsed yet. */
   notDueYet: number;
-  /** Rows where the re-fetch recovered at least one redemption field. */
   recovered: number;
-  /** Rows re-fetched but still empty (attempts bumped). */
   stillEmpty: number;
-  /** Rows that crossed the attempts cap this tick (Discord alert fired). */
   exhausted: number;
-  /** Rows whose fetch threw a non-transient error (attempts bumped). */
   errors: number;
-  /** True when the tick aborted early on a CTX outage or rate-limit. */
   abortedCtxUnavailable: boolean;
-  /** S4-8: true when another machine held the fleet-wide sweep lock. */
   skippedLocked: boolean;
 }
 
-/**
- * Single sweep pass. Safe to call repeatedly — the WHERE guards on
- * the persist UPDATE mean a concurrent writer (or a second sweeper)
- * can't double-write or clobber a payload that landed in between.
- *
- * CF-14 (x-concurrency-financial X-2) cross-instance safety: already
- * safe without `SKIP LOCKED`. The candidate `SELECT` is a plain read,
- * but every mutation is a guarded compare-and-set: the recovery UPDATE
- * re-asserts `state='fulfilled' AND redeem* IS NULL`, and
- * `recordEmptyAttempt` CAS-es on `redemptionBackfillAttempts =
- * row.attempts`. So when two Fly machines run this sweep at once they
- * may both re-`fetchRedemption` the same `ctx_order_id` (an idempotent,
- * read-only supplier call — wasted cost, no money/correctness bug) but
- * exactly one wins the attempt bump and the at-cap page. No shared
- * sequenced resource, no double-process.
- *
- * S4-8: still true today, but two machines re-fetching the same CTX
- * order on every tick is a real wasted-cost tax at fleet scale. Single-
- * flighted fleet-wide via `withAdvisoryLock` (see the exported
- * `runRedemptionBackfillTick` wrapper below) — pure efficiency, the
- * money-safety reasoning above is unchanged and preserved verbatim.
- */
+// CF-14: mutations are guarded compare-and-set, so concurrent sweepers won't double-write or clobber payloads
 async function runRedemptionBackfillTickLocked(args?: {
   limit?: number;
   now?: number;
@@ -133,10 +58,7 @@ async function runRedemptionBackfillTickLocked(args?: {
     skippedLocked: false,
   };
 
-  // Candidate scan: fulfilled docs that captured a ctxOrderId but no
-  // redemption payload, under the attempts cap. Oldest fulfillment
-  // first so a long-stuck order isn't starved by newer ones when the
-  // batch limit bites.
+  // Oldest fulfillment first to prevent starvation of long-stuck orders when batch limit bites
   const candidates = await db.collection('orders').findMany(
     {
       state: 'fulfilled',
@@ -160,12 +82,8 @@ async function runRedemptionBackfillTickLocked(args?: {
   result.picked = rows.length;
 
   for (const row of rows) {
-    // ctxOrderId is guaranteed non-null by the SQL filter; the
-    // narrow keeps TypeScript honest without a non-null assertion.
     if (row.ctxOrderId === null) continue;
 
-    // Backoff gate, evaluated in code so the schedule lives next to
-    // the constants rather than in a SQL interval expression.
     if (
       row.lastAttemptAt !== null &&
       now - row.lastAttemptAt.getTime() < redemptionBackfillDelayMs(row.attempts)
@@ -179,11 +97,7 @@ async function runRedemptionBackfillTickLocked(args?: {
       redemption = await fetchRedemption(row.ctxOrderId);
     } catch (err) {
       if (err instanceof CtxUnavailableError || err instanceof CtxRateLimitedError) {
-        // Pool-wide outage or CTX rate-limit (CF-12) — every subsequent
-        // row would hit the same wall. Abort WITHOUT bumping attempts:
-        // this is our-side back-pressure / outage, not evidence that
-        // CTX has no payload for the order, and it shouldn't consume
-        // the order's retry budget.
+        // CF-12: abort without bumping attempts; this is our-side back-pressure, not evidence of missing payload
         log.warn(
           { orderId: row.id, rateLimited: err instanceof CtxRateLimitedError },
           'CTX unavailable / rate-limited — aborting redemption-backfill tick without burning attempts',
@@ -214,7 +128,6 @@ async function runRedemptionBackfillTickLocked(args?: {
   return result;
 }
 
-/** Zeroed tick result for the not-run paths (lock lost / lease expired). */
 function emptyBackfillTickResult(skippedLocked: boolean): RedemptionBackfillTickResult {
   return {
     picked: 0,
@@ -228,36 +141,12 @@ function emptyBackfillTickResult(skippedLocked: boolean): RedemptionBackfillTick
   };
 }
 
-/**
- * Hard ceiling on how long the lock holder may run one sweep
- * (`db/client.ts` puts lease responsibility on the CALLER — the
- * payout worker's `PAYOUT_TICK_LEASE_MS` is the established pattern,
- * INV-9). A batch of 20 CTX re-fetches at a few seconds each fits
- * comfortably in 240s. On expiry the lock releases and the orphaned
- * sweep body degrades to the pre-S4-8 per-machine concurrency (safe:
- * every mutation is a guarded compare-and-set — see the tick
- * doc-comment), never a fleet stall.
- */
+// INV-9: lease responsibility on caller; 240s fits 20 CTX re-fetches comfortably
 const REDEMPTION_BACKFILL_TICK_LEASE_MS = 240_000;
 
-/** Distinct sentinel so the lease-timeout path is testable + loggable. */
 const TICK_LEASE_TIMED_OUT = Symbol('redemption-backfill-tick-lease-timeout');
 
-/**
- * S4-8: fleet-wide single-flight wrapper around
- * `runRedemptionBackfillTickLocked`, copying the `withAdvisoryLock` +
- * zeroed-result pattern from `runInterestMintTick`
- * (`../credits/interest-mint.ts`) plus the payout worker's lease
- * deadline. With N Fly machines running the same 60s-cadence
- * interval, only the lock holder sweeps this tick; the rest return
- * immediately with `skippedLocked: true` and no I/O.
- *
- * Public API unchanged for existing callers (`startRedemptionBackfill`,
- * the ADR-037 admin one-shot uses `refetchOrderRedemption` directly
- * and is NOT gated by this lock — a human click is its own rate
- * limiter) — this is still `runRedemptionBackfillTick`, just now
- * single-flighted.
- */
+// S4-8: fleet-wide single-flight; only lock holder sweeps, others return immediately with skippedLocked
 export async function runRedemptionBackfillTick(args?: {
   limit?: number;
   now?: number;
@@ -288,11 +177,7 @@ export async function runRedemptionBackfillTick(args?: {
   return locked.value;
 }
 
-/**
- * Persists a recovered payload. The state + still-NULL guards make
- * the write idempotent against a concurrent recovery (admin manual
- * fix, second instance) — losing the race is a no-op (false).
- */
+// Idempotent against concurrent recovery; losing the race is a no-op
 async function persistRecoveredRedemption(
   row: BackfillRow,
   redemption: { code: string | null; pin: string | null; url: string | null },
@@ -302,9 +187,7 @@ async function persistRecoveredRedemption(
     { id: row.id, state: 'fulfilled', redeemCode: null, redeemPin: null, redeemUrl: null },
     {
       $set: {
-        // CF-25 / X-PRIV-03: same envelope as the primary fulfillment
-        // write — encrypt code + PIN at rest, leave the URL plaintext.
-        // No-op passthrough when LOOP_REDEEM_ENCRYPTION_KEY is unset.
+        // CF-25 / X-PRIV-03: encrypt code + PIN at rest, leave URL plaintext
         redeemCode: encryptRedeemField(redemption.code),
         redeemPin: encryptRedeemField(redemption.pin),
         redeemUrl: redemption.url,
@@ -328,21 +211,7 @@ async function persistRecoveredRedemption(
   return true;
 }
 
-/**
- * ADR 037 support action — one-shot redemption re-fetch for a
- * single order, through the SAME machinery as the sweeper
- * (`fetchRedemption` + the idempotent persist guards + the
- * attempts bookkeeping). Differences from a sweep tick, both
- * deliberate:
- *
- *   - no backoff gate and no attempts cap — the action exists
- *     precisely for orders the sweeper has exhausted (runbook:
- *     redemption-backfill-exhausted.md), and a human clicking it
- *     IS the rate limiter (plus the route's 10/min).
- *   - exhaustion paging still only fires when the bump crosses the
- *     cap exactly, so repeated admin re-drives past the cap don't
- *     re-page ops on every click.
- */
+// ADR 037: one-shot re-fetch for exhausted orders; human click is the rate limiter
 export type AdminRedemptionRefetchOutcome =
   | { kind: 'order_not_found' }
   | { kind: 'not_eligible'; reason: 'not_fulfilled' | 'no_ctx_order_id' | 'already_present' }
@@ -391,8 +260,6 @@ export async function refetchOrderRedemption(
   };
   if (presence.hasCode || presence.hasPin || presence.hasUrl) {
     const won = await persistRecoveredRedemption(row, redemption, now);
-    // Losing the persist race means a concurrent writer landed a
-    // payload — for the support user that's still "recovered".
     return { kind: 'recovered', attempts: won ? row.attempts + 1 : row.attempts, ...presence };
   }
   await recordEmptyAttempt(row, now);
@@ -408,14 +275,7 @@ interface BackfillRow {
   attempts: number;
 }
 
-/**
- * Bumps the attempts counter + last-attempt timestamp after an empty
- * or failed re-fetch, and pages ops once when the bump crosses the
- * cap. The attempts guard on the UPDATE keeps a racing sweeper from
- * double-counting (and double-paging) the same attempt. `result` is
- * the sweep tick's tally; the ADR-037 one-shot admin path passes
- * none.
- */
+// Attempts guard prevents double-counting/paging from racing sweepers
 async function recordEmptyAttempt(
   row: BackfillRow,
   now: number,
@@ -431,11 +291,8 @@ async function recordEmptyAttempt(
       },
     },
   );
-  if (updated === null) return; // raced — the other writer owns the bump
-  // `===` not `>=`: the sweeper can only ever land exactly on the cap
-  // (its SQL filter excludes rows at/past the cap), and the ADR-037
-  // admin re-drive keeps bumping past it — re-paging ops on every
-  // post-exhaustion click would be noise.
+  if (updated === null) return;
+  // === not >=: sweeper lands exactly on cap; admin re-drive bumps past it without re-paging
   if (nextAttempts === REDEMPTION_BACKFILL_MAX_ATTEMPTS) {
     if (result !== undefined) result.exhausted++;
     log.error(
@@ -457,16 +314,9 @@ function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-// ─── Interval loop ────────────────────────────────────────────────────────
-
 let backfillTimer: ReturnType<typeof setInterval> | null = null;
 
-/**
- * Starts the periodic backfill sweeper. Started unconditionally from
- * `index.ts` with the rest of the ADR 052 order-mirror machinery.
- * Per-tick errors are swallowed so a transient CTX / DB blip doesn't
- * kill the interval — the next tick retries.
- */
+// ADR 052: started unconditionally; per-tick errors swallowed so transient blips don't kill interval
 export function startRedemptionBackfill(args?: { intervalMs?: number }): void {
   if (backfillTimer !== null) return;
   const intervalMs = args?.intervalMs ?? REDEMPTION_BACKFILL_INTERVAL_MS;
@@ -478,9 +328,7 @@ export function startRedemptionBackfill(args?: { intervalMs?: number }): void {
       if (r.picked > 0) {
         log.info(r, 'Redemption-backfill tick complete');
       }
-      // S4-8 /health honesty: a lock-skipped tick proves liveness but
-      // is recorded separately from a led tick — see
-      // markWorkerTickSkippedLocked's doc-comment.
+      // S4-8: lock-skipped tick proves liveness but is recorded separately from a led tick
       if (r.skippedLocked) {
         markWorkerTickSkippedLocked('redemption_backfill');
       } else {

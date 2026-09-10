@@ -1,24 +1,4 @@
-/**
- * `GET /api/orders` list-handler tests (AUD-08).
- *
- * Two things under test:
- *
- *   1. The injection-sensitive forward-to-CTX allowlist. Only
- *      CTX-native params (`page`/`perPage`/`status`) may reach the
- *      upstream; everything else — including the new Loop-side
- *      `excludePending` control and any injected `userId` — must be
- *      stripped. These assertions are the security gate: a widening
- *      of the allowlist (or a bug forwarding client strings during
- *      exclude-pending aggregation) turns them red.
- *
- *   2. Exclude-pending server-side pagination. The handler must walk
- *      the upstream pages, drop rows whose translated Loop status is
- *      `pending`, and serve a STABLE, COMPLETE page of the filtered
- *      set — no false-empty page, no hidden pages. This is the
- *      AUD-08 root-cause fix; it is red on the pre-AUD-08 handler,
- *      which ignored `excludePending`, made a single upstream call
- *      for the client\'s page, and returned pending rows unfiltered.
- */
+// GET /api/orders list-handler tests — AUD-08
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type * as ConfigModule from '../../config/index.js';
 import type { Context } from 'hono';
@@ -93,7 +73,6 @@ function upstreamPage(
   });
 }
 
-/** All URLs the handler pushed to the upstream, as parsed URL objects. */
 function upstreamCallUrls(): URL[] {
   return mockFetch.mock.calls.map((call) => new URL(call[0] as string));
 }
@@ -106,8 +85,6 @@ describe('listOrdersHandler — injection-safe allowlist (AUD-08)', () => {
       page: '2',
       perPage: '10',
       status: 'fulfilled',
-      // Injection attempts — an upstream-only param a naive CTX might
-      // honour to read another account, plus SQL/scope noise.
       userId: 'victim-account',
       accountId: 'victim-account',
       role: 'admin',
@@ -121,7 +98,6 @@ describe('listOrdersHandler — injection-safe allowlist (AUD-08)', () => {
     expect(url.searchParams.get('page')).toBe('2');
     expect(url.searchParams.get('perPage')).toBe('10');
     expect(url.searchParams.get('status')).toBe('fulfilled');
-    // Nothing outside the CTX-native allowlist may reach the upstream.
     for (const forbidden of [
       'userId',
       'accountId',
@@ -140,7 +116,6 @@ describe('listOrdersHandler — injection-safe allowlist (AUD-08)', () => {
     const ctx = makeCtx({
       excludePending: 'true',
       page: '1',
-      // These must NOT reach CTX during aggregation.
       userId: 'victim-account',
       status: "fulfilled' OR 1=1",
       perPage: '999999',
@@ -148,14 +123,11 @@ describe('listOrdersHandler — injection-safe allowlist (AUD-08)', () => {
     await listOrdersHandler(ctx);
 
     for (const url of upstreamCallUrls()) {
-      // Server-constructed pagination only.
       expect(url.searchParams.get('perPage')).toBe('100');
       expect(url.searchParams.get('page')).toBeTruthy();
-      // No client-controlled value may appear on the upstream URL.
       expect(url.searchParams.has('userId')).toBe(false);
       expect(url.searchParams.has('status')).toBe(false);
       expect(url.searchParams.has('excludePending')).toBe(false);
-      // The client\'s bogus perPage must never override the server value.
       expect(url.searchParams.get('perPage')).not.toBe('999999');
     }
   });
@@ -168,7 +140,7 @@ describe('listOrdersHandler — exclude-pending server-side pagination (AUD-08)'
     merchantName: 'Shop',
     cardFiatAmount: '10.00',
     cardFiatCurrency: 'USD',
-    status: 'unpaid', // maps to Loop `pending`
+    status: 'unpaid',
   });
   const doneRow = (id: string, status = 'fulfilled'): UpstreamItem => ({
     id,
@@ -176,15 +148,10 @@ describe('listOrdersHandler — exclude-pending server-side pagination (AUD-08)'
     merchantName: 'Shop',
     cardFiatAmount: '25.00',
     cardFiatCurrency: 'USD',
-    status, // fulfilled→completed, refunded→failed, expired→expired
+    status,
   });
 
   it('an all-pending first upstream page does NOT produce a false-empty page', async () => {
-    // Upstream page 1 is entirely pending; the caller\'s completed
-    // orders live on page 2. The pre-AUD-08 handler returned page 1
-    // as-is (empty after the client dropped pending) and could hide
-    // Prev/Next — the trap. Now the backend walks to page 2 and
-    // serves the non-pending rows on Loop page 1.
     mockFetch
       .mockResolvedValueOnce(upstreamPage(1, 2, [pendingRow('p1'), pendingRow('p2')]))
       .mockResolvedValueOnce(
@@ -206,12 +173,7 @@ describe('listOrdersHandler — exclude-pending server-side pagination (AUD-08)'
   });
 
   it('paginates the FILTERED set with stable, complete pages', async () => {
-    // 3 non-pending orders interleaved with pending across 2 upstream
-    // pages; Loop perPage=2. Page 1 = first two filtered rows + Next;
-    // page 2 = the third filtered row + Prev, no Next. No row is lost
-    // or duplicated across the boundary.
-    // Build a FRESH Response per call — a Response body can only be
-    // read once, and each list request re-walks every upstream page.
+    // Response bodies are single-read; each list request re-walks upstream pages.
     const pageData: [number, number, UpstreamItem[]][] = [
       [1, 2, [doneRow('a'), pendingRow('p1'), doneRow('b')]],
       [2, 2, [pendingRow('p2'), doneRow('c')]],
@@ -282,7 +244,6 @@ describe('listOrdersHandler — plain-proxy path unchanged', () => {
     };
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
-    // Plain proxy does NOT filter — the pending row is passed through.
     expect(body.orders).toHaveLength(1);
     expect(body.orders[0]!.status).toBe('pending');
     expect(body.pagination).toMatchObject({ total: 42, totalPages: 3, hasNext: true });

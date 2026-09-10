@@ -1,14 +1,4 @@
-/**
- * Transactional email — currently just the OTP send (ADR 013). Kept
- * behind a narrow interface so the concrete provider (Resend /
- * Postmark / SES) can be swapped without touching handlers.
- *
- * The dev default is `console` — it writes the code to stdout so
- * `npm run dev:backend` works end-to-end without SMTP credentials.
- * Production deploys set `EMAIL_PROVIDER=resend` (or another real
- * provider) plus the matching API-key env var. The `resend`
- * implementation lives below.
- */
+// transactional email — ADR 013
 import { logger } from '../logger.js';
 import { config } from '../config/index.js';
 
@@ -25,19 +15,7 @@ export interface EmailProvider {
   sendOtpEmail(input: OtpEmailInput): Promise<void>;
 }
 
-/**
- * Dev-only provider: logs the code to stdout instead of sending.
- * Intentionally writes at `info` so it's visible in default LOG_LEVEL.
- * This provider must never be selected in production (see
- * `getEmailProvider`).
- *
- * A2-1612: Pino redacts `code` via `REDACT_PATHS`, but if
- * `@sentry/pino` is configured the Sentry transport receives the log
- * record BEFORE the redaction pass applies. Guard by skipping the
- * raw-code payload when `SENTRY_DSN` is set — devs running local
- * Sentry read the code from the DB row (`auth_otps`) or the API's
- * test-only verify-otp response rather than through the log.
- */
+// A2-1612: Sentry transport receives log records before redaction; skip raw code when SENTRY_DSN is set
 class ConsoleEmailProvider implements EmailProvider {
   readonly name = 'console';
 
@@ -46,12 +24,7 @@ class ConsoleEmailProvider implements EmailProvider {
     log.info(
       {
         to: input.to,
-        // Redact when Sentry is active so the raw code can't land in
-        // a Sentry breadcrumb. Fall through to full code in the
-        // default (no-Sentry) dev loop so the console stub still
-        // serves its "grab the OTP from the log" purpose. The key is
-        // deliberately NOT `code`/`otp` — logger.ts's REDACT_PATHS
-        // censors those even in dev, which used to defeat this branch.
+        // Key is not `code`/`otp` — REDACT_PATHS censors those even in dev
         ...(sentryActive
           ? { code: '[REDACTED: SENTRY_DSN set]' }
           : { revealedDevOtpCode: input.code }),
@@ -64,26 +37,6 @@ class ConsoleEmailProvider implements EmailProvider {
   }
 }
 
-/**
- * Resend transactional-email provider. Posts the OTP body to
- * `https://api.resend.com/emails` with the operator's
- * `email.apiKey`.
- *
- * Three operator-tunable settings beyond the API key:
- *   - `email.from.address` — the sender. Resend requires this
- *     domain to be verified (DKIM / SPF) in their dashboard
- *     before delivery succeeds. Defaults to `noreply@loopfinance.io`
- *     to make the launch path the no-touch case.
- *   - `email.from.name` — the human-readable display name.
- *     Defaults to `Loop`.
- *   - `email.replyTo` — optional Reply-To so user replies route to a
- *     monitored inbox. Omitted from the payload when unset.
- *     Email-validated by the schema at boot.
- *
- * Network failure / non-2xx responses throw — the caller (OTP
- * handler) maps the throw to a 503 so the user retries rather than
- * silently submitting a code that was never sent.
- */
 class ResendEmailProvider implements EmailProvider {
   readonly name = 'resend';
 
@@ -94,11 +47,7 @@ class ResendEmailProvider implements EmailProvider {
   ) {}
 
   async sendOtpEmail(input: OtpEmailInput): Promise<void> {
-    // NTF-18: the OTP code must NOT appear in the subject line. Mail
-    // clients surface the subject in lock-screen / push notification
-    // previews, so an interpolated code (`… code: 123456`) is
-    // shoulder-surfable and leaks via notification mirroring without
-    // the device ever being unlocked. Keep the code in the body only.
+    // NTF-18: OTP code must not appear in subject line (visible in lock-screen previews)
     const subject = 'Your Loop verification code';
     const expiresAtIso = input.expiresAt.toISOString();
     const minutes = Math.max(1, Math.round((input.expiresAt.getTime() - Date.now()) / 60_000));
@@ -116,10 +65,7 @@ class ResendEmailProvider implements EmailProvider {
       `<p style="color:#888;font-size:12px;">If you didn't request this, you can ignore this email.</p>`,
     ].join('');
 
-    // Resend's API uses `reply_to` (snake_case). Omit the key entirely
-    // when unset — sending `reply_to: null` confuses some inbox
-    // clients into showing "(no reply address)" rather than falling
-    // back to the From address.
+    // Omit reply_to when unset — sending null confuses some inbox clients
     const body: Record<string, unknown> = {
       from: this.from,
       to: input.to,
@@ -138,10 +84,6 @@ class ResendEmailProvider implements EmailProvider {
         Authorization: `Bearer ${this.apiKey}`,
       },
       body: JSON.stringify(body),
-      // 10s — short enough that a hung Resend doesn't lock up the
-      // OTP request beyond what the user would tolerate; the OTP
-      // handler's circuit / retry plumbing covers transient blips
-      // on the next attempt.
       signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) {
@@ -174,29 +116,10 @@ function escapeHtml(s: string): string {
 
 let cached: EmailProvider | null = null;
 
-/**
- * Lazily constructs the configured provider from `config.email`.
- *
- * The `email` section is a discriminated union on `provider`, so the
- * per-provider settings each branch needs are guaranteed present by the
- * schema — `resend` without an API key no longer parses, which is what
- * the old "EMAIL_PROVIDER=resend requires RESEND_API_KEY" throw here
- * (and its production-only twin in the boot guards) existed to catch.
- *
- * These values used to be read live from `process.env` rather than from
- * the validated object, purely so tests could mutate them and reset the
- * cache. Tests now mock `../config/index.js` instead, and the read goes
- * through the validated config like everything else.
- */
 export function getEmailProvider(): EmailProvider {
   if (cached !== null) return cached;
   if (config.email.provider === 'console') {
-    // A2-571: the console provider logs plaintext OTPs to stdout and
-    // MUST NEVER run in production — whether it arrived as the default
-    // or as an explicit `provider: console`. A deploy shipping the
-    // console stub would silently leak OTPs into production logs.
-    // `config.ts` also refuses this pairing at boot whenever native auth
-    // is on (A4-093); this throw covers the native-auth-off case.
+    // A2-571: console provider logs plaintext OTPs; A4-093 covers native-auth-on case
     if (config.env === 'production') {
       throw new Error(
         'email.provider=console is not permitted in production — the console stub logs plaintext OTPs',
@@ -210,7 +133,6 @@ export function getEmailProvider(): EmailProvider {
   return cached;
 }
 
-/** Resets the cached provider — test-only. */
 export function __resetEmailProviderForTests(): void {
   cached = null;
 }

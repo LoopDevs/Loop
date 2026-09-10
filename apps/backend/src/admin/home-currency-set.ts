@@ -1,25 +1,4 @@
-/**
- * Admin home-currency change (ADR 015 deferred § "self-serve
- * home-currency change — currently support-mediated").
- *
- * `POST /api/admin/users/:userId/home-currency` — flips
- * `users.homeCurrency` for a user who is past the self-serve window.
- * The self-serve endpoint (`users/handler.ts`) refuses once the user
- * has placed an order, because pricing history is pinned at order
- * creation and a silent flip would misalign it. This endpoint is the
- * deliberate override for that case, which is why it is admin-tier,
- * step-up-gated, and demands a reason: somebody has decided the
- * misalignment is acceptable and their name is on it.
- *
- * ADR 017 admin-write contract:
- *   1. Actor from `c.get('user')` (the staff gate), never the body.
- *   2. Idempotency-Key required; a repeat replays the snapshot.
- *   3. Reason required (2..500 chars), carried into the Discord audit.
- *   4. Reversibility is another admin write running the same path —
- *      there is deliberately no separate "revert" primitive, because
- *      the audit trail is the reversibility surface.
- *   5. Discord audit fanout AFTER the write, fire-and-forget.
- */
+// Admin home-currency override — ADR 015, ADR 017
 import type { Context } from 'hono';
 import { z } from 'zod';
 import { HOME_CURRENCIES } from '@loop/shared';
@@ -50,7 +29,6 @@ export interface HomeCurrencySetResult {
   updatedAt: string;
 }
 
-/** Thrown inside the guard when the target is already on that currency. */
 class HomeCurrencyUnchangedError extends Error {
   constructor() {
     super('User is already on that home currency');
@@ -110,10 +88,8 @@ export async function adminHomeCurrencySetHandler(c: Context): Promise<Response>
       },
       async () => {
         const updatedAt = new Date();
-        // Guarded on the CURRENT value rather than read-then-write, so
-        // two admins racing on the same user can't both report having
-        // made the change — the loser sees no row back and is told the
-        // currency was already what they asked for.
+        // Guarded on current value to prevent race conditions where two admins
+        // both report success; loser sees no row and gets 409.
         const updated = await db
           .collection('users')
           .updateOne(

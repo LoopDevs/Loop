@@ -1,18 +1,4 @@
-/**
- * CTX gift-card contract helpers (ADR 052).
- *
- * ctx is the payment processor: Loop creates the gift card acting-as
- * the customer, relays CTX's payment instructions to the client, and
- * mirrors CTX's `displayStatus`. This module owns the Zod schemas for
- * the CTX card + payment JSON, the operator-scope reads, and the
- * per-order economics derivation (user cashback + expected
- * commission) captured from the operator read-back.
- *
- * Amount convention: CTX serialises fiat as major-unit decimal
- * strings ("25.00"); Loop stores minor-unit bigints. All fiat
- * currencies Loop sells in are 2-decimal (see `orders_currency_known`),
- * so the conversion is a fixed ×100.
- */
+// CTX gift-card contract helpers — ADR 052
 import { z } from 'zod';
 import { logger } from '../logger.js';
 import { ctxFetch } from '../ctx/api-fetch.js';
@@ -24,11 +10,7 @@ const log = logger.child({ area: 'ctx-order' });
 
 const CTX_READ_TIMEOUT_MS = 10_000;
 
-/**
- * Parses a CTX major-unit decimal string ("25", "12.34") into
- * 2-decimal minor units. Returns null for anything unparseable —
- * callers treat that as "snapshot unavailable", never as zero.
- */
+// Returns null for unparseable input — callers treat as "snapshot unavailable", never zero
 export function parseMajorToMinor(value: string | undefined): bigint | null {
   if (value === undefined) return null;
   const m = /^(-?)(\d+)(?:\.(\d{1,2}))?$/.exec(value.trim());
@@ -39,13 +21,7 @@ export function parseMajorToMinor(value: string | undefined): bigint | null {
   return sign * (units * 100n + cents);
 }
 
-/**
- * The slice of CTX's gift-card JSON Loop consumes. `.passthrough()`
- * everywhere — CTX adds fields freely and only these are load-bearing.
- * The operator-only fields (`operatorReference`, `operatorDiscount`,
- * `userDiscount`) appear on operator-scope reads and on the giftcard
- * ws topic, never on the act-as create response.
- */
+// Operator-only fields appear on operator-scope reads and ws topic, never on act-as create response
 export const CtxGiftCardSchema = z
   .object({
     id: z.string().min(1),
@@ -69,7 +45,6 @@ export const CtxGiftCardSchema = z
 
 export type CtxGiftCard = z.infer<typeof CtxGiftCardSchema>;
 
-/** The slice of CTX's `GET /payments/:id` JSON Loop consumes. */
 export const CtxPaymentSchema = z
   .object({
     id: z.string().min(1),
@@ -80,11 +55,7 @@ export const CtxPaymentSchema = z
 
 export type CtxPayment = z.infer<typeof CtxPaymentSchema>;
 
-/**
- * Maps a CTX `displayStatus` onto Loop's mirrored order state.
- * Returns null for a value Loop shouldn't act on (unknown strings —
- * schema drift is logged by the caller).
- */
+// Returns null for unknown strings — schema drift is logged by the caller
 export function mapCtxDisplayStatus(
   displayStatus: string,
 ): 'unpaid' | 'paid' | 'fulfilled' | 'rejected' | 'refunded' | null {
@@ -100,10 +71,7 @@ export function mapCtxDisplayStatus(
   }
 }
 
-/**
- * Operator-scope card read (API key, NO act-as) — the only view that
- * carries `operatorReference` / `operatorDiscount`. Throws on non-ok.
- */
+// Operator-scope read (API key, NO act-as) — only view carrying operatorReference / operatorDiscount
 export async function fetchCtxCardAsOperator(ctxOrderId: string): Promise<CtxGiftCard> {
   const res = await ctxFetch(upstreamUrl(`/gift-cards/${encodeURIComponent(ctxOrderId)}`), {
     method: 'GET',
@@ -119,7 +87,6 @@ export async function fetchCtxCardAsOperator(ctxOrderId: string): Promise<CtxGif
   return CtxGiftCardSchema.parse(await res.json());
 }
 
-/** Operator-scope payment read — drives the pay-screen expiry + the mirror sweep's expiry check. */
 export async function fetchCtxPayment(paymentId: string): Promise<CtxPayment | null> {
   try {
     const res = await ctxFetch(upstreamUrl(`/payments/${encodeURIComponent(paymentId)}`), {
@@ -138,11 +105,7 @@ export async function fetchCtxPayment(paymentId: string): Promise<CtxPayment | n
   }
 }
 
-/**
- * Builds the client-facing payment instructions from a CTX card (+
- * optional payment read for the expiry). Fail-soft: any missing field
- * lands as null so the pay screen can degrade rather than 500.
- */
+// Fail-soft: missing fields land as null so pay screen degrades rather than 500
 export function paymentInstructionsFromCard(
   card: CtxGiftCard,
   payment: CtxPayment | null,
@@ -160,13 +123,7 @@ export function paymentInstructionsFromCard(
   };
 }
 
-/**
- * Loop's operator company on CTX (id + profit share in basis
- * points), resolved once per process from `GET /me` under the API
- * credentials and cached — both change only by a CTX-side system
- * write, at which point a process restart picks them up. A failed
- * resolution is not cached.
- */
+// Resolved once per process from GET /me; changes only by CTX-side system write, picked up on restart
 const CtxMeCompanySchema = z
   .object({
     company: z
@@ -218,27 +175,13 @@ export async function operatorProfitShareBp(): Promise<number | null> {
   return company?.profitShareBp ?? null;
 }
 
-/**
- * Loop's own company id in the CTX namespace — the merchant-link
- * bulk endpoint targets it (`targetEntityType: 'company'`).
- */
 export async function operatorCompanyId(): Promise<string | null> {
   const company = await operatorCompany();
   return company?.id ?? null;
 }
 
-/**
- * Per-order economics from the operator read-back (ADR 052):
- *
- *   userCashbackMinor      = cardFiat × userDiscountBp / 10000
- *   expectedCommissionMinor = cardFiat × (operatorBp − userBp)/10000
- *                              × profitShareBp / 10000
- *
- * Mirrors CTX's accrual (`flow_commission.go`: CardFiatAmount
- * .Split(spread).Split(profitShare), floors at each step). Null when
- * any input is unavailable — the mirror sweep retries via the card
- * re-read; a null is "unknown", never zero.
- */
+// Mirrors CTX accrual (flow_commission.go: CardFiatAmount.Split(spread).Split(profitShare), floors at each step)
+// Null when any input unavailable — mirror sweep retries via card re-read; null is "unknown", never zero
 export function deriveOrderEconomics(
   card: CtxGiftCard,
   profitShareBp: number | null,

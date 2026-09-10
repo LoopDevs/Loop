@@ -1,8 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import type * as ConfigModule from '../config/index.js';
 
-// Only `ctx.baseUrl` matters here; the rest of the real (test-fixture)
-// config stays intact so the import chain keeps booting.
 vi.mock('../config/index.js', async (importActual) => {
   const actual = await importActual<typeof ConfigModule>();
   return {
@@ -60,12 +58,10 @@ describe('upstreamUrl', () => {
   it('throws on percent-encoded traversal segments', () => {
     expect(() => upstreamUrl('/gift-cards/%2e%2e/admin')).toThrow(/percent-encoded traversal/);
     expect(() => upstreamUrl('/gift-cards/%2E%2E/admin')).toThrow(/percent-encoded traversal/);
-    // Mixed encoding is also rejected — catches %2e%2E as well.
     expect(() => upstreamUrl('/gift-cards/%2e%2E/admin')).toThrow(/percent-encoded traversal/);
   });
 
   it('allows single percent-encoded dots (not a traversal)', () => {
-    // `%2e` on its own is just an encoded `.` — not traversal.
     expect(() => upstreamUrl('/v1/file%2ejson')).not.toThrow();
   });
 

@@ -17,8 +17,7 @@ vi.mock('../../config/index.js', async (importActual) => {
   };
 });
 
-// The caller's upstream CTX credentials — null simulates a loop-native
-// user with no CTX mapping.
+// null simulates a loop-native user with no CTX mapping
 const { mockUpstreamHeaders } = vi.hoisted(() => ({
   mockUpstreamHeaders: vi.fn<() => Promise<Record<string, string> | null>>(),
 }));
@@ -26,9 +25,7 @@ vi.mock('../handler-shared.js', () => ({
   upstreamHeaders: mockUpstreamHeaders,
 }));
 
-// The image transport/transform layer is proven in images/__tests__ —
-// here it's mocked so the handler's resolution + authz mapping is what's
-// under test.
+// mocked to isolate handler resolution and authz mapping
 const { mockFetchAndTransform } = vi.hoisted(() => ({
   mockFetchAndTransform: vi.fn(),
 }));
@@ -89,7 +86,7 @@ beforeEach(() => {
 describe('orderBarcodeImageHandler', () => {
   it('rejects a malformed order id with 400', async () => {
     const res = await makeApp().request('/api/orders/../etc/barcode-image');
-    expect([400, 404]).toContain(res.status); // traversal never reaches CTX
+    expect([400, 404]).toContain(res.status);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -120,10 +117,7 @@ describe('orderBarcodeImageHandler', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('Content-Type')).toBe('image/jpeg');
     expect(res.headers.get('Cache-Control')).toBe('private, no-store');
-    // CTX order fetched with the caller's upstream credentials.
     expect(String(fetchSpy.mock.calls[0]![0])).toBe('http://ctx.test/gift-cards/ord-1');
-    // The resolved URL — never a client-supplied one — is what gets
-    // fetched, flattened to JPEG.
     expect(mockFetchAndTransform).toHaveBeenCalledWith(
       'http://ctx.test/bc.png',
       expect.objectContaining({ width: 320, forceJpeg: true }),

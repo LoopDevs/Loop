@@ -9,9 +9,7 @@ vi.mock('../../config/index.js', async (importActual) => {
     config: {
       ...actual.config,
       ctx: { ...actual.config.ctx, baseUrl: 'http://test-upstream.local' },
-      // Rate-limit test below drives requests via the spoof-proof
-      // `Fly-Client-IP` header (FT-08) — matches the auth handler test's
-      // pattern (auth/__tests__/handler.test.ts).
+      // FT-08: spoof-proof Fly-Client-IP header requires trustProxy
       server: { ...actual.config.server, trustProxy: true },
     },
   };
@@ -56,10 +54,7 @@ vi.mock('../../db/client.js', () => ({
     select: vi.fn(() => ({ from: vi.fn(() => ({ where: vi.fn(async () => []) })) })),
   },
 }));
-// The merchant handlers proxy CTX through global `fetch`. Fail every
-// outbound call so the handler falls through to the cached baseline —
-// leaving `fetch` unstubbed would actually hit
-// http://test-upstream.local/ and hang.
+// Fail outbound fetch to force cached baseline fallback; unstubbed fetch would hit test-upstream.local and hang
 vi.stubGlobal('fetch', async () => {
   throw new Error('upstream disabled in tests');
 });
@@ -158,9 +153,7 @@ describe('GET /api/merchants/search', () => {
   });
 
   it('clamps a negative limit up to 1 (parseInt("-5") is truthy, unlike "0")', async () => {
-    // Mirrors merchantListHandler's existing `parseInt(...) || DEFAULT` pattern:
-    // limit=0 falls back to the default (0 is falsy) — not a floor-to-1 case.
-    // A genuinely negative value exercises the Math.max(1, …) floor.
+    // limit=0 falls back to default (falsy); negative values exercise Math.max(1, …) floor
     seed([merchant('m-1', 'Store A'), merchant('m-2', 'Store B')]);
     const res = await app.request('/api/merchants/search?q=store&limit=-5');
     const body = (await res.json()) as { merchants: Merchant[] };
@@ -193,8 +186,7 @@ describe('GET /api/merchants/search', () => {
     ]);
     const res = await app.request('/api/merchants/search?q=store&country=gb');
     const body = (await res.json()) as { merchants: Merchant[] };
-    // Both GB merchants rank ahead of the higher-savings US merchant;
-    // within GB, savings desc still applies.
+    // In-country matches rank ahead of higher-savings foreign matches
     expect(body.merchants.map((m) => m.id)).toEqual(['gb-high', 'gb-low', 'us-high']);
   });
 

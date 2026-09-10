@@ -1,8 +1,4 @@
-/**
- * Loop order read-handler tests (ADR 052): auth/flag gates, the
- * BigInt-safe `orderToView` shaping (incl. at-rest decryption of the
- * redemption secrets), and the unpaid-order live CTX payment overlay.
- */
+// loop order read-handler tests — ADR 052
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type * as ConfigModule from '../../config/index.js';
 import type { Context } from 'hono';
@@ -25,8 +21,7 @@ vi.mock('../../config/index.js', async (importActual) => {
         },
         orders: {
           ...actual.config.orders,
-          // CF-25 / X-PRIV-03: fixed, valid 32-byte base64 key so the
-          // read handler decrypts on the way out.
+          // CF-25 / X-PRIV-03
           redeem: { encryptionKey: 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=' },
         },
       };

@@ -26,21 +26,9 @@ interface MutableWorkerState {
   lastErrorAtMs: number | null;
   lastError: string | null;
   staleAfterMs: number | null;
-  /**
-   * S4-8: last tick this machine skipped because another machine held
-   * the fleet-wide single-flight lock. A skip proves the loop is
-   * alive, so it also stamps `lastSuccessAtMs` (liveness) — this
-   * field exists so /health can distinguish "alive and leading" from
-   * "alive but always losing the lock".
-   */
+  // S4-8: skip proves liveness, so it stamps lastSuccessAtMs; this field distinguishes "alive and leading" from "alive but always losing the lock"
   lastSkippedLockedAtMs: number | null;
-  /**
-   * S4-8: last tick this machine actually did the work (won the
-   * fleet-wide lock, or the worker has no single-flight lock at all).
-   * With N machines a healthy fleet has exactly one machine advancing
-   * this per tick window; a fleet where NO machine advances it is
-   * wedged even though every machine's liveness stamp looks fresh.
-   */
+  // S4-8: last tick this machine actually did the work; a fleet where NO machine advances it is wedged even if liveness stamps look fresh
   lastLeadTickAtMs: number | null;
 }
 
@@ -101,32 +89,20 @@ function errorMessage(err: unknown): string {
   return 'unknown error';
 }
 
-/**
- * Operator-facing kill-switch for the OTP-delivery health surface.
- * `false` silences `otpDelivery.degraded` (e.g. during a known
- * provider incident) without blocking sends. Nothing self-resets it
- * except `recordOtpSendSuccess` — a successful send is the only real
- * evidence the surface recovered, so it re-arms reporting.
- */
+// Operator kill-switch for OTP delivery; only recordOtpSendSuccess re-arms it, as a successful send is the only real evidence of recovery
 export function setOtpDeliveryEnabled(enabled: boolean): void {
   otpDeliveryState.enabled = enabled;
 }
 
 export function recordOtpSendSuccess(): void {
-  // Self-heal: a successful send proves delivery works again, so a
-  // previously disabled surface re-arms its degraded reporting.
+  // Self-heal: a successful send proves delivery works again, so a previously disabled surface re-arms its degraded reporting
   otpDeliveryState.enabled = true;
   otpDeliveryState.lastSuccessAtMs = Date.now();
   otpDeliveryState.lastError = null;
 }
 
 export function recordOtpSendFailure(err: unknown): void {
-  // Deliberately does NOT flip `enabled` back on. A failed send is
-  // not evidence of recovery — re-arming here would clobber an
-  // operator-set kill-switch on the very provider incident they
-  // silenced (each failing request would re-page). Failure metadata
-  // is still recorded so /health and /metrics stay truthful once
-  // the surface is re-enabled.
+  // Deliberately does NOT flip `enabled` back on; a failed send is not evidence of recovery, and re-arming here would clobber an operator-set kill-switch
   otpDeliveryState.lastFailureAtMs = Date.now();
   otpDeliveryState.lastError = errorMessage(err);
 }
@@ -175,26 +151,11 @@ export function markWorkerTickSuccess(name: RuntimeWorkerName): void {
   state.running = true;
   if (state.startedAtMs === null) state.startedAtMs = Date.now();
   state.lastSuccessAtMs = Date.now();
-  // A tick that reached markWorkerTickSuccess did the real work (for
-  // single-flighted workers: it won the fleet-wide lock this tick).
+  // A tick that reached markWorkerTickSuccess did the real work (for single-flighted workers: it won the fleet-wide lock this tick)
   state.lastLeadTickAtMs = state.lastSuccessAtMs;
 }
 
-/**
- * S4-8: a tick that returned early because another machine held the
- * fleet-wide single-flight advisory lock.
- *
- * Deliberately still stamps `lastSuccessAtMs`: the skip proves this
- * machine's interval loop is alive and reaching the lock probe, and
- * the degraded/stale computation keys off that liveness stamp. If a
- * skip did NOT count as liveness, a healthy fleet's consistent
- * lock-loser would flip stale → degraded → Fly restarts a perfectly
- * healthy machine (false positive). The separate
- * `lastSkippedLockedAtMs` / `lastLeadTickAtMs` fields exist so the
- * /health payload still exposes the difference — an operator (or a
- * dashboard) can see "alive but hasn't led in N minutes" fleet-wide,
- * which is the real wedged-fleet signal.
- */
+// S4-8: skip stamps lastSuccessAtMs to prove liveness; if it did NOT count, a healthy fleet's consistent lock-loser would flip stale → degraded → Fly restarts a perfectly healthy machine
 export function markWorkerTickSkippedLocked(name: RuntimeWorkerName): void {
   const state = ensureWorker(name);
   state.running = true;
@@ -226,13 +187,7 @@ export function getRuntimeHealthSnapshot(now: number = Date.now()): RuntimeHealt
   const workers = Array.from(workerState.entries())
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([name, state]) => {
-      // A4-111: a worker that calls markWorkerStarted then hangs on
-      // its first tick (no markWorkerTickSuccess + no
-      // markWorkerTickFailure) used to look forever-healthy because
-      // staleness was gated on `lastSuccessAtMs !== null`. Use
-      // `startedAtMs` as the fallback anchor so a hung first-tick
-      // surfaces as stale/degraded once we've waited longer than
-      // the configured staleAfterMs.
+      // A4-111: use startedAtMs as fallback anchor so a hung first-tick surfaces as stale/degraded once we've waited longer than the configured staleAfterMs
       const lastActivityMs = state.lastSuccessAtMs ?? state.startedAtMs;
       const stale =
         state.required &&

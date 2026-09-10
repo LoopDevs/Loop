@@ -1,26 +1,4 @@
-/**
- * `GET /api/users/me/recently-purchased` — distinct merchants the
- * caller has bought from, most-recent first.
- *
- * Sister surface to `/api/users/me/favorites` and intended for the
- * same home-page strip pattern (returning user lands on what they
- * already buy). Where favourites are pinned manually, this list is
- * derived from the orders ledger.
- *
- * "Purchased" here is `state IN ('paid', 'procuring', 'fulfilled')`:
- *   - `paid` / `procuring` are committed purchases the user has
- *     spent money on, even if the gift card hasn't dropped yet.
- *   - `fulfilled` is the clearly-completed case.
- *   - `pending_payment` / `failed` / `expired` are excluded — the
- *     user either hasn't paid or the order didn't go through, so
- *     the merchant isn't a useful repeat-purchase shortcut.
- *
- * GROUP BY `merchant_id` collapses multiple buys from the same
- * merchant into one chip ordered by their MAX(created_at). Limit
- * is 8 by default (clamped to [1, 20]) — enough to fill a 2x4 row
- * on mobile / a 4-up strip on desktop without crowding the home
- * grid below.
- */
+// GET /api/users/me/recently-purchased — distinct merchants, most-recent first — ADR 019
 import type { Context } from 'hono';
 import type { RecentlyPurchasedMerchantView, RecentlyPurchasedResponse } from '@loop/shared';
 import { db } from '../db/client.js';
@@ -36,9 +14,6 @@ const MAX_LIMIT = 20;
 
 const PURCHASED_STATES = ['paid', 'fulfilled'] as const;
 
-// RecentlyPurchasedMerchantView and RecentlyPurchasedResponse are now the
-// single source of truth from @loop/shared
-// (packages/shared/src/user-recently-purchased.ts — ADR 019).
 export type { RecentlyPurchasedMerchantView, RecentlyPurchasedResponse };
 
 function parseLimit(raw: string | undefined): number {
@@ -61,12 +36,6 @@ export async function listRecentlyPurchasedHandler(c: Context): Promise<Response
 
   const limit = parseLimit(c.req.query('limit'));
 
-  // GROUP BY merchant_id with MAX(created_at) gives one row per
-  // distinct merchant ordered by most-recent qualifying order. The
-  // `orders_user_created` btree on (user_id, created_at) covers the
-  // WHERE + ORDER BY; the partial-index hot-paths under
-  // `orders_pending_payment` / `orders_fulfilled_*` aren't relevant
-  // here — we want the broader purchased-states cut.
   const qualifying = await db
     .collection('orders')
     .findMany({ userId: user.id, state: { $in: [...PURCHASED_STATES] } });
