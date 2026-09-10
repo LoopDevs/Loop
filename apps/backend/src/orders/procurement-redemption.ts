@@ -1,8 +1,7 @@
 // CTX gift-card-detail fetch + parsing — ADR 010, ADR 015
 import { z } from 'zod';
 import { logger } from '../logger.js';
-import { ctxFetch, ctxApiCredentials } from '../ctx/api-fetch.js';
-import { streamGiftCardStatus } from '../ctx/stream.js';
+import { ctxFetch } from '../ctx/api-fetch.js';
 import { upstreamUrl } from '../upstream.js';
 import { notifyCtxSchemaDrift } from '../discord.js';
 import { summariseZodIssues } from './handler-shared.js';
@@ -71,92 +70,4 @@ export async function fetchRedemption(ctxOrderId: string): Promise<{
     );
   }
   return out;
-}
-
-export interface WaitForRedemptionOptions {
-  /** Total wall-clock budget across stream + polling fallback (ms). Default 5 min. */
-  totalTimeoutMs?: number;
-  /** Polling interval after a stream error (ms). Default 1 s. */
-  pollIntervalMs?: number;
-}
-
-// Reads timing defaults from env to allow tests to collapse 5-min/1-s budgets without changing function signature
-function numericEnv(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (raw === undefined || raw === '') return fallback;
-  const v = Number.parseInt(raw, 10);
-  return Number.isFinite(v) && v >= 0 ? v : fallback;
-}
-
-export async function waitForRedemption(
-  ctxOrderId: string,
-  opts: WaitForRedemptionOptions = {},
-): Promise<{
-  code: string | null;
-  pin: string | null;
-  url: string | null;
-}> {
-  const totalTimeoutMs =
-    opts.totalTimeoutMs ?? numericEnv('LOOP_REDEMPTION_TOTAL_TIMEOUT_MS', 5 * 60 * 1000);
-  const pollIntervalMs =
-    opts.pollIntervalMs ?? numericEnv('LOOP_REDEMPTION_POLL_INTERVAL_MS', 1000);
-  const deadline = Date.now() + totalTimeoutMs;
-
-  const creds = ctxApiCredentials();
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), totalTimeoutMs);
-    try {
-      await streamGiftCardStatus(ctxOrderId, {
-        apiKey: creds.apiKey,
-        apiSecret: creds.apiSecret,
-        clientId: creds.clientId,
-        signal: controller.signal,
-        onUpdate: (frame) => {
-          const status =
-            typeof frame.fulfilmentStatus === 'string'
-              ? frame.fulfilmentStatus
-              : typeof frame.status === 'string'
-                ? frame.status
-                : 'unknown';
-          log.debug({ ctxOrderId, status }, 'CTX SSE frame');
-        },
-      });
-    } finally {
-      clearTimeout(timer);
-    }
-    return await fetchRedemption(ctxOrderId);
-  } catch (err) {
-    // Propagates CTX-side rejections to trigger order failure; falls back to polling for transport errors
-    const msg = err instanceof Error ? err.message : String(err);
-    if (/^CTX order .* (rejected|failed|error)/.test(msg)) {
-      throw err;
-    }
-    log.warn({ ctxOrderId, err: msg }, 'CTX SSE stream errored — falling back to polling');
-  }
-
-  let last: { code: string | null; pin: string | null; url: string | null } = {
-    code: null,
-    pin: null,
-    url: null,
-  };
-  while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, pollIntervalMs));
-    try {
-      last = await fetchRedemption(ctxOrderId);
-      if (last.code !== null || last.pin !== null || last.url !== null) {
-        return last;
-      }
-    } catch (err) {
-      log.warn(
-        { ctxOrderId, err: err instanceof Error ? err.message : String(err) },
-        'Polling fetchRedemption tick failed — continuing',
-      );
-    }
-  }
-  log.warn(
-    { ctxOrderId },
-    'waitForRedemption budget exhausted with no redemption payload — persisting nulls',
-  );
-  return last;
 }
