@@ -22,7 +22,7 @@ steps:
         done
         echo "Docker is ready!"
 
-  - name: build loop-api
+  - name: build loop-backend
     image: docker:dind
     volumes:
       - name: dockersock
@@ -36,16 +36,16 @@ steps:
     commands:
       - |
         docker build \
-          -t registry.ctx.com/loop-api:latest \
+          -t registry.ctx.com/loop-backend:latest \
           -f apps/backend/Dockerfile \
           ${MAXMIND_ACCOUNT_ID:+--secret id=maxmind_account_id,env=MAXMIND_ACCOUNT_ID} \
           ${MAXMIND_LICENSE_KEY:+--secret id=maxmind_license_key,env=MAXMIND_LICENSE_KEY} \
           .
-      - docker tag registry.ctx.com/loop-api:latest registry.ctx.com/loop-api:$DRONE_COMMIT_SHA
-      - docker tag registry.ctx.com/loop-api:latest registry.ctx.com/loop-api:$DRONE_BRANCH
-      - docker push registry.ctx.com/loop-api:$DRONE_COMMIT_SHA
-      - docker push registry.ctx.com/loop-api:$DRONE_BRANCH
-      - docker push registry.ctx.com/loop-api:latest
+      - docker tag registry.ctx.com/loop-backend:latest registry.ctx.com/loop-backend:$DRONE_COMMIT_SHA
+      - docker tag registry.ctx.com/loop-backend:latest registry.ctx.com/loop-backend:$DRONE_BRANCH
+      - docker push registry.ctx.com/loop-backend:$DRONE_COMMIT_SHA
+      - docker push registry.ctx.com/loop-backend:$DRONE_BRANCH
+      - docker push registry.ctx.com/loop-backend:latest
 
   - name: build loop-web
     image: docker:dind
@@ -109,4 +109,6 @@ trigger:
     - main
     - staging
   event:
+    - tag
     - push
+    - custom
