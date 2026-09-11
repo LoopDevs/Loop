@@ -4,14 +4,8 @@ import { createHmac } from 'node:crypto';
 
 const { jwtState } = vi.hoisted(() => ({
   jwtState: {
-    hs256: {
-      current: 'jwt-test-signing-key-32-chars-min!!' as string | undefined,
-      previous: undefined as string | undefined,
-    },
-    rs256: {
-      current: undefined as string | undefined,
-      previous: undefined as string | undefined,
-    },
+    current: 'jwt-test-signing-key-32-chars-min!!' as string | undefined,
+    previous: undefined as string | undefined,
   },
 }));
 
@@ -260,7 +254,7 @@ describe('verifyLoopToken', () => {
   });
 
   it('A2-1600: malformed when a legacy token without iss/aud is verified', () => {
-    const key = jwtState.hs256.current!;
+    const key = jwtState.current!;
     const legacyPayload = {
       sub: 'u1',
       email: 'a@b.com',
@@ -286,13 +280,13 @@ describe('verifyLoopToken', () => {
       ttlSeconds: 300,
     });
     vi.resetModules();
-    jwtState.hs256.previous = 'jwt-test-signing-key-32-chars-min!!';
-    jwtState.hs256.current = 'jwt-test-key-n-variant-32-chars-min!';
+    jwtState.previous = 'jwt-test-signing-key-32-chars-min!!';
+    jwtState.current = 'jwt-test-key-n-variant-32-chars-min!';
     const fresh = await import('../tokens.js');
     const result = fresh.verifyLoopToken(token, 'access');
     expect(result.ok).toBe(true);
-    jwtState.hs256.current = 'jwt-test-signing-key-32-chars-min!!';
-    jwtState.hs256.previous = undefined;
+    jwtState.current = 'jwt-test-signing-key-32-chars-min!!';
+    jwtState.previous = undefined;
     vi.resetModules();
   });
 });
@@ -335,8 +329,8 @@ describe('isLoopAuthConfigured', () => {
 });
 
 afterEach(() => {
-  jwtState.hs256.current = 'jwt-test-signing-key-32-chars-min!!';
-  jwtState.hs256.previous = undefined;
+  jwtState.current = 'jwt-test-signing-key-32-chars-min!!';
+  jwtState.previous = undefined;
 });
 
 beforeAll(() => {

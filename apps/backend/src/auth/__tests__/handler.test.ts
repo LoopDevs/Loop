@@ -3,7 +3,7 @@ import type * as ConfigModule from '../../config/index.js';
 import type * as RefreshTokensModule from '../refresh-tokens.js';
 
 const { configState } = vi.hoisted(() => ({
-  configState: { hs256Current: undefined as string | undefined },
+  configState: { jwtCurrent: undefined as string | undefined },
 }));
 
 vi.mock('../../config/index.js', async (importActual) => {
@@ -20,10 +20,7 @@ vi.mock('../../config/index.js', async (importActual) => {
           ...actual.config.auth,
           native: {
             ...actual.config.auth.native,
-            jwt: {
-              ...actual.config.auth.native.jwt,
-              hs256: { current: configState.hs256Current, previous: undefined },
-            },
+            jwt: { current: configState.jwtCurrent, previous: undefined },
           },
         },
       };
@@ -392,7 +389,7 @@ describe('DELETE /api/auth/session', () => {
 
   it('never forwards a Loop-signed bearer upstream (native mode)', async () => {
     const key = 'k'.repeat(32);
-    configState.hs256Current = key;
+    configState.jwtCurrent = key;
     const { signLoopToken } = await import('../tokens.js');
     const { token } = signLoopToken({
       sub: 'u-9',
@@ -413,12 +410,12 @@ describe('DELETE /api/auth/session', () => {
 
     expect(res.status).toBe(200);
     expect(mockFetch).not.toHaveBeenCalled();
-    configState.hs256Current = undefined;
+    configState.jwtCurrent = undefined;
   });
 
   it('A2-565: revokes the Loop-native refresh-token row when the token is Loop-signed', async () => {
     const key = 'k'.repeat(32);
-    configState.hs256Current = key;
+    configState.jwtCurrent = key;
     const { signLoopToken } = await import('../tokens.js');
     const { token, claims } = signLoopToken({
       sub: 'u-1',
@@ -435,7 +432,7 @@ describe('DELETE /api/auth/session', () => {
     });
     expect(res.status).toBe(200);
     expect(revokeRefreshMock).toHaveBeenCalledWith(expect.objectContaining({ jti: claims.jti }));
-    configState.hs256Current = undefined;
+    configState.jwtCurrent = undefined;
   });
 
   it('rate limits at 20/min per IP', async () => {

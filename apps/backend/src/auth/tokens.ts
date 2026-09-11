@@ -1,6 +1,6 @@
 // Loop-signed JWT sign + verify — ADR 013, ADR 030, A2-1600, NS-09
 import { randomBytes } from 'node:crypto';
-import { getActiveSigner, getVerifiersForAlg, isAnySignerConfigured, type Alg } from './signer.js';
+import { getActiveSigner, getVerifiers, isAnySignerConfigured } from './signer.js';
 
 export type TokenType = 'access' | 'refresh';
 
@@ -60,7 +60,7 @@ export function signLoopToken(opts: SignOptions): { token: string; claims: LoopT
   const signer = getActiveSigner();
   if (signer === null) {
     throw new Error(
-      'No Loop JWT signing key configured (LOOP_JWT_RSA_PRIVATE_KEY or LOOP_JWT_SIGNING_KEY) — Loop-native auth is disabled',
+      'No Loop JWT signing key configured (auth.native.jwt.current) — Loop-native auth is disabled',
     );
   }
   const nowSec = opts.now ?? Math.floor(Date.now() / 1000);
@@ -84,9 +84,7 @@ export function signLoopToken(opts: SignOptions): { token: string; claims: LoopT
   if (opts.tv !== undefined) {
     claims.tv = opts.tv;
   }
-  const headerObj: Record<string, string> = { alg: signer.alg, typ: 'JWT' };
-  if (signer.kid !== undefined) headerObj['kid'] = signer.kid;
-  const header = b64urlEncode(JSON.stringify(headerObj));
+  const header = b64urlEncode(JSON.stringify({ alg: signer.alg, typ: 'JWT' }));
   const payload = b64urlEncode(JSON.stringify(claims));
   const signingInput = `${header}.${payload}`;
   const sig = b64urlEncode(signer.sign(signingInput));
@@ -122,7 +120,7 @@ export function verifyLoopToken(token: string, expectedType: TokenType): VerifyR
     return { ok: false, reason: 'malformed' };
   }
 
-  // Reject unknown algorithms to prevent routing to empty verifier sets
+  // Reject any alg other than HS256 (alg-strip / confusion defence)
   let headerObj: unknown;
   try {
     headerObj = JSON.parse(b64urlDecode(header).toString('utf8'));
@@ -133,10 +131,10 @@ export function verifyLoopToken(token: string, expectedType: TokenType): VerifyR
     return { ok: false, reason: 'malformed' };
   }
   const alg = (headerObj as Record<string, unknown>)['alg'];
-  if (alg !== 'HS256' && alg !== 'RS256') {
+  if (alg !== 'HS256') {
     return { ok: false, reason: 'bad_signature' };
   }
-  const verifiers = getVerifiersForAlg(alg as Alg);
+  const verifiers = getVerifiers();
   if (verifiers.length === 0) return { ok: false, reason: 'bad_signature' };
 
   const signingInput = `${header}.${payload}`;

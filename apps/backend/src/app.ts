@@ -155,8 +155,8 @@ app.get('/health', healthHandler);
 // `./routes/misc.ts`.
 mountMiscRoutes(app);
 
-// `/.well-known/jwks.json` (public RSA JWKS for Loop-minted RS256
-// JWTs — ADR 030 Phase A) lives in `./routes/well-known.ts`.
+// `/.well-known/*` (M-3 deep-link verification files) lives in
+// `./routes/well-known.ts`.
 mountWellKnownRoutes(app);
 
 // `/api/merchants/*` route mounts (catalog reads + auth-gated

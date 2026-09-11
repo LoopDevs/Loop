@@ -1,5 +1,4 @@
 import { describe, it, expect, vi } from 'vitest';
-import { generateKeyPairSync } from 'node:crypto';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -31,7 +30,7 @@ const base = {
 // production doc clearing every boot guard (R3-7, A4-093, NS-10); guard tests break exactly one thing
 const prodBase = {
   ...base,
-  auth: { native: { enabled: true, jwt: { hs256: { current: JWT_KEY } } } },
+  auth: { native: { enabled: true, jwt: { current: JWT_KEY } } },
   email: { provider: 'resend', credentials: { key: 're_test_key_value' } },
 };
 
@@ -260,88 +259,34 @@ describe('parseConfig', () => {
 
   // CF2-17: length alone doesn't rule out a guessable key — a repeated character passes .min(32) with zero entropy
   describe('signing-key entropy validation', () => {
-    const hs256 = (jwt: Record<string, unknown>): unknown => ({
+    const jwtDoc = (jwt: Record<string, unknown>): unknown => ({
       ...base,
-      auth: { native: { enabled: true, jwt: { hs256: jwt } } },
+      auth: { native: { enabled: true, jwt } },
     });
 
     it('accepts a realistic random-looking key', () => {
-      expect(() => parse(hs256({ current: JWT_KEY }))).not.toThrow();
+      expect(() => parse(jwtDoc({ current: JWT_KEY }))).not.toThrow();
     });
 
     it('rejects a 32-char single-repeated-character key despite meeting the length bar', () => {
-      expect(() => parse(hs256({ current: 'a'.repeat(32) }))).toThrow(
-        /auth\.native\.jwt\.hs256\.current.*low-entropy/,
+      expect(() => parse(jwtDoc({ current: 'a'.repeat(32) }))).toThrow(
+        /auth\.native\.jwt\.current.*low-entropy/,
       );
     });
 
     it('rejects a short repeating-cycle key (e.g. "ab" repeated)', () => {
-      expect(() => parse(hs256({ current: 'ab'.repeat(17) }))).toThrow(/low-entropy/);
+      expect(() => parse(jwtDoc({ current: 'ab'.repeat(17) }))).toThrow(/low-entropy/);
     });
 
     it('applies the same check to the previous-key slot', () => {
-      expect(() => parse(hs256({ current: JWT_KEY, previous: 'c'.repeat(32) }))).toThrow(
-        /auth\.native\.jwt\.hs256\.previous.*low-entropy/,
+      expect(() => parse(jwtDoc({ current: JWT_KEY, previous: 'c'.repeat(32) }))).toThrow(
+        /auth\.native\.jwt\.previous.*low-entropy/,
       );
     });
 
     it('still enforces the minimum-length bar independently of entropy', () => {
-      expect(() => parse(hs256({ current: 'short' }))).toThrow(
-        /auth\.native\.jwt\.hs256\.current must be at least 32 characters/,
-      );
-    });
-  });
-
-  describe('RS256 signing keys (ADR 030 Phase A)', () => {
-    // Generated at runtime — never commit a PEM fixture, even test-only.
-    const rsaPem = generateKeyPairSync('rsa', { modulusLength: 2048 })
-      .privateKey.export({ type: 'pkcs8', format: 'pem' })
-      .toString();
-    const ecPem = generateKeyPairSync('ec', { namedCurve: 'P-256' })
-      .privateKey.export({ type: 'pkcs8', format: 'pem' })
-      .toString();
-
-    const rs256 = (jwt: Record<string, unknown>): unknown => ({
-      ...base,
-      auth: { native: { jwt: { rs256: jwt } } },
-    });
-
-    it('is optional — absent leaves RS256 unconfigured', () => {
-      const config = parse(base);
-      expect(config.auth.native.jwt.rs256.current).toBeUndefined();
-      expect(config.auth.native.jwt.rs256.previous).toBeUndefined();
-    });
-
-    it('accepts a valid PKCS8 RSA PEM on both slots', () => {
-      const config = parse(rs256({ current: rsaPem, previous: rsaPem }));
-      expect(config.auth.native.jwt.rs256.current).toBe(rsaPem);
-      expect(config.auth.native.jwt.rs256.previous).toBe(rsaPem);
-    });
-
-    it('normalises escaped \\n sequences to real newlines (secret-store flattening)', () => {
-      const flattened = rsaPem.replace(/\n/g, '\\n');
-      expect(parse(rs256({ current: flattened })).auth.native.jwt.rs256.current).toBe(rsaPem);
-    });
-
-    it('rejects a malformed PEM with the openssl hint', () => {
-      expect(() => parse(rs256({ current: 'not-a-pem' }))).toThrow(
-        /auth\.native\.jwt\.rs256\.current.*openssl genpkey/,
-      );
-    });
-
-    it('rejects a truncated PEM', () => {
-      expect(() => parse(rs256({ current: rsaPem.slice(0, 80) }))).toThrow(
-        /auth\.native\.jwt\.rs256\.current/,
-      );
-    });
-
-    it('rejects a non-RSA (EC) private key', () => {
-      expect(() => parse(rs256({ current: ecPem }))).toThrow(/must be an RSA private key/);
-    });
-
-    it('validates the previous slot with the same rules', () => {
-      expect(() => parse(rs256({ current: rsaPem, previous: 'garbage' }))).toThrow(
-        /auth\.native\.jwt\.rs256\.previous/,
+      expect(() => parse(jwtDoc({ current: 'short' }))).toThrow(
+        /auth\.native\.jwt\.current must be at least 32 characters/,
       );
     });
   });
@@ -358,50 +303,17 @@ describe('parseConfig', () => {
       }
     });
 
-    it('accepts native auth with only the HS256 key', () => {
+    it('accepts native auth with a signing key', () => {
       expect(() =>
         parse({
           ...base,
-          auth: { native: { enabled: true, jwt: { hs256: { current: JWT_KEY } } } },
+          auth: { native: { enabled: true, jwt: { current: JWT_KEY } } },
         }),
-      ).not.toThrow();
-    });
-
-    it('accepts native auth with only the RS256 key', () => {
-      const pem = generateKeyPairSync('rsa', { modulusLength: 2048 })
-        .privateKey.export({ type: 'pkcs8', format: 'pem' })
-        .toString();
-      expect(() =>
-        parse({ ...base, auth: { native: { enabled: true, jwt: { rs256: { current: pem } } } } }),
       ).not.toThrow();
     });
 
     it('leaves native-auth-disabled documents unconstrained', () => {
       expect(() => parse(base)).not.toThrow();
-    });
-  });
-
-  describe('B7: HS256 retirement tripwire', () => {
-    it('warns on every boot while both the RSA and HS256 keys are set', () => {
-      const pem = generateKeyPairSync('rsa', { modulusLength: 2048 })
-        .privateKey.export({ type: 'pkcs8', format: 'pem' })
-        .toString();
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      parse({
-        ...base,
-        auth: {
-          native: { enabled: true, jwt: { hs256: { current: JWT_KEY }, rs256: { current: pem } } },
-        },
-      });
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('remove the hs256 key'));
-      warn.mockRestore();
-    });
-
-    it('stays quiet when only one signing family is configured', () => {
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      parse({ ...base, auth: { native: { enabled: true, jwt: { hs256: { current: JWT_KEY } } } } });
-      expect(warn).not.toHaveBeenCalled();
-      warn.mockRestore();
     });
   });
 

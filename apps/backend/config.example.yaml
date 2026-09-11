@@ -84,30 +84,21 @@ database:
   # uri: mongodb://localhost:27017
   # name: loop
 
-# ── Loop-native auth (ADR 013 / 014 / 030) ──────────────────────────
+# ── Loop-native auth (ADR 013 / 014) ────────────────────────────────
 auth:
   native:
     # The parent switch. When true, Loop sends OTP emails and mints its
     # own JWTs; when false the legacy CTX-proxy path stays in place.
     # Production requires true (R3-7) unless unsafe.allowLegacyProxyAuth
-    # is set. Enabling this requires at least one signing key below.
+    # is set. Enabling this requires the signing key below.
     enabled: false
     jwt:
-      # Symmetric secret, min 32 chars of real entropy.
+      # Symmetric HS256 secret, min 32 chars of real entropy.
       # `openssl rand -base64 32`
-      hs256:
-        current:
-        # Keep the old key here for the access-token TTL after rotating.
-        previous:
-      # PKCS8 PEM RSA private key. When set, new JWTs sign RS256 and the
-      # public keys publish at /.well-known/jwks.json. Use a `|` block
-      # scalar for the multi-line PEM.
-      # `openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048`
-      rs256:
-        current:
-        # Keep the old key here for the refresh-token TTL (30 days)
-        # after rotating — both public keys serve in the JWKS.
-        previous:
+      current:
+      # Keep the old key here for the refresh-token TTL (30 days)
+      # after rotating.
+      previous:
   # Social login (ADR 014). At least one Google client id activates the
   # Google endpoint; the Apple service id activates the Apple endpoint.
   social:

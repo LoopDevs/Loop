@@ -5,14 +5,8 @@ import type * as OtpsModule from '../otps.js';
 
 const { jwtState } = vi.hoisted(() => ({
   jwtState: {
-    hs256: {
-      current: 'jwt-test-signing-key-32-chars-min!!' as string | undefined,
-      previous: undefined as string | undefined,
-    },
-    rs256: {
-      current: undefined as string | undefined,
-      previous: undefined as string | undefined,
-    },
+    current: 'jwt-test-signing-key-32-chars-min!!' as string | undefined,
+    previous: undefined as string | undefined,
   },
 }));
 

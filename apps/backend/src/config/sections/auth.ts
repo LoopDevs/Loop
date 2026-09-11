@@ -1,22 +1,12 @@
-// config sections: `auth:` (Loop-native auth, ADR 013 / 014 / 030) and `email:` (transactional sender)
+// config sections: `auth:` (Loop-native auth, ADR 013 / 014) and `email:` (transactional sender)
 import { z } from 'zod';
-import { signingKeySchema, rsaPrivateKeyPem } from '../schema-helpers.js';
+import { signingKeySchema } from '../schema-helpers.js';
 
 // Rotation window: verifier accepts current/previous; signer uses current. Drop previous after TTL.
 const jwtSchema = z
   .object({
-    hs256: z
-      .object({
-        current: signingKeySchema('auth.native.jwt.hs256.current'),
-        previous: signingKeySchema('auth.native.jwt.hs256.previous'),
-      })
-      .prefault({}),
-    rs256: z
-      .object({
-        current: rsaPrivateKeyPem.optional(),
-        previous: rsaPrivateKeyPem.optional(),
-      })
-      .prefault({}),
+    current: signingKeySchema('auth.native.jwt.current'),
+    previous: signingKeySchema('auth.native.jwt.previous'),
   })
   .prefault({});
 
@@ -28,17 +18,13 @@ const nativeAuthSchema = z
   })
   .prefault({})
   .superRefine((native, ctx) => {
-    if (
-      native.enabled &&
-      native.jwt.hs256.current === undefined &&
-      native.jwt.rs256.current === undefined
-    ) {
+    if (native.enabled && native.jwt.current === undefined) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['jwt'],
         message:
-          'auth.native.enabled requires a signing key — set jwt.hs256.current or jwt.rs256.current ' +
-          '(ADR 013 / ADR 030). Without one, every verify-otp/refresh call 500s.',
+          'auth.native.enabled requires a signing key — set jwt.current (ADR 013). ' +
+          'Without one, every verify-otp/refresh call 500s.',
       });
     }
   });

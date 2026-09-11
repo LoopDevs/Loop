@@ -1,5 +1,4 @@
-// shared zod helpers for config.yaml — CF2-17, ADR 030
-import { createPrivateKey } from 'node:crypto';
+// shared zod helpers for config.yaml — CF2-17
 import { z } from 'zod';
 
 // YAML null means "unset"; stripping here lets sections use .optional()/.default() instead of .nullish()
@@ -42,29 +41,6 @@ export function signingKeySchema(path: string): z.ZodOptional<z.ZodString> {
     })
     .optional();
 }
-
-// ADR 030 Phase A: normalizes escaped \n and validates RSA PEM at boot to fail fast
-export const rsaPrivateKeyPem = z
-  .string()
-  .transform((v) => v.replace(/\\n/g, '\n'))
-  .superRefine((pem, ctx) => {
-    try {
-      const key = createPrivateKey(pem);
-      if (key.asymmetricKeyType !== 'rsa') {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: `must be an RSA private key, got ${key.asymmetricKeyType ?? 'unknown'}`,
-        });
-      }
-    } catch {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message:
-          'must be a PEM-encoded (PKCS8) RSA private key — generate with ' +
-          '`openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048`',
-      });
-    }
-  });
 
 export function decode32ByteKey(raw: string): Buffer | null {
   const bytes = /^[0-9a-fA-F]{64}$/.test(raw)

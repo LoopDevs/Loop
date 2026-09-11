@@ -2,17 +2,11 @@ import { describe, it, expect, vi } from 'vitest';
 import type * as ConfigModule from '../../config/index.js';
 import { createHmac } from 'node:crypto';
 
-// `signer.ts` reads keys lazily inside getActiveSigner(), so the mock only needs to serve an HS256 key.
+// `signer.ts` reads keys lazily inside getActiveSigner(), so a plain mutable mock state object works.
 const { jwtState } = vi.hoisted(() => ({
   jwtState: {
-    hs256: {
-      current: 'jwt-test-signing-key-32-chars-min!!' as string | undefined,
-      previous: undefined as string | undefined,
-    },
-    rs256: {
-      current: undefined as string | undefined,
-      previous: undefined as string | undefined,
-    },
+    current: 'jwt-test-signing-key-32-chars-min!!' as string | undefined,
+    previous: undefined as string | undefined,
   },
 }));
 
@@ -32,15 +26,14 @@ vi.mock('../../config/index.js', async (importActual) => {
   };
 });
 
-import { getActiveSigner, getVerifiersForAlg, isAnySignerConfigured } from '../signer.js';
+import { getActiveSigner, getVerifiers, isAnySignerConfigured } from '../signer.js';
 
-describe('signer (Tranche-2 prep — Track A.1)', () => {
+describe('signer', () => {
   describe('getActiveSigner', () => {
-    it('returns an HS256 signer when auth.native.jwt.hs256.current is set', () => {
+    it('returns an HS256 signer when auth.native.jwt.current is set', () => {
       const s = getActiveSigner();
       expect(s).not.toBeNull();
       expect(s?.alg).toBe('HS256');
-      expect(s?.kid).toBeUndefined();
     });
 
     it('round-trips a sign + verify under HS256', () => {
@@ -75,31 +68,25 @@ describe('signer (Tranche-2 prep — Track A.1)', () => {
     });
   });
 
-  describe('getVerifiersForAlg', () => {
-    it('returns the current HS256 key as a verifier when LOOP_JWT_SIGNING_KEY is set', () => {
-      const verifiers = getVerifiersForAlg('HS256');
+  describe('getVerifiers', () => {
+    it('returns the current key as a verifier when auth.native.jwt.current is set', () => {
+      const verifiers = getVerifiers();
       expect(verifiers.length).toBeGreaterThanOrEqual(1);
       expect(verifiers[0]?.alg).toBe('HS256');
     });
 
     it('returns BOTH current and previous keys during a rotation window', () => {
       // The mock re-reads `jwtState` on every access, so setting the previous slot here is sufficient.
-      jwtState.hs256.current = 'jwt-test-current-signing-key-32min!!';
-      jwtState.hs256.previous = 'jwt-test-signing-key-previous-32chr!';
+      jwtState.current = 'jwt-test-current-signing-key-32min!!';
+      jwtState.previous = 'jwt-test-signing-key-previous-32chr!';
       try {
-        const verifiers = getVerifiersForAlg('HS256');
+        const verifiers = getVerifiers();
         expect(verifiers.length).toBe(2);
         expect(verifiers.every((v) => v.alg === 'HS256')).toBe(true);
       } finally {
-        jwtState.hs256.current = 'jwt-test-signing-key-32-chars-min!!';
-        jwtState.hs256.previous = undefined;
+        jwtState.current = 'jwt-test-signing-key-32-chars-min!!';
+        jwtState.previous = undefined;
       }
-    });
-
-    it('returns an empty array for RS256 — Track A.2 reserved', () => {
-      // Track A.1 only ships HS256. RS256 verifiers are wired in A.2.
-      const verifiers = getVerifiersForAlg('RS256');
-      expect(verifiers).toEqual([]);
     });
   });
 

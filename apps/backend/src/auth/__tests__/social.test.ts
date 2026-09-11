@@ -18,10 +18,7 @@ vi.mock('../../config/index.js', async (importActual) => {
           native: {
             ...actual.config.auth.native,
             enabled: configState.nativeAuthEnabled,
-            jwt: {
-              hs256: { current: 'jwt-test-signing-key-32-chars-min!!', previous: undefined },
-              rs256: { current: undefined, previous: undefined },
-            },
+            jwt: { current: 'jwt-test-signing-key-32-chars-min!!', previous: undefined },
           },
           social: {
             google: { web: 'google-web-client', ios: 'google-ios-client', android: undefined },

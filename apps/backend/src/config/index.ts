@@ -13,19 +13,6 @@ export const DEFAULT_CONFIG_FILENAME = 'config.yaml';
 export function applyCrossFieldGuards(config: Config, source: string): void {
   const isProduction = config.env === 'production';
 
-  // Hardening B7: HS256 key must be removed 30 days after RS256 cutover to eliminate forgery surface.
-  if (
-    config.auth.native.jwt.rs256.current !== undefined &&
-    config.auth.native.jwt.hs256.current !== undefined
-  ) {
-    // eslint-disable-next-line no-console
-    console.warn(
-      '[config] Both auth.native.jwt.rs256.current and auth.native.jwt.hs256.current are set. If the ' +
-        'RS256 cutover is more than 30 days old (the refresh-token TTL), remove the hs256 key — ' +
-        'outstanding HS256 tokens have all expired and the key is now a pure forgery-if-leaked surface.',
-    );
-  }
-
   // Audit A-018: warn if server client IDs diverge from build-time web bundle defaults to prevent auth rejection.
   for (const platform of ['web', 'ios', 'android'] as const) {
     const actual = config.ctx.clientIds[platform];

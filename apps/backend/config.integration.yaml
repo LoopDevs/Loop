@@ -31,5 +31,4 @@ auth:
   native:
     enabled: true
     jwt:
-      hs256:
-        current: integration-test-loop-jwt-signing-key-32-chars-min
+      current: integration-test-loop-jwt-signing-key-32-chars-min

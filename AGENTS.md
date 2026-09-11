@@ -34,8 +34,8 @@ and unique specs live in `db/types.ts`. There are NO migrations —
 the project is undeployed; change `db/types.ts` and move on.
 
 **Auth has two paths.** Loop-native (ADR 013, default via
-`LOOP_AUTH_NATIVE_ENABLED=true`): backend mints its own JWTs (RS256 +
-JWKS publish when `LOOP_JWT_RSA_PRIVATE_KEY` is set; HS256 otherwise),
+`auth.native.enabled: true`): backend mints its own HS256 JWTs
+(`auth.native.jwt.current` / `.previous` rotation window),
 generates OTPs, sends email. Legacy CTX-proxy: backend forwards auth
 calls to upstream. Both paths coexist until the takeover completes.
 
