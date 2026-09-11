@@ -9,11 +9,11 @@ vi.mock('../config/index.js', async (importActual) => {
     config: {
       ...actual.config,
       // Step-up gates short-circuit to 503 without a signing key, masking the 404-vs-not-404 tier signal.
-      admin: {
-        ...actual.config.admin,
-        stepUp: {
-          signingKey: 'staff-route-gating-step-up-key-32ch',
-          previousSigningKey: undefined,
+      auth: {
+        ...actual.config.auth,
+        native: {
+          ...actual.config.auth.native,
+          jwt: { current: 'staff-route-gating-signing-key-32ch', previous: undefined },
         },
       },
     },

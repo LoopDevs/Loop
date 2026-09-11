@@ -129,15 +129,9 @@ admin:
   ctxUserIds: []
   # ADR 028 — step-up auth for destructive admin writes. The admin
   # re-presents an OTP, gets a 5-minute single-use token scoped to one
-  # action class, and sends it as X-Admin-Step-Up. A DIFFERENT key from
-  # auth.native.jwt on purpose: a bearer-key leak must not also mint
-  # step-ups. Unset → the gated endpoints fail closed with 503, so the
-  # surface ships disabled until you generate one.
-  stepUp:
-    # Min 32 chars — `openssl rand -base64 32`
-    signingKey:
-    # Keep the old key here for the 5-minute TTL after rotating.
-    previousSigningKey:
+  # action class, and sends it as X-Admin-Step-Up. Signed with
+  # auth.native.jwt (kept distinct by aud/purpose claims), so there is
+  # no separate key to configure or rotate.
   # How long applied admin writes stay in the audit tail. Separate from
   # the 24h idempotency replay window: `admin_idempotency_keys` doubles
   # as the durable record of every admin mutation. Default ~7 years.
@@ -182,8 +176,9 @@ orders:
 
 # ── Rate limiting ───────────────────────────────────────────────────
 rateLimit:
-  # Master switch for every per-IP limiter. Production refuses to boot
-  # with this false (A2-1605) — it exists for e2e harnesses.
+  # Master switch for every per-IP limiter. Ignored in production —
+  # limits are always enforced there (A2-1605); it exists for e2e
+  # harnesses.
   enabled: true
   # Fallback per-machine divisor used only when live Fly `.internal` DNS
   # fleet counting is unavailable (S4-4). 1 = no division.

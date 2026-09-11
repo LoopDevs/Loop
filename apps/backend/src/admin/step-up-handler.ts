@@ -28,12 +28,12 @@ const StepUpBody = z.object({
 
 export async function adminStepUpHandler(c: Context): Promise<Response> {
   if (!isAdminStepUpConfigured()) {
-    log.error('admin step-up requested but admin.stepUp.signingKey is unset');
+    log.error('admin step-up requested but no JWT signing key is configured');
     return c.json(
       {
         code: 'STEP_UP_UNAVAILABLE',
         message:
-          'Admin step-up auth is not configured on this deployment. Set admin.stepUp.signingKey and redeploy.',
+          'Admin step-up auth is not configured on this deployment. Set auth.native.jwt.current and redeploy.',
       },
       503,
     );

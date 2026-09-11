@@ -8,11 +8,11 @@ vi.mock('../../config/index.js', async (importActual) => {
     ...actual,
     config: {
       ...actual.config,
-      admin: {
-        ...actual.config.admin,
-        stepUp: {
-          signingKey: 'admin-surfaces-test-step-up-key-32c',
-          previousSigningKey: undefined,
+      auth: {
+        ...actual.config.auth,
+        native: {
+          ...actual.config.auth.native,
+          jwt: { current: 'admin-surfaces-test-signing-key-32c', previous: undefined },
         },
       },
     },
@@ -328,6 +328,8 @@ describe('cashback config', () => {
       method: 'PUT',
     });
     expect(first.status).toBe(200);
+
+    await new Promise((resolve) => setTimeout(resolve, 2));
 
     const second = await app.request(upsertPath, {
       ...adminWrite({ userCashbackPct: 2.5, reason: 'margin squeeze' }, 'cashback-config'),

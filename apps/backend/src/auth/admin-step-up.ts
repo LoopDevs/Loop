@@ -1,8 +1,8 @@
 // Admin step-up auth — ADR 028, A4-063, SEC-02-stepup
-import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
-import { config } from '../config/index.js';
+import { randomUUID } from 'node:crypto';
 import { db } from '../db/client.js';
 import { isUniqueViolation } from '../db/errors.js';
+import { getActiveSigner, getVerifiers, isAnySignerConfigured } from './signer.js';
 
 export const ADMIN_STEP_UP_TTL_SECONDS = 5 * 60;
 
@@ -83,27 +83,20 @@ function b64urlDecode(s: string): Buffer {
   return Buffer.from(s, 'base64url');
 }
 
-function hmac(key: string, signingInput: string): Buffer {
-  return createHmac('sha256', key).update(signingInput).digest();
-}
-
-function currentSigningKey(): string {
-  const k = config.admin.stepUp.signingKey;
-  if (k === undefined) {
-    throw new Error('admin.stepUp.signingKey is not configured — admin step-up auth is disabled');
-  }
-  return k;
-}
-
 export function isAdminStepUpConfigured(): boolean {
-  return config.admin.stepUp.signingKey !== undefined;
+  return isAnySignerConfigured();
 }
 
 export function signAdminStepUpToken(opts: SignAdminStepUpOptions): {
   token: string;
   claims: AdminStepUpClaims;
 } {
-  const key = currentSigningKey();
+  const signer = getActiveSigner();
+  if (signer === null) {
+    throw new Error(
+      'No Loop JWT signing key configured (auth.native.jwt.current) — admin step-up auth is disabled',
+    );
+  }
   const nowSec = opts.now ?? Math.floor(Date.now() / 1000);
   const claims: AdminStepUpClaims = {
     sub: opts.sub,
@@ -116,10 +109,10 @@ export function signAdminStepUpToken(opts: SignAdminStepUpOptions): {
     iat: nowSec,
     exp: nowSec + (opts.ttlSeconds ?? ADMIN_STEP_UP_TTL_SECONDS),
   };
-  const header = b64urlEncode(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
+  const header = b64urlEncode(JSON.stringify({ alg: signer.alg, typ: 'JWT' }));
   const payload = b64urlEncode(JSON.stringify(claims));
   const signingInput = `${header}.${payload}`;
-  const sig = b64urlEncode(hmac(key, signingInput));
+  const sig = b64urlEncode(signer.sign(signingInput));
   return { token: `${signingInput}.${sig}`, claims };
 }
 
@@ -139,14 +132,9 @@ export function verifyAdminStepUpToken(token: string): AdminStepUpVerifyResult {
   }
   const signingInput = `${header}.${payload}`;
   const providedSigBuf = b64urlDecode(providedSig);
-  const keys = [config.admin.stepUp.signingKey, config.admin.stepUp.previousSigningKey].filter(
-    (k): k is string => typeof k === 'string' && k.length > 0,
-  );
-  if (keys.length === 0) return { ok: false, reason: 'not_configured' };
-  const matched = keys.some((k) => {
-    const expected = hmac(k, signingInput);
-    return expected.length === providedSigBuf.length && timingSafeEqual(expected, providedSigBuf);
-  });
+  const verifiers = getVerifiers();
+  if (verifiers.length === 0) return { ok: false, reason: 'not_configured' };
+  const matched = verifiers.some((s) => s.verify(signingInput, providedSigBuf));
   if (!matched) return { ok: false, reason: 'bad_signature' };
   let parsed: unknown;
   try {

@@ -32,11 +32,14 @@ export function applyCrossFieldGuards(config: Config, source: string): void {
     throw new Error(`Invalid configuration in ${source} — ${message}`);
   };
 
-  // A2-1605: refuse boot in production if rate limiting is disabled.
+  // A2-1605: rate limiting is enforced in production regardless of the flag.
   if (isProduction && !config.rateLimit.enabled) {
-    fail(
-      'rateLimit.enabled must not be false in production (audit A2-1605). It is a test-harness ' +
-        'escape hatch that disables every per-IP limit on every route; production runs with limits on.',
+    config.rateLimit.enabled = true;
+    // eslint-disable-next-line no-console
+    console.warn(
+      '[config] rateLimit.enabled=false — this configuration value is ignored in production, as ' +
+        'rate limiting is enforced. Either remove this config value or set it to true to hide ' +
+        'this warning.',
     );
   }
 

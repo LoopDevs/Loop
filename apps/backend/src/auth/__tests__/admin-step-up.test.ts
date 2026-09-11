@@ -5,10 +5,10 @@ import type * as ConfigModule from '../../config/index.js';
 const KEY = 'admin-step-up-unit-test-key-32-chars!';
 const OLD_KEY = 'admin-step-up-unit-test-PREVIOUS-key!';
 
-const { stepUpState } = vi.hoisted(() => ({
-  stepUpState: {
-    signingKey: undefined as string | undefined,
-    previousSigningKey: undefined as string | undefined,
+const { jwtState } = vi.hoisted(() => ({
+  jwtState: {
+    current: undefined as string | undefined,
+    previous: undefined as string | undefined,
   },
 }));
 
@@ -17,7 +17,13 @@ vi.mock('../../config/index.js', async (importActual) => {
   return {
     ...actual,
     get config() {
-      return { ...actual.config, admin: { ...actual.config.admin, stepUp: stepUpState } };
+      return {
+        ...actual.config,
+        auth: {
+          ...actual.config.auth,
+          native: { ...actual.config.auth.native, jwt: jwtState },
+        },
+      };
     },
   };
 });
@@ -33,8 +39,8 @@ import {
 
 beforeEach(() => {
   __resetDbForTests();
-  stepUpState.signingKey = KEY;
-  stepUpState.previousSigningKey = undefined;
+  jwtState.current = KEY;
+  jwtState.previous = undefined;
 });
 
 function mint(overrides: Parameters<typeof signAdminStepUpToken>[0]): string {
@@ -44,7 +50,7 @@ function mint(overrides: Parameters<typeof signAdminStepUpToken>[0]): string {
 describe('configuration', () => {
   it('reports unconfigured when no signing key is set, and verify fails closed', () => {
     const token = mint({ sub: 'a', email: 'a@b.c', scope: 'staff-role-grant' });
-    stepUpState.signingKey = undefined;
+    jwtState.current = undefined;
 
     expect(isAdminStepUpConfigured()).toBe(false);
     // `not_configured` maps to 503 so the surface ships disabled rather than silently skipping
@@ -52,10 +58,10 @@ describe('configuration', () => {
   });
 
   it('accepts a token signed with the PREVIOUS key so a rotation overlaps', () => {
-    stepUpState.signingKey = OLD_KEY;
+    jwtState.current = OLD_KEY;
     const token = mint({ sub: 'a', email: 'a@b.c', scope: 'staff-role-grant' });
-    stepUpState.signingKey = KEY;
-    stepUpState.previousSigningKey = OLD_KEY;
+    jwtState.current = KEY;
+    jwtState.previous = OLD_KEY;
 
     const result = verifyAdminStepUpToken(token);
     expect(result.ok).toBe(true);

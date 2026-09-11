@@ -551,11 +551,10 @@ describe('parseConfig', () => {
 });
 
 describe('admin', () => {
-  it('defaults to no allowlist, no step-up key, and financial-grade audit retention', () => {
+  it('defaults to no allowlist and financial-grade audit retention', () => {
     const cfg = parse(base);
     expect(cfg.admin.emails).toEqual([]);
     expect(cfg.admin.ctxUserIds).toEqual([]);
-    expect(cfg.admin.stepUp.signingKey).toBeUndefined();
     expect(cfg.admin.auditRetentionDays).toBe(2557);
   });
 
@@ -575,12 +574,6 @@ describe('admin', () => {
     );
   });
 
-  it('rejects a step-up signing key with too little entropy', () => {
-    expect(() => parse({ ...base, admin: { stepUp: { signingKey: 'short' } } })).toThrow(
-      /admin\.stepUp\.signingKey/,
-    );
-  });
-
   it('rejects a non-positive audit retention', () => {
     expect(() => parse({ ...base, admin: { auditRetentionDays: 0 } })).toThrow(
       /admin\.auditRetentionDays/,
@@ -594,10 +587,15 @@ describe('production cross-field guards', () => {
     expect(() => parseProd(prodBase)).not.toThrow();
   });
 
-  it('A2-1605: refuses production with rateLimit.enabled false', () => {
-    expect(() => parseProd({ ...prodBase, rateLimit: { enabled: false } })).toThrow(
-      /rateLimit\.enabled must not be false in production/,
-    );
+  it('A2-1605: forces rateLimit.enabled true in production, warning if set false', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const cfg = parseProd({ ...prodBase, rateLimit: { enabled: false } });
+      expect(cfg.rateLimit.enabled).toBe(true);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('rateLimit.enabled=false'));
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('A2-1605: allows rateLimit.enabled false in development and test', () => {
