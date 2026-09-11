@@ -1,4 +1,3 @@
-// CTX API-key fetch — ADR 051, A2-1510, CF-12, CF-13
 import { notifyCtxCredentialInvalid } from '../discord.js';
 import { config } from '../config/index.js';
 import { logger } from '../logger.js';
@@ -6,7 +5,6 @@ import { upstreamFetch } from '../upstream.js';
 
 const log = logger.child({ area: 'ctx-api' });
 
-// Transient CTX-side outage or misconfiguration: credentials unset, or the API key rejected (401). Callers treat this as "defer and retry later", never as a per-order failure.
 export class CtxUnavailableError extends Error {
   constructor(message: string) {
     super(message);
@@ -14,9 +12,7 @@ export class CtxUnavailableError extends Error {
   }
 }
 
-// CF-12: CTX returned 429 — back-pressure, not a per-order failure.
 export class CtxRateLimitedError extends Error {
-  // Parsed `Retry-After` in ms, or `null` if CTX sent no usable header.
   readonly retryAfterMs: number | null;
   constructor(message: string, retryAfterMs: number | null) {
     super(message);
@@ -25,8 +21,12 @@ export class CtxRateLimitedError extends Error {
   }
 }
 
-// CF-12: parse an HTTP `Retry-After` header into milliseconds. Per RFC 9110 the value is either delta-seconds (`"120"`) or an HTTP-date (`"Wed, 21 Oct 2026 07:28:00 GMT"`). Returns `null` for an absent, empty, or unparseable header, and clamps negatives (a past date) to 0. Caps at 5 minutes so a pathological upstream value can't park a tick indefinitely.
+// CF-12: parse an HTTP `Retry-After` header into milliseconds. Per RFC 9110 the value is either delta-seconds (`"120"`)
+// or an HTTP-date (`"Wed, 21 Oct 2026 07:28:00 GMT"`).
+// Returns `null` for an absent, empty, or unparseable header, and clamps negatives (a past date) to 0.
+// Caps at 5 minutes so a pathological upstream value can't park a tick indefinitely.
 const RETRY_AFTER_MAX_MS = 5 * 60 * 1000;
+
 export function parseRetryAfterMs(header: string | null): number | null {
   if (header === null) return null;
   const trimmed = header.trim();
@@ -57,7 +57,14 @@ export function ctxApiCredentials(): CtxApiCredentials {
   };
 }
 
-// Snapshot of the upstream credential state — for `/health` and the admin treasury snapshot (ADR 013's observability bullet, collapsed to a single upstream under ADR 051). Both fields are now constant: `configured` because the env schema requires the credentials at boot, and `state` because the upstream breaker it used to report is gone. They survive for response-shape stability — `/health` consumers still parse this object. Live CTX reachability is the upstream probe's job, not this function's.
+// Snapshot of the upstream credential state — for `/health` and the admin
+// treasury snapshot (ADR 013's observability bullet, collapsed to a single
+// upstream under ADR 051).
+// Both fields are now constant: `configured` because the env schema requires
+// the credentials at boot, and `state` because the upstream breaker it used
+// to report is gone. They survive for response-shape stability — `/health`
+// consumers still parse this object.
+// Live CTX reachability is the upstream probe's job, not this function's.
 export function getCtxApiHealth(): { configured: boolean; state: string } {
   return { configured: true, state: 'closed' };
 }

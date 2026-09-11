@@ -59,7 +59,8 @@ vi.mock('../discord.js', () => ({
   notifyGeoDbStale: notifyGeoDbStaleMock,
 }));
 
-// CONV-WATCH-02: gate mocked so transition doesn't touch DB; end-to-end covered in __tests__/integration/health-change-dedup.test.ts
+// CONV-WATCH-02: gate mocked so transition doesn't touch DB;
+// end-to-end covered in __tests__/integration/health-change-dedup.test.ts
 const applyBinaryWatchdogAlertMock = vi.hoisted(() =>
   vi.fn<
     (args: {

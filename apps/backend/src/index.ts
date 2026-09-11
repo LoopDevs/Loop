@@ -12,7 +12,7 @@ import {
 import { registerMerchantWsEvents } from './merchants/ws-events.js';
 import { initDb, closeDb } from './db/client.js';
 import { registerGiftcardWsEvents } from './orders/ws-events.js';
-import { startCtxWs, stopCtxWs } from './ctx/ws-events.js';
+import { startCtx, stopCtx } from './ctx/startup.js';
 import { startMirrorSweep, stopMirrorSweep } from './orders/ctx-mirror-sweep.js';
 import { startRedemptionBackfill, stopRedemptionBackfill } from './orders/redemption-backfill.js';
 import { startAuthRowPurge, stopAuthRowPurge } from './auth/auth-row-purge.js';
@@ -43,7 +43,7 @@ await initDb();
 await startMerchantRefresh();
 registerMerchantWsEvents();
 registerGiftcardWsEvents();
-startCtxWs();
+await startCtx();
 const locationStartTimer = setTimeout(() => {
   void startLocationRefresh();
 }, 3000);
@@ -76,7 +76,7 @@ function shutdown(signal: string): void {
   stopCleanupInterval();
   stopFleetSizeEstimator();
   stopMerchantRefresh();
-  stopCtxWs();
+  stopCtx();
   cancelPendingSnapshotPersist();
   stopLocationRefresh();
   stopMirrorSweep();

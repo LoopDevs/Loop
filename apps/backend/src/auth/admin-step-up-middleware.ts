@@ -33,7 +33,8 @@ export function requireAdminStepUp(action: AdminStepUpScope): MiddlewareHandler 
 
     const auth = c.get('auth') as AuthLike | undefined;
 
-    // Fail closed on missing auth context: prevents a mount-order bug from allowing any admin's valid step-up token to satisfy the gate.
+    // Fail closed on missing auth context: prevents a mount-order bug from allowing any admin's
+    // valid step-up token to satisfy the gate.
     if (auth === undefined || auth.userId === undefined) {
       log.error(
         { path: c.req.path },
@@ -59,7 +60,8 @@ export function requireAdminStepUp(action: AdminStepUpScope): MiddlewareHandler 
       );
     }
 
-    // Verify before consume: pins subject without burning the token, so a replay on the wrong session cannot DoS the legitimate owner.
+    // Verify before consume: pins subject without burning the token, so a replay on the wrong
+    // session cannot DoS the legitimate owner.
     const verified: AdminStepUpVerifyResult = verifyAdminStepUpToken(tokenHeader);
     if (!verified.ok) {
       log.warn({ reason: verified.reason }, 'admin step-up token rejected (verify)');

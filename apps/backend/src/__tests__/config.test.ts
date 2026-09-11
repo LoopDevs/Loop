@@ -13,7 +13,8 @@ import {
 // A valid HTTPS Discord webhook URL (SEC-10 schema shape).
 const MONITORING_WEBHOOK = 'https://discord.com/api/webhooks/123456789012345678/AbCdEf-gh_Ij';
 
-// NS-10 (CF-25 / X-PRIV-03): production boots require the redeem key; carried in base so production fixtures satisfy the guard
+// NS-10 (CF-25 / X-PRIV-03): production boots require the redeem key;
+// carried in base so production fixtures satisfy the guard
 const REDEEM_KEY = 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=';
 
 const JWT_KEY = 'jwt-test-signing-key-32-chars-min!!';
@@ -34,7 +35,8 @@ const prodBase = {
   email: { provider: 'resend', credentials: { key: 're_test_key_value' } },
 };
 
-// NODE_ENV overrides the document's env: key and vitest always sets NODE_ENV=test, so production parses must move the process variable
+// NODE_ENV overrides the document's env: key and vitest always sets NODE_ENV=test,
+// so production parses must move the process variable
 function withNodeEnv<T>(value: string | undefined, fn: () => T): T {
   const previous = process.env['NODE_ENV'];
   if (value === undefined) delete process.env['NODE_ENV'];
@@ -177,7 +179,8 @@ describe('parseConfig', () => {
       );
     });
 
-    // A-018: the web bundle hardcodes DEFAULT_CLIENT_IDS at build time, so an unmirrored server override breaks the X-Client-Id allowlist (A-036) after login
+    // A-018: the web bundle hardcodes DEFAULT_CLIENT_IDS at build time,
+    // so an unmirrored server override breaks the X-Client-Id allowlist (A-036) after login
     it('warns when a client id diverges from the shared default', () => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
       parse({ ...base, ctx: { ...base.ctx, clientIds: { web: 'customweb' } } });
@@ -429,7 +432,8 @@ describe('parseConfig', () => {
     });
   });
 
-  // CF-25 / X-PRIV-03: a wrong-length key would write ciphertext nobody can decrypt, so the decoded length is validated whenever present
+  // CF-25 / X-PRIV-03: a wrong-length key would write ciphertext nobody can decrypt,
+  // so the decoded length is validated whenever present
   describe('orders.redeem.encryptionKey', () => {
     it('rejects a key that does not decode to exactly 32 bytes', () => {
       expect(() =>

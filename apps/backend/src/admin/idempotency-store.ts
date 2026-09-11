@@ -1,4 +1,5 @@
-// admin idempotency store — ADR 017; NS-03: replay TTL decoupled from audit retention (this collection doubles as the audit trail)
+// admin idempotency store — ADR 017; NS-03: replay TTL decoupled from audit retention
+// (this collection doubles as the audit trail)
 import { config } from '../config/index.js';
 import { db } from '../db/client.js';
 import { logger } from '../logger.js';
@@ -33,9 +34,9 @@ export async function lookupIdempotencyKey(args: {
   return { status: row.status, body, createdAt: row.createdAt };
 }
 
-// A2-500 / NS-03: sweeps by AUDIT RETENTION, not the 24h replay TTL — this collection is the durable admin audit trail (audit-tail.ts reads it)
-// a retained row older than 24h is a replay miss at read time, so replay semantics are unchanged
-// retentionMs/now are test seams (mirrors runAuthRowPurgeTick)
+// A2-500 / NS-03: sweeps by AUDIT RETENTION, not the 24h replay TTL — this collection is the durable admin
+// audit trail (audit-tail.ts reads it) a retained row older than 24h is a replay miss at read time,
+// so replay semantics are unchanged. retentionMs/now are test seams (mirrors runAuthRowPurgeTick)
 export async function sweepStaleIdempotencyKeys(args?: {
   retentionMs?: number;
   now?: Date;

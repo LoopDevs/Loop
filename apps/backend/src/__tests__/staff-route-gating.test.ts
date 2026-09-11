@@ -204,7 +204,8 @@ describe('ADR 037 tier behaviour', () => {
     },
   );
 
-  // The support-tier delivery unstick: a 400 for the missing Idempotency-Key proves the gate passed and the handler's own validation is what answered, which a 404 would not.
+  // The support-tier delivery unstick: a 400 for the missing Idempotency-Key proves the gate passed and the handler's
+  // own validation is what answered, which a 404 would not.
   it('support can reach the redemption re-fetch past the gate', async () => {
     const res = await app.request(
       `/api/admin/orders/${ORDER_ID}/refetch-redemption`,
@@ -264,7 +265,8 @@ describe('ADR 037 mount inventory (default-deny)', () => {
   });
 
   it('every destructive write carries its correctly-SCOPED step-up gate (ADR 028 / CF-08)', () => {
-    // The scope is pinned per route, not merely its presence: merge history has produced both failure modes this guards — a route losing its step-up gate entirely, and a route keeping the gate but losing its CF-08 scope binding.
+    // The scope is pinned per route, not merely its presence: merge history has produced both failure modes this guards —
+    // a route losing its step-up gate entirely, and a route keeping the gate but losing its CF-08 scope binding.
     const mustCarryStepUp: Record<string, string> = {
       'PUT /api/admin/staff/:userId/role': 'requireAdminStepUp(staff-role-grant)',
       'DELETE /api/admin/staff/:userId/role': 'requireAdminStepUp(staff-role-revoke)',
@@ -284,17 +286,24 @@ describe('ADR 037 mount inventory (default-deny)', () => {
   });
 
   it('default-deny: a NEW admin-tier write must declare step-up or join the explicit exempt list', () => {
-    // Any non-GET admin mount either carries a named step-up gate or is listed here WITH its reason. Adding a destructive admin write without step-up requires editing this list — which is exactly the review conversation ADR 028 wants to force.
+    // Any non-GET admin mount either carries a named step-up gate or is listed here WITH its reason.
+    // Adding a destructive admin write without step-up requires editing this list — which is exactly the review
+    // conversation ADR 028 wants to force.
     const STEP_UP_EXEMPT = new Set<string>([
       // Mints the step-up token itself — gating it on step-up would be circular; it re-authenticates with a fresh OTP instead.
       'POST /api/admin/step-up',
-      // B4 incident response: moves no value, and the user simply signs back in. Step-up friction in the first minute of "their laptop was stolen" is the wrong trade.
+      // B4 incident response: moves no value, and the user simply signs back in. Step-up friction in the first minute of
+      // "their laptop was stolen" is the wrong trade.
       'POST /api/admin/users/:userId/revoke-sessions',
-      // A5-3: same rationale as revoke-sessions — clearing the counter grants no access by itself, it only re-opens the guess budget, and a wrong guess re-arms the lockout from a clean window. Its own per-target velocity cap is what bounds abuse.
+      // A5-3: same rationale as revoke-sessions — clearing the counter grants no access by itself, it only re-opens the
+      // guess budget, and a wrong guess re-arms the lockout from a clean window. Its own per-target velocity cap is what
+      // bounds abuse.
       'POST /api/admin/users/:userId/clear-otp-lockout',
-      // ADR 037 support-tier delivery unstick: re-drives work the customer already paid for and creates nothing. Adding step-up would push it back to admin-only, which is the opposite of what the tier is for.
+      // ADR 037 support-tier delivery unstick: re-drives work the customer already paid for and creates nothing.
+      // Adding step-up would push it back to admin-only, which is the opposite of what the tier is for.
       'POST /api/admin/orders/:orderId/refetch-redemption',
-      // Catalog refresh: no money path, self-correcting (the worst outcome is that the catalog matches CTX sooner), and already the tightest rate limit on the surface.
+      // Catalog refresh: no money path, self-correcting (the worst outcome is that the catalog matches CTX sooner),
+      // and already the tightest rate limit on the surface.
       'POST /api/admin/merchants/resync',
       // Sends one test embed to an already-configured webhook — no state change beyond the outbound message.
       'POST /api/admin/discord/test',

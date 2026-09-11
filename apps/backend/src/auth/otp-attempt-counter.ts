@@ -28,7 +28,8 @@ export interface RegisterFailedAttemptResult {
   locked: boolean;
 }
 
-// Node single-threaded execution makes read-modify-write atomic in memory driver; mongo driver may lose one increment on simultaneous guesses.
+// Node single-threaded execution makes read-modify-write atomic in memory driver;
+// mongo driver may lose one increment on simultaneous guesses.
 export async function registerFailedOtpAttempt(args: {
   email: string;
   now?: Date;
