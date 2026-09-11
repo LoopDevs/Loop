@@ -115,8 +115,23 @@ export const emailSchema = z
     }),
     z.object({
       provider: z.literal('resend'),
-      // https://resend.com — format is `re_...`. Never log this.
-      apiKey: z.string().min(1),
+      // key is the https://resend.com api key — format `re_...`. Never log this.
+      credentials: z.object({
+        key: z.string().min(1),
+      }),
+      ...emailSenderFields,
+    }),
+    z.object({
+      provider: z.literal('aws_ses'),
+      region: z.string().min(1),
+      // key/secret map to the AWS access key id / secret access key.
+      // Unset → the AWS SDK default credential chain (env vars / IAM role).
+      credentials: z
+        .object({
+          key: z.string().min(1),
+          secret: z.string().min(1),
+        })
+        .optional(),
       ...emailSenderFields,
     }),
   ])

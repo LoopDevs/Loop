@@ -13,9 +13,53 @@ const CONSOLE_EMAIL: Config['email'] = {
 
 const RESEND_EMAIL: Config['email'] = {
   provider: 'resend',
-  apiKey: 're_test_xxxxxxxxxxxxxxxx',
+  credentials: { key: 're_test_xxxxxxxxxxxxxxxx' },
   from: { address: 'noreply@loopfinance.io', name: 'Loop' },
 };
+
+const SES_EMAIL: Config['email'] = {
+  provider: 'aws_ses',
+  region: 'eu-west-1',
+  credentials: { key: 'AKIA_TEST_KEY_ID', secret: 'test-secret-access-key' },
+  from: { address: 'noreply@loopfinance.io', name: 'Loop' },
+};
+
+const { sesSend, sesClientConfigs } = vi.hoisted(() => ({
+  sesSend: vi.fn<(command: unknown) => Promise<unknown>>(),
+  sesClientConfigs: [] as unknown[],
+}));
+
+vi.mock('@aws-sdk/client-sesv2', () => ({
+  SESv2Client: class {
+    send = sesSend;
+    constructor(clientConfig: unknown) {
+      sesClientConfigs.push(clientConfig);
+    }
+  },
+  SendEmailCommand: class {
+    constructor(readonly input: unknown) {}
+  },
+}));
+
+interface SesSendEmailInput {
+  FromEmailAddress: string;
+  Destination: { ToAddresses: string[] };
+  ReplyToAddresses?: string[];
+  Content: {
+    Simple: {
+      Subject: { Data: string; Charset: string };
+      Body: {
+        Text: { Data: string; Charset: string };
+        Html: { Data: string; Charset: string };
+      };
+    };
+  };
+}
+
+function sentSesInput(callIndex = 0): SesSendEmailInput {
+  const command = sesSend.mock.calls[callIndex]![0] as { input: SesSendEmailInput };
+  return command.input;
+}
 
 const { configState } = vi.hoisted(() => ({
   configState: {
@@ -95,6 +139,12 @@ describe('getEmailProvider', () => {
     configState.email = RESEND_EMAIL;
     const p = getEmailProvider();
     expect(p.name).toBe('resend');
+  });
+
+  it('returns the aws_ses provider for provider: aws_ses', () => {
+    configState.email = SES_EMAIL;
+    const p = getEmailProvider();
+    expect(p.name).toBe('aws_ses');
   });
 });
 
@@ -225,6 +275,114 @@ describe('ResendEmailProvider.sendOtpEmail', () => {
     expect(body.html).toContain('&lt;script&gt;');
     expect(body.html).not.toContain('<script>');
     fetchSpy.mockRestore();
+  });
+});
+
+describe('AwsSesEmailProvider.sendOtpEmail', () => {
+  beforeEach(() => {
+    configState.email = SES_EMAIL;
+    __resetEmailProviderForTests();
+    sesSend.mockReset();
+    sesSend.mockResolvedValue({});
+    sesClientConfigs.length = 0;
+  });
+
+  it('sends via SESv2 with default from, code in body only (never the subject)', async () => {
+    await getEmailProvider().sendOtpEmail({
+      to: 'user@example.com',
+      code: '654321',
+      expiresAt: new Date(Date.now() + 5 * 60_000),
+    });
+    expect(sesSend).toHaveBeenCalledOnce();
+    const input = sentSesInput();
+    expect(input.FromEmailAddress).toBe('Loop <noreply@loopfinance.io>');
+    expect(input.Destination.ToAddresses).toEqual(['user@example.com']);
+    // NTF-18: the subject leaks into lock-screen / push-notification
+    // previews, so the OTP code must never appear there — only in the
+    // body, which requires opening the mail.
+    expect(input.Content.Simple.Subject.Data).toBe('Your Loop verification code');
+    expect(input.Content.Simple.Subject.Data).not.toContain('654321');
+    expect(input.Content.Simple.Body.Text.Data).toContain('654321');
+    expect(input.Content.Simple.Body.Html.Data).toContain('654321');
+  });
+
+  it('constructs the client with the configured region and static credentials', async () => {
+    getEmailProvider();
+    expect(sesClientConfigs).toHaveLength(1);
+    expect(sesClientConfigs[0]).toMatchObject({
+      region: 'eu-west-1',
+      credentials: { accessKeyId: 'AKIA_TEST_KEY_ID', secretAccessKey: 'test-secret-access-key' },
+    });
+  });
+
+  it('omits credentials from the client so the SDK default chain applies when unset', async () => {
+    configState.email = {
+      provider: 'aws_ses',
+      region: 'eu-west-1',
+      from: { address: 'noreply@loopfinance.io', name: 'Loop' },
+    };
+    __resetEmailProviderForTests();
+    getEmailProvider();
+    expect(sesClientConfigs).toHaveLength(1);
+    expect('credentials' in (sesClientConfigs[0] as Record<string, unknown>)).toBe(false);
+  });
+
+  it('omits ReplyToAddresses when email.replyTo is unset', async () => {
+    await getEmailProvider().sendOtpEmail({
+      to: 'a@b.com',
+      code: '222222',
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    expect('ReplyToAddresses' in (sentSesInput() as unknown as Record<string, unknown>)).toBe(
+      false,
+    );
+  });
+
+  it('sets ReplyToAddresses when email.replyTo is set', async () => {
+    configState.email = { ...SES_EMAIL, replyTo: 'hello@loopfinance.io' };
+    __resetEmailProviderForTests();
+    await getEmailProvider().sendOtpEmail({
+      to: 'a@b.com',
+      code: '333333',
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    expect(sentSesInput().ReplyToAddresses).toEqual(['hello@loopfinance.io']);
+  });
+
+  it('honours email.from.address + email.from.name overrides', async () => {
+    configState.email = {
+      ...SES_EMAIL,
+      from: { address: 'auth@loopfinance.io', name: 'Loop Finance' },
+    };
+    __resetEmailProviderForTests();
+    await getEmailProvider().sendOtpEmail({
+      to: 'a@b.com',
+      code: '111111',
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    expect(sentSesInput().FromEmailAddress).toBe('Loop Finance <auth@loopfinance.io>');
+  });
+
+  it('throws on an SDK send failure (caller maps to 503 retry)', async () => {
+    sesSend.mockRejectedValue(Object.assign(new Error('rejected'), { name: 'MessageRejected' }));
+    await expect(
+      getEmailProvider().sendOtpEmail({
+        to: 'a@b.com',
+        code: '999999',
+        expiresAt: new Date(Date.now() + 60_000),
+      }),
+    ).rejects.toThrow(/SES SendEmail failed \(MessageRejected\)/);
+  });
+
+  it('escapes HTML-special characters in the code (defence-in-depth)', async () => {
+    await getEmailProvider().sendOtpEmail({
+      to: 'a@b.com',
+      code: '<script>',
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    const html = sentSesInput().Content.Simple.Body.Html.Data;
+    expect(html).toContain('&lt;script&gt;');
+    expect(html).not.toContain('<script>');
   });
 });
 

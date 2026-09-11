@@ -154,8 +154,14 @@ admin:
 # auth.native.enabled is true.
 email:
   provider: console
-  # provider: resend
-  # apiKey:            # https://resend.com, format `re_...`
+  # provider: resend   # credentials.key = https://resend.com api key (`re_...`), no secret
+  # provider: aws_ses  # Amazon SES (SESv2 API); region required
+  # region: eu-west-1
+  # aws_ses: key/secret = AWS access key id / secret access key; unset ->
+  # the SDK default credential chain (env vars / IAM role).
+  # credentials:
+  #   key:
+  #   secret:
   from:
     # Must be on a domain with DKIM/SPF verified at the provider.
     address: noreply@loopfinance.io

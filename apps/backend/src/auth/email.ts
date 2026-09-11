@@ -1,4 +1,5 @@
 // transactional email — ADR 013
+import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import { logger } from '../logger.js';
 import { config } from '../config/index.js';
 
@@ -47,23 +48,7 @@ class ResendEmailProvider implements EmailProvider {
   ) {}
 
   async sendOtpEmail(input: OtpEmailInput): Promise<void> {
-    // NTF-18: OTP code must not appear in subject line (visible in lock-screen previews)
-    const subject = 'Your Loop verification code';
-    const expiresAtIso = input.expiresAt.toISOString();
-    const minutes = Math.max(1, Math.round((input.expiresAt.getTime() - Date.now()) / 60_000));
-    const text = [
-      `Your Loop verification code is ${input.code}`,
-      '',
-      `Enter this code to sign in. It expires in ${minutes} minutes (${expiresAtIso}).`,
-      '',
-      "If you didn't request this, you can ignore this email.",
-    ].join('\n');
-    const html = [
-      `<p>Your Loop verification code is</p>`,
-      `<p style="font-size:24px;font-weight:700;letter-spacing:0.1em;">${escapeHtml(input.code)}</p>`,
-      `<p>Enter this code to sign in. It expires in ${minutes} minutes.</p>`,
-      `<p style="color:#888;font-size:12px;">If you didn't request this, you can ignore this email.</p>`,
-    ].join('');
+    const { subject, text, html } = renderOtpEmail(input);
 
     // Omit reply_to when unset — sending null confuses some inbox clients
     const body: Record<string, unknown> = {
@@ -97,6 +82,72 @@ class ResendEmailProvider implements EmailProvider {
   }
 }
 
+class AwsSesEmailProvider implements EmailProvider {
+  readonly name = 'aws_ses';
+
+  private readonly client: SESv2Client;
+
+  constructor(
+    region: string,
+    credentials: { accessKeyId: string; secretAccessKey: string } | undefined,
+    private readonly from: string,
+    private readonly replyTo: string | null,
+  ) {
+    this.client = new SESv2Client({
+      region,
+      requestHandler: { requestTimeout: 10_000 },
+      ...(credentials !== undefined ? { credentials } : {}),
+    });
+  }
+
+  async sendOtpEmail(input: OtpEmailInput): Promise<void> {
+    const { subject, text, html } = renderOtpEmail(input);
+    try {
+      await this.client.send(
+        new SendEmailCommand({
+          FromEmailAddress: this.from,
+          Destination: { ToAddresses: [input.to] },
+          ...(this.replyTo !== null ? { ReplyToAddresses: [this.replyTo] } : {}),
+          Content: {
+            Simple: {
+              Subject: { Data: subject, Charset: 'UTF-8' },
+              Body: {
+                Text: { Data: text, Charset: 'UTF-8' },
+                Html: { Data: html, Charset: 'UTF-8' },
+              },
+            },
+          },
+        }),
+      );
+    } catch (err) {
+      const name = err instanceof Error ? err.name : 'unknown';
+      log.error({ to: input.to, errorName: name }, 'SES email send failed');
+      throw new Error(`SES SendEmail failed (${name})`, { cause: err });
+    }
+  }
+}
+
+// NTF-18: OTP code must not appear in subject line (visible in lock-screen previews)
+function renderOtpEmail(input: OtpEmailInput): { subject: string; text: string; html: string } {
+  const subject = 'Your Loop verification code';
+  const expiresAtIso = input.expiresAt.toISOString();
+  const minutes = Math.max(1, Math.round((input.expiresAt.getTime() - Date.now()) / 60_000));
+  const text = [
+    `Your Loop verification code is ${input.code}`,
+    '',
+    `Enter this code to sign in. It expires in ${minutes} minutes (${expiresAtIso}).`,
+    '',
+    "If you didn't request this, you can ignore this email.",
+  ].join('\n');
+  const html = [
+    `<p>Your Loop verification code is</p>`,
+    `<p style="font-size:24px;font-weight:700;letter-spacing:0.1em;">${escapeHtml(input.code)}</p>`,
+    `<p>Enter this code to sign in. It expires in ${minutes} minutes.</p>`,
+    `<p style="color:#888;font-size:12px;">If you didn't request this, you can ignore this email.</p>`,
+  ].join('');
+  return { subject, text, html };
+}
+
 async function safeReadBody(res: Response): Promise<string> {
   try {
     return await res.text();
@@ -118,18 +169,33 @@ let cached: EmailProvider | null = null;
 
 export function getEmailProvider(): EmailProvider {
   if (cached !== null) return cached;
-  if (config.email.provider === 'console') {
-    // A2-571: console provider logs plaintext OTPs; A4-093 covers native-auth-on case
-    if (config.env === 'production') {
-      throw new Error(
-        'email.provider=console is not permitted in production — the console stub logs plaintext OTPs',
-      );
+  const email = config.email;
+  switch (email.provider) {
+    case 'console': {
+      // A2-571: console provider logs plaintext OTPs; A4-093 covers native-auth-on case
+      if (config.env === 'production') {
+        throw new Error(
+          'email.provider=console is not permitted in production — the console stub logs plaintext OTPs',
+        );
+      }
+      cached = new ConsoleEmailProvider();
+      break;
     }
-    cached = new ConsoleEmailProvider();
-    return cached;
+    case 'resend': {
+      const from = `${email.from.name} <${email.from.address}>`;
+      cached = new ResendEmailProvider(email.credentials.key, from, email.replyTo ?? null);
+      break;
+    }
+    case 'aws_ses': {
+      const from = `${email.from.name} <${email.from.address}>`;
+      const credentials =
+        email.credentials !== undefined
+          ? { accessKeyId: email.credentials.key, secretAccessKey: email.credentials.secret }
+          : undefined;
+      cached = new AwsSesEmailProvider(email.region, credentials, from, email.replyTo ?? null);
+      break;
+    }
   }
-  const { apiKey, from, replyTo } = config.email;
-  cached = new ResendEmailProvider(apiKey, `${from.name} <${from.address}>`, replyTo ?? null);
   return cached;
 }
 

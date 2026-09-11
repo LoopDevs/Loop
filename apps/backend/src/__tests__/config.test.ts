@@ -32,7 +32,7 @@ const base = {
 const prodBase = {
   ...base,
   auth: { native: { enabled: true, jwt: { hs256: { current: JWT_KEY } } } },
-  email: { provider: 'resend', apiKey: 're_test_key_value' },
+  email: { provider: 'resend', credentials: { key: 're_test_key_value' } },
 };
 
 // NODE_ENV overrides the document's env: key and vitest always sets NODE_ENV=test, so production parses must move the process variable
@@ -399,14 +399,62 @@ describe('parseConfig', () => {
     });
 
     // FT-09: resend without a key is a silent login outage (OTPs swallowed into fake 200s) — the union makes it un-representable
-    it('requires an apiKey for the resend provider', () => {
-      expect(() => parse({ ...base, email: { provider: 'resend' } })).toThrow(/email\.apiKey/);
-      expect(() => parse({ ...base, email: { provider: 'resend', apiKey: '' } })).toThrow(
-        /email\.apiKey/,
+    it('requires credentials.key for the resend provider', () => {
+      expect(() => parse({ ...base, email: { provider: 'resend' } })).toThrow(/email\.credentials/);
+      expect(() => parse({ ...base, email: { provider: 'resend', credentials: {} } })).toThrow(
+        /email\.credentials\.key/,
       );
+      expect(() =>
+        parse({ ...base, email: { provider: 'resend', credentials: { key: '' } } }),
+      ).toThrow(/email\.credentials\.key/);
       expect(
-        parse({ ...base, email: { provider: 'resend', apiKey: 're_test_key_value' } }).email,
-      ).toMatchObject({ provider: 'resend', apiKey: 're_test_key_value' });
+        parse({
+          ...base,
+          email: { provider: 'resend', credentials: { key: 're_test_key_value' } },
+        }).email,
+      ).toMatchObject({ provider: 'resend', credentials: { key: 're_test_key_value' } });
+    });
+
+    it('requires a region for the aws_ses provider', () => {
+      expect(() => parse({ ...base, email: { provider: 'aws_ses' } })).toThrow(/email\.region/);
+      expect(() => parse({ ...base, email: { provider: 'aws_ses', region: '' } })).toThrow(
+        /email\.region/,
+      );
+    });
+
+    it('accepts aws_ses without credentials (SDK default chain applies)', () => {
+      const email = parse({ ...base, email: { provider: 'aws_ses', region: 'eu-west-1' } }).email;
+      expect(email).toMatchObject({ provider: 'aws_ses', region: 'eu-west-1' });
+      expect('credentials' in email && email.credentials !== undefined).toBe(false);
+    });
+
+    it('accepts aws_ses with a full static credential pair', () => {
+      expect(
+        parse({
+          ...base,
+          email: {
+            provider: 'aws_ses',
+            region: 'eu-west-1',
+            credentials: { key: 'AKIA_TEST_KEY_ID', secret: 'test-secret' },
+          },
+        }).email,
+      ).toMatchObject({
+        provider: 'aws_ses',
+        credentials: { key: 'AKIA_TEST_KEY_ID', secret: 'test-secret' },
+      });
+    });
+
+    it('rejects a partial aws_ses credential pair', () => {
+      expect(() =>
+        parse({
+          ...base,
+          email: {
+            provider: 'aws_ses',
+            region: 'eu-west-1',
+            credentials: { key: 'AKIA_TEST_KEY_ID' },
+          },
+        }),
+      ).toThrow(/email\.credentials\.secret/);
     });
 
     it('rejects an unknown provider', () => {

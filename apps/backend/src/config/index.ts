@@ -75,7 +75,7 @@ export function applyCrossFieldGuards(config: Config, source: string): void {
     fail(
       'email.provider must be a real provider when auth.native.enabled is true in production ' +
         '(A4-093 / FT-09). The `console` provider only logs OTPs to stdout, so every login request ' +
-        'would silently fail while returning 200. Set email.provider: resend with an apiKey.',
+        'would silently fail while returning 200. Set email.provider: resend or aws_ses with credentials.',
     );
   }
 
