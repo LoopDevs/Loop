@@ -62,6 +62,7 @@ describe('parseConfig', () => {
     expect(config.server.port).toBe(8080);
     expect(config.server.logLevel).toBe('info');
     expect(config.server.trustProxy).toBe(false);
+    expect(config.server.corsOrigins).toEqual([]);
     expect(config.catalog.locationRefreshIntervalHours).toBe(24);
     expect(config.ctx.clientIds.web).toBe('loopweb');
     expect(config.ctx.paymentCurrencies).toEqual(['XLM']);
@@ -132,6 +133,19 @@ describe('parseConfig', () => {
     it('rejects a stringly-typed port or boolean instead of coercing it', () => {
       expect(() => parse({ ...base, server: { port: '9090' } })).toThrow(/server\.port/);
       expect(() => parse({ ...base, server: { trustProxy: 'yes' } })).toThrow(/server\.trustProxy/);
+    });
+
+    it('accepts origin-shaped corsOrigins entries and rejects paths or bare hosts', () => {
+      expect(
+        parse({ ...base, server: { corsOrigins: ['https://web.staging.example.com'] } }).server
+          .corsOrigins,
+      ).toEqual(['https://web.staging.example.com']);
+      expect(() =>
+        parse({ ...base, server: { corsOrigins: ['https://a.example.com/path'] } }),
+      ).toThrow(/server\.corsOrigins/);
+      expect(() => parse({ ...base, server: { corsOrigins: ['a.example.com'] } })).toThrow(
+        /server\.corsOrigins/,
+      );
     });
 
     it('accepts every pino level, including silent and fatal', () => {

@@ -13,5 +13,10 @@ export const serverSchema = z
     // Rate-limiter trust boundary (audit A-023). When `true`, reads client IP from X-Forwarded-For (required behind an LB/reverse proxy).
     // When `false`, uses TCP socket remote address to prevent IP spoofing for per-IP limit bypass.
     trustProxy: z.boolean().default(false),
+
+    // Extra browser origins (scheme + host, no trailing slash) merged into the
+    // hardcoded PRODUCTION_ORIGINS allowlist when env is production — e.g. the
+    // staging frontend. Ignored in non-production (CORS is `*` there).
+    corsOrigins: z.array(z.string().regex(/^https?:\/\/[^/]+$/)).default([]),
   })
   .prefault({});

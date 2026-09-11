@@ -33,6 +33,10 @@ server:
   # X-Forwarded-For (audit A-023) — otherwise clients can spoof their own
   # IP and bypass every per-IP rate limit.
   trustProxy: false
+  # Extra browser origins allowed by CORS in production (scheme + host,
+  # no trailing slash), merged into the built-in allowlist — e.g. a
+  # staging frontend. Default [].
+  corsOrigins: []
 
 # ── Upstream CTX: the gift-card supplier and payment processor ──────
 ctx:

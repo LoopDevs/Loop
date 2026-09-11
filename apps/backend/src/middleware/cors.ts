@@ -12,5 +12,5 @@ export const PRODUCTION_ORIGINS = [
 ];
 
 export const corsMiddleware = cors({
-  origin: config.env === 'production' ? PRODUCTION_ORIGINS : '*',
+  origin: config.env === 'production' ? [...PRODUCTION_ORIGINS, ...config.server.corsOrigins] : '*',
 });
