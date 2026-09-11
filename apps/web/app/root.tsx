@@ -13,6 +13,7 @@ import { QueryClient, QueryCache, MutationCache, QueryClientProvider } from '@ta
 import { I18nextProvider } from 'react-i18next';
 import i18n from '~/i18n/i18next';
 import { initSentryLazily, captureExceptionLazily } from '~/utils/sentry-lazy';
+import { runtimeEnv, runtimeEnvScript } from '~/utils/runtime-env';
 import { initAnalyticsLazily } from '~/utils/analytics-lazy';
 import { scrubErrorForSentry } from '~/utils/sentry-error-scrubber';
 import { forwardQueryErrorToSentry, type SentryLike } from '~/utils/query-error-reporting';
@@ -285,10 +286,7 @@ export function Layout({ children }: { children: React.ReactNode }): React.JSX.E
   // as an HTTP header (tracked alongside the other non-meta headers
   // above), and the Capacitor webview doesn't need frame-ancestors.
   const fullCsp = buildSecurityHeaders({
-    apiOrigin:
-      typeof import.meta.env !== 'undefined' && import.meta.env['VITE_API_URL']
-        ? (import.meta.env['VITE_API_URL'] as string)
-        : 'https://api.loopfinance.io',
+    apiOrigin: runtimeEnv().API_URL ?? 'https://api.loopfinance.io',
     // FE-08: on the SSR web path a per-request nonce exists (minted in
     // entry.server.tsx, threaded via NonceContext). Feed it into the meta
     // CSP so `script-src` lists `'nonce-<value>'` and drops
@@ -350,6 +348,14 @@ export function Layout({ children }: { children: React.ReactNode }): React.JSX.E
             // before body paints so there's no flash.
             __html: `document.documentElement.classList.add('light');`,
           }}
+        />
+        {/* Stamps the SSR-resolved deploy env (API origin, env tag,
+            phase gate) before any module script evaluates, so
+            `runtimeEnv()` on the client sees the server's values.
+            Same nonce treatment as the theme script above. */}
+        <script
+          {...(nonce !== null ? { nonce } : {})}
+          dangerouslySetInnerHTML={{ __html: runtimeEnvScript() }}
         />
         <Meta />
         <Links />

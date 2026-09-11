@@ -8,6 +8,7 @@
  * should keep the legacy path, never unlock a new one.
  */
 import { useMemo } from 'react';
+import { runtimeEnv } from '~/utils/runtime-env';
 import { useQuery } from '@tanstack/react-query';
 import { fetchAppConfig, type AppConfig } from '~/services/config';
 
@@ -33,7 +34,7 @@ import { fetchAppConfig, type AppConfig } from '~/services/config';
  * the read at runtime (stubbable in tests) rather than statically inlined.
  */
 export function defaultPhase1Only(): boolean {
-  return import.meta.env['VITE_PHASE_1_ONLY'] !== 'false';
+  return runtimeEnv().PHASE_1_ONLY !== 'false';
 }
 
 const DEFAULT_CONFIG: AppConfig = {

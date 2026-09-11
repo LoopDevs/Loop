@@ -26,12 +26,13 @@
  * `X-Frame-Options`).
  */
 import { buildSecurityHeaders } from '~/utils/security-headers';
+import { runtimeEnv } from '~/utils/runtime-env';
 
 export function applySecurityHeaders(
   responseHeaders: Headers,
   inlineScriptNonce: string | undefined,
 ): void {
-  const apiOrigin = process.env['VITE_API_URL'] ?? 'https://api.loopfinance.io';
+  const apiOrigin = runtimeEnv().API_URL ?? 'https://api.loopfinance.io';
   const headers = buildSecurityHeaders(
     inlineScriptNonce !== undefined ? { apiOrigin, inlineScriptNonce } : { apiOrigin },
   );

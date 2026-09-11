@@ -1,4 +1,5 @@
 import { COUNTRIES, DEFAULT_LANG, type PublicTopCashbackMerchantsResponse } from '@loop/shared';
+import { runtimeEnv } from '~/utils/runtime-env';
 import { hreflangAlternates, localeUrl } from '~/i18n/seo';
 
 /**
@@ -28,13 +29,10 @@ import { hreflangAlternates, localeUrl } from '~/i18n/seo';
 
 const MERCHANT_LIMIT = 50;
 
-// Resolved server-side at request time. Baked in at build time by
-// Vite when rendered on the SSR server (`import.meta.env` carries
-// the VITE_API_URL the build ran with), falling back to the Fly
-// internal service DNS when called through the web container's
-// runtime.
+// Resolved server-side at request time via runtimeEnv() (pod env on
+// SSR, baked VITE_API_URL as fallback).
 function apiBaseUrl(): string {
-  return import.meta.env.VITE_API_URL ?? 'https://api.loopfinance.io';
+  return runtimeEnv().API_URL ?? 'https://api.loopfinance.io';
 }
 
 async function fetchMerchants(): Promise<PublicTopCashbackMerchantsResponse | null> {

@@ -14,6 +14,7 @@
  * don't want it reachable.
  */
 import { Button, Input, Card, Badge, Avatar, Container, LoopLogo } from '~/components/ui';
+import { runtimeEnv } from '~/utils/runtime-env';
 import { Spinner } from '~/components/ui/Spinner';
 import { Skeleton } from '~/components/ui/Skeleton';
 import type { Route } from './+types/styleguide';
@@ -38,7 +39,7 @@ import type { Route } from './+types/styleguide';
  */
 export function loader(_: Route.LoaderArgs): null {
   const isProductionBuild = import.meta.env.PROD === true;
-  const isStaging = import.meta.env.VITE_LOOP_ENV === 'staging';
+  const isStaging = runtimeEnv().LOOP_ENV === 'staging';
   if (isProductionBuild && !isStaging) {
     throw new Response(null, { status: 404, statusText: 'Not Found' });
   }

@@ -1,4 +1,5 @@
 import { isbot } from 'isbot';
+import { runtimeEnv } from '~/utils/runtime-env';
 import { redirect } from 'react-router';
 import {
   DEFAULT_LANG,
@@ -16,7 +17,7 @@ export { default, meta, links } from './home';
 
 // Resolved server-side at request time (same pattern as sitemap.tsx).
 function apiBaseUrl(): string {
-  return import.meta.env.VITE_API_URL ?? 'https://api.loopfinance.io';
+  return runtimeEnv().API_URL ?? 'https://api.loopfinance.io';
 }
 
 /**

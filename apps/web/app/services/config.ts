@@ -1,20 +1,25 @@
+import { runtimeEnv } from '~/utils/runtime-env';
+
 /**
- * Base URL of the Loop backend API. Injected at build time by Vite.
+ * Base URL of the Loop backend API. Resolved at runtime via
+ * `runtimeEnv()` (k8s pod env on SSR, `window.__ENV__` in the browser),
+ * falling back to the value Vite baked in — the native static export's
+ * only configuration surface.
  *
- * If a production build ships without `VITE_API_URL` set, falling back to
+ * If a production deploy ships without any of those set, falling back to
  * the empty string quietly broke every API call — every request became
  * relative (`/api/...`) and hit the web origin (loopfinance.io or, worse
  * on native, the capacitor://localhost scheme that has no backend). Prefer
  * the known prod origin in that case; CSP already does the same for the
  * same reason. Dev explicitly sets `VITE_API_URL=http://localhost:8080`
  * in `.env.local`, so this fallback only kicks in if an operator
- * forgets to set it for a production build.
+ * forgets to set it for a production deploy.
  *
  * Matches the CSP fallback in `apps/web/app/root.tsx` so header and
  * runtime URLs can't drift.
  */
 export const API_BASE =
-  import.meta.env['VITE_API_URL'] ?? (import.meta.env.PROD ? 'https://api.loopfinance.io' : '');
+  runtimeEnv().API_URL ?? (import.meta.env.PROD ? 'https://api.loopfinance.io' : '');
 
 /**
  * Per-LOOP-asset availability snapshot inside `AppConfig`. Mirrors the

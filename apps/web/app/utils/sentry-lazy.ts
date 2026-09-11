@@ -18,6 +18,7 @@
  * event id once the SDK is ready, or no-ops if Sentry is disabled.
  */
 import type * as SentryType from '@sentry/react';
+import { runtimeEnv } from '~/utils/runtime-env';
 import { scrubSentryEvent } from '~/utils/sentry-scrubber';
 
 type SentryModule = typeof SentryType;
@@ -51,7 +52,7 @@ function runInit(Sentry: SentryModule): void {
     // staging build bucketed as `MODE=production` can still report
     // events as `staging`. Falls back to `MODE` so existing deploys
     // without the env var set continue to behave as before.
-    environment: (import.meta.env.VITE_LOOP_ENV as string | undefined) ?? import.meta.env.MODE,
+    environment: runtimeEnv().LOOP_ENV ?? import.meta.env.MODE,
     // A2-1309: release tag pivots a Sentry event back to the deploy
     // artifact. CI/CD sets `VITE_SENTRY_RELEASE` to the git SHA at
     // build time; left unset on dev so Sentry omits the attribute.
