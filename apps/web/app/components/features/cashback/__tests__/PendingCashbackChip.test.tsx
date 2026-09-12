@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type * as UserModule from '~/services/user';
@@ -7,8 +7,13 @@ import { PendingCashbackChip, formatOldestAgo, stroopsToMinor } from '../Pending
 
 afterEach(cleanup);
 
-const { userMock } = vi.hoisted(() => ({
+beforeEach(() => {
+  configMock.phase1Only = false;
+});
+
+const { userMock, configMock } = vi.hoisted(() => ({
   userMock: { getUserPendingPayoutsSummary: vi.fn() },
+  configMock: { phase1Only: false },
 }));
 
 vi.mock('~/services/user', async (importActual) => {
@@ -24,6 +29,9 @@ vi.mock('~/hooks/query-retry', () => ({ shouldRetry: () => false }));
 // the user is authenticated so the query fires.
 vi.mock('~/hooks/use-auth', () => ({
   useAuth: () => ({ isAuthenticated: true, user: null, refreshUser: () => {} }),
+}));
+vi.mock('~/hooks/use-app-config', () => ({
+  useAppConfig: () => ({ config: { phase1Only: configMock.phase1Only }, isLoading: false }),
 }));
 
 function renderChip(): HTMLElement {
@@ -59,6 +67,13 @@ describe('formatOldestAgo', () => {
 });
 
 describe('<PendingCashbackChip />', () => {
+  it('does not fire the request while LOOP_PHASE_1_ONLY is on', () => {
+    configMock.phase1Only = true;
+    const container = renderChip();
+    expect(userMock.getUserPendingPayoutsSummary).not.toHaveBeenCalled();
+    expect(container.firstChild).toBeNull();
+  });
+
   it('renders per-asset totals when the summary has rows', async () => {
     userMock.getUserPendingPayoutsSummary.mockResolvedValue({
       rows: [

@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { getCashbackSummary, type UserCashbackSummary } from '~/services/user';
 import { useAuth } from '~/hooks/use-auth';
+import { useAppConfig } from '~/hooks/use-app-config';
 import { shouldRetry } from '~/hooks/query-retry';
 import { formatMinorCurrency, useLocaleTag } from '~/i18n/format';
 
@@ -30,11 +31,12 @@ export function fmtEarnings(minor: string, currency: string, locale?: string): s
 export function CashbackEarningsHeadline(): React.JSX.Element | null {
   // A2-1156: auth-gate so cold-start doesn't fire before session restore.
   const { isAuthenticated } = useAuth();
+  const { config } = useAppConfig();
   const locale = useLocaleTag();
   const query = useQuery({
     queryKey: ['me', 'cashback-summary'],
     queryFn: getCashbackSummary,
-    enabled: isAuthenticated,
+    enabled: isAuthenticated && !config.phase1Only,
     retry: shouldRetry,
     staleTime: 60_000,
   });

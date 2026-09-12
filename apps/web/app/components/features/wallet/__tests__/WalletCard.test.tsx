@@ -35,6 +35,10 @@ vi.mock('~/hooks/use-auth', () => ({
   useAuth: () => ({ isAuthenticated: authMock.isAuthenticated }),
 }));
 
+vi.mock('~/hooks/use-app-config', () => ({
+  useAppConfig: () => ({ config: { phase1Only: false }, isLoading: false }),
+}));
+
 // Keep the REAL isTransientError (WalletCard uses it to tell a
 // transient blip from a permanent 4xx) — only force shouldRetry off so
 // a rejected query settles into isError immediately, no auto-retry.

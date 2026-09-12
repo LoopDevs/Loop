@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { getMyWallet, type UserWalletResponse } from '~/services/wallet';
 import { useAuth } from './use-auth';
+import { useAppConfig } from './use-app-config';
 import { shouldRetry } from './query-retry';
 
 /**
@@ -33,8 +34,8 @@ export interface UseWalletResult {
 /**
  * Reads the caller's embedded-wallet surface: address, provisioning
  * state, on-chain LOOP balances (the user's authoritative balance),
- * interest APY. Auth-gated internally so cold-start / signed-out
- * renders never fire a guaranteed-401 request.
+ * interest APY. Double-gated on auth AND `!config.phase1Only` (see
+ * `useVaultApy`) so no request fires that cannot succeed.
  *
  * 30s staleTime: balances move on order payment and nightly interest;
  * the redeem mutation invalidates explicitly, so a 30s
@@ -43,10 +44,11 @@ export interface UseWalletResult {
  */
 export function useWallet(): UseWalletResult {
   const { isAuthenticated } = useAuth();
+  const { config } = useAppConfig();
   const query = useQuery({
     queryKey: WALLET_QUERY_KEY,
     queryFn: getMyWallet,
-    enabled: isAuthenticated,
+    enabled: isAuthenticated && !config.phase1Only,
     retry: shouldRetry,
     staleTime: 30_000,
   });

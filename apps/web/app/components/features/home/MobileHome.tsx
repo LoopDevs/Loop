@@ -149,7 +149,7 @@ export function MobileHome(): React.JSX.Element {
   const summaryQuery = useQuery({
     queryKey: ['me', 'cashback-summary'],
     queryFn: getCashbackSummary,
-    enabled: isAuthenticated,
+    enabled: isAuthenticated && !phase1Only,
     retry: shouldRetry,
     staleTime: 60_000,
   });

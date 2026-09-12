@@ -102,7 +102,9 @@ export default function handleRequest(
           path never reaches them. `ServerRouter`'s own `nonce` prop
           is the documented hook that stamps those streamed scripts.
           Without it the strict nonce-CSP blocks hydration entirely
-          (blank app: no merchants, no search).
+          (blank app: no merchants, no search). React's own streamed
+          Suspense boundary-completion scripts (`$RC(...)`) take
+          theirs from the `renderToPipeableStream` `nonce` option.
         */}
         <ServerRouter
           context={routerContext}
@@ -111,6 +113,7 @@ export default function handleRequest(
         />
       </NonceContext>,
       {
+        ...(inlineScriptNonce !== undefined ? { nonce: inlineScriptNonce } : {}),
         [readyOption]() {
           shellRendered = true;
           const body = new PassThrough();

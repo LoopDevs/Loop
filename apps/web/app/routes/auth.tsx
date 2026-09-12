@@ -445,7 +445,7 @@ export default function AuthRoute(): React.JSX.Element {
   const historyQuery = useQuery({
     queryKey: ['me', 'cashback-history'],
     queryFn: () => getCashbackHistory({ limit: 5 }),
-    enabled: isAuthenticated,
+    enabled: isAuthenticated && !config.phase1Only,
     retry: shouldRetry,
     staleTime: 60_000,
   });

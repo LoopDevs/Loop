@@ -5,9 +5,10 @@ import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { UserWalletResponse } from '~/services/wallet';
 
-const { walletMock, authMock } = vi.hoisted(() => ({
+const { walletMock, authMock, configMock } = vi.hoisted(() => ({
   walletMock: { getMyWallet: vi.fn() },
   authMock: { isAuthenticated: true },
+  configMock: { phase1Only: false },
 }));
 
 vi.mock('~/services/wallet', () => ({
@@ -16,6 +17,10 @@ vi.mock('~/services/wallet', () => ({
 
 vi.mock('~/hooks/use-auth', () => ({
   useAuth: () => ({ isAuthenticated: authMock.isAuthenticated }),
+}));
+
+vi.mock('~/hooks/use-app-config', () => ({
+  useAppConfig: () => ({ config: { phase1Only: configMock.phase1Only }, isLoading: false }),
 }));
 
 vi.mock('~/hooks/query-retry', () => ({ shouldRetry: () => false }));
@@ -27,6 +32,7 @@ afterEach(cleanup);
 beforeEach(() => {
   walletMock.getMyWallet.mockReset();
   authMock.isAuthenticated = true;
+  configMock.phase1Only = false;
 });
 
 function makeWrapper(): React.FC<{ children: React.ReactNode }> {
@@ -58,6 +64,13 @@ describe('useWallet', () => {
     expect(result.current.wallet).toBeUndefined();
     expect(result.current.isActivated).toBe(false);
     expect(result.current.balanceFor('GBPLOOP')).toBe('0');
+  });
+
+  it('does not fire the request while LOOP_PHASE_1_ONLY is on', () => {
+    configMock.phase1Only = true;
+    const { result } = renderHook(() => useWallet(), { wrapper: makeWrapper() });
+    expect(walletMock.getMyWallet).not.toHaveBeenCalled();
+    expect(result.current.wallet).toBeUndefined();
   });
 
   it('fetches and exposes the wallet when authenticated', async () => {
