@@ -129,7 +129,7 @@ const CtxMeCompanySchema = z
     company: z
       .object({
         id: z.string().min(1),
-        operatorProfitShareBasisPoints: z.number().optional(),
+        profitShareBasisPoints: z.number().optional(),
       })
       .passthrough(),
   })
@@ -161,7 +161,7 @@ async function operatorCompany(): Promise<CtxOperatorCompany | null> {
     const me = CtxMeCompanySchema.parse(await res.json());
     cachedCompany = {
       id: me.company.id,
-      profitShareBp: me.company.operatorProfitShareBasisPoints ?? null,
+      profitShareBp: me.company.profitShareBasisPoints ?? null,
     };
     return cachedCompany;
   } catch (err) {
