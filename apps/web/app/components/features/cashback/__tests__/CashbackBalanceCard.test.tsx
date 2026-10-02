@@ -1,156 +1,105 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { render, screen, cleanup, waitFor } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter } from 'react-router';
-import type * as UserModule from '~/services/user';
-import { CashbackBalanceCard, fmtBalance } from '../CashbackBalanceCard';
+import { render, screen, cleanup } from '@testing-library/react';
+import type { UserAccountView } from '@loop/shared';
+import { CashbackBalanceCard } from '../CashbackBalanceCard';
 
 afterEach(cleanup);
 
-const { userMock, walletState } = vi.hoisted(() => ({
-  userMock: {
-    getMyCredits: vi.fn(),
-  },
-  walletState: {
-    wallet: undefined as { balances: Array<{ assetCode: string; balance: string }> } | undefined,
-    isActivated: false,
-  },
-}));
-
-vi.mock('~/services/user', async (importActual) => {
-  const actual = (await importActual()) as typeof UserModule;
-  return {
-    ...actual,
-    getMyCredits: () => userMock.getMyCredits(),
-  };
-});
-
-vi.mock('~/hooks/query-retry', () => ({
-  shouldRetry: () => false,
-}));
-// A2-1156: auth-gate in the component → tests need to pretend
-// the user is authenticated so the query fires.
-vi.mock('~/hooks/use-auth', () => ({
-  useAuth: () => ({ isAuthenticated: true, user: null, refreshUser: () => {} }),
-}));
-// ADR 036: balance = tokens once activated; mirror is
-// reconciliation-only. Default state is pre-activation so the
-// original mirror-sourced tests keep exercising that path.
-vi.mock('~/hooks/use-wallet', () => ({
-  useWallet: () => ({
-    wallet: walletState.wallet,
-    isActivated: walletState.isActivated,
-    balanceFor: (code: string) =>
-      walletState.wallet?.balances.find((b) => b.assetCode === code)?.balance ?? '0',
+const { accountState } = vi.hoisted(() => ({
+  accountState: {
+    account: undefined as UserAccountView | undefined,
     isLoading: false,
     isError: false,
+  },
+}));
+
+vi.mock('~/hooks/use-account', () => ({
+  useAccount: () => ({
+    account: accountState.account,
+    activeLink: null,
+    isLoading: accountState.isLoading,
+    isError: accountState.isError,
+    error: null,
+    refetch: () => {},
   }),
 }));
 
-beforeEach(() => {
-  walletState.wallet = undefined;
-  walletState.isActivated = false;
-  userMock.getMyCredits.mockReset();
-});
+vi.mock('~/components/ui/Spinner', () => ({
+  Spinner: () => <div data-testid="spinner" />,
+}));
 
-function renderCard(): void {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
-    <QueryClientProvider client={qc}>
-      <MemoryRouter>
-        <CashbackBalanceCard />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
+function account(overrides: Partial<UserAccountView> = {}): UserAccountView {
+  return {
+    id: 'acct-1',
+    userId: 'ctx-1',
+    wallet: [],
+    savings: [],
+    savingsPrincipal: [],
+    pendingOperations: [],
+    linkedWallets: [],
+    payouts: [],
+    created: '2026-09-01T00:00:00Z',
+    updated: '2026-09-23T10:00:00Z',
+    ...overrides,
+  };
 }
 
-describe('fmtBalance', () => {
-  it('formats GBP minor as localized currency', () => {
-    expect(fmtBalance('12345', 'GBP')).toMatch(/123\.45/);
-  });
-
-  it('returns em-dash for non-finite input', () => {
-    expect(fmtBalance('abc', 'GBP')).toBe('—');
-  });
+beforeEach(() => {
+  accountState.account = undefined;
+  accountState.isLoading = false;
+  accountState.isError = false;
 });
 
 describe('<CashbackBalanceCard />', () => {
-  it('renders empty-state when credits array is empty', async () => {
-    userMock.getMyCredits.mockResolvedValue({ credits: [] });
-    renderCard();
-    await waitFor(() => {
-      expect(screen.getByText(/No cashback yet/)).toBeDefined();
-    });
+  it('renders a spinner while the account loads', () => {
+    accountState.isLoading = true;
+    render(<CashbackBalanceCard />);
+    expect(screen.getByTestId('spinner')).toBeTruthy();
   });
 
-  it('renders one tile per currency with formatted balance', async () => {
-    userMock.getMyCredits.mockResolvedValue({
-      credits: [
-        { currency: 'GBP', balanceMinor: '12500', updatedAt: new Date().toISOString() },
-        { currency: 'USD', balanceMinor: '500', updatedAt: new Date().toISOString() },
+  it('renders the empty state when the wallet holds nothing', () => {
+    accountState.account = account();
+    render(<CashbackBalanceCard />);
+    expect(screen.getByText(/No cashback yet/i)).toBeTruthy();
+  });
+
+  it('renders one tile per held currency, pegged stables as their fiat', () => {
+    accountState.account = account({
+      wallet: [
+        { currency: 'XLM.GBPLOOP', amount: '12.5000000' },
+        { currency: 'XLM.USDC', amount: '3.0000000' },
+        { currency: 'XLM', amount: '1.2500000' },
       ],
     });
-    renderCard();
-    await waitFor(() => {
-      expect(screen.getByText(/125\.00/)).toBeDefined();
-    });
-    // Both balances end in ".00"; the 125 one is checked above.
-    // $5.00 is the second tile — assert by the dollar sign + digit.
-    expect(screen.getByText(/\$5\.00/)).toBeDefined();
-    expect(screen.getByText('GBP')).toBeDefined();
-    expect(screen.getByText('USD')).toBeDefined();
+    render(<CashbackBalanceCard />);
+    expect(screen.getByText('GBPLOOP')).toBeTruthy();
+    expect(screen.getByText(/£12\.50/)).toBeTruthy();
+    expect(screen.getByText(/\$3\.00/)).toBeTruthy();
+    expect(screen.getByText('1.25 XLM')).toBeTruthy();
   });
 
-  it('ADR 036 — activated wallet: tiles source from on-chain LOOP tokens, not the mirror', async () => {
-    // balance = tokens once activated; mirror is reconciliation-only
-    // (ADR 036). The mirror says £999.99 — the tokens say £42.50; the
-    // tokens win, and the mirror endpoint is not even queried.
-    walletState.isActivated = true;
-    walletState.wallet = { balances: [{ assetCode: 'GBPLOOP', balance: '42.5000000' }] };
-    userMock.getMyCredits.mockResolvedValue({
-      credits: [{ currency: 'GBP', balanceMinor: '99999', updatedAt: new Date().toISOString() }],
+  it('lists savings positions with value and earnt', () => {
+    accountState.account = account({
+      savings: [
+        {
+          currency: 'XLM.USDC',
+          provider: 'ctxmock',
+          principal: '5.0000000',
+          value: '5.1200000',
+          earnt: '0.1200000',
+        },
+      ],
     });
-    renderCard();
-    await waitFor(() => {
-      expect(screen.getByText(/42\.50/)).toBeDefined();
-    });
-    expect(screen.getByText('GBP')).toBeDefined();
-    expect(screen.queryByText(/999\.99/)).toBeNull();
-    // The mirror query is disabled once tokens are authoritative.
-    expect(userMock.getMyCredits).not.toHaveBeenCalled();
+    render(<CashbackBalanceCard />);
+    expect(screen.getByText('Savings')).toBeTruthy();
+    expect(screen.getByText(/\$5\.12/)).toBeTruthy();
+    expect(screen.getByText(/\+\$0\.12 earnt/)).toBeTruthy();
   });
 
-  it('ADR 036 — wallet exists but not activated: mirror display stays (tokens not emitted yet)', async () => {
-    walletState.isActivated = false;
-    walletState.wallet = { balances: [{ assetCode: 'GBPLOOP', balance: '42.5000000' }] };
-    userMock.getMyCredits.mockResolvedValue({
-      credits: [{ currency: 'GBP', balanceMinor: '12500', updatedAt: new Date().toISOString() }],
-    });
-    renderCard();
-    await waitFor(() => {
-      expect(screen.getByText(/125\.00/)).toBeDefined();
-    });
-    expect(screen.queryByText(/42\.50/)).toBeNull();
-  });
-
-  it('silently renders empty fragment on fetch error (ledger below is the source of truth)', async () => {
-    userMock.getMyCredits.mockRejectedValue(new Error('boom'));
-    const { container } = render(
-      <QueryClientProvider
-        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-      >
-        <MemoryRouter>
-          <CashbackBalanceCard />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
-    await waitFor(() => {
-      expect(userMock.getMyCredits).toHaveBeenCalled();
-    });
-    // Either nothing rendered, or a comment/fragment placeholder; no
-    // visible error banner.
-    expect(container.querySelector('[role="alert"]')).toBeNull();
-    expect(container.textContent ?? '').not.toMatch(/fail/i);
+  it('renders nothing on fetch error', () => {
+    accountState.isError = true;
+    const { container } = render(<CashbackBalanceCard />);
+    expect(container.textContent).toBe('');
   });
 });

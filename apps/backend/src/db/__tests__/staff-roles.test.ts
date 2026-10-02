@@ -193,7 +193,7 @@ describe('listStaffEntries', () => {
     });
     expect(entries.find((e) => e.userId === 'grantor')).toMatchObject({
       role: 'admin',
-      source: 'legacy_is_admin',
+      source: 'ctx_operator_admin',
       grantedAt: null,
     });
   });

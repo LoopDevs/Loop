@@ -3,32 +3,17 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
+import type { UserAccountView, WalletLinkView } from '@loop/shared';
 import type { UserMeView } from '~/services/user';
 
-/**
- * Account-screen "Your cashback" card — ADR 036 display sourcing:
- * balance = tokens once activated; mirror is reconciliation-only.
- * Pre-activation the card renders `me.homeCurrencyBalanceMinor` (the
- * off-chain mirror); once the embedded wallet is `activated` it
- * renders the on-chain LOOP balance for the user's home currency.
- */
-
-const { userMock, walletState, authMock } = vi.hoisted(() => ({
+const { userMock, accountState, authMock } = vi.hoisted(() => ({
   userMock: {
     getMe: vi.fn(),
     getCashbackHistory: vi.fn(),
   },
-  walletState: {
-    wallet: undefined as
-      | {
-          address: string | null;
-          provisioning: string;
-          balances: Array<{ assetCode: string; balance: string }>;
-          interestApyBps: number;
-          stale: boolean;
-        }
-      | undefined,
-    isActivated: false,
+  accountState: {
+    account: undefined as UserAccountView | undefined,
+    activeLink: null as WalletLinkView | null,
   },
   authMock: { isAuthenticated: true },
 }));
@@ -53,15 +38,15 @@ vi.mock('~/hooks/use-auth', () => ({
   }),
 }));
 
-vi.mock('~/hooks/use-wallet', () => ({
-  WALLET_QUERY_KEY: ['me', 'wallet'],
-  useWallet: () => ({
-    wallet: walletState.wallet,
-    isActivated: walletState.isActivated,
-    balanceFor: (code: string) =>
-      walletState.wallet?.balances.find((b) => b.assetCode === code)?.balance ?? '0',
+vi.mock('~/hooks/use-account', () => ({
+  ACCOUNT_QUERY_KEY: ['me', 'account'],
+  useAccount: () => ({
+    account: accountState.account,
+    activeLink: accountState.activeLink,
     isLoading: false,
     isError: false,
+    error: null,
+    refetch: () => {},
   }),
 }));
 
@@ -69,7 +54,6 @@ vi.mock('~/hooks/use-native-platform', () => ({
   useNativePlatform: () => ({ isNative: false, platform: 'web' }),
 }));
 
-// Phase-2 config so the account card exercises the live balance copy.
 vi.mock('~/hooks/use-app-config', () => ({
   useAppConfig: () => ({
     config: {
@@ -82,16 +66,11 @@ vi.mock('~/hooks/use-app-config', () => ({
 
 vi.mock('~/hooks/query-retry', () => ({ shouldRetry: () => false }));
 
-// jsdom has no matchMedia; the theme store resolves it at module init.
 vi.mock('~/stores/ui.store', () => ({
   useUiStore: () => ({ themePreference: 'system', setThemePreference: vi.fn() }),
 }));
 
-// Heavy siblings of the card under test — not the subject here.
 vi.mock('~/components/features/Navbar', () => ({ Navbar: () => null }));
-vi.mock('~/components/features/cashback/PendingCashbackChip', () => ({
-  PendingCashbackChip: () => null,
-}));
 
 import AuthRoute from '../auth';
 
@@ -101,8 +80,8 @@ beforeEach(() => {
   userMock.getMe.mockReset();
   userMock.getCashbackHistory.mockReset();
   userMock.getCashbackHistory.mockResolvedValue({ entries: [] });
-  walletState.wallet = undefined;
-  walletState.isActivated = false;
+  accountState.account = undefined;
+  accountState.activeLink = null;
 });
 
 function mkMe(overrides: Partial<UserMeView> = {}): UserMeView {
@@ -112,9 +91,22 @@ function mkMe(overrides: Partial<UserMeView> = {}): UserMeView {
     isAdmin: false,
     staffRole: null,
     homeCurrency: 'GBP',
-    stellarAddress: null,
-    homeCurrencyBalanceMinor: '12345',
     ...overrides,
+  };
+}
+
+function mkAccount(wallet: UserAccountView['wallet']): UserAccountView {
+  return {
+    id: 'acct-1',
+    userId: 'ctx-1',
+    wallet,
+    savings: [],
+    savingsPrincipal: [],
+    pendingOperations: [],
+    linkedWallets: [],
+    payouts: [],
+    created: '2026-09-01T00:00:00Z',
+    updated: '2026-09-23T10:00:00Z',
   };
 }
 
@@ -129,32 +121,50 @@ function renderAccount(): void {
   );
 }
 
-describe('Account screen cashback card — ADR 036 balance sourcing', () => {
-  it('pre-activation: renders the off-chain mirror (homeCurrencyBalanceMinor)', async () => {
+describe('Account screen cashback card', () => {
+  it('shows the held stable for the home currency as fiat', async () => {
     userMock.getMe.mockResolvedValue(mkMe());
+    accountState.account = mkAccount([
+      { currency: 'XLM.GBPLOOP', amount: '42.5000000' },
+      { currency: 'XLM.USDC', amount: '999.9900000' },
+    ]);
     renderAccount();
     await waitFor(() => {
-      expect(screen.getByText(/123\.45/)).toBeDefined();
+      expect(screen.getByText(/£42\.50/)).toBeDefined();
+    });
+    expect(screen.queryByText(/999\.99/)).toBeNull();
+  });
+
+  it('shows zero when the account holds nothing in the home stable', async () => {
+    userMock.getMe.mockResolvedValue(mkMe());
+    accountState.account = mkAccount([]);
+    renderAccount();
+    await waitFor(() => {
+      expect(screen.getByText(/£0\.00/)).toBeDefined();
     });
   });
 
-  it('activated: renders the on-chain home-currency LOOP balance instead of the mirror', async () => {
-    userMock.getMe.mockResolvedValue(mkMe({ homeCurrencyBalanceMinor: '99999' }));
-    walletState.isActivated = true;
-    walletState.wallet = {
-      address: 'GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW',
-      provisioning: 'activated',
-      balances: [{ assetCode: 'GBPLOOP', balance: '42.5000000' }],
-      interestApyBps: 0,
-      stale: false,
+  it('nudges to link a wallet only while no wallet is linked', async () => {
+    userMock.getMe.mockResolvedValue(mkMe());
+    accountState.account = mkAccount([]);
+    renderAccount();
+    await waitFor(() => {
+      expect(screen.getByText(/Link a wallet to receive payouts/)).toBeDefined();
+    });
+    cleanup();
+    accountState.activeLink = {
+      id: 'w-1',
+      chain: 'XLM',
+      address: 'G' + 'A'.repeat(55),
+      autoPayout: true,
+      status: 'active',
+      created: '2026-09-01T00:00:00Z',
+      removed: null,
     };
     renderAccount();
-    // Both the WalletCard headline and the cashback card now show the
-    // token balance — the point: one number, sourced from the tokens.
     await waitFor(() => {
-      expect(screen.getAllByText(/42\.50/).length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByText(/£0\.00/)).toBeDefined();
     });
-    // The mirror's £999.99 must not appear anywhere.
-    expect(screen.queryByText(/999\.99/)).toBeNull();
+    expect(screen.queryByText(/Link a wallet to receive payouts/)).toBeNull();
   });
 });

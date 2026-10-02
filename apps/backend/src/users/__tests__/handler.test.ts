@@ -10,6 +10,13 @@ vi.mock('../../logger.js', () => ({
   },
 }));
 
+const updateCtxStableCurrencyMock = vi.hoisted(() => vi.fn());
+vi.mock('../../ctx/user-roles.js', async (importOriginal) => ({
+  ...((await importOriginal()) as Record<string, unknown>),
+  updateCtxStableCurrency: updateCtxStableCurrencyMock,
+}));
+
+import { CtxUserRolesError } from '../../ctx/user-roles.js';
 import { getMeHandler, setHomeCurrencyHandler } from '../handler.js';
 
 // User profile handlers — A2-550, A2-551
@@ -88,6 +95,8 @@ async function seedOrder(overrides: Partial<OrderDoc> = {}): Promise<OrderDoc> {
 
 beforeEach(() => {
   __resetDbForTests();
+  updateCtxStableCurrencyMock.mockReset();
+  updateCtxStableCurrencyMock.mockResolvedValue({ isAdmin: false, homeCurrency: 'GBP' });
 });
 
 describe('getMeHandler', () => {
@@ -151,7 +160,7 @@ describe('getMeHandler', () => {
     expect(body['isAdmin']).toBe(false);
   });
 
-  it('falls back to the users.isAdmin allowlist shim when there is no row', async () => {
+  it('falls back to the users.isAdmin CTX-role mirror when there is no row', async () => {
     await seedUser({ isAdmin: true });
     const res = await getMeHandler(makeCtx(loopAuth));
     const body = (await res.json()) as Record<string, unknown>;
@@ -190,14 +199,44 @@ describe('setHomeCurrencyHandler', () => {
     expect(res.status).toBe(401);
   });
 
-  it('happy path — order-less user gets homeCurrency written and returns the new view', async () => {
+  it('happy path — order-less user gets the CTX stableCurrency and homeCurrency written and returns the new view', async () => {
     await seedUser({ homeCurrency: 'USD' });
     const res = await setHomeCurrencyHandler(makeCtx(loopAuth, { currency: 'GBP' }));
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
     expect(body['homeCurrency']).toBe('GBP');
+    expect(updateCtxStableCurrencyMock).toHaveBeenCalledWith('ctx-123', 'GBP');
     const stored = await db.collection('users').findOne({ id: UID });
     expect(stored?.homeCurrency).toBe('GBP');
+  });
+
+  it('writes locally only while the user has no CTX mapping yet', async () => {
+    await seedUser({ homeCurrency: 'USD', ctxUserId: null });
+    const res = await setHomeCurrencyHandler(makeCtx(loopAuth, { currency: 'GBP' }));
+    expect(res.status).toBe(200);
+    expect(updateCtxStableCurrencyMock).not.toHaveBeenCalled();
+    const stored = await db.collection('users').findOne({ id: UID });
+    expect(stored?.homeCurrency).toBe('GBP');
+  });
+
+  it('503 and no local write when the CTX stableCurrency update fails', async () => {
+    await seedUser({ homeCurrency: 'USD' });
+    updateCtxStableCurrencyMock.mockRejectedValue(new CtxUserRolesError('ctx down', 503));
+    const res = await setHomeCurrencyHandler(makeCtx(loopAuth, { currency: 'GBP' }));
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body['code']).toBe('SUPPLIER_UNAVAILABLE');
+    const stored = await db.collection('users').findOne({ id: UID });
+    expect(stored?.homeCurrency).toBe('USD');
+  });
+
+  it('400 when CTX rejects the stable for the company', async () => {
+    await seedUser({ homeCurrency: 'USD' });
+    updateCtxStableCurrencyMock.mockRejectedValue(new CtxUserRolesError('not supported', 400));
+    const res = await setHomeCurrencyHandler(makeCtx(loopAuth, { currency: 'GBP' }));
+    expect(res.status).toBe(400);
+    const stored = await db.collection('users').findOne({ id: UID });
+    expect(stored?.homeCurrency).toBe('USD');
   });
 
   it('409 HOME_CURRENCY_LOCKED once the user has any order (first-time-only write)', async () => {
@@ -218,6 +257,7 @@ describe('setHomeCurrencyHandler', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
     expect(body['homeCurrency']).toBe('GBP');
+    expect(updateCtxStableCurrencyMock).not.toHaveBeenCalled();
     const stored = await db.collection('users').findOne({ id: UID });
     expect(stored?.updatedAt).toEqual(seeded.updatedAt);
   });

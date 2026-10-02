@@ -1,7 +1,12 @@
 // public client config — ADR 010, ADR 013, ADR 014, ADR 052, P2-14
 import type { Context } from 'hono';
 import { config } from '../config/index.js';
-import { ctxPaymentCurrencies } from '../orders/loop-handler.js';
+import {
+  loopCountries,
+  loopCryptoPaymentCurrencies,
+  loopFiatPaymentCurrencies,
+  loopStableCurrencies,
+} from '../ctx/startup.js';
 
 export interface AppConfig {
   /** ADR 013: Loop-native auth is active (OTP + JWTs minted by Loop). */
@@ -14,6 +19,9 @@ export interface AppConfig {
    * `POST /api/orders/loop` validates `cryptoCurrency` against this list.
    */
   ctxPaymentCurrencies: string[];
+  fiatPaymentCurrencies: string[];
+  countries: string[];
+  stableCurrencies: string[];
   /**
    * Tranche 1 (MVP) launch gate. When true, the web client hides
    * every Phase 2+ surface — cashback navbar links, /settings/wallet,
@@ -65,7 +73,10 @@ export function configHandler(c: Context): Response {
     // and the order-mirror machinery always runs, so native auth is
     // the only remaining gate.
     loopOrdersEnabled: config.auth.native.enabled,
-    ctxPaymentCurrencies: ctxPaymentCurrencies(),
+    ctxPaymentCurrencies: loopCryptoPaymentCurrencies(),
+    fiatPaymentCurrencies: loopFiatPaymentCurrencies(),
+    countries: loopCountries(),
+    stableCurrencies: loopStableCurrencies(),
     phase1Only: config.launch.phase1Only,
     social: {
       googleClientIdWeb: config.auth.social.google.web ?? null,

@@ -39,6 +39,10 @@ const setUserCtxUserIdMock = vi.hoisted(() => vi.fn());
 vi.mock('../../db/users.js', () => ({
   setUserCtxUserId: setUserCtxUserIdMock,
 }));
+const syncCtxAdminRoleMock = vi.hoisted(() => vi.fn());
+vi.mock('../user-roles.js', () => ({
+  syncCtxAdminRole: syncCtxAdminRoleMock,
+}));
 
 import {
   enqueueCtxUserProvisioning,
@@ -49,7 +53,7 @@ import {
 
 const flush = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 
-const user = { id: 'loop-u1', email: 'u1@test.io', ctxUserId: null };
+const user = { id: 'loop-u1', email: 'u1@test.io', ctxUserId: null, homeCurrency: 'EUR' as const };
 
 describe('provisionCtxUser', () => {
   beforeEach(() => {
@@ -60,7 +64,7 @@ describe('provisionCtxUser', () => {
     ctxState.credentials = { key: 'op-key', secret: 'op-secret' };
   });
 
-  it('POSTs /users with operator API creds + operatorUserId and stores the returned id', async () => {
+  it('POSTs /users with operator API creds, operatorUserId and the held stable, and stores the returned id', async () => {
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
       .mockResolvedValue(new Response(JSON.stringify({ id: 'ctx-u1' }), { status: 201 }));
@@ -74,8 +78,14 @@ describe('provisionCtxUser', () => {
     expect(headers['X-Api-Key']).toBe('op-key');
     expect(headers['X-Api-Secret']).toBe('op-secret');
     const body = JSON.parse(init.body as string) as Record<string, string>;
-    expect(body).toEqual({ email: 'u1@test.io', type: 'customer', operatorUserId: 'loop-u1' });
+    expect(body).toEqual({
+      email: 'u1@test.io',
+      type: 'customer',
+      operatorUserId: 'loop-u1',
+      stableCurrency: 'XLM.EURC',
+    });
     expect(setUserCtxUserIdMock).toHaveBeenCalledWith('loop-u1', 'ctx-u1');
+    expect(syncCtxAdminRoleMock).toHaveBeenCalledWith({ id: 'loop-u1', ctxUserId: 'ctx-u1' });
   });
 
   it('logs and stores nothing on a non-email 400 (operatorUserId uniqueness rejection)', async () => {
@@ -164,6 +174,7 @@ describe('adoption on email-exists 400', () => {
       operatorUserId: 'loop-u1',
     });
     expect(setUserCtxUserIdMock).toHaveBeenCalledWith('loop-u1', 'ctx-legacy');
+    expect(syncCtxAdminRoleMock).toHaveBeenCalledWith({ id: 'loop-u1', ctxUserId: 'ctx-legacy' });
   });
 
   it('skips the claim when CTX already carries our operatorUserId, and just stores', async () => {

@@ -40,6 +40,7 @@ function mkPayment(
 ): LoopOrderPaymentInstructions {
   return {
     ctxPaymentId: 'pay-1',
+    method: 'crypto',
     cryptoCurrency: 'XLM',
     cryptoAmount: '10.0000000',
     address: ADDRESS,
@@ -127,6 +128,30 @@ describe('LoopPaymentStep — unpaid (ctx payment instructions)', () => {
     await waitFor(() =>
       expect(screen.getAllByText(/Payment window expired/i).length).toBeGreaterThan(0),
     );
+  });
+
+  it('hides the QR code and "Open in wallet" link once the expiry passes', async () => {
+    getLoopOrderMock.mockResolvedValue(mkOrder());
+    render(
+      wrap(
+        <LoopPaymentStep
+          create={mkCreate({ expiresAt: new Date(Date.now() - 1000).toISOString() })}
+        />,
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.getAllByText(/Payment window expired/i).length).toBeGreaterThan(0),
+    );
+    expect(screen.queryByAltText('Payment QR code')).toBeNull();
+    expect(screen.queryByRole('link', { name: /Open in wallet/i })).toBeNull();
+    expect(screen.getByText(/GABCDEFGHIJKLMNOPQRSTUVWXYZ234567/)).toBeDefined();
+  });
+
+  it('shows the QR code while the payment window is open', async () => {
+    getLoopOrderMock.mockResolvedValue(mkOrder());
+    render(wrap(<LoopPaymentStep create={mkCreate()} />));
+    await waitFor(() => screen.getByAltText('Payment QR code'));
+    expect(screen.getByRole('link', { name: /Open in wallet/i })).toBeDefined();
   });
 
   it('omits the "Open in wallet" link when no payment URI exists for the currency', async () => {
@@ -484,5 +509,30 @@ describe('LoopPaymentStep — FE-05 sensitive copy auto-clear', () => {
       await vi.advanceTimersByTimeAsync(CLEAR_MS * 2);
     });
     expect(wasCleared()).toBe(false);
+  });
+
+  it('renders a fiat payment as a "Continue to payment" link with no address or QR', async () => {
+    getLoopOrderMock.mockResolvedValue(mkOrder({ state: 'unpaid' }));
+    render(
+      wrap(
+        <LoopPaymentStep
+          create={mkCreate({
+            method: 'fiat',
+            cryptoCurrency: 'USD',
+            cryptoAmount: null,
+            address: null,
+            paymentUrls: { USD: 'https://ctx.test/ctxmock/payments/pay-1' },
+          })}
+        />,
+      ),
+    );
+    await settle();
+    const link = screen.getByRole('link', { name: 'Continue to payment' });
+    expect(link.getAttribute('href')).toBe('https://ctx.test/ctxmock/payments/pay-1');
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toMatch(/noopener/);
+    expect(screen.queryByRole('button', { name: /Copy to address/i })).toBeNull();
+    expect(screen.queryByAltText('Payment QR code')).toBeNull();
+    expect(screen.queryByText(/wallet/i)).toBeNull();
   });
 });

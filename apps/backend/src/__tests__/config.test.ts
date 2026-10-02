@@ -66,7 +66,6 @@ describe('parseConfig', () => {
     expect(config.server.corsOrigins).toEqual([]);
     expect(config.catalog.locationRefreshIntervalHours).toBe(24);
     expect(config.ctx.clientIds.web).toBe('loopweb');
-    expect(config.ctx.paymentCurrencies).toEqual(['XLM']);
     expect(config.database.driver).toBe('memory');
     expect(config.email.provider).toBe('console');
     expect(config.rateLimit.enabled).toBe(true);
@@ -555,27 +554,9 @@ describe('parseConfig', () => {
 });
 
 describe('admin', () => {
-  it('defaults to no allowlist and financial-grade audit retention', () => {
+  it('defaults to financial-grade audit retention', () => {
     const cfg = parse(base);
-    expect(cfg.admin.emails).toEqual([]);
-    expect(cfg.admin.ctxUserIds).toEqual([]);
     expect(cfg.admin.auditRetentionDays).toBe(2557);
-  });
-
-  it('accepts allowlists as lists', () => {
-    const cfg = parse({
-      ...base,
-      admin: { emails: ['a@loop.test', 'b@loop.test'], ctxUserIds: ['ctx-1'] },
-    });
-    expect(cfg.admin.emails).toEqual(['a@loop.test', 'b@loop.test']);
-    expect(cfg.admin.ctxUserIds).toEqual(['ctx-1']);
-  });
-
-  it('rejects a non-address in the email allowlist', () => {
-    // a typo here silently grants nobody — a security-relevant no-op an operator wouldn't notice
-    expect(() => parse({ ...base, admin: { emails: ['not-an-email'] } })).toThrow(
-      /admin\.emails\.0/,
-    );
   });
 
   it('rejects a non-positive audit retention', () => {

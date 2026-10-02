@@ -13,7 +13,7 @@ export interface UserDoc {
   // NS-09 — bumped on logout/sign-out-all/refresh-reuse to invalidate prior access tokens
   tokenVersion: number;
   homeCurrency: HomeCurrency;
-  // ADR 037 — recomputed from allowlist on upsert; `requireStaff` prefers `staff_roles` row
+  // ADR 037 — mirror of the CTX operator-admin role; `requireStaff` prefers `staff_roles` row
   isAdmin: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -117,7 +117,7 @@ export interface CtxCatalogSnapshotDoc {
   updatedAt: Date;
 }
 
-// ADR 037 — absence means "not staff"; `users.isAdmin` allowlist shim is the only other way
+// ADR 037 — absence means "not staff"; the `users.isAdmin` CTX-role mirror is the only other way
 export interface StaffRoleDoc {
   userId: string;
   role: StaffRole;

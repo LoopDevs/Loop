@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { triggerHapticNotification } from '~/native/haptics';
 import { copySensitive } from '~/native/clipboard';
 import { nativeShare } from '~/native/share';
-import { fetchOrderBarcodeImage } from '~/services/orders';
+import { fetchLoopOrderBarcodeImage } from '~/services/orders-loop';
 import { composeGiftCardShareImage } from '~/utils/share-image';
 
 interface PurchaseCompleteProps {
@@ -10,13 +10,10 @@ interface PurchaseCompleteProps {
   code: string;
   pin?: string | undefined;
   /**
-   * Order id to fetch the upstream-rendered barcode image for — set
-   * only when the order carries one (ADR 050: the image comes through
-   * the authed reference-keyed proxy as a blob; the client never sees
-   * the CTX URL). When present, we display that image instead of
-   * rendering our own CODE128 canvas — the merchant's POS expects a
-   * specific format (CODE39, DataMatrix, QR, etc.) that we can't
-   * reliably guess client-side.
+   * Loop order id to fetch the CTX-rendered barcode image for (ADR 050:
+   * the image comes through the authed proxy as a blob; the client never
+   * sees the CTX URL). CTX encodes the card's own barcode type, so this
+   * is preferred over the client-side CODE128 canvas fallback.
    */
   barcodeOrderId?: string | undefined;
 }
@@ -51,7 +48,7 @@ export function PurchaseComplete({
     let objectUrl: string | null = null;
     void (async () => {
       try {
-        const blob = await fetchOrderBarcodeImage(barcodeOrderId);
+        const blob = await fetchLoopOrderBarcodeImage(barcodeOrderId);
         objectUrl = URL.createObjectURL(blob);
         if (cancelled) {
           URL.revokeObjectURL(objectUrl);

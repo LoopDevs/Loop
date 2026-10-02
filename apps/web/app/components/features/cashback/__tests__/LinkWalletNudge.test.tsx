@@ -1,155 +1,109 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup, waitFor } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import { render, screen, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
-import type * as UserModule from '~/services/user';
-import { LinkWalletNudge, hasPositiveBalance } from '../LinkWalletNudge';
+import type { UserAccountView, WalletLinkView } from '@loop/shared';
+
+const { accountState, configMock } = vi.hoisted(() => ({
+  accountState: {
+    account: undefined as UserAccountView | undefined,
+    activeLink: null as WalletLinkView | null,
+    isLoading: false,
+    isError: false,
+  },
+  configMock: { phase1Only: false },
+}));
+
+vi.mock('~/hooks/use-account', () => ({
+  ACCOUNT_QUERY_KEY: ['me', 'account'],
+  useAccount: () => ({
+    account: accountState.account,
+    activeLink: accountState.activeLink,
+    isLoading: accountState.isLoading,
+    isError: accountState.isError,
+    error: null,
+    refetch: () => undefined,
+  }),
+}));
+
+vi.mock('~/hooks/use-app-config', () => ({
+  useAppConfig: () => ({ config: { phase1Only: configMock.phase1Only }, isLoading: false }),
+}));
+
+import { LinkWalletNudge } from '../LinkWalletNudge';
+
+function account(wallet: UserAccountView['wallet']): UserAccountView {
+  return {
+    id: 'acct-1',
+    userId: 'ctx-1',
+    wallet,
+    savings: [],
+    savingsPrincipal: [],
+    pendingOperations: [],
+    linkedWallets: [],
+    payouts: [],
+    created: '2026-09-01T00:00:00Z',
+    updated: '2026-09-23T00:00:00Z',
+  };
+}
+
+const link: WalletLinkView = {
+  id: 'w-1',
+  chain: 'XLM',
+  address: 'G' + 'A'.repeat(55),
+  autoPayout: true,
+  status: 'active',
+  created: '2026-09-23T00:00:00Z',
+  removed: null,
+};
+
+function renderNudge(): HTMLElement {
+  return render(
+    <MemoryRouter>
+      <LinkWalletNudge />
+    </MemoryRouter>,
+  ).container;
+}
 
 afterEach(cleanup);
 
-const { userMock } = vi.hoisted(() => ({
-  userMock: {
-    getMe: vi.fn(),
-    getMyCredits: vi.fn(),
-  },
-}));
-
-vi.mock('~/services/user', async (importActual) => {
-  const actual = (await importActual()) as typeof UserModule;
-  return {
-    ...actual,
-    getMe: () => userMock.getMe(),
-    getMyCredits: () => userMock.getMyCredits(),
-  };
-});
-
-vi.mock('~/hooks/query-retry', () => ({
-  shouldRetry: () => false,
-}));
-// A2-1156: auth-gate in the component → tests need to pretend
-// the user is authenticated so the query fires.
-vi.mock('~/hooks/use-auth', () => ({
-  useAuth: () => ({ isAuthenticated: true, user: null, refreshUser: () => {} }),
-}));
-
-// LinkWalletNudge returns null when phase1Only (a Phase-2 surface); useAppConfig
-// defaults phase1Only=true, so force it false to exercise the CTA.
-vi.mock('~/hooks/use-app-config', () => ({
-  useAppConfig: () => ({ config: { phase1Only: false }, isLoading: false }),
-}));
-
-function renderNudge(): { container: HTMLElement } {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const result = render(
-    <QueryClientProvider client={qc}>
-      <MemoryRouter>
-        <LinkWalletNudge />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
-  return { container: result.container };
-}
-
-function meStub(overrides: { stellarAddress?: string | null } = {}): object {
-  return {
-    id: 'u1',
-    email: 'u@loop.test',
-    isAdmin: false,
-    homeCurrency: 'GBP',
-    stellarAddress: overrides.stellarAddress ?? null,
-    homeCurrencyBalanceMinor: '0',
-  };
-}
-
-describe('hasPositiveBalance', () => {
-  it('returns false for undefined / empty input', () => {
-    expect(hasPositiveBalance(undefined)).toBe(false);
-    expect(hasPositiveBalance([])).toBe(false);
-  });
-
-  it('returns false when every row is zero', () => {
-    expect(
-      hasPositiveBalance([
-        { currency: 'GBP', balanceMinor: '0', updatedAt: '' },
-        { currency: 'USD', balanceMinor: '0', updatedAt: '' },
-      ]),
-    ).toBe(false);
-  });
-
-  it('returns true when at least one row is positive', () => {
-    expect(
-      hasPositiveBalance([
-        { currency: 'GBP', balanceMinor: '0', updatedAt: '' },
-        { currency: 'USD', balanceMinor: '10', updatedAt: '' },
-      ]),
-    ).toBe(true);
-  });
-
-  it('ignores malformed amountMinor strings', () => {
-    expect(
-      hasPositiveBalance([
-        { currency: 'GBP', balanceMinor: 'garbage', updatedAt: '' },
-        { currency: 'USD', balanceMinor: '0', updatedAt: '' },
-      ]),
-    ).toBe(false);
-  });
+beforeEach(() => {
+  accountState.account = undefined;
+  accountState.activeLink = null;
+  accountState.isLoading = false;
+  accountState.isError = false;
+  configMock.phase1Only = false;
 });
 
 describe('<LinkWalletNudge />', () => {
-  it('renders the CTA when balance > 0 and no wallet linked', async () => {
-    userMock.getMe.mockResolvedValue(meStub());
-    userMock.getMyCredits.mockResolvedValue({
-      credits: [{ currency: 'GBP', balanceMinor: '1500', updatedAt: '' }],
-    });
+  it('renders the CTA when the wallet holds cashback and no wallet is linked', () => {
+    accountState.account = account([{ currency: 'XLM.GBPLOOP', amount: '0.4000000' }]);
     renderNudge();
-    await waitFor(() => {
-      expect(screen.getByText(/Link a Stellar wallet to withdraw/)).toBeDefined();
-    });
-    const link = screen.getByRole('link', { name: /Go to wallet settings/ });
-    expect(link.getAttribute('href')).toBe('/settings/wallet');
+    expect(screen.getByRole('link', { name: /wallet settings/i })).toBeTruthy();
   });
 
-  it('hides when user has a wallet linked', async () => {
-    userMock.getMe.mockResolvedValue(meStub({ stellarAddress: 'GABC...' }));
-    userMock.getMyCredits.mockResolvedValue({
-      credits: [{ currency: 'GBP', balanceMinor: '1500', updatedAt: '' }],
-    });
-    const { container } = renderNudge();
-    await waitFor(() => {
-      expect(userMock.getMe).toHaveBeenCalled();
-    });
-    expect(container.firstChild).toBeNull();
+  it('hides once a wallet is linked', () => {
+    accountState.account = account([{ currency: 'XLM.GBPLOOP', amount: '0.4000000' }]);
+    accountState.activeLink = link;
+    expect(renderNudge().innerHTML).toBe('');
   });
 
-  it('hides when balance is zero', async () => {
-    userMock.getMe.mockResolvedValue(meStub());
-    userMock.getMyCredits.mockResolvedValue({
-      credits: [{ currency: 'GBP', balanceMinor: '0', updatedAt: '' }],
-    });
-    const { container } = renderNudge();
-    await waitFor(() => {
-      expect(userMock.getMyCredits).toHaveBeenCalled();
-    });
-    expect(container.firstChild).toBeNull();
+  it('hides while the balance is zero', () => {
+    accountState.account = account([{ currency: 'XLM.GBPLOOP', amount: '0' }]);
+    expect(renderNudge().innerHTML).toBe('');
   });
 
-  it('hides while either fetch is in flight (no flash)', () => {
-    userMock.getMe.mockReturnValue(new Promise(() => {}));
-    userMock.getMyCredits.mockReturnValue(new Promise(() => {}));
-    const { container } = renderNudge();
-    expect(container.firstChild).toBeNull();
-  });
-
-  it('hides silently on fetch error', async () => {
-    userMock.getMe.mockRejectedValue(new Error('boom'));
-    userMock.getMyCredits.mockResolvedValue({
-      credits: [{ currency: 'GBP', balanceMinor: '1500', updatedAt: '' }],
-    });
-    const { container } = renderNudge();
-    await waitFor(() => {
-      expect(userMock.getMe).toHaveBeenCalled();
-    });
-    expect(container.firstChild).toBeNull();
+  it('hides while loading, on error, and under phase1Only', () => {
+    accountState.isLoading = true;
+    expect(renderNudge().innerHTML).toBe('');
+    cleanup();
+    accountState.isLoading = false;
+    accountState.isError = true;
+    expect(renderNudge().innerHTML).toBe('');
+    cleanup();
+    accountState.isError = false;
+    accountState.account = account([{ currency: 'XLM.GBPLOOP', amount: '0.4000000' }]);
+    configMock.phase1Only = true;
+    expect(renderNudge().innerHTML).toBe('');
   });
 });

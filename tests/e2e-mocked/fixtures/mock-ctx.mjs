@@ -22,7 +22,8 @@
  *     `commission-settlement` system trigger. POST /users echoes an id so
  *     the act-as provisioning path works offline; GET /users (regex email
  *     filter, operatorUserId omitted when empty) + PUT /users/:id
- *     (operatorUserId claim) back the adopt-on-email-exists branch.
+ *     (operatorUserId claim) back the adopt-on-email-exists branch;
+ *     GET /users/:id serves the roles the admin mirror reads.
  *
  * Usage:
  *   node tests/e2e-mocked/fixtures/mock-ctx.mjs            # runs on :9091
@@ -93,7 +94,7 @@ const merchants = [
  * Order shape (JSDoc since this is a plain .mjs file):
  *   { id, merchantId, merchantName, cardFiatAmount, cardFiatCurrency,
  *     paymentCryptoAmount, paymentUrls: {XLM}, status, fulfilmentStatus,
- *     percentDiscount, redeemType?, redeemUrl?, redeemUrlChallenge?,
+ *     userDiscountBasisPoints, redeemType?, redeemUrl?, redeemUrlChallenge?,
  *     redeemScripts?, created }
  *
  * status transitions: 'unpaid' → (POST /_test/mark-fulfilled) → 'fulfilled'.
@@ -111,6 +112,8 @@ const MOCK_OPERATOR_COMPANY_ID = 'mock-loop-co';
 const commissionEntries = [];
 const commissionSettlements = [];
 const provisionedUsers = new Map();
+const walletLinks = new Map();
+const payouts = new Map();
 
 // ───────── Helpers ───────────────────────────────────────────────────
 
@@ -130,6 +133,18 @@ function json(res, status, body) {
   const payload = JSON.stringify(body);
   res.writeHead(status, { 'Content-Type': 'application/json' });
   res.end(payload);
+}
+
+function walletLinkJson(link) {
+  return {
+    id: link.id,
+    chain: link.chain,
+    address: link.address,
+    autoPayout: link.autoPayout,
+    status: link.status,
+    created: link.created,
+    ...(link.removedAt ? { removed: link.removedAt } : {}),
+  };
 }
 
 function makeTokens() {
@@ -227,9 +242,8 @@ const server = http.createServer(async (req, res) => {
       },
       status: 'unpaid',
       fulfilmentStatus: 'pending',
-      percentDiscount: ((merchant.savingsPercentage ?? 0) / 100).toFixed(2),
-      operatorDiscount: operatorDiscountBps,
-      operatorPercentDiscount: (operatorDiscountBps / 100).toFixed(2),
+      userDiscountBasisPoints: userDiscountBps,
+      operatorDiscountBasisPoints: operatorDiscountBps,
       operatorFiatAmount: operatorFiat.toFixed(2),
       operatorFiatCurrency: body.fiatCurrency ?? merchant.currency,
       operatorCryptoAmount: (Number(xlmAmount) * (operatorFiat / fiat || 0)).toFixed(4),
@@ -294,10 +308,31 @@ const server = http.createServer(async (req, res) => {
 
   // ── ctx-interop: operator identity (company id is evaluated from
   // /me under API-key auth, never configured) ──
+  if (method === 'GET' && path === '/currencies') {
+    return json(res, 200, {
+      result: [
+        { code: 'USD', name: 'US Dollar', decimals: 2, crypto: false },
+        { code: 'GBP', name: 'British Pound', decimals: 2, crypto: false },
+        { code: 'EUR', name: 'Euro', decimals: 2, crypto: false },
+        { code: 'XLM', name: 'Stellar Lumens', decimals: 7, crypto: true, chain: 'XLM' },
+        { code: 'XLM.USDC', name: 'USDC on Stellar', decimals: 7, crypto: true, chain: 'XLM' },
+      ],
+    });
+  }
+
   if (method === 'GET' && path === '/me') {
     return json(res, 200, {
       user: { id: 'mock-api-user', email: 'api@loop.test' },
-      company: { id: MOCK_OPERATOR_COMPANY_ID, name: 'Loop', type: 'operator' },
+      company: {
+        id: MOCK_OPERATOR_COMPANY_ID,
+        name: 'Loop',
+        type: 'operator',
+        disableUserEmails: true,
+        countries: ['US', 'GB', 'CA', 'DE', 'FR'],
+        paymentCurrencies: ['XLM'],
+        stableCurrencies: ['XLM.USDC'],
+        profitShareBasisPoints: 5000,
+      },
     });
   }
 
@@ -317,9 +352,10 @@ const server = http.createServer(async (req, res) => {
       email,
       type: body.type ?? 'customer',
       operatorUserId: body.operatorUserId ?? '',
+      stableCurrency: String(body.stableCurrency ?? 'XLM.USDC').toUpperCase(),
     };
     provisionedUsers.set(email, user);
-    return json(res, 201, { id: user.id });
+    return json(res, 201, { id: user.id, stableCurrency: user.stableCurrency });
   }
 
   // ── ctx-interop: adoption lookup + operatorUserId claim ──
@@ -340,6 +376,7 @@ const server = http.createServer(async (req, res) => {
         id: u.id,
         email: u.email,
         type: u.type,
+        stableCurrency: u.stableCurrency,
         ...(u.operatorUserId ? { operatorUserId: u.operatorUserId } : {}),
       })),
       pagination: { page: 1, perPage: 50, total: result.length },
@@ -347,6 +384,18 @@ const server = http.createServer(async (req, res) => {
   }
 
   const userUpdateMatch = path.match(/^\/users\/([^/]+)$/);
+  if (method === 'GET' && userUpdateMatch) {
+    const target = [...provisionedUsers.values()].find((u) => u.id === userUpdateMatch[1]);
+    if (!target) return json(res, 404, { error: 'not found' });
+    return json(res, 200, {
+      id: target.id,
+      email: target.email,
+      type: target.type,
+      stableCurrency: target.stableCurrency,
+      ...(target.operatorUserId ? { operatorUserId: target.operatorUserId } : {}),
+      roles: [],
+    });
+  }
   if (method === 'PUT' && userUpdateMatch) {
     const target = [...provisionedUsers.values()].find((u) => u.id === userUpdateMatch[1]);
     if (!target) return json(res, 404, { error: 'not found' });
@@ -365,12 +414,88 @@ const server = http.createServer(async (req, res) => {
         });
       target.operatorUserId = operatorUserId;
     }
+    if (body.stableCurrency !== undefined) {
+      const stableCurrency = String(body.stableCurrency).toUpperCase();
+      if (!['XLM.USDC', 'XLM.EURC', 'XLM.GBPLOOP'].includes(stableCurrency))
+        return json(res, 400, {
+          error: 'bad request',
+          fields: { stableCurrency: ['not supported by company'] },
+        });
+      target.stableCurrency = stableCurrency;
+    }
     return json(res, 200, {
       id: target.id,
       email: target.email,
       type: target.type,
+      stableCurrency: target.stableCurrency,
       ...(target.operatorUserId ? { operatorUserId: target.operatorUserId } : {}),
     });
+  }
+
+  // ── ctx-interop: per-user account + wallet links (act-as) ──
+  const accountMatch = path.match(/^\/users\/([^/]+)\/account$/);
+  if (method === 'GET' && accountMatch) {
+    const userId = accountMatch[1];
+    const links = [...walletLinks.values()].filter((l) => l.userId === userId);
+    const userPayouts = [...payouts.values()].filter((p) => p.userId === userId);
+    return json(res, 200, {
+      id: `acct-${userId}`,
+      userId,
+      wallet: [],
+      savings: [],
+      savingsPrincipal: [],
+      pendingOperations: [],
+      linkedWallets: links.map(walletLinkJson),
+      payouts: userPayouts,
+      created: SEED_UPDATED,
+      updated: new Date().toISOString(),
+    });
+  }
+
+  const walletsMatch = path.match(/^\/users\/([^/]+)\/wallets$/);
+  if (method === 'POST' && walletsMatch) {
+    const userId = walletsMatch[1];
+    const body = await readBody(req);
+    const fields = {};
+    if (body.chain !== 'XLM') fields.chain = ['unsupported chain'];
+    if (!/^G[A-Z2-7]{55}$/.test(String(body.address ?? ''))) fields.address = ['invalid'];
+    if (Object.keys(fields).length > 0) return json(res, 400, { error: 'bad request', fields });
+    for (const link of walletLinks.values()) {
+      if (link.userId === userId && link.chain === body.chain && link.status === 'active') {
+        link.status = 'removed';
+        link.removedAt = new Date().toISOString();
+      }
+    }
+    const link = {
+      id: randomUUID(),
+      userId,
+      chain: body.chain,
+      address: body.address,
+      autoPayout: body.autoPayout !== false,
+      status: 'active',
+      created: new Date().toISOString(),
+      removedAt: '',
+    };
+    walletLinks.set(link.id, link);
+    return json(res, 201, walletLinkJson(link));
+  }
+  if (method === 'GET' && walletsMatch) {
+    const links = [...walletLinks.values()].filter((l) => l.userId === walletsMatch[1]);
+    return json(res, 200, { result: links.map(walletLinkJson) });
+  }
+
+  const walletMatch = path.match(/^\/users\/([^/]+)\/wallets\/([^/]+)$/);
+  if ((method === 'PUT' || method === 'DELETE') && walletMatch) {
+    const link = walletLinks.get(walletMatch[2]);
+    if (!link || link.userId !== walletMatch[1]) return json(res, 404, { error: 'not found' });
+    if (method === 'PUT') {
+      const body = await readBody(req);
+      if (typeof body.autoPayout === 'boolean') link.autoPayout = body.autoPayout;
+    } else {
+      link.status = 'removed';
+      link.removedAt = new Date().toISOString();
+    }
+    return json(res, 200, walletLinkJson(link));
   }
 
   // ── ctx-interop: operator commission ──
@@ -493,6 +618,8 @@ const server = http.createServer(async (req, res) => {
     commissionEntries.length = 0;
     commissionSettlements.length = 0;
     provisionedUsers.clear();
+    walletLinks.clear();
+    payouts.clear();
     return json(res, 200, { message: 'reset' });
   }
 

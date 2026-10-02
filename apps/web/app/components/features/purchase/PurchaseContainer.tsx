@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Merchant } from '@loop/shared';
 import { useAuthStore } from '~/stores/auth.store';
@@ -10,6 +10,7 @@ import {
 } from '~/services/orders-loop';
 import { requestOtp, verifyOtp } from '~/services/auth';
 import { useAppConfig } from '~/hooks/use-app-config';
+import { paymentOptionsFor } from '~/services/payment-options';
 import { useMerchantCashbackRate } from '~/hooks/use-merchants';
 import { useRadioGroupKeys } from '~/hooks/use-radio-group-keys';
 import {
@@ -69,8 +70,11 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
   // ADR 052: chain-qualified CTX payment currency. Defaults to the
   // first allowlisted entry ('XLM' in the default deployment); a
   // selector renders only when the operator offers more than one.
-  const paymentCurrencies =
-    config.ctxPaymentCurrencies.length > 0 ? config.ctxPaymentCurrencies : ['XLM'];
+  const cardCurrency = merchant.denominations?.currency ?? 'USD';
+  const paymentCurrencies = useMemo(
+    () => paymentOptionsFor(config, cardCurrency),
+    [config, cardCurrency],
+  );
   const [cryptoCurrency, setCryptoCurrency] = useState<string>('XLM');
   const effectiveCryptoCurrency = paymentCurrencies.includes(cryptoCurrency)
     ? cryptoCurrency
@@ -329,7 +333,7 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
         {
           merchantId: merchant.id,
           amountMinor: Math.round(amount * 100),
-          currency: merchant.denominations?.currency ?? 'USD',
+          currency: cardCurrency,
           cryptoCurrency: effectiveCryptoCurrency,
         },
         { idempotencyKey: idempotencyKeyRef.current },

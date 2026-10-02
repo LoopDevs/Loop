@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { ApiException, LOOP_ASSET_CODES, type LoopAssetCode } from '@loop/shared';
+import { LOOP_ASSET_CODES, type LoopAssetCode } from '@loop/shared';
 import type { Route } from './+types/admin._index';
 import { shouldRetry } from '~/hooks/query-retry';
 import { useStaffRole } from '~/hooks/use-staff-role';
@@ -147,13 +147,9 @@ const CARDS: ReadonlyArray<CardLink> = [
  * cards from the treasury snapshot (CTX upstream state, failed
  * payouts count) followed by navigation cards into every subpage.
  *
- * Auth gate deliberately matches the subpages: show a sign-in CTA
- * when logged out; the 401/403 from the treasury fetch is how we
- * tell the caller isn't an admin.
+ * `RequireStaff` owns the auth decision: non-staff see its deny
+ * banner without any of the admin-specific data fetches firing.
  */
-// A2-1101: the whole admin shell gates on `RequireAdmin`, which resolves
-// /api/users/me.isAdmin before rendering children. Non-admins see the
-// deny banner without any of the admin-specific data fetches firing.
 export default function AdminIndexRoute(): React.JSX.Element {
   return (
     <RequireStaff minimum="support">
@@ -172,9 +168,6 @@ function AdminIndexRouteInner(): React.JSX.Element {
     staleTime: 30_000,
   });
 
-  const denied =
-    snapshotQuery.error instanceof ApiException &&
-    (snapshotQuery.error.status === 401 || snapshotQuery.error.status === 404);
   const status = ctxApiStatus(snapshotQuery.data?.ctxApi);
   const failed = failedPayoutsCount(snapshotQuery.data?.payouts);
 
@@ -193,14 +186,7 @@ function AdminIndexRouteInner(): React.JSX.Element {
         </div>
       </header>
 
-      {denied ? (
-        <section
-          role="alert"
-          className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300"
-        >
-          Admin access required. The signed-in account is not marked as admin.
-        </section>
-      ) : snapshotQuery.isPending ? (
+      {snapshotQuery.isPending ? (
         <section className="rounded-xl border border-gray-200 bg-white px-4 py-6 dark:border-gray-800 dark:bg-gray-900 flex justify-center">
           <Spinner />
         </section>
@@ -248,12 +234,10 @@ function AdminIndexRouteInner(): React.JSX.Element {
           landing as checkout discounts?"). Each self-hides
           independently so a fresh deployment sees only the signals
           it has data for. */}
-      {denied ? null : (
-        <section className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <AssetDriftWatcherCard />
-          <CashbackRealizationCard />
-        </section>
-      )}
+      <section className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <AssetDriftWatcherCard />
+        <CashbackRealizationCard />
+      </section>
 
       {/* LOOP-asset outstanding-liability strip. Three cards,
           one per issued stablecoin — click drills into
@@ -261,8 +245,8 @@ function AdminIndexRouteInner(): React.JSX.Element {
           headline so the first thing an op sees on /admin is
           "what does Loop owe users right now, per stablecoin".
           Hidden while the treasury snapshot is loading / errored
-          / denied so the layout doesn't flash stubs. */}
-      {denied || snapshotQuery.data === undefined ? null : (
+          so the layout doesn't flash stubs. */}
+      {snapshotQuery.data === undefined ? null : (
         <section className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {LOOP_ASSET_CODES.map((code) => {
             const row = snapshotQuery.data.liabilities?.[code] ?? {
@@ -281,29 +265,29 @@ function AdminIndexRouteInner(): React.JSX.Element {
         </section>
       )}
 
-      {denied ? null : <CashbackSparkline />}
+      <CashbackSparkline />
 
       {/* Settlement-side sparkline (#637). Pairs with cashback
           above: cashback = liability-creation per day, payouts =
           liability-settlement per day. Same 30-day window, same
           sparkline primitive — so the two read naturally side-by-
           side as in/out flows of the on-chain LOOP ledger. */}
-      {denied ? null : <PayoutsSparkline />}
+      <PayoutsSparkline />
 
-      {denied ? null : <OrdersSparkline />}
+      <OrdersSparkline />
 
       {/* Fleet realization-rate trend (#731). Companion to the
           single-point realization card above: point = "are we
           recycling now?", trend = "is that direction holding?".
           Ops catches flywheel regressions before they cross the
           threshold on the point card. */}
-      {denied ? null : <RealizationSparkline />}
+      <RealizationSparkline />
 
       {/* ADR 037 §6: audit + cashback-config history are admin
           surfaces — hidden for support. */}
-      {denied || !isAdminRole ? null : <AdminAuditTail />}
+      {!isAdminRole ? null : <AdminAuditTail />}
 
-      {denied || !isAdminRole ? null : <ConfigsHistoryCard />}
+      {!isAdminRole ? null : <ConfigsHistoryCard />}
 
       <section className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {CARDS.filter((card) => isAdminRole || card.minRole === 'support').map((card) => (

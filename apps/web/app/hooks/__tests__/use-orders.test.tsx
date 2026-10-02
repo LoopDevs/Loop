@@ -7,24 +7,21 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 const { ordersMock } = vi.hoisted(() => ({
   ordersMock: {
     fetchOrders: vi.fn(),
-    fetchOrder: vi.fn(),
   },
 }));
 
 vi.mock('~/services/orders', () => ({
   fetchOrders: (page: number) => ordersMock.fetchOrders(page),
-  fetchOrder: (id: string) => ordersMock.fetchOrder(id),
 }));
 
 vi.mock('~/hooks/query-retry', () => ({ shouldRetry: () => false }));
 
-import { useOrders, useOrder } from '../use-orders';
+import { useOrders } from '../use-orders';
 
 afterEach(cleanup);
 
 beforeEach(() => {
   ordersMock.fetchOrders.mockReset();
-  ordersMock.fetchOrder.mockReset();
 });
 
 function ListProbe(props: { page: number; isAuthed: boolean }): React.ReactElement {
@@ -35,16 +32,6 @@ function ListProbe(props: { page: number; isAuthed: boolean }): React.ReactEleme
       <span data-testid="count">{r.orders.length}</span>
       <span data-testid="hasNext">{String(r.hasNext)}</span>
       <span data-testid="total">{r.total}</span>
-    </div>
-  );
-}
-
-function DetailProbe(props: { id: string; isAuthed: boolean }): React.ReactElement {
-  const r = useOrder(props.id, props.isAuthed);
-  return (
-    <div>
-      <span data-testid="loading">{r.isLoading ? 'true' : 'false'}</span>
-      <span data-testid="id">{r.order?.id ?? '_none_'}</span>
     </div>
   );
 }
@@ -84,25 +71,5 @@ describe('useOrders', () => {
     await waitFor(() => expect(ordersMock.fetchOrders).toHaveBeenCalledWith(1));
     rerender(withProvider(<ListProbe page={2} isAuthed={true} />));
     await waitFor(() => expect(ordersMock.fetchOrders).toHaveBeenCalledWith(2));
-  });
-});
-
-describe('useOrder', () => {
-  it('does not fire when id is empty after trim', () => {
-    render(withProvider(<DetailProbe id="   " isAuthed={true} />));
-    expect(ordersMock.fetchOrder).not.toHaveBeenCalled();
-  });
-
-  it('does not fire when isAuthenticated=false', () => {
-    render(withProvider(<DetailProbe id="o-1" isAuthed={false} />));
-    expect(ordersMock.fetchOrder).not.toHaveBeenCalled();
-  });
-
-  it('fetches with the trimmed id and returns the order', async () => {
-    ordersMock.fetchOrder.mockResolvedValue({ order: { id: 'o-1' } });
-    render(withProvider(<DetailProbe id="  o-1  " isAuthed={true} />));
-    await waitFor(() => expect(screen.getByTestId('loading').textContent).toBe('false'));
-    expect(ordersMock.fetchOrder).toHaveBeenCalledWith('o-1');
-    expect(screen.getByTestId('id').textContent).toBe('o-1');
   });
 });

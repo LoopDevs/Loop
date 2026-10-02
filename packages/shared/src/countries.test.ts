@@ -106,40 +106,26 @@ describe('countryFromAcceptLanguage', () => {
 });
 
 describe('merchantInCountry (ADR 034 §Decision-2)', () => {
-  const merchant = (
-    country: string | undefined,
-    currency: string | undefined,
-  ): Parameters<typeof merchantInCountry>[0] =>
-    ({
-      country,
-      denominations: currency ? { currency } : undefined,
-    }) as Parameters<typeof merchantInCountry>[0];
-
-  it('matches on explicit merchant country', () => {
-    expect(merchantInCountry(merchant('US', undefined), 'us')).toBe(true);
-    expect(merchantInCountry(merchant('us', undefined), 'US')).toBe(true);
+  const merchant = (country: string | undefined): Parameters<typeof merchantInCountry>[0] => ({
+    country,
   });
 
-  it('matches on display-currency equality (EUR merchant in every Eurozone country)', () => {
+  it('matches on merchant country, case-insensitively', () => {
+    expect(merchantInCountry(merchant('US'), 'us')).toBe(true);
+    expect(merchantInCountry(merchant('us'), 'US')).toBe(true);
+    expect(merchantInCountry(merchant('JP'), 'JP')).toBe(true);
+  });
+
+  it('shows a Eurozone merchant only in its own country', () => {
     for (const c of EUROZONE_COUNTRIES) {
-      expect(merchantInCountry(merchant(undefined, 'EUR'), c)).toBe(true);
+      expect(merchantInCountry(merchant('DE'), c)).toBe(c === 'DE');
     }
-    expect(merchantInCountry(merchant(undefined, 'GBP'), 'GB')).toBe(true);
+    expect(merchantInCountry(merchant('US'), 'GB')).toBe(false);
   });
 
-  it('rejects a currency/country mismatch', () => {
-    expect(merchantInCountry(merchant('US', 'USD'), 'GB')).toBe(false);
-    expect(merchantInCountry(merchant(undefined, 'INR'), 'US')).toBe(false);
-  });
-
-  it('a merchant with neither country nor currency stays visible everywhere', () => {
-    expect(merchantInCountry(merchant(undefined, undefined), 'US')).toBe(true);
-    expect(merchantInCountry(merchant(undefined, undefined), 'DE')).toBe(true);
-  });
-
-  it('an unrouted target country only matches on explicit merchant country', () => {
-    expect(merchantInCountry(merchant('JP', undefined), 'JP')).toBe(true);
-    expect(merchantInCountry(merchant(undefined, 'USD'), 'JP')).toBe(false);
+  it('a merchant with no country stays visible everywhere', () => {
+    expect(merchantInCountry(merchant(undefined), 'US')).toBe(true);
+    expect(merchantInCountry(merchant(undefined), 'DE')).toBe(true);
   });
 });
 

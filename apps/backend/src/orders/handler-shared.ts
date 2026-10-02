@@ -49,6 +49,11 @@ export const CreateOrderUpstreamResponse = z
 // Server-authoritative to prevent client clock-skew drift.
 export const ORDER_EXPIRY_SECONDS = 30 * 60;
 
+export function percentFromBasisPoints(basisPoints: number | undefined): string | undefined {
+  if (basisPoints === undefined) return undefined;
+  return (basisPoints / 100).toFixed(2);
+}
+
 export function mapStatus(ctxStatus: string): 'pending' | 'completed' | 'failed' | 'expired' {
   if (ctxStatus === 'fulfilled') return 'completed';
   if (ctxStatus === 'expired') return 'expired';

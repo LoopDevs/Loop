@@ -15,6 +15,7 @@ import {
   OTP_EMAIL_LOCKOUT_MS,
 } from './otp-attempt-counter.js';
 import { enqueueCtxUserProvisioning } from '../ctx/user-provisioning.js';
+import { enqueueCtxAdminRoleSync, syncCtxAdminRole } from '../ctx/user-roles.js';
 import { normalizeEmail, NonAsciiEmailError } from './normalize-email.js';
 import { verifyLoopToken, isLoopAuthConfigured } from './tokens.js';
 import { findOrCreateUserByEmail, getUserTokenVersion } from '../db/users.js';
@@ -92,6 +93,7 @@ export async function nativeVerifyOtpHandler(c: Context): Promise<Response> {
     // B5: legitimate verify clears the email's failed-attempt counter
     await clearOtpAttempts(email);
     const user = await findOrCreateUserByEmail(email);
+    await syncCtxAdminRole(user);
     // NS-09: stamp current token_version for invalidation support
     const pair = await issueTokenPair({
       id: user.id,
@@ -165,6 +167,7 @@ export async function nativeRefreshHandler(c: Context): Promise<Response> {
     }
     // Fail-closed: if persist fails, old token is revoked and successor is not stored
     await persistMintedRefreshToken(minted);
+    enqueueCtxAdminRoleSync(claims.sub);
     // Strip internal fields for wire contract
     return c.json({ accessToken: minted.accessToken, refreshToken: minted.refreshToken });
   } catch (err) {

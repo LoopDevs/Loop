@@ -136,13 +136,13 @@ const adminMember: AdminStaffEntry = {
   reason: null,
 };
 
-// Deprecated users.is_admin shim — a CTX-allowlist admin with no
-// staff_roles row yet (ADR 037 §1). No grant metadata at all.
+// users.isAdmin mirror of the CTX operator-admin role — an admin with
+// no staff_roles row (ADR 037 §1). No grant metadata at all.
 const legacyMember: AdminStaffEntry = {
   userId: 'u-legacy',
   email: 'old@loop.test',
   role: 'admin',
-  source: 'legacy_is_admin',
+  source: 'ctx_operator_admin',
   grantedAt: null,
   grantedByUserId: null,
   grantedByEmail: null,
@@ -257,8 +257,8 @@ describe('<AdminStaffRoute /> — list', () => {
     expect(screen.getByText('admin@loop.test')).toBeDefined();
     // Null grantedByUserId on a staff_roles row → migration seed marker.
     expect(screen.getByText('migration')).toBeDefined();
-    // legacy_is_admin shim rows are labelled and have no grant date.
-    expect(screen.getByText('legacy is_admin')).toBeDefined();
+    // ctx_operator_admin mirror rows are labelled and have no grant date.
+    expect(screen.getByText('CTX operator-admin')).toBeDefined();
   });
 
   it('renders the empty state', async () => {

@@ -27,7 +27,6 @@ const baseUser = {
   email: 'a@b.com',
   isAdmin: false,
   homeCurrency: 'GBP',
-  stellarAddress: null,
   ctxUserId: null,
   createdAt: new Date(),
   updatedAt: new Date(),

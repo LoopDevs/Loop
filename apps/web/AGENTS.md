@@ -26,29 +26,23 @@ app/
 │   │   │               login/OTP support state: read for both staff roles, the
 │   │   │               "Clear OTP lockout" action admin-only)
 │   │   ├── auth/     ← social login button, email+OTP flow
-│   │   ├── cashback/ ← balance, pending-payouts
+│   │   ├── cashback/ ← balance, payouts, link-wallet nudge (CTX account read)
 │   │   ├── home/     ← stats bands (cashback)
 │   │   ├── onboarding/ ← biometric, currency, wallet-trust, signup-tail
-│   │   ├── order/    ← per-order payout card
 │   │   ├── orders/   ← loop-orders list + summary header
 │   │   ├── purchase/ ← amount → payment → complete / redeem state machine
 │   │   │               (incl. PayWithLoopBalance — ADR 030 one-tap pay)
-│   │   ├── wallet/   ← Stellar trustline status / setup cards, WalletCard
-│   │   │               (ADR 030 embedded-wallet balance surface), VaultApyRow
-│   │   │               (ADR 031 V6 — past-30d APY + disclaimer + one-tap
-│   │   │               90d-range detail per LOOP-branded balance row, dark
-│   │   │               behind LOOP_PHASE_1_ONLY)
 │   │   └── top-level: Navbar, Footer, MerchantCard, MerchantGroupCard, ClusterMap, MapBottomSheet,
 │   │                  NativeTabBar, NativeBackButton, FixedSearchButton
 │   └── ui/           ← Primitives (Button, Input, LazyImage, OfflineBanner,
 │                       Skeleton, Spinner, ToastContainer)
 ├── hooks/            ← TanStack Query wrappers + lifecycle (use-auth, use-merchants,
-│                       use-orders, use-wallet, use-vault-apy (ADR 031 V6 —
-│                       double-gated on auth AND !phase1Only), use-native-platform,
+│                       use-orders, use-account (CTX account: balances, linked
+│                       wallets, payouts; gated on auth AND !phase1Only), use-native-platform,
 │                       use-session-restore, query-retry,
 │                       use-staff-role — ADR 037 staffRole resolver over the ['me'] line)
 ├── services/         ← Typed API client (api-client, auth, clusters, merchants,
-│                       orders, orders-loop, wallet, vault-apy (ADR 031 V6), config,
+│                       orders, orders-loop, config,
 │                       admin (+ per-surface admin-*
 │                       slices incl. ADR 037 admin-staff /
 │                       admin-user-wallet / admin-lookup / admin-order-redemption /

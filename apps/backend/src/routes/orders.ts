@@ -8,6 +8,7 @@ import { getOrderHandler } from '../orders/get-handler.js';
 import { orderBarcodeImageHandler } from '../orders/barcode-image-handler.js';
 import { loopCreateOrderHandler } from '../orders/loop-handler.js';
 import { loopGetOrderHandler, loopListOrdersHandler } from '../orders/loop-read-handlers.js';
+import { loopOrderBarcodeImageHandler } from '../orders/loop-barcode-image-handler.js';
 
 export function mountOrderRoutes(app: Hono): void {
   // Cache-Control must precede requireAuth so 401s carry private, no-store
@@ -31,6 +32,11 @@ export function mountOrderRoutes(app: Hono): void {
     '/api/orders/loop/:id',
     rateLimit('GET /api/orders/loop/:id', 120, 60_000),
     loopGetOrderHandler,
+  );
+  app.get(
+    '/api/orders/loop/:id/barcode-image',
+    rateLimit('GET /api/orders/loop/:id/barcode-image', 60, 60_000),
+    loopOrderBarcodeImageHandler,
   );
   app.get('/api/orders/:id', rateLimit('GET /api/orders/:id', 120, 60_000), getOrderHandler);
   // ADR 050: authed, reference-keyed barcode-image proxy

@@ -6,7 +6,7 @@ vi.mock('~/services/api-client', () => ({
   authenticatedRequest: vi.fn(),
 }));
 
-import { fetchOrders, fetchOrder } from '../orders';
+import { fetchOrders } from '../orders';
 import { authenticatedRequest } from '../api-client';
 
 const mockAuthRequest = vi.mocked(authenticatedRequest);
@@ -33,27 +33,6 @@ describe('orders service', () => {
       const response = { orders: [{ id: 'o-1' }], pagination: { total: 1, page: 1 } };
       mockAuthRequest.mockResolvedValue(response);
       const result = await fetchOrders(1);
-      expect(result).toEqual(response);
-    });
-  });
-
-  describe('fetchOrder', () => {
-    it('calls with the order id', async () => {
-      mockAuthRequest.mockResolvedValue({ order: { id: 'order-123' } });
-      await fetchOrder('order-123');
-      expect(mockAuthRequest).toHaveBeenCalledWith('/api/orders/order-123');
-    });
-
-    it('encodes the order id', async () => {
-      mockAuthRequest.mockResolvedValue({ order: { id: 'a/b' } });
-      await fetchOrder('a/b');
-      expect(mockAuthRequest).toHaveBeenCalledWith('/api/orders/a%2Fb');
-    });
-
-    it('returns the order response', async () => {
-      const response = { order: { id: 'o-1', status: 'completed' } };
-      mockAuthRequest.mockResolvedValue(response);
-      const result = await fetchOrder('o-1');
       expect(result).toEqual(response);
     });
   });

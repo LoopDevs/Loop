@@ -134,11 +134,11 @@ describe('merchantInCountry — ADR 034 visibility rule', () => {
     expect(merchantInCountry(merchant('US', 'USD'), 'gb')).toBe(false);
   });
 
-  it('surfaces a EUR merchant across every Eurozone country', () => {
+  it('shows a EUR merchant only in its own country', () => {
     const frMerchant = merchant('FR', 'EUR');
     expect(merchantInCountry(frMerchant, 'fr')).toBe(true);
-    expect(merchantInCountry(frMerchant, 'de')).toBe(true); // currency match
-    expect(merchantInCountry(frMerchant, 'it')).toBe(true);
+    expect(merchantInCountry(frMerchant, 'de')).toBe(false);
+    expect(merchantInCountry(frMerchant, 'it')).toBe(false);
     expect(merchantInCountry(frMerchant, 'us')).toBe(false);
     expect(merchantInCountry(frMerchant, 'gb')).toBe(false);
   });
@@ -153,9 +153,9 @@ describe('merchantInCountry — ADR 034 visibility rule', () => {
     expect(merchantInCountry(merchant('GB', 'GBP'), 'GB')).toBe(true);
   });
 
-  it('matches by currency when the merchant has no country tag', () => {
+  it('shows a currency-only merchant everywhere', () => {
     expect(merchantInCountry(merchant(undefined, 'EUR'), 'de')).toBe(true);
-    expect(merchantInCountry(merchant(undefined, 'EUR'), 'us')).toBe(false);
+    expect(merchantInCountry(merchant(undefined, 'EUR'), 'us')).toBe(true);
   });
 
   it('matches by country when the merchant has no currency', () => {

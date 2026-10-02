@@ -32,14 +32,15 @@ vi.mock('~/hooks/use-auth', () => ({
   }),
 }));
 
-vi.mock('~/hooks/use-wallet', () => ({
-  WALLET_QUERY_KEY: ['me', 'wallet'],
-  useWallet: () => ({
-    wallet: undefined,
-    isActivated: false,
-    balanceFor: () => '0',
+vi.mock('~/hooks/use-account', () => ({
+  ACCOUNT_QUERY_KEY: ['me', 'account'],
+  useAccount: () => ({
+    account: undefined,
+    activeLink: null,
     isLoading: false,
     isError: false,
+    error: null,
+    refetch: () => undefined,
   }),
 }));
 

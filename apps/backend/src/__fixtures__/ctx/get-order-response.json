@@ -7,7 +7,7 @@
   "paymentCryptoAmount": "12.4567890",
   "status": "fulfilled",
   "fulfilmentStatus": "ready",
-  "percentDiscount": "5.00",
+  "userDiscountBasisPoints": 500,
   "redeemType": "code",
   "redeemUrl": "https://example.invalid/synthetic/redeem",
   "redeemUrlChallenge": "synthetic-challenge-token",

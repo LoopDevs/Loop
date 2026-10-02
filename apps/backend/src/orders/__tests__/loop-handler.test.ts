@@ -19,7 +19,6 @@ vi.mock('../../config/index.js', async (importActual) => {
           ...actual.config.ctx,
           baseUrl: 'https://ctx.test',
           credentials: { key: 'k', secret: 's' },
-          paymentCurrencies: ['XLM', 'DASH'],
         },
         auth: {
           ...actual.config.auth,
@@ -29,6 +28,12 @@ vi.mock('../../config/index.js', async (importActual) => {
     },
   };
 });
+
+vi.mock('../../ctx/startup.js', () => ({
+  loopPaymentCurrencies: () => ['XLM', 'DASH', 'USD'],
+  loopCryptoPaymentCurrencies: () => ['XLM', 'DASH'],
+  loopFiatPaymentCurrencies: () => ['USD'],
+}));
 
 vi.mock('../../logger.js', () => ({
   logger: {
@@ -80,6 +85,7 @@ vi.mock('../../ctx/user-provisioning.js', async (importActual) => {
   return {
     ...actual,
     provisionCtxUser: vi.fn(async () => undefined),
+    resolveCtxUserId: vi.fn(async () => usersState.ctxUserId),
     ctxActAsHeaders: (ctxUserId: string | null, clientId?: string) =>
       ctxUserId === null
         ? null
@@ -254,6 +260,52 @@ describe('gate ladder', () => {
       }),
     );
     expect(res.status).toBe(400);
+  });
+
+  it('400s on a fiat payment currency that differs from the card currency', async () => {
+    const res = await loopCreateOrderHandler(
+      makeCtx({
+        auth: LOOP_AUTH,
+        clientId: 'loopweb',
+        body: { ...GOOD_BODY, currency: 'GBP', cryptoCurrency: 'USD' },
+      }),
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { message: string };
+    expect(body.message).toContain('card currency');
+    expect(ctxFetchMock).not.toHaveBeenCalled();
+  });
+
+  it('sends a fiat payment in the card currency to CTX without a cryptoCurrency', async () => {
+    ctxFetchMock.mockResolvedValue(
+      ctx201({
+        paymentMethod: 'ctxmock',
+        paymentUrl: 'https://ctx.test/ctxmock/payments/ctx-pay-1',
+        paymentCryptoAmount: undefined,
+        paymentCryptoCurrency: undefined,
+        paymentCryptoAddress: undefined,
+        paymentUrls: undefined,
+      }),
+    );
+    const res = await loopCreateOrderHandler(
+      makeCtx({
+        auth: LOOP_AUTH,
+        clientId: 'loopweb',
+        body: { ...GOOD_BODY, cryptoCurrency: 'USD' },
+      }),
+    );
+    expect(res.status).toBe(201);
+    const [, init] = ctxFetchMock.mock.calls[0] as [string, RequestInit];
+    const sent = JSON.parse(init.body as string) as Record<string, unknown>;
+    expect(sent).not.toHaveProperty('cryptoCurrency');
+    expect(sent.fiatCurrency).toBe('USD');
+    const body = (await res.json()) as { payment: Record<string, unknown> };
+    expect(body.payment).toMatchObject({
+      method: 'fiat',
+      cryptoCurrency: 'USD',
+      address: null,
+      paymentUrls: { USD: 'https://ctx.test/ctxmock/payments/ctx-pay-1' },
+    });
   });
 
   it('400s on an unknown merchant', async () => {

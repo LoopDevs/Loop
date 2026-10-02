@@ -45,6 +45,9 @@ export interface AppConfig {
    * backend allowlist that `POST /api/orders/loop` validates against.
    */
   ctxPaymentCurrencies: string[];
+  fiatPaymentCurrencies: string[];
+  countries: string[];
+  stableCurrencies: string[];
   /**
    * Tranche 1 (MVP) launch gate. When true, the web client hides
    * every Phase 2+ surface (cashback navbar, /settings/wallet,

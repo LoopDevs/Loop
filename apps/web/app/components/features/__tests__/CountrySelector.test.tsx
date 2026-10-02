@@ -1,11 +1,17 @@
 // @vitest-environment jsdom
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router';
 import { CountrySelector } from '../CountrySelector';
 
+const appConfigState = vi.hoisted(() => ({ countries: [] as string[] }));
+vi.mock('~/hooks/use-app-config', () => ({
+  useAppConfig: () => ({ config: { countries: appConfigState.countries }, isLoading: false }),
+}));
+
 afterEach(() => {
   cleanup();
+  appConfigState.countries = [];
   document.cookie = 'loop_country=; path=/; max-age=0';
 });
 
@@ -106,5 +112,16 @@ describe('CountrySelector', () => {
     fireEvent.change(input, { target: { value: 'ger' } });
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(screen.getByTestId('loc').textContent).toBe('/de/en/cashback');
+  });
+
+  it('lists only the countries the operator company serves', () => {
+    appConfigState.countries = ['gb', 'US'];
+    renderAt('/gb/en/cashback');
+    fireEvent.click(screen.getByRole('button', { name: /Country:/ }));
+    const list = screen.getByRole('listbox', { name: 'Countries' });
+    expect(within(list).getAllByRole('option')).toHaveLength(2);
+    expect(within(list).getByText('United Kingdom')).toBeTruthy();
+    expect(within(list).getByText('United States')).toBeTruthy();
+    expect(within(list).queryByText('Germany')).toBeNull();
   });
 });

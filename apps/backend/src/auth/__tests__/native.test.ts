@@ -75,6 +75,12 @@ vi.mock('../../db/users.js', () => ({
   findOrCreateUserByEmail: (email: string) => findOrCreateUserMock(email),
   getUserTokenVersion: (id: string) => getUserTokenVersionMock(id),
 }));
+const syncCtxAdminRoleMock = vi.fn();
+const enqueueCtxAdminRoleSyncMock = vi.fn();
+vi.mock('../../ctx/user-roles.js', () => ({
+  syncCtxAdminRole: (user: unknown) => syncCtxAdminRoleMock(user),
+  enqueueCtxAdminRoleSync: (userId: string) => enqueueCtxAdminRoleSyncMock(userId),
+}));
 vi.mock('../refresh-tokens.js', () => ({
   recordRefreshToken: (args: unknown) => recordRefreshMock(args),
   findLiveRefreshToken: (args: unknown) => findLiveRefreshMock(args),
@@ -327,6 +333,9 @@ describe('nativeVerifyOtpHandler', () => {
     expect(res.status).toBe(200);
     expect(tryConsumeOtpMock).toHaveBeenCalledWith('otp-1');
     expect(findOrCreateUserMock).toHaveBeenCalledWith('a@b.com');
+    expect(syncCtxAdminRoleMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'user-1', email: 'a@b.com' }),
+    );
     expect(recordRefreshMock).toHaveBeenCalled();
     expect(clearOtpAttemptsMock).toHaveBeenCalledWith('a@b.com');
     const body = (await res.json()) as { accessToken: string; refreshToken: string };
@@ -413,6 +422,7 @@ describe('nativeRefreshHandler', () => {
     const body = (await res.json()) as { accessToken: string; refreshToken: string };
     expect(body.refreshToken).not.toBe(oldRefresh);
     expect(recordRefreshMock).toHaveBeenCalled();
+    expect(enqueueCtxAdminRoleSyncMock).toHaveBeenCalledWith('user-1');
     expect(tryRevokeIfLiveMock).toHaveBeenCalledWith(
       expect.objectContaining({ jti: oldClaims.jti }),
     );

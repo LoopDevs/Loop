@@ -122,6 +122,9 @@ vi.mock('../refresh-tokens.js', () => ({
     }
   },
 }));
+vi.mock('../../ctx/user-roles.js', () => ({
+  enqueueCtxAdminRoleSync: vi.fn(),
+}));
 // NS-09: the refresh handler reads the user's current token_version to
 // stamp the rotated access token. This suite is about the refresh-row
 // CAS, not token_version — return a fixed 0 so the rotation mints a

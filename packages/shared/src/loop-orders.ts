@@ -19,9 +19,10 @@ import type { OrderState } from './order-state.js';
  * - `amountMinor` is the gift-card face value in the catalog currency's
  *   minor units. Accepted as either number or numeric string — the
  *   backend transforms both to `bigint`.
- * - `cryptoCurrency` is the chain-qualified CTX payment currency the
- *   customer chose (e.g. `XLM`, `DASH`, `ETH.USDT`), validated against
- *   the server's `LOOP_CTX_PAYMENT_CURRENCIES` allowlist.
+ * - `cryptoCurrency` is the CTX payment currency the customer chose:
+ *   a chain-qualified crypto currency (e.g. `XLM`, `DASH`, `ETH.USDT`)
+ *   from the operator company's crypto payment currencies, or one of
+ *   its fiat payment currencies, which must equal the card `currency`.
  */
 export interface CreateLoopOrderRequest {
   merchantId: string;
@@ -36,10 +37,14 @@ export interface CreateLoopOrderRequest {
  * from the gift-card create / payment read. The customer pays CTX
  * directly — Loop never receives these funds.
  */
+export type LoopOrderPaymentMethod = 'crypto' | 'fiat';
+
 export interface LoopOrderPaymentInstructions {
   /** CTX payment row id backing the card. */
   ctxPaymentId: string | null;
-  /** Chain-qualified currency the customer chose to pay in. */
+  /** Crypto: pay to `address` / `paymentUrls`. Fiat: follow the `paymentUrls` entry for `cryptoCurrency`. */
+  method: LoopOrderPaymentMethod;
+  /** Currency the customer chose to pay in (chain-qualified crypto, or the card's fiat currency). */
   cryptoCurrency: string;
   /** Amount to send in the crypto currency's major units (decimal string). */
   cryptoAmount: string | null;

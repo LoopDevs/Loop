@@ -1,11 +1,13 @@
 // Async CTX customer provisioning — ADR 013, ADR 030, ADR 051
 import { z } from 'zod';
+import { heldStableForCurrency, type HomeCurrency } from '@loop/shared';
 import { config } from '../config/index.js';
 import { logger } from '../logger.js';
 import { upstreamUrl } from '../upstream.js';
 import { scrubUpstreamBody } from '../upstream-body-scrub.js';
-import { setUserCtxUserId } from '../db/users.js';
+import { getUserById, getUserCtxUserId, setUserCtxUserId } from '../db/users.js';
 import { ctxFetch } from './api-fetch.js';
+import { syncCtxAdminRole } from './user-roles.js';
 
 const log = logger.child({ area: 'ctx-user-provisioning' });
 
@@ -13,6 +15,7 @@ export interface ProvisionableUser {
   id: string;
   email: string;
   ctxUserId: string | null;
+  homeCurrency: HomeCurrency;
 }
 
 const CtxCreateUserResponse = z.object({ id: z.string().min(1) });
@@ -80,6 +83,7 @@ export async function provisionCtxUser(user: ProvisionableUser): Promise<void> {
       email: user.email,
       type: 'customer',
       operatorUserId: user.id,
+      stableCurrency: heldStableForCurrency(user.homeCurrency),
     }),
     signal: AbortSignal.timeout(10_000),
   });
@@ -119,6 +123,7 @@ export async function provisionCtxUser(user: ProvisionableUser): Promise<void> {
     return;
   }
   log.info({ userId: user.id, ctxUserId: parsed.data.id }, 'CTX user provisioned');
+  await syncCtxAdminRole({ id: user.id, ctxUserId: parsed.data.id });
 }
 
 export async function adoptExistingCtxUser(user: ProvisionableUser): Promise<void> {
@@ -195,6 +200,7 @@ export async function adoptExistingCtxUser(user: ProvisionableUser): Promise<voi
     return;
   }
   log.info({ userId: user.id, ctxUserId: ctxUser.id }, 'CTX user adopted');
+  await syncCtxAdminRole({ id: user.id, ctxUserId: ctxUser.id });
 }
 
 // Returns null when mapping is absent; callers must not reach CTX for user-scoped reads without X-User-Id.
@@ -209,4 +215,22 @@ export function ctxActAsHeaders(
     'X-User-Id': ctxUserId,
     'X-Client-Id': clientId ?? config.ctx.clientIds.web,
   };
+}
+
+export async function resolveCtxUserId(userId: string): Promise<string | null> {
+  const existing = await getUserCtxUserId(userId);
+  if (existing !== null) return existing;
+  const user = await getUserById(userId);
+  if (user === null || user.email === null) return null;
+  try {
+    await provisionCtxUser({
+      id: user.id,
+      email: user.email,
+      ctxUserId: null,
+      homeCurrency: user.homeCurrency,
+    });
+  } catch (err) {
+    log.warn({ userId, err }, 'Synchronous CTX provisioning attempt failed');
+  }
+  return getUserCtxUserId(userId);
 }

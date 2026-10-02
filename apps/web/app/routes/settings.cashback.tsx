@@ -35,7 +35,7 @@ import { CashbackBalanceCard } from '~/components/features/cashback/CashbackBala
 import { CashbackByMerchantCard } from '~/components/features/cashback/CashbackByMerchantCard';
 import { LinkWalletNudge } from '~/components/features/cashback/LinkWalletNudge';
 import { MonthlyCashbackChart } from '~/components/features/cashback/MonthlyCashbackChart';
-import { PendingPayoutsCard } from '~/components/features/cashback/PendingPayoutsCard';
+import { PayoutsCard } from '~/components/features/cashback/PayoutsCard';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: i18n.t('settings:cashback.meta.title') }];
@@ -215,7 +215,7 @@ function SettingsCashbackBody(): React.JSX.Element {
           so new users don't see an empty card full of state terms
           they haven't earned context for yet. Shared with the wallet
           settings page so the same live status lands in both spots. */}
-      <PendingPayoutsCard />
+      <PayoutsCard />
 
       {/* Last-12-months bar chart (ADR 009 / #576). Renders one
           bar per (month, currency) pair; multi-currency users see

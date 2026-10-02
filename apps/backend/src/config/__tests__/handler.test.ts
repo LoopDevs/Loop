@@ -19,6 +19,13 @@ const { configState } = vi.hoisted(() => ({
   },
 }));
 
+vi.mock('../../ctx/startup.js', () => ({
+  loopCryptoPaymentCurrencies: () => ['XLM', 'DASH'],
+  loopFiatPaymentCurrencies: () => ['GBP'],
+  loopCountries: () => ['US', 'GB'],
+  loopStableCurrencies: () => ['XLM.USDC'],
+}));
+
 vi.mock('../index.js', async (importActual) => {
   const actual = await importActual<typeof ConfigModule>();
   return {
@@ -145,11 +152,19 @@ describe('configHandler', () => {
     expect(body.loopOrdersEnabled).toBe(false);
   });
 
-  it('surfaces the CTX payment-currency allowlist (default XLM)', async () => {
+  it('surfaces the operator company payment currencies, countries and stable currencies', async () => {
     const { configHandler } = await import('../handler.js');
     const { ctx } = makeCtx();
-    const body = (await configHandler(ctx).json()) as { ctxPaymentCurrencies: string[] };
-    expect(body.ctxPaymentCurrencies).toEqual(['XLM']);
+    const body = (await configHandler(ctx).json()) as {
+      ctxPaymentCurrencies: string[];
+      fiatPaymentCurrencies: string[];
+      countries: string[];
+      stableCurrencies: string[];
+    };
+    expect(body.ctxPaymentCurrencies).toEqual(['XLM', 'DASH']);
+    expect(body.fiatPaymentCurrencies).toEqual(['GBP']);
+    expect(body.countries).toEqual(['US', 'GB']);
+    expect(body.stableCurrencies).toEqual(['XLM.USDC']);
   });
 
   it('reflects launch.phase1Only independently of the loop-native flags', async () => {

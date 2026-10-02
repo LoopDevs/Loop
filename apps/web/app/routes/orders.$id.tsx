@@ -1,26 +1,25 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Link, useParams, useNavigate } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { ApiException } from '@loop/shared';
-import type { Order } from '@loop/shared';
 import type { Route } from './+types/orders.$id';
 import i18n from '~/i18n/i18next';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 import { useAuth } from '~/hooks/use-auth';
-import { fetchOrder } from '~/services/orders';
+import { useAllMerchants } from '~/hooks/use-merchants';
+import { getLoopOrder, isLoopOrderTerminal, type LoopOrderView } from '~/services/orders-loop';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Navbar } from '~/components/features/Navbar';
 import { PageHeader } from '~/components/ui/PageHeader';
 import { Spinner } from '~/components/ui/Spinner';
 import { Button } from '~/components/ui/Button';
 import { PurchaseComplete } from '~/components/features/purchase/PurchaseComplete';
-import { OrderPayoutCard } from '~/components/features/order/OrderPayoutCard';
 import { LinkWalletNudge } from '~/components/features/cashback/LinkWalletNudge';
-import { formatDateTime, formatMoney, useLocaleTag } from '~/i18n/format';
+import { LoopOrderStatePill } from '~/components/features/orders/LoopOrdersList';
+import { formatDateTime, formatMinorCurrency, useLocaleTag } from '~/i18n/format';
 import { friendlyError } from '~/utils/error-messages';
-import { openWebView } from '~/native/webview';
-import { buildChallengeBarScript } from '~/utils/redeem-challenge-bar';
+import { openWebView, safeRedeemHref } from '~/native/webview';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: i18n.t('orders:detail.meta.title') }];
@@ -42,13 +41,13 @@ export function ErrorBoundary(): React.JSX.Element {
   );
 }
 
+const IN_FLIGHT_REFETCH_MS = 15_000;
+
 /**
- * `/orders/:id` — standalone detail view for a single placed order.
- * Refetches `/api/orders/:id` on mount so the user sees live data —
- * particularly for barcode-type cards, where the code/pin/barcodeUrl
- * are only populated by the backend once CTX reports fulfilled. Lets
- * users revisit their gift card any time without us persisting the
- * code locally (refresh token is enough to re-authenticate).
+ * `/orders/:id` — standalone detail view for a single Loop order.
+ * Reads `GET /api/orders/loop/:id` and keeps polling while the order
+ * is still in flight, so a user who returns mid-payment sees the card
+ * appear without a manual refresh.
  */
 export default function OrderDetailRoute(): React.JSX.Element {
   const { t } = useTranslation('orders');
@@ -57,22 +56,21 @@ export default function OrderDetailRoute(): React.JSX.Element {
   const { isNative } = useNativePlatform();
   const navigate = useNavigate();
 
-  const { data, isLoading, error, refetch } = useQuery<{ order: Order }, Error>({
-    queryKey: ['order', id],
-    queryFn: () => fetchOrder(id),
+  const {
+    data: order,
+    isLoading,
+    error,
+    refetch,
+  } = useQuery<LoopOrderView, Error>({
+    queryKey: ['loop-order', id],
+    queryFn: () => getLoopOrder(id),
     enabled: isAuthenticated && id.length > 0,
     retry: shouldRetry,
+    refetchInterval: (query) =>
+      query.state.data !== undefined && !isLoopOrderTerminal(query.state.data.state)
+        ? IN_FLIGHT_REFETCH_MS
+        : false,
   });
-
-  const order = data?.order;
-
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    // Pulse the clock every 30s so "x minutes ago" stays fresh
-    // without each render computing it from stale state.
-    const t = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(t);
-  }, []);
 
   const errText =
     error !== null && error !== undefined
@@ -144,139 +142,125 @@ export default function OrderDetailRoute(): React.JSX.Element {
           </div>
         )}
 
-        {order !== undefined && <OrderDetailBody order={order} now={now} />}
+        {order !== undefined && <OrderDetailBody order={order} />}
       </main>
     </>
   );
 }
 
-function OrderDetailBody({ order, now }: { order: Order; now: number }): React.JSX.Element {
+function OrderDetailBody({ order }: { order: LoopOrderView }): React.JSX.Element {
   const { t } = useTranslation('orders');
   const locale = useLocaleTag();
-  // Valid dates go through the shared `formatDateTime` seam in the route
-  // locale — not a local `toLocaleString` copy — so a `/de/en` reader sees the
-  // German date/time, not the host default (ADR 034 / P2-DATE). Malformed
-  // input falls back to the raw string rather than "Invalid Date".
-  const created = new Date(order.createdAt);
-  const createdLabel = Number.isNaN(created.getTime())
-    ? order.createdAt
-    : formatDateTime(order.createdAt, locale, {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit',
-      });
-  void now;
+  const { merchants } = useAllMerchants();
+  const merchantName = merchants.find((m) => m.id === order.merchantId)?.name ?? order.merchantId;
+  const createdLabel = formatDateTime(order.createdAt, locale, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+  const isFulfilled = order.state === 'fulfilled';
+  const hasCode = order.redeemCode !== null && order.redeemCode.length > 0;
+  const hasPin = order.redeemPin !== null && order.redeemPin.length > 0;
+  const redeemHref =
+    order.redeemUrl !== null && order.redeemUrl.length > 0 ? safeRedeemHref(order.redeemUrl) : null;
 
   return (
     <>
       {/* Tight header — merchant + date on the left, amount on the
-          right. Status only surfaces when it's not 'completed'
-          (completed is implicit once we render the gift-card card
+          right. Status only surfaces when it's not 'fulfilled'
+          (fulfilled is implicit once we render the gift-card card
           below, so repeating it as a badge is noise). */}
       <div className="flex items-start justify-between gap-3 py-3 mb-4">
         <div className="min-w-0">
           <h1 className="text-lg font-semibold text-gray-900 dark:text-white truncate">
-            {order.merchantName}
+            {merchantName}
           </h1>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{createdLabel}</p>
         </div>
         <div className="text-end flex-shrink-0">
           <div className="text-lg font-bold text-gray-900 dark:text-white tabular-nums">
-            {formatMoney(order.amount, order.currency, locale)}
+            {formatMinorCurrency(order.faceValueMinor, order.currency, locale)}
           </div>
-          {order.status !== 'completed' && (
+          {!isFulfilled && (
             <div className="mt-1">
-              <StatusBadge status={order.status} />
+              <LoopOrderStatePill state={order.state} />
             </div>
           )}
         </div>
       </div>
 
-      {order.status === 'completed' && order.giftCardCode !== undefined && (
+      {isFulfilled && hasCode && (
         <div className="flex flex-col gap-3">
-          {/* Per-order settlement state (ADR 015/016). Self-hides
-              when there's no payout row — fresh-fulfil orders show
-              nothing here until the builder queues a row. */}
-          <OrderPayoutCard orderId={order.id} />
-          {/* Link-wallet nudge — self-hides when user has already
-              linked a Stellar address or has zero balance. For the
-              user who just earned cashback and doesn't have a
-              wallet yet, this is the "claim it on-chain" hint at
-              the exact point they'd expect to see it: right where
-              OrderPayoutCard silently hid itself. Re-uses the
-              /settings/cashback nudge so copy + behaviour stay in
-              lockstep across surfaces. */}
           <LinkWalletNudge />
           <PurchaseComplete
-            merchantName={order.merchantName}
-            code={order.giftCardCode}
-            pin={order.giftCardPin}
-            // ADR 050: `barcodeImageUrl` on the order is only the
-            // "has an upstream barcode" signal — the bytes come
-            // through the authed reference-keyed proxy by order id.
-            barcodeOrderId={order.barcodeImageUrl !== undefined ? order.id : undefined}
+            merchantName={merchantName}
+            code={order.redeemCode!}
+            pin={hasPin ? order.redeemPin! : undefined}
+            barcodeOrderId={order.id}
           />
         </div>
       )}
 
-      {order.status === 'completed' &&
-        order.giftCardCode === undefined &&
-        order.redeemUrl !== undefined && (
-          <RedemptionBlock redeemUrl={order.redeemUrl} challengeCode={order.redeemChallengeCode} />
-        )}
+      {isFulfilled && !hasCode && redeemHref !== null && <RedemptionBlock redeemUrl={redeemHref} />}
 
-      {order.status === 'pending' && (
+      {isFulfilled && !hasCode && redeemHref === null && (
         <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-4">
-          {t('detail.pendingPayment')}
+          {t('detail.redemptionPending')}
         </p>
       )}
 
-      {(order.status === 'failed' || order.status === 'expired') && (
+      {isFulfilled && order.userCashbackMinor !== '0' && (
+        <p className="mt-4 text-xs text-green-700 dark:text-green-300 text-center">
+          {t('detail.cashbackCredited', {
+            amount: formatMinorCurrency(order.userCashbackMinor, order.currency, locale),
+          })}
+        </p>
+      )}
+
+      {order.state === 'unpaid' && (
+        <div className="rounded-lg border border-yellow-200 dark:border-yellow-900/40 bg-yellow-50 dark:bg-yellow-900/20 p-3 text-sm text-yellow-900 dark:text-yellow-100">
+          {t('detail.awaitingPayment', {
+            amount: formatMinorCurrency(order.chargeMinor, order.chargeCurrency, locale),
+            asset: order.paymentCryptoCurrency ?? '',
+          })}
+        </div>
+      )}
+
+      {order.state === 'paid' && (
+        <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 text-center">
+          <p className="text-sm text-gray-700 dark:text-gray-300">{t('detail.paid')}</p>
+          <div className="mt-4 flex justify-center">
+            <Spinner />
+          </div>
+        </div>
+      )}
+
+      {(order.state === 'rejected' || order.state === 'refunded') && (
+        <div
+          role="alert"
+          className="rounded-lg border border-red-200 dark:border-red-900/40 bg-red-50 dark:bg-red-900/20 p-3 text-sm text-red-700 dark:text-red-300"
+        >
+          {order.failureReason ?? t('detail.failedFallback')}
+        </div>
+      )}
+
+      {order.state === 'expired' && (
         <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-4">
-          {t('detail.terminalStatus', { status: order.status })}
+          {t('detail.expired')}
         </p>
       )}
     </>
   );
 }
 
-function StatusBadge({ status }: { status: Order['status'] }): React.JSX.Element {
-  const { t } = useTranslation('orders');
-  const classNames: Record<Order['status'], string> = {
-    pending: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
-    completed: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
-    failed: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
-    expired: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300',
-  };
-  return (
-    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${classNames[status]}`}>
-      {t(`status.${status}`)}
-    </span>
-  );
-}
-
 /**
- * Redeem-URL order presentation. Shows the challenge code (if any)
- * with a copy affordance, and a button that opens the merchant's
- * redemption page inside the in-app WebView with the challenge-code
- * bar pre-injected — same behaviour as the in-purchase RedeemFlow
- * so revisiting an old URL-redeem order doesn't regress to a bare
- * `<a target="_blank">`.
- *
- * Kept local to this route module since it's not reused elsewhere;
- * RedeemFlow owns the mid-purchase path with its own state (manual
- * entry, postMessage capture, etc.) — here the order already
- * exists and we're just re-opening the redemption page.
+ * Redeem-URL order presentation: a button that opens the merchant's
+ * redemption page inside the in-app WebView, so revisiting a URL-redeem
+ * order doesn't regress to a bare `<a target="_blank">`.
  */
-function RedemptionBlock({
-  redeemUrl,
-  challengeCode,
-}: {
-  redeemUrl: string;
-  challengeCode?: string | undefined;
-}): React.JSX.Element {
+function RedemptionBlock({ redeemUrl }: { redeemUrl: string }): React.JSX.Element {
   const { t } = useTranslation('orders');
   const [opening, setOpening] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
@@ -285,14 +269,7 @@ function RedemptionBlock({
     setOpening(true);
     setOpenError(null);
     try {
-      // Only inject the bar when we actually have a challenge code —
-      // some URL-redeem merchants don't use one, and injecting an
-      // empty "CODE" bar would be confusing.
-      const scripts =
-        challengeCode !== undefined && challengeCode.length > 0
-          ? [buildChallengeBarScript(challengeCode)]
-          : [];
-      await openWebView({ url: redeemUrl, scripts });
+      await openWebView({ url: redeemUrl, scripts: [] });
     } catch (err) {
       setOpenError(
         err instanceof Error && err.message.length > 0
@@ -307,14 +284,6 @@ function RedemptionBlock({
   return (
     <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6">
       <p className="text-sm text-gray-600 dark:text-gray-300 mb-3">{t('detail.redemption.body')}</p>
-      {challengeCode !== undefined && challengeCode.length > 0 && (
-        <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3 mb-4">
-          <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
-            {t('detail.redemption.challengeCodeLabel')}
-          </p>
-          <p className="font-mono text-sm text-gray-900 dark:text-gray-100">{challengeCode}</p>
-        </div>
-      )}
       {openError !== null && (
         <p className="text-sm text-red-600 dark:text-red-400 mb-3" role="alert">
           {openError}

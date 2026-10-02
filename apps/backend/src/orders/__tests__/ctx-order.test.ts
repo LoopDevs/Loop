@@ -56,6 +56,7 @@ describe('paymentInstructionsFromCard', () => {
     );
     expect(out).toEqual({
       ctxPaymentId: 'pay-1',
+      method: 'crypto',
       cryptoCurrency: 'DASH',
       cryptoAmount: '150.5',
       address: 'Xaddr',
@@ -70,6 +71,7 @@ describe('paymentInstructionsFromCard', () => {
     const out = paymentInstructionsFromCard({ id: 'ctx-1' }, null, fallback);
     expect(out).toEqual({
       ctxPaymentId: null,
+      method: 'crypto',
       cryptoCurrency: 'XLM',
       cryptoAmount: null,
       address: null,
@@ -79,14 +81,40 @@ describe('paymentInstructionsFromCard', () => {
       expiresAt: null,
     });
   });
+
+  it('relays a fiat card as a payment URL in the card currency', () => {
+    const out = paymentInstructionsFromCard(
+      {
+        id: 'ctx-1',
+        paymentId: 'pay-1',
+        paymentMethod: 'ctxmock',
+        paymentUrl: 'https://ctx.test/ctxmock/payments/pay-1',
+        paymentFiatAmount: '24.50',
+        paymentFiatCurrency: 'GBP',
+      },
+      { id: 'pay-1', expires: '2026-08-01T00:10:00.000Z' },
+      fallback,
+    );
+    expect(out).toEqual({
+      ctxPaymentId: 'pay-1',
+      method: 'fiat',
+      cryptoCurrency: 'GBP',
+      cryptoAmount: null,
+      address: null,
+      paymentUrls: { GBP: 'https://ctx.test/ctxmock/payments/pay-1' },
+      amountMinor: '2450',
+      currency: 'GBP',
+      expiresAt: '2026-08-01T00:10:00.000Z',
+    });
+  });
 });
 
 describe('deriveOrderEconomics', () => {
   const card = (over?: Record<string, unknown>): Parameters<typeof deriveOrderEconomics>[0] => ({
     id: 'ctx-1',
     cardFiatAmount: '100.00',
-    userDiscount: 250,
-    operatorDiscount: 750,
+    userDiscountBasisPoints: 250,
+    operatorDiscountBasisPoints: 750,
     ...over,
   });
 
@@ -98,7 +126,7 @@ describe('deriveOrderEconomics', () => {
   });
 
   it('returns zero commission when the spread or profit share is non-positive', () => {
-    expect(deriveOrderEconomics(card({ operatorDiscount: 250 }), 5000)).toEqual({
+    expect(deriveOrderEconomics(card({ operatorDiscountBasisPoints: 250 }), 5000)).toEqual({
       userCashbackMinor: 250n,
       expectedCommissionMinor: 0n,
     });
@@ -113,7 +141,7 @@ describe('deriveOrderEconomics', () => {
       userCashbackMinor: null,
       expectedCommissionMinor: null,
     });
-    expect(deriveOrderEconomics(card({ operatorDiscount: undefined }), 5000)).toEqual({
+    expect(deriveOrderEconomics(card({ operatorDiscountBasisPoints: undefined }), 5000)).toEqual({
       userCashbackMinor: 250n,
       expectedCommissionMinor: null,
     });

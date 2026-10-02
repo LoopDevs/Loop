@@ -75,7 +75,7 @@ export async function listStaffEntries(): Promise<AdminStaffEntry[]> {
       userId: user.id,
       email: user.email,
       role: 'admin',
-      source: 'legacy_is_admin',
+      source: 'ctx_operator_admin',
       grantedAt: null,
       grantedByUserId: null,
       grantedByEmail: null,

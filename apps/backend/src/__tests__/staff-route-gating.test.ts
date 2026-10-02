@@ -186,9 +186,12 @@ describe('ADR 037 tier behaviour', () => {
     const res = await app.request('/api/admin/staff', asUser(ADMIN_ID));
     expect(res.status).toBe(200);
     const body = (await res.json()) as { staff: Array<Record<string, unknown>> };
-    // The support row, plus the shim admin who has no row.
+    // The support row, plus the CTX-mirrored admin who has no row.
     expect(body.staff).toHaveLength(2);
-    expect(body.staff.map((s) => s['source']).sort()).toEqual(['legacy_is_admin', 'staff_roles']);
+    expect(body.staff.map((s) => s['source']).sort()).toEqual([
+      'ctx_operator_admin',
+      'staff_roles',
+    ]);
   });
 
   it.each(SUPPORT_VISIBLE_PROBES)('support can read %s %s', async (_method, path) => {

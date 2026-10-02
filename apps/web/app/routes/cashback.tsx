@@ -94,9 +94,7 @@ function CashbackIndexBody(): React.JSX.Element {
           </div>
         ) : query.isError ? (
           <p className="py-8 text-center text-red-600 dark:text-red-400">{t('index.loadError')}</p>
-        ) : query.data.merchants.length === 0 ? (
-          <p className="py-8 text-center text-gray-500 dark:text-gray-400">{t('index.empty')}</p>
-        ) : (
+        ) : query.data.merchants.length === 0 ? null : (
           <ul className="space-y-3">
             {query.data.merchants.map((m) => (
               <MerchantRow key={m.id} merchant={m} />

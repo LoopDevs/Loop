@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ApiException } from '@loop/shared';
 
 vi.mock('../api-client', () => ({
   authenticatedRequest: vi.fn(),
@@ -8,13 +7,11 @@ vi.mock('../api-client', () => ({
 import {
   setHomeCurrency,
   getMe,
-  setStellarAddress,
+  getMyAccount,
+  linkWallet,
+  updateWallet,
+  unlinkWallet,
   getCashbackHistory,
-  getUserPendingPayouts,
-  getUserPendingPayoutsSummary,
-  getUserStellarTrustlines,
-  getUserPayoutByOrder,
-  getMyCredits,
   getCashbackSummary,
   getCashbackByMerchant,
   getCashbackMonthly,
@@ -57,23 +54,41 @@ describe('getMe', () => {
   });
 });
 
-describe('setStellarAddress', () => {
-  it('PUTs the address wrapped in { address }', async () => {
-    mockAuth.mockResolvedValue({});
-    await setStellarAddress('GABC123');
-    expect(mockAuth).toHaveBeenCalledWith('/api/users/me/stellar-address', {
-      method: 'PUT',
-      body: { address: 'GABC123' },
+describe('getMyAccount', () => {
+  it('GETs /api/users/me/account', async () => {
+    mockAuth.mockResolvedValue({ wallet: [], linkedWallets: [], payouts: [] });
+    await getMyAccount();
+    expect(mockAuth).toHaveBeenCalledWith('/api/users/me/account');
+  });
+});
+
+describe('linkWallet', () => {
+  it('POSTs the chain + address body', async () => {
+    mockAuth.mockResolvedValue({ id: 'w-1' });
+    await linkWallet({ chain: 'XLM', address: 'GABC123' });
+    expect(mockAuth).toHaveBeenCalledWith('/api/users/me/wallets', {
+      method: 'POST',
+      body: { chain: 'XLM', address: 'GABC123' },
     });
   });
+});
 
-  it('sends { address: null } when unlinking', async () => {
-    mockAuth.mockResolvedValue({});
-    await setStellarAddress(null);
-    expect(mockAuth).toHaveBeenCalledWith('/api/users/me/stellar-address', {
+describe('updateWallet', () => {
+  it('PUTs the autoPayout toggle to the url-encoded wallet id', async () => {
+    mockAuth.mockResolvedValue({ id: 'w 1' });
+    await updateWallet('w 1', { autoPayout: false });
+    expect(mockAuth).toHaveBeenCalledWith('/api/users/me/wallets/w%201', {
       method: 'PUT',
-      body: { address: null },
+      body: { autoPayout: false },
     });
+  });
+});
+
+describe('unlinkWallet', () => {
+  it('DELETEs the url-encoded wallet id', async () => {
+    mockAuth.mockResolvedValue({ id: 'w-1', status: 'removed' });
+    await unlinkWallet('w/1');
+    expect(mockAuth).toHaveBeenCalledWith('/api/users/me/wallets/w%2F1', { method: 'DELETE' });
   });
 });
 
@@ -96,77 +111,6 @@ describe('getCashbackHistory', () => {
     mockAuth.mockResolvedValue({ items: [], nextBefore: null });
     await getCashbackHistory({ limit: 10 });
     expect(mockAuth).toHaveBeenCalledWith('/api/users/me/cashback-history?limit=10');
-  });
-});
-
-describe('getUserPendingPayouts', () => {
-  it('omits the query string when no opts', async () => {
-    mockAuth.mockResolvedValue({ items: [], nextBefore: null });
-    await getUserPendingPayouts();
-    expect(mockAuth).toHaveBeenCalledWith('/api/users/me/pending-payouts');
-  });
-
-  it('threads state / limit / before into the query string', async () => {
-    mockAuth.mockResolvedValue({ items: [], nextBefore: null });
-    await getUserPendingPayouts({
-      state: 'pending',
-      limit: 10,
-      before: '2026-04-23T00:00:00Z',
-    });
-    const [[path]] = mockAuth.mock.calls as [[string, unknown]];
-    expect(path).toBe(
-      '/api/users/me/pending-payouts?state=pending&limit=10&before=2026-04-23T00%3A00%3A00Z',
-    );
-  });
-});
-
-describe('getUserPendingPayoutsSummary', () => {
-  it('GETs the summary endpoint', async () => {
-    mockAuth.mockResolvedValue({ rows: [] });
-    await getUserPendingPayoutsSummary();
-    expect(mockAuth).toHaveBeenCalledWith('/api/users/me/pending-payouts/summary');
-  });
-});
-
-describe('getUserStellarTrustlines', () => {
-  it('GETs the trustlines endpoint', async () => {
-    mockAuth.mockResolvedValue({ trustlines: [] });
-    await getUserStellarTrustlines();
-    expect(mockAuth).toHaveBeenCalledWith('/api/users/me/stellar-trustlines');
-  });
-});
-
-describe('getUserPayoutByOrder', () => {
-  it('url-encodes the orderId in the path', async () => {
-    mockAuth.mockResolvedValue({});
-    await getUserPayoutByOrder('order with/special&chars');
-    expect(mockAuth).toHaveBeenCalledWith(
-      '/api/users/me/orders/order%20with%2Fspecial%26chars/payout',
-    );
-  });
-
-  it('returns null on a 404 (no payout for this order)', async () => {
-    mockAuth.mockRejectedValue(new ApiException(404, { code: 'NOT_FOUND', message: 'no payout' }));
-    const out = await getUserPayoutByOrder('order-1');
-    expect(out).toBeNull();
-  });
-
-  it('propagates non-404 errors', async () => {
-    mockAuth.mockRejectedValue(new ApiException(500, { code: 'INTERNAL', message: 'boom' }));
-    await expect(getUserPayoutByOrder('order-1')).rejects.toThrow(ApiException);
-  });
-
-  it('propagates a non-ApiException (network / timeout) error', async () => {
-    mockAuth.mockRejectedValue(new Error('fetch aborted'));
-    await expect(getUserPayoutByOrder('order-1')).rejects.toThrow(/fetch aborted/);
-  });
-});
-
-describe('getMyCredits', () => {
-  it('GETs /api/users/me/credits', async () => {
-    mockAuth.mockResolvedValue({ balances: [] });
-    await getMyCredits();
-    expect(mockAuth).toHaveBeenCalledWith('/api/users/me/credits');
   });
 });
 

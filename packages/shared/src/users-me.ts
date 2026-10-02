@@ -13,26 +13,20 @@
  * Integer columns serialise as strings (BigInt-safe). Timestamps are
  * ISO-8601.
  */
-import type { HomeCurrency, LoopAssetCode } from './loop-asset.js';
+import type { HomeCurrency } from './loop-asset.js';
 import type { CreditTransactionType } from './credit-transaction-type.js';
-import type { PayoutState } from './payout-state.js';
 import type { StaffRole } from './admin-staff.js';
 
 /**
- * `GET /api/users/me` / `POST /api/users/me/home-currency` /
- * `PUT /api/users/me/stellar-address` response.
- *
- * `homeCurrencyBalanceMinor` is the off-chain cashback balance in
- * the current home currency's minor units, returned as a bigint-string
- * (`"0"` when the user has no ledger row yet).
+ * `GET /api/users/me` / `POST /api/users/me/home-currency` response.
+ * Balances and linked wallets live on `UserAccountView`.
  */
 export interface UserMeView {
   id: string;
   email: string;
   /**
    * Deprecated read-compat shim (ADR 037): true iff `staffRole` is
-   * `'admin'`. Kept until the config-allowlist `users.isAdmin` flag
-   * retires; new gating should key off `staffRole`.
+   * `'admin'`. New gating should key off `staffRole`.
    */
   isAdmin: boolean;
   /**
@@ -44,8 +38,6 @@ export interface UserMeView {
    */
   staffRole: StaffRole | null;
   homeCurrency: HomeCurrency;
-  stellarAddress: string | null;
-  homeCurrencyBalanceMinor: string;
 }
 
 /** One row of the credit-ledger history (ADR 009 / 015). */
@@ -63,103 +55,6 @@ export interface CashbackHistoryEntry {
 /** `GET /api/users/me/cashback-history` */
 export interface CashbackHistoryResponse {
   entries: CashbackHistoryEntry[];
-}
-
-/**
- * Caller-scoped on-chain payout lifecycle (ADR 015 / 016).
- *
- * Aliased to `PayoutState` (same four-literal union) so a future state
- * addition in `payout-state.ts` propagates here automatically without
- * requiring a second edit.
- */
-export type UserPendingPayoutState = PayoutState;
-
-/** One row of the caller's pending-payout backlog. */
-export interface UserPendingPayoutView {
-  id: string;
-  orderId: string;
-  assetCode: LoopAssetCode;
-  assetIssuer: string;
-  /** Stroops (7 decimals); bigint-as-string. */
-  amountStroops: string;
-  state: UserPendingPayoutState;
-  /** Null until the payout confirms on Stellar. */
-  txHash: string | null;
-  attempts: number;
-  createdAt: string;
-  submittedAt: string | null;
-  confirmedAt: string | null;
-  failedAt: string | null;
-}
-
-/** `GET /api/users/me/pending-payouts` */
-export interface UserPendingPayoutsResponse {
-  payouts: UserPendingPayoutView[];
-}
-
-/**
- * One row of the caller's pending-payouts summary — grouped by
- * `(assetCode, state)`. Confirmed / failed states are omitted server-
- * side so this only carries in-flight work.
- */
-export interface UserPendingPayoutsSummaryRow {
-  assetCode: LoopAssetCode;
-  state: 'pending' | 'submitted';
-  count: number;
-  /** Sum of amountStroops in this bucket. bigint-as-string. */
-  totalStroops: string;
-  /** ISO-8601 of the oldest row in the bucket. */
-  oldestCreatedAt: string;
-}
-
-/** `GET /api/users/me/pending-payouts/summary` */
-export interface UserPendingPayoutsSummaryResponse {
-  rows: UserPendingPayoutsSummaryRow[];
-}
-
-/**
- * Caller's LOOP-asset trustline status (ADR 015). One row per
- * configured LOOP asset; `present: true` means the user's linked
- * address already has the trustline so the next payout in that asset
- * will land. `accountLinked: false` means no wallet on file.
- * `accountExists: false` means the address is linked but unfunded
- * on Stellar (needs an XLM reserve before any trustline can be
- * created).
- */
-export interface StellarTrustlineRow {
-  code: LoopAssetCode;
-  issuer: string;
-  present: boolean;
-  /** bigint-as-string. `"0"` when absent. */
-  balanceStroops: string;
-  /** bigint-as-string. `"0"` when absent. */
-  limitStroops: string;
-}
-
-/** `GET /api/users/me/stellar-trustlines` */
-export interface StellarTrustlinesResponse {
-  address: string | null;
-  accountLinked: boolean;
-  accountExists: boolean;
-  rows: StellarTrustlineRow[];
-}
-
-/**
- * One row of the caller's off-chain credit balance (ADR 009 / 015).
- * Most users only ever have a row in their home currency; multi-
- * currency rows appear when an admin adjustment landed in a non-home
- * currency or the user flipped their home currency with a non-zero
- * old-bucket balance.
- */
-export interface UserCreditRow {
-  currency: string;
-  balanceMinor: string;
-  updatedAt: string;
-}
-
-/** `GET /api/users/me/credits` */
-export interface UserCreditsResponse {
-  credits: UserCreditRow[];
 }
 
 /**

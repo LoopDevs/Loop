@@ -59,17 +59,28 @@
       "cta": "Go to sign-in"
     },
     "loadError": "Couldn't load your profile.",
+    "accountError": "Couldn't load your wallet right now. Please try again in a moment.",
     "heading": "Wallet",
     "introPrefix": "Link a Stellar wallet to receive your cashback as",
-    "introSuffix": "on-chain. Unlinked, your cashback still accrues server-side — you just can't spend it outside of Loop until you link one.",
+    "introSuffix": "on-chain. Unlinked, your cashback stays in your Loop balance until you link one.",
     "homeCurrency": {
       "heading": "Home currency",
-      "introPrefix": "Determines which LOOP asset your cashback lands in on-chain. Your current currency is",
+      "introPrefix": "Determines which stable your cashback is held in. Your current currency is",
       "introMiddle": ", so payouts arrive as",
       "introSuffix": ".",
       "radiogroupLabel": "Home currency",
       "locked": "You've already placed an order, so your home currency is locked. Contact support to change it.",
       "fallbackError": "Couldn't change currency."
+    },
+    "destination": {
+      "heading": "Cashback goes to",
+      "radiogroupLabel": "Cashback destination",
+      "payout": "Payout",
+      "payoutBody": "Sent to your linked wallet as soon as it's credited.",
+      "savings": "Savings",
+      "savingsBody": "Earn yield on your balance.",
+      "comingSoon": "Coming soon",
+      "fallbackError": "Couldn't update your payout setting."
     },
     "linked": {
       "heading": "Linked address",
@@ -77,20 +88,16 @@
       "copied": "Copied",
       "unlink": "Unlink wallet",
       "unlinking": "Saving…",
-      "empty": "No wallet linked. Add one below to start receiving on-chain cashback."
+      "empty": "No wallet linked. Add one to start receiving payouts."
     },
     "link": {
-      "headingLink": "Link a wallet",
-      "headingRelink": "Relink to a different wallet",
       "pubkeyLabel": "Stellar public key",
       "pubkeyPlaceholder": "GABC…",
       "pubkeyHintPart1": "56 characters, starts with",
       "pubkeyHintPart2": ". Make sure the wallet has a trustline to",
       "pubkeyHintPart3": "before linking — without it, payouts fail with",
       "pubkeyHintPart4": ".",
-      "invalidAddress": "That doesn't look like a Stellar public key.",
       "saving": "Saving…",
-      "update": "Update wallet",
       "linkCta": "Link wallet",
       "fallbackError": "Couldn't save — check the address and retry."
     }

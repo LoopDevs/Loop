@@ -229,26 +229,13 @@ export function countryFromAcceptLanguage(header: string | null | undefined): st
 
 /**
  * Country↔merchant visibility rule (ADR 034 §Decision-2). A merchant shows in
- * country `C` when `merchant.country === C` **OR** its display currency equals
- * `currencyOf(C)` — so a EUR merchant appears in every Eurozone country and a
- * GBP merchant in GB. No backend change; reads fields we already expose.
+ * country `C` only when `merchant.country === C`; CTX ships one catalogue row
+ * per country, so a brand's DE and AT variants are distinct merchants.
  *
- * A merchant tagged with neither a country nor a currency stays visible
- * everywhere — a data-gap fallback that preserves the pre-ADR-034 `!m.country`
- * behaviour. (No such rows exist in the live catalogue, but the guard keeps a
- * future sync gap from silently hiding a brand.)
+ * A merchant with no country stays visible everywhere — a data-gap fallback
+ * that keeps a future sync gap from silently hiding a brand.
  */
-export function merchantInCountry(
-  merchant: Pick<Merchant, 'country' | 'denominations'>,
-  country: string,
-): boolean {
-  const target = country.toUpperCase();
+export function merchantInCountry(merchant: Pick<Merchant, 'country'>, country: string): boolean {
   const merchantCountry = merchant.country?.toUpperCase();
-  const merchantCurrency = merchant.denominations?.currency?.toUpperCase();
-
-  if (!merchantCountry && !merchantCurrency) return true;
-  if (merchantCountry && merchantCountry === target) return true;
-
-  const countryCurrency = currencyOf(target);
-  return !!merchantCurrency && !!countryCurrency && merchantCurrency === countryCurrency;
+  return !merchantCountry || merchantCountry === country.toUpperCase();
 }

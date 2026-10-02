@@ -34,8 +34,8 @@ vi.mock('~/native/haptics', () => ({
 vi.mock('jsbarcode', () => ({ default: () => undefined }));
 // ADR 050: the barcode image arrives as an authed blob fetch by order id.
 const mockFetchBarcode = vi.fn<(id: string) => Promise<Blob>>();
-vi.mock('~/services/orders', () => ({
-  fetchOrderBarcodeImage: (id: string) => mockFetchBarcode(id),
+vi.mock('~/services/orders-loop', () => ({
+  fetchLoopOrderBarcodeImage: (id: string) => mockFetchBarcode(id),
 }));
 
 import { PurchaseComplete } from '../PurchaseComplete';

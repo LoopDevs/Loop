@@ -74,6 +74,15 @@ export async function getLoopOrder(id: string): Promise<LoopOrderView> {
   return authenticatedRequest<LoopOrderView>(`/api/orders/loop/${encodeURIComponent(id)}`);
 }
 
+/** GET /api/orders/loop/:id/barcode-image — CTX-rendered barcode as an authed JPEG blob. */
+export async function fetchLoopOrderBarcodeImage(id: string): Promise<Blob> {
+  const buffer = await authenticatedRequest<ArrayBuffer>(
+    `/api/orders/loop/${encodeURIComponent(id)}/barcode-image`,
+    { binary: true },
+  );
+  return new Blob([buffer], { type: 'image/jpeg' });
+}
+
 /**
  * GET /api/orders/loop — owner-scoped list of the caller's Loop-native
  * orders, newest first. `limit` clamps 1–100 server-side (default 50).

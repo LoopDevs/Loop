@@ -1,17 +1,4 @@
 {
-  "status": {
-    "pending": "Pending",
-    "completed": "Completed",
-    "failed": "Failed",
-    "expired": "Expired"
-  },
-  "payoutState": {
-    "pending": "Queued",
-    "submitted": "Submitting",
-    "confirmed": "Paid",
-    "failed": "Failed"
-  },
-  "payoutAriaLabel": "Cashback payout: {{label}}",
   "list": {
     "meta": {
       "title": "Orders — Loop"
@@ -19,6 +6,7 @@
     "pageTitle": "Orders",
     "heading": "Order history",
     "subtitle": "Every gift card order on your account — newest first.",
+    "ariaLabel": "Your orders",
     "error": {
       "tryAgain": "Try again"
     },
@@ -29,11 +17,8 @@
       "cta": "Sign in"
     },
     "empty": "No orders yet.",
-    "emptyPage": "No orders on this page.",
     "browseGiftCards": "Browse gift cards",
-    "retry": "Retry",
-    "previous": "Previous",
-    "next": "Next"
+    "retry": "Retry"
   },
   "detail": {
     "meta": {
@@ -46,32 +31,21 @@
     "signInRequired": "Please sign in to view this order.",
     "loadErrorFallback": "Failed to load order.",
     "retry": "Retry",
-    "pendingPayment": "This order is still awaiting payment confirmation.",
-    "terminalStatus": "This order {{status}}. The XLM you sent (if any) should refund automatically.",
+    "awaitingPayment": "Awaiting payment. Pay {{amount}} in {{asset}} from the merchant page to complete this order.",
+    "paid": "Thanks — your gift card is on the way.",
+    "failedFallback": "Order failed.",
+    "expired": "Order expired before payment arrived.",
+    "redemptionPending": "Your gift card is ready. Redemption details are still coming through — check back in a moment, or look at your email.",
+    "cashbackCredited": "{{amount}} cashback credited.",
     "redemption": {
-      "body": "This gift card is redeemed on the merchant's site. Open the page below and, if prompted, paste the challenge code.",
-      "challengeCodeLabel": "Challenge code",
+      "body": "This gift card is redeemed on the merchant's site. Open the page below to redeem it.",
       "openError": "We could not open the redemption page.",
       "opening": "Opening…",
       "cta": "Open redemption page"
     }
   },
   "loopList": {
-    "heading": "Your orders",
-    "failedFallback": "Order failed.",
-    "expired": "Order expired before payment arrived.",
-    "pendingPayment": "Awaiting payment. Pay {{amount}} in {{asset}} from the merchant page to complete this order.",
-    "openRedemptionLink": "Open redemption link",
-    "cashbackCredited": "{{amount}} cashback credited.",
-    "earnedCashback": "+{{amount}} cashback",
-    "fields": {
-      "code": "Code",
-      "pin": "PIN"
-    },
-    "copy": "Copy",
-    "copied": "Copied",
-    "copyAriaLabel": "Copy {{label}}",
-    "copiedAnnouncement": "{{label}} copied to clipboard."
+    "earnedCashback": "+{{amount}} cashback"
   },
   "summary": {
     "ariaLabel": "Orders summary",

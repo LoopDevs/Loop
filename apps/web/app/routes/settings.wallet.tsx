@@ -5,19 +5,25 @@ import { useTranslation } from 'react-i18next';
 import {
   ApiException,
   HOME_CURRENCIES,
-  STELLAR_PUBKEY_REGEX,
-  loopAssetForCurrency,
+  displayCurrencyCode,
+  heldStableForCurrency,
   type HomeCurrency,
 } from '@loop/shared';
 import type { Route } from './+types/settings.wallet';
 import i18n from '~/i18n/i18next';
 import { useAuth } from '~/hooks/use-auth';
-import { getMe, setHomeCurrency, setStellarAddress, type UserMeView } from '~/services/user';
+import { ACCOUNT_QUERY_KEY, useAccount } from '~/hooks/use-account';
+import {
+  getMe,
+  linkWallet,
+  setHomeCurrency,
+  unlinkWallet,
+  updateWallet,
+  type UserMeView,
+} from '~/services/user';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
-import { PendingPayoutsCard } from '~/components/features/cashback/PendingPayoutsCard';
-import { TrustlineSetupCard } from '~/components/features/wallet/TrustlineSetupCard';
-import { StellarTrustlineStatus } from '~/components/features/wallet/StellarTrustlineStatus';
+import { PayoutsCard } from '~/components/features/cashback/PayoutsCard';
 import { copyToClipboard } from '~/native/clipboard';
 import { Phase2Gate } from '~/components/Phase2Gate';
 import { Navbar } from '~/components/features/Navbar';
@@ -28,17 +34,6 @@ export function meta(): Route.MetaDescriptors {
   return [{ title: i18n.t('settings:wallet.meta.title') }];
 }
 
-/**
- * FE-41: route-level error boundary for the wallet money screen. Without
- * one, an unhandled render/loader error here bubbles to the root boundary
- * (root.tsx), which replaces the whole `App` — including `NativeShell` and
- * its `NativeTabBar` — so the native user is left on a blank screen with no
- * tab bar and no way to navigate away (hard stuck in the Capacitor webview).
- * Exported at the route level, React Router renders this in place of the
- * route's element inside `NativeShell`'s `<Outlet />`, so the chrome/tab-bar
- * stays mounted and the user keeps a recoverable error state (message +
- * retry). Same idiom as `routes/orders.tsx`.
- */
 export function ErrorBoundary(): React.JSX.Element {
   const { t } = useTranslation(['settings', 'common']);
   return (
@@ -54,31 +49,11 @@ export function ErrorBoundary(): React.JSX.Element {
   );
 }
 
-// `STELLAR_PUBKEY_REGEX` (ADR 015/016) + `loopAssetForCurrency`
-// (ADR 015) both come from `@loop/shared` — one source of truth
-// for the home-currency ↔ LOOP-asset mapping and the Stellar
-// address format, shared between backend zod schemas and this
-// UI form. See packages/shared/src/stellar.ts + loop-asset.ts.
-
-/**
- * `/settings/wallet` — opt in / out of on-chain cashback payouts
- * (ADR 015). Paste a Stellar pubkey to receive the LOOP-branded
- * asset matching your home currency, or unlink to go back to
- * off-chain-only ledger accrual.
- *
- * Nothing is lost when unlinking — the credit ledger continues
- * to track cashback server-side; only the Stellar-side emission
- * is gated on a linked address.
- */
 export default function SettingsWalletRoute(): React.JSX.Element {
   const { t } = useTranslation('settings');
   const { isNative } = useNativePlatform();
   return (
     <Phase2Gate>
-      {/* Same interior-page chrome idiom as routes/orders.tsx: web gets
-          the shared fixed Navbar, native gets the back-chevron PageHeader
-          (the Navbar's account menu links here, so a chrome-less page
-          left web users with no way back — FE regression fixed 2026-08). */}
       {!isNative && <Navbar />}
       <PageHeader title={t('wallet.heading')} fallbackHref="/auth" />
       <SettingsWalletBody />
@@ -86,15 +61,15 @@ export default function SettingsWalletRoute(): React.JSX.Element {
   );
 }
 
+const CARD =
+  'rounded-xl border border-gray-200 dark:border-gray-800 p-5 bg-white dark:bg-gray-900 space-y-4';
+const SECONDARY_BUTTON =
+  'rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800';
+
 function SettingsWalletBody(): React.JSX.Element {
   const { t } = useTranslation('settings');
   const navigate = useNavigate();
   const { isNative } = useNativePlatform();
-  // Native: NativeShell's `native-safe-page` already pads by
-  // `var(--safe-top)`, so only the PageHeader row (h-14) needs
-  // clearing. Web: `pt-28` clears the fixed Navbar and matches the
-  // home hero / rates page top offset so headings land at a
-  // consistent height across pages.
   const mainPad = isNative ? 'pt-16 pb-4' : 'pt-28 pb-8';
   const { isAuthenticated } = useAuth();
   const queryClient = useQueryClient();
@@ -106,20 +81,48 @@ function SettingsWalletBody(): React.JSX.Element {
     retry: shouldRetry,
     staleTime: 60_000,
   });
+  const { account, activeLink, isLoading: accountLoading, isError: accountError } = useAccount();
 
   const [draftAddress, setDraftAddress] = useState<string>('');
   const [formError, setFormError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [currencyError, setCurrencyError] = useState<string | null>(null);
+  const [destinationError, setDestinationError] = useState<string | null>(null);
+
+  const invalidateAccount = (): void => {
+    void queryClient.invalidateQueries({ queryKey: ACCOUNT_QUERY_KEY });
+  };
   const linkMutation = useMutation({
-    mutationFn: (addr: string | null) => setStellarAddress(addr),
-    onSuccess: (view: UserMeView) => {
-      queryClient.setQueryData(['me'], view);
+    mutationFn: (address: string) => linkWallet({ chain: 'XLM', address }),
+    onSuccess: () => {
       setDraftAddress('');
       setFormError(null);
+      invalidateAccount();
     },
     onError: (err) => {
       setFormError(err instanceof ApiException ? err.message : t('wallet.link.fallbackError'));
+    },
+  });
+  const unlinkMutation = useMutation({
+    mutationFn: (walletId: string) => unlinkWallet(walletId),
+    onSuccess: () => {
+      setFormError(null);
+      invalidateAccount();
+    },
+    onError: (err) => {
+      setFormError(err instanceof ApiException ? err.message : t('wallet.link.fallbackError'));
+    },
+  });
+  const destinationMutation = useMutation({
+    mutationFn: (walletId: string) => updateWallet(walletId, { autoPayout: true }),
+    onSuccess: () => {
+      setDestinationError(null);
+      invalidateAccount();
+    },
+    onError: (err) => {
+      setDestinationError(
+        err instanceof ApiException ? err.message : t('wallet.destination.fallbackError'),
+      );
     },
   });
   const currencyMutation = useMutation({
@@ -159,7 +162,7 @@ function SettingsWalletBody(): React.JSX.Element {
     );
   }
 
-  if (meQuery.isPending) {
+  if (meQuery.isPending || accountLoading) {
     return (
       <main className={`max-w-2xl mx-auto px-6 ${mainPad} flex justify-center`}>
         <Spinner />
@@ -167,36 +170,39 @@ function SettingsWalletBody(): React.JSX.Element {
     );
   }
 
-  if (meQuery.isError) {
+  if (meQuery.isError || accountError || account === undefined) {
     return (
       <main className={`max-w-2xl mx-auto px-6 ${mainPad}`}>
         <h1 className="text-2xl font-semibold text-gray-900 dark:text-white mb-4">
           {t('wallet.heading')}
         </h1>
-        <p className="text-red-600 dark:text-red-400">{t('wallet.loadError')}</p>
+        <p className="text-red-600 dark:text-red-400">
+          {meQuery.isError ? t('wallet.loadError') : t('wallet.accountError')}
+        </p>
       </main>
     );
   }
 
   const user = meQuery.data;
-  const linked = user.stellarAddress !== null;
   const trimmed = draftAddress.trim();
-  const draftValid = STELLAR_PUBKEY_REGEX.test(trimmed);
-  const assetCode = loopAssetForCurrency(user.homeCurrency);
+  const draftValid = trimmed.length > 0;
+  const stableCode = displayCurrencyCode(heldStableForCurrency(user.homeCurrency));
+  const busy = linkMutation.isPending || unlinkMutation.isPending;
+  const payoutSelected = activeLink === null || activeLink.autoPayout;
 
   const handleLink = (): void => {
-    if (!draftValid || linkMutation.isPending) return;
+    if (!draftValid || busy) return;
     setFormError(null);
     linkMutation.mutate(trimmed);
   };
   const handleUnlink = (): void => {
-    if (linkMutation.isPending) return;
+    if (busy || activeLink === null) return;
     setFormError(null);
-    linkMutation.mutate(null);
+    unlinkMutation.mutate(activeLink.id);
   };
   const handleCopy = async (): Promise<void> => {
-    if (user.stellarAddress === null) return;
-    const ok = await copyToClipboard(user.stellarAddress);
+    if (activeLink === null) return;
+    const ok = await copyToClipboard(activeLink.address);
     if (ok) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
@@ -207,6 +213,11 @@ function SettingsWalletBody(): React.JSX.Element {
     setCurrencyError(null);
     currencyMutation.mutate(code);
   };
+  const handleSelectPayout = (): void => {
+    if (payoutSelected || activeLink === null || destinationMutation.isPending) return;
+    setDestinationError(null);
+    destinationMutation.mutate(activeLink.id);
+  };
 
   return (
     <main className={`max-w-2xl mx-auto px-6 ${mainPad} space-y-8`}>
@@ -215,21 +226,11 @@ function SettingsWalletBody(): React.JSX.Element {
           {t('wallet.heading')}
         </h1>
         <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-          {t('wallet.introPrefix')} <strong>{assetCode}</strong> {t('wallet.introSuffix')}
+          {t('wallet.introPrefix')} <strong>{stableCode}</strong> {t('wallet.introSuffix')}
         </p>
       </header>
 
-      {/* Home-currency picker. The backend locks the column once the
-          user has placed an order (409 HOME_CURRENCY_LOCKED), so the
-          first-order-onwards flow is a one-way gate — the button click
-          optimistically fires the PUT, the 409 branch falls through to
-          an inline "contact support" callout. Keeping this a card
-          (not buried in a /settings index) so users who land here to
-          link a wallet see the asset-code consequence immediately. */}
-      <section
-        aria-labelledby="home-currency-heading"
-        className="rounded-xl border border-gray-200 dark:border-gray-800 p-5 bg-white dark:bg-gray-900 space-y-4"
-      >
+      <section aria-labelledby="home-currency-heading" className={CARD}>
         <h2
           id="home-currency-heading"
           className="text-base font-semibold text-gray-900 dark:text-white"
@@ -238,7 +239,7 @@ function SettingsWalletBody(): React.JSX.Element {
         </h2>
         <p className="text-sm text-gray-600 dark:text-gray-400">
           {t('wallet.homeCurrency.introPrefix')} <strong>{user.homeCurrency}</strong>
-          {t('wallet.homeCurrency.introMiddle')} <strong>{assetCode}</strong>
+          {t('wallet.homeCurrency.introMiddle')} <strong>{stableCode}</strong>
           {t('wallet.homeCurrency.introSuffix')}
         </p>
         <div
@@ -248,11 +249,6 @@ function SettingsWalletBody(): React.JSX.Element {
         >
           {HOME_CURRENCIES.map((code, i) => {
             const active = code === user.homeCurrency;
-            // A11Y-021 / CF-35: WAI-ARIA radiogroup keyboard contract — one
-            // roving tab stop (the selected currency, or the first), with
-            // Arrow/Home/End moving selection. The active radio stays
-            // focusable (only `isPending` disables it) so it can be the tab
-            // stop; `handleCurrencyChange` already no-ops on re-select.
             const selectedIndex = HOME_CURRENCIES.indexOf(user.homeCurrency);
             const tabStop = selectedIndex === -1 ? 0 : selectedIndex;
             return (
@@ -284,7 +280,7 @@ function SettingsWalletBody(): React.JSX.Element {
                     : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800'
                 }`}
               >
-                {code} → {loopAssetForCurrency(code)}
+                {code} → {displayCurrencyCode(heldStableForCurrency(code))}
               </button>
             );
           })}
@@ -296,20 +292,76 @@ function SettingsWalletBody(): React.JSX.Element {
         ) : null}
       </section>
 
-      <section
-        aria-labelledby="linked-heading"
-        className="rounded-xl border border-gray-200 dark:border-gray-800 p-5 bg-white dark:bg-gray-900 space-y-4"
-      >
+      <section aria-labelledby="destination-heading" className={CARD}>
+        <h2
+          id="destination-heading"
+          className="text-base font-semibold text-gray-900 dark:text-white"
+        >
+          {t('wallet.destination.heading')}
+        </h2>
+        <div
+          role="radiogroup"
+          aria-label={t('wallet.destination.radiogroupLabel')}
+          className="grid grid-cols-1 sm:grid-cols-2 gap-3"
+        >
+          <button
+            type="button"
+            role="radio"
+            aria-checked={payoutSelected}
+            onClick={handleSelectPayout}
+            disabled={destinationMutation.isPending}
+            className={`rounded-lg border px-4 py-3 text-start disabled:cursor-not-allowed ${
+              payoutSelected
+                ? 'border-gray-900 dark:border-white'
+                : 'border-gray-300 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800'
+            }`}
+          >
+            <span className="block text-sm font-semibold text-gray-900 dark:text-white">
+              {t('wallet.destination.payout')}
+            </span>
+            <span className="mt-0.5 block text-xs text-gray-600 dark:text-gray-400">
+              {t('wallet.destination.payoutBody')}
+            </span>
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={false}
+            aria-disabled="true"
+            disabled
+            className="rounded-lg border border-gray-200 px-4 py-3 text-start opacity-60 cursor-not-allowed dark:border-gray-800"
+          >
+            <span className="flex items-center justify-between gap-2">
+              <span className="text-sm font-semibold text-gray-900 dark:text-white">
+                {t('wallet.destination.savings')}
+              </span>
+              <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+                {t('wallet.destination.comingSoon')}
+              </span>
+            </span>
+            <span className="mt-0.5 block text-xs text-gray-600 dark:text-gray-400">
+              {t('wallet.destination.savingsBody')}
+            </span>
+          </button>
+        </div>
+        {destinationError !== null ? (
+          <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+            {destinationError}
+          </p>
+        ) : null}
+      </section>
+
+      <section aria-labelledby="linked-heading" className={CARD}>
         <h2 id="linked-heading" className="text-base font-semibold text-gray-900 dark:text-white">
           {t('wallet.linked.heading')}
         </h2>
-        {linked ? (
+        {activeLink !== null ? (
           <>
             <p
               className="break-all font-mono text-sm text-gray-900 dark:text-white"
-              title={user.stellarAddress ?? ''}
+              title={activeLink.address}
             >
-              {user.stellarAddress}
+              {activeLink.address}
             </p>
             <div className="flex flex-wrap gap-2">
               <button
@@ -318,97 +370,65 @@ function SettingsWalletBody(): React.JSX.Element {
                   void handleCopy();
                 }}
                 aria-live="polite"
-                className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
+                className={SECONDARY_BUTTON}
               >
                 {copied ? t('wallet.linked.copied') : t('wallet.linked.copy')}
               </button>
               <button
                 type="button"
                 onClick={handleUnlink}
-                disabled={linkMutation.isPending}
+                disabled={busy}
                 className="rounded-lg border border-red-300 bg-white px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800 dark:bg-gray-900 dark:text-red-400 dark:hover:bg-red-900/20"
               >
-                {linkMutation.isPending ? t('wallet.linked.unlinking') : t('wallet.linked.unlink')}
+                {unlinkMutation.isPending
+                  ? t('wallet.linked.unlinking')
+                  : t('wallet.linked.unlink')}
               </button>
             </div>
           </>
         ) : (
-          <p className="text-sm text-gray-600 dark:text-gray-400">{t('wallet.linked.empty')}</p>
+          <>
+            <p className="text-sm text-gray-600 dark:text-gray-400">{t('wallet.linked.empty')}</p>
+            <label htmlFor="stellar-address" className="block">
+              <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                {t('wallet.link.pubkeyLabel')}
+              </span>
+              <input
+                id="stellar-address"
+                type="text"
+                spellCheck={false}
+                autoComplete="off"
+                inputMode="text"
+                value={draftAddress}
+                onChange={(e) => setDraftAddress(e.target.value)}
+                placeholder={t('wallet.link.pubkeyPlaceholder')}
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-mono text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-950 dark:text-white dark:placeholder-gray-600"
+              />
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {t('wallet.link.pubkeyHintPart1')} <code>G</code>
+                {t('wallet.link.pubkeyHintPart2')} <strong>{stableCode}</strong>{' '}
+                {t('wallet.link.pubkeyHintPart3')} <code>op_no_trust</code>
+                {t('wallet.link.pubkeyHintPart4')}
+              </p>
+            </label>
+            <button
+              type="button"
+              onClick={handleLink}
+              disabled={!draftValid || busy}
+              className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-white dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100 dark:disabled:bg-gray-700 dark:disabled:text-gray-400"
+            >
+              {linkMutation.isPending ? t('wallet.link.saving') : t('wallet.link.linkCta')}
+            </button>
+          </>
         )}
-      </section>
-
-      {/* In-flight on-chain payouts. Hides itself when the user has
-          no payout history yet, so the first-link flow stays clean;
-          appears automatically after the next fulfilled order so the
-          user can watch a payout transition pending → submitted →
-          confirmed without reloading. */}
-      {linked ? <PendingPayoutsCard /> : null}
-
-      {/* Per-LOOP-asset trustline status (#725). Complements the
-          setup card below with "did my wallet actually open the
-          trustline?" — self-hides when no address is linked since
-          the form above is the primary surface then. */}
-      {linked ? <StellarTrustlineStatus /> : null}
-
-      {/* Trustline setup helper — self-hides on error / empty-list /
-          unconfigured deployments. Shown to every visitor (linked or
-          not) because opening a trustline is a wallet-side action
-          that happens before the user sees their first payout, so
-          the card should be visible up-front on first arrival. */}
-      <TrustlineSetupCard />
-
-      <section
-        aria-labelledby="link-heading"
-        className="rounded-xl border border-gray-200 dark:border-gray-800 p-5 bg-white dark:bg-gray-900 space-y-4"
-      >
-        <h2 id="link-heading" className="text-base font-semibold text-gray-900 dark:text-white">
-          {linked ? t('wallet.link.headingRelink') : t('wallet.link.headingLink')}
-        </h2>
-        <label htmlFor="stellar-address" className="block">
-          <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            {t('wallet.link.pubkeyLabel')}
-          </span>
-          <input
-            id="stellar-address"
-            type="text"
-            spellCheck={false}
-            autoComplete="off"
-            inputMode="text"
-            value={draftAddress}
-            onChange={(e) => setDraftAddress(e.target.value)}
-            placeholder={t('wallet.link.pubkeyPlaceholder')}
-            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-mono text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-950 dark:text-white dark:placeholder-gray-600"
-          />
-          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            {t('wallet.link.pubkeyHintPart1')} <code>G</code>
-            {t('wallet.link.pubkeyHintPart2')} <strong>{assetCode}</strong>{' '}
-            {t('wallet.link.pubkeyHintPart3')} <code>op_no_trust</code>
-            {t('wallet.link.pubkeyHintPart4')}
-          </p>
-        </label>
         {formError !== null ? (
           <div role="alert" className="text-sm text-red-600 dark:text-red-400">
             {formError}
           </div>
         ) : null}
-        {trimmed.length > 0 && !draftValid ? (
-          <div className="text-sm text-amber-700 dark:text-amber-400">
-            {t('wallet.link.invalidAddress')}
-          </div>
-        ) : null}
-        <button
-          type="button"
-          onClick={handleLink}
-          disabled={!draftValid || linkMutation.isPending}
-          className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-white dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100 dark:disabled:bg-gray-700 dark:disabled:text-gray-400"
-        >
-          {linkMutation.isPending
-            ? t('wallet.link.saving')
-            : linked
-              ? t('wallet.link.update')
-              : t('wallet.link.linkCta')}
-        </button>
       </section>
+
+      <PayoutsCard />
     </main>
   );
 }

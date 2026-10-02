@@ -45,6 +45,9 @@ const DEFAULT_CONFIG: AppConfig = {
   // checkout on the universally-supported currency rather than
   // offering rails the deployment may not accept.
   ctxPaymentCurrencies: ['XLM'],
+  fiatPaymentCurrencies: [],
+  countries: [],
+  stableCurrencies: [],
   // Base value only — `useAppConfig` overrides `phase1Only` with the
   // deploy-aware `defaultPhase1Only()` at call time so SSR/first-paint
   // tracks the deployment. Kept `true` here as the safe fallback for any

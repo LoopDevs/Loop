@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import type { Order, OrderListResponse } from '@loop/shared';
-import { fetchOrders, fetchOrder } from '~/services/orders';
+import { fetchOrders } from '~/services/orders';
 import { shouldRetry } from './query-retry';
 
 export interface UseOrdersResult {
@@ -51,33 +51,5 @@ export function useOrders(page: number, isAuthenticated: boolean): UseOrdersResu
     refetch: () => {
       void query.refetch();
     },
-  };
-}
-
-/** Fetches a single order by id. */
-export function useOrder(
-  id: string,
-  isAuthenticated: boolean,
-): {
-  order: Order | undefined;
-  isLoading: boolean;
-  isError: boolean;
-  error: Error | null;
-} {
-  const normalized = id.trim();
-  const query = useQuery<{ order: Order }, Error>({
-    queryKey: ['order', normalized],
-    queryFn: () => fetchOrder(normalized),
-    enabled: isAuthenticated && normalized.length > 0,
-    staleTime: 30 * 1000,
-    refetchOnReconnect: true,
-    retry: shouldRetry,
-  });
-
-  return {
-    order: query.data?.order,
-    isLoading: query.isLoading,
-    isError: query.isError,
-    error: query.error,
   };
 }

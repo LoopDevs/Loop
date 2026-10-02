@@ -5,7 +5,12 @@ import { logger } from '../logger.js';
 import { upstreamUrl, upstreamFetch } from '../upstream.js';
 import { scrubUpstreamBody } from '../upstream-body-scrub.js';
 import { notifyCtxSchemaDrift } from '../discord.js';
-import { mapStatus, summariseZodIssues, upstreamHeaders } from './handler-shared.js';
+import {
+  mapStatus,
+  percentFromBasisPoints,
+  summariseZodIssues,
+  upstreamHeaders,
+} from './handler-shared.js';
 
 const log = logger.child({ handler: 'orders' });
 
@@ -18,7 +23,7 @@ const ListOrdersUpstreamItem = z
     cardFiatCurrency: z.string().optional(),
     paymentCryptoAmount: z.string().optional(),
     status: z.string().optional(),
-    percentDiscount: z.string().optional(),
+    userDiscountBasisPoints: z.number().optional(),
     redeemType: z.string().optional(),
     created: z.string().optional(),
   })
@@ -84,7 +89,7 @@ function shapeOrder(item: UpstreamListItem): OrderListRow | null {
     currency: item.cardFiatCurrency ?? 'USD',
     status: mapStatus(item.status ?? 'unpaid'),
     xlmAmount: item.paymentCryptoAmount ?? '0',
-    percentDiscount: item.percentDiscount,
+    percentDiscount: percentFromBasisPoints(item.userDiscountBasisPoints),
     redeemType: item.redeemType,
     createdAt: item.created,
   };

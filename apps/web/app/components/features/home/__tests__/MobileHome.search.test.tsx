@@ -78,7 +78,6 @@ vi.mock('~/services/user', () => ({
   getCashbackSummary: vi.fn().mockRejectedValue(new Error('not authenticated')),
 }));
 
-vi.mock('~/components/features/wallet/WalletCard', () => ({ WalletCard: () => null }));
 vi.mock('~/components/features/FavoritesStrip', () => ({ FavoritesStrip: () => null }));
 vi.mock('~/components/features/RecentlyPurchasedStrip', () => ({
   RecentlyPurchasedStrip: () => null,

@@ -27,11 +27,9 @@ import {
   type CashbackHistoryEntry,
   type UserMeView,
 } from '~/services/user';
-import { PendingCashbackChip } from '~/components/features/cashback/PendingCashbackChip';
-import { WalletCard, fmtLoopBalance } from '~/components/features/wallet/WalletCard';
-import { formatDateTime, useLocaleTag } from '~/i18n/format';
-import { useWallet } from '~/hooks/use-wallet';
-import { CURRENCY_TO_ASSET_CODE } from '@loop/shared';
+import { formatAccountAmount, formatDateTime, useLocaleTag } from '~/i18n/format';
+import { useAccount } from '~/hooks/use-account';
+import { heldStableForCurrency } from '@loop/shared';
 
 // ADR 043 (B-6): `meta()` runs outside the React tree (no hooks) — uses the
 // i18next singleton's `.t()` directly rather than `useTranslation()`.
@@ -179,37 +177,6 @@ function BiometricLockRow(): React.JSX.Element | null {
   );
 }
 
-/**
- * Formats a minor-units bigint-string into the account view's
- * headline cashback balance. Falls back to `—` for parse errors so
- * a bad server response degrades gracefully rather than crashing
- * the Account screen.
- */
-function formatCashbackBalance(minor: string, currency: 'USD' | 'GBP' | 'EUR'): string {
-  try {
-    const asCents = BigInt(minor);
-    const major = Number(asCents) / 100;
-    return new Intl.NumberFormat(undefined, {
-      style: 'currency',
-      currency,
-      maximumFractionDigits: 2,
-    }).format(major);
-  } catch {
-    return '—';
-  }
-}
-
-/**
- * `Your cashback` card on the Account screen. Shows the user's
- * off-chain balance in their home currency (ADR 015). Zero-balance
- * users still see the card so "you have 0.00 cashback" is a clear
- * state rather than an empty container.
- *
- * Phase 1 (`phase1Only=true`) delivers cashback as instant discount
- * at order creation — no balance accumulates, no wallet to withdraw
- * to. The "Link a wallet to withdraw" CTA suppresses in that mode so
- * users aren't sold a feature that doesn't exist yet.
- */
 function CashbackBalanceCard({
   me,
   isLoading,
@@ -219,34 +186,22 @@ function CashbackBalanceCard({
   isLoading: boolean;
   phase1Only: boolean;
 }): React.JSX.Element {
-  // balance = tokens once activated; mirror is reconciliation-only
-  // (ADR 036). Once the embedded wallet is `activated`, every accrued
-  // unit has been emitted on-chain — the user's balance IS the LOOP
-  // tokens they hold, so this card sources the headline from the
-  // wallet's matching home-currency LOOP asset. Pre-activation users
-  // keep the `homeCurrencyBalanceMinor` mirror display (their tokens
-  // haven't been emitted yet).
-  const { wallet, isActivated, balanceFor } = useWallet();
-  const tokenSourced = isActivated && wallet !== undefined;
+  const { account, activeLink } = useAccount();
   const locale = useLocaleTag();
-  const showWithdrawNudge = !phase1Only && me?.stellarAddress === null;
   const { t } = useTranslation('auth');
+  const showWithdrawNudge = !phase1Only && account !== undefined && activeLink === null;
+  let headline = '—';
+  if (!isLoading && me !== undefined) {
+    const stable = heldStableForCurrency(me.homeCurrency);
+    const amount = account?.wallet.find((b) => b.currency === stable)?.amount ?? '0';
+    headline = formatAccountAmount(amount, stable, locale);
+  }
   return (
     <div className="mb-6 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-4">
       <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
         {t('cashback.heading')}
       </p>
-      <p className="mt-1 text-2xl font-semibold text-gray-900 dark:text-white">
-        {isLoading || me === undefined
-          ? '—'
-          : tokenSourced
-            ? fmtLoopBalance(
-                balanceFor(CURRENCY_TO_ASSET_CODE[me.homeCurrency]),
-                CURRENCY_TO_ASSET_CODE[me.homeCurrency],
-                locale,
-              )
-            : formatCashbackBalance(me.homeCurrencyBalanceMinor, me.homeCurrency)}
-      </p>
+      <p className="mt-1 text-2xl font-semibold text-gray-900 dark:text-white">{headline}</p>
       <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
         {phase1Only ? t('cashback.subtitlePhase1') : t('cashback.subtitlePhase2')}
         {showWithdrawNudge ? t('cashback.withdrawNudge') : ''}
@@ -521,18 +476,11 @@ export default function AuthRoute(): React.JSX.Element {
               {t('account.heading')}
             </h1>
             <p className="text-gray-500 dark:text-gray-400 mb-6">{userEmail}</p>
-            {/* ADR 030 Phase C: the on-chain LOOP balance is THE
-                user-facing balance once the embedded wallet is live.
-                Self-gating — renders nothing until the backend wallet
-                surface exists, so the off-chain cashback card below
-                stays the headline meanwhile. */}
-            <WalletCard />
             <CashbackBalanceCard
               me={meQuery.data}
               isLoading={meQuery.isLoading}
               phase1Only={config.phase1Only}
             />
-            <PendingCashbackChip />
             <CashbackHistoryCard
               entries={historyQuery.data?.entries}
               isLoading={historyQuery.isLoading}

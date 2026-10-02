@@ -31,7 +31,6 @@ import { formatDateTime, formatMinorCurrency, formatMoney, useLocaleTag } from '
 import { MerchantCardSkeleton } from '~/components/ui/Skeleton';
 import { FavoritesStrip } from '~/components/features/FavoritesStrip';
 import { RecentlyPurchasedStrip } from '~/components/features/RecentlyPurchasedStrip';
-import { WalletCard } from '~/components/features/wallet/WalletCard';
 import { useWindowedGrid } from './use-windowed-grid';
 // FE-25 windowing primitives now live in ./use-windowed-grid (shared with the
 // desktop directory grid in routes/home.tsx). Re-exported here so the existing
@@ -337,13 +336,6 @@ export function MobileHome(): React.JSX.Element {
           currency={heroCurrency}
           locale={locale}
         />
-      </div>
-
-      {/* Loop balance (ADR 030 Phase C) — the on-chain LOOP balance
-          is the user's authoritative spendable balance. Self-gating:
-          renders nothing while signed out / loading / pre-backend. */}
-      <div className="px-5 pt-3 [&>section]:mb-0">
-        <WalletCard />
       </div>
 
       {/* Quick buy ---------------------------------------------- */}

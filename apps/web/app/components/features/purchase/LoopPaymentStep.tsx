@@ -254,6 +254,8 @@ function FailureBody({
 function CtxPaymentBody({ payment }: { payment: LoopOrderPaymentInstructions }): React.JSX.Element {
   const locale = useLocaleTag();
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const secondsLeft = useSecondsLeft(payment.expiresAt);
+  const expired = secondsLeft !== null && secondsLeft <= 0;
 
   // PAYMENTURI-UNGATED (XSS): `paymentUrls` values are upstream-supplied
   // (see safePaymentUriHref). A `javascript:`/`data:` scheme dropped into
@@ -261,12 +263,14 @@ function CtxPaymentBody({ payment }: { payment: LoopOrderPaymentInstructions }):
   // to the wallet-scheme allow-list; a rejected URI yields null and we
   // render no live link — the address copy path below still lets the
   // user pay.
+  const isFiat = payment.method === 'fiat';
   const rawUri = payment.paymentUrls[payment.cryptoCurrency];
-  const paymentHref = rawUri !== undefined ? safePaymentUriHref(rawUri) : null;
+  const paymentHref =
+    rawUri !== undefined ? (isFiat ? safeRedeemHref(rawUri) : safePaymentUriHref(rawUri)) : null;
 
   // QR encodes the wallet URI when CTX supplied one (wallets prefill
   // amount + destination from it) and falls back to the bare address.
-  const qrContent = paymentHref ?? payment.address;
+  const qrContent = isFiat ? null : (paymentHref ?? payment.address);
 
   useEffect(() => {
     if (qrContent === null) return;
@@ -292,7 +296,9 @@ function CtxPaymentBody({ payment }: { payment: LoopOrderPaymentInstructions }):
           label="You pay"
           value={formatMinorCurrency(payment.amountMinor, payment.currency, locale)}
         />
-        {payment.cryptoAmount !== null ? (
+        {isFiat ? (
+          <Row label="Pay with" value={payment.cryptoCurrency} mono />
+        ) : payment.cryptoAmount !== null ? (
           <Row label="Send" value={`${payment.cryptoAmount} ${payment.cryptoCurrency}`} mono />
         ) : (
           <Row label="Pay in" value={payment.cryptoCurrency} mono />
@@ -302,27 +308,30 @@ function CtxPaymentBody({ payment }: { payment: LoopOrderPaymentInstructions }):
         ) : null}
       </div>
 
-      {qrDataUrl !== null ? (
+      {qrDataUrl !== null && !expired ? (
         <div className="flex justify-center">
           <img src={qrDataUrl} alt="Payment QR code" className="rounded-lg" />
         </div>
       ) : null}
 
-      {paymentHref !== null ? (
+      {paymentHref !== null && !expired ? (
         <a
           href={paymentHref}
+          target={isFiat ? '_blank' : undefined}
+          rel={isFiat ? 'noopener noreferrer' : undefined}
           className="block w-full rounded-lg bg-gray-900 hover:bg-gray-800 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-200 px-4 py-3 text-center text-sm font-semibold text-white"
         >
-          Open in wallet
+          {isFiat ? 'Continue to payment' : 'Open in wallet'}
         </a>
       ) : null}
 
       <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
-        Send exactly this amount from any {payment.cryptoCurrency} wallet. Your order updates
-        automatically once the payment confirms.
+        {isFiat
+          ? `Complete the ${payment.cryptoCurrency} payment with our payment partner. Your order updates automatically once the payment confirms.`
+          : `Send exactly this amount from any ${payment.cryptoCurrency} wallet. Your order updates automatically once the payment confirms.`}
       </p>
 
-      <ExpiryCountdown expiresAt={payment.expiresAt} />
+      <ExpiryCountdown secondsLeft={secondsLeft} />
 
       <div className="flex justify-center">
         <Spinner />
@@ -333,14 +342,14 @@ function CtxPaymentBody({ payment }: { payment: LoopOrderPaymentInstructions }):
 
 /**
  * Countdown to CTX's payment-window expiry. Renders nothing when the
- * server didn't report one (`expiresAt: null`) — a missing window is
+ * server didn't report one (`secondsLeft: null`) — a missing window is
  * "no deadline to show", never a fabricated local one.
  *
  * WCAG 2.2.1 (Timing Adjustable) / A11Y-002: announced politely on a
  * coarse cadence so SR users hear time running low without a
  * per-second barrage.
  */
-function ExpiryCountdown({ expiresAt }: { expiresAt: string | null }): React.JSX.Element | null {
+function useSecondsLeft(expiresAt: string | null): number | null {
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
 
   useEffect(() => {
@@ -355,7 +364,15 @@ function ExpiryCountdown({ expiresAt }: { expiresAt: string | null }): React.JSX
     return () => clearInterval(timer);
   }, [expiresAt]);
 
-  if (expiresAt === null || secondsLeft === null) return null;
+  return expiresAt === null ? null : secondsLeft;
+}
+
+function ExpiryCountdown({
+  secondsLeft,
+}: {
+  secondsLeft: number | null;
+}): React.JSX.Element | null {
+  if (secondsLeft === null) return null;
 
   const expired = secondsLeft <= 0;
   const mins = Math.floor(secondsLeft / 60);

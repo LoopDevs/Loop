@@ -3,13 +3,12 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, act, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Routes, Route } from 'react-router';
+import type { PayoutView, UserAccountView } from '@loop/shared';
 
 const { historyMock, authMock } = vi.hoisted(() => ({
   historyMock: {
     getCashbackHistory: vi.fn(),
-    getUserPendingPayouts: vi.fn(),
-    getMyCredits: vi.fn(),
-    getMe: vi.fn(),
+    getMyAccount: vi.fn(),
   },
   authMock: {
     isAuthenticated: true,
@@ -19,10 +18,7 @@ const { historyMock, authMock } = vi.hoisted(() => ({
 vi.mock('~/services/user', () => ({
   getCashbackHistory: (opts?: { limit?: number; before?: string }) =>
     historyMock.getCashbackHistory(opts),
-  getUserPendingPayouts: (opts?: { limit?: number; before?: string; state?: string }) =>
-    historyMock.getUserPendingPayouts(opts),
-  getMyCredits: () => historyMock.getMyCredits(),
-  getMe: () => historyMock.getMe(),
+  getMyAccount: () => historyMock.getMyAccount(),
   // Monthly bar chart (#576 / #577) self-hides on reject; returning
   // a rejected promise here keeps the pre-existing tests focused on
   // the history + payouts sections without mocking a new shape.
@@ -104,31 +100,45 @@ function mkEntry(overrides: Partial<Entry> = {}): Entry {
   };
 }
 
+function emptyAccount(overrides: Partial<UserAccountView> = {}): UserAccountView {
+  return {
+    id: 'acct-1',
+    userId: 'ctx-1',
+    wallet: [],
+    savings: [],
+    savingsPrincipal: [],
+    pendingOperations: [],
+    linkedWallets: [],
+    payouts: [],
+    created: '2026-09-01T00:00:00Z',
+    updated: '2026-09-23T10:00:00Z',
+    ...overrides,
+  };
+}
+
+function payout(overrides: Partial<PayoutView> = {}): PayoutView {
+  return {
+    id: 'p-1',
+    status: 'complete',
+    chain: 'XLM',
+    address: 'G' + 'A'.repeat(55),
+    currency: 'XLM.GBPLOOP',
+    amount: '1.2500000',
+    giftCardId: 'gc-1',
+    txHash: null,
+    transferId: null,
+    error: null,
+    created: '2026-09-23T10:00:00Z',
+    finalised: '2026-09-23T10:00:05Z',
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
   authMock.isAuthenticated = true;
   historyMock.getCashbackHistory.mockReset();
-  // Every existing test expects the pending-payouts section to stay
-  // hidden; default the fetch to an empty list so we don't have to
-  // touch every case. Pending-payouts-specific tests below override.
-  historyMock.getUserPendingPayouts.mockReset();
-  historyMock.getUserPendingPayouts.mockResolvedValue({ payouts: [] });
-  // Default balance-card fetch to an empty-rows snapshot so the
-  // card renders its "no cashback yet" copy and existing tests
-  // that don't care about the card don't need to stub it.
-  historyMock.getMyCredits.mockReset();
-  historyMock.getMyCredits.mockResolvedValue({ credits: [] });
-  // Default to a user with a linked wallet so the LinkWalletNudge
-  // hides itself — existing tests don't care about the nudge.
-  // Nudge-specific tests below can override.
-  historyMock.getMe.mockReset();
-  historyMock.getMe.mockResolvedValue({
-    id: 'u1',
-    email: 'u@loop.test',
-    isAdmin: false,
-    homeCurrency: 'GBP',
-    stellarAddress: 'GABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGH',
-    homeCurrencyBalanceMinor: '0',
-  });
+  historyMock.getMyAccount.mockReset();
+  historyMock.getMyAccount.mockResolvedValue(emptyAccount());
 });
 
 afterEach(cleanup);
@@ -289,101 +299,49 @@ describe('SettingsCashbackRoute — ledger amount formatting (AUD-12)', () => {
   });
 });
 
-describe('SettingsCashbackRoute — on-chain payouts section', () => {
-  it('does not render the section when the user has no payout rows', async () => {
+describe('SettingsCashbackRoute — payouts section', () => {
+  it('does not render the section when the account has no payouts', async () => {
     historyMock.getCashbackHistory.mockResolvedValue({ entries: [] });
-    historyMock.getUserPendingPayouts.mockResolvedValue({ payouts: [] });
     renderPage();
-    // Empty state of the ledger section still renders; the payouts
-    // section should simply be absent.
     await screen.findByText(/No cashback activity yet/i);
-    expect(screen.queryByText(/On-chain payouts/i)).toBeNull();
+    expect(screen.queryByText(/^Payouts$/i)).toBeNull();
   });
 
-  it('renders the section with a state pill + asset amount when a row exists', async () => {
+  it('renders a status pill and the amount as the pegged fiat', async () => {
     historyMock.getCashbackHistory.mockResolvedValue({ entries: [] });
-    historyMock.getUserPendingPayouts.mockResolvedValue({
-      payouts: [
-        {
-          id: 'p-1',
-          orderId: 'o-1',
-          assetCode: 'GBPLOOP',
-          assetIssuer: 'GISSUER',
-          amountStroops: '12500000',
-          state: 'confirmed',
-          txHash: 'abc123def456',
-          attempts: 1,
-          createdAt: '2026-04-20T10:00:00.000Z',
-          submittedAt: '2026-04-20T10:01:00.000Z',
-          confirmedAt: '2026-04-20T10:02:00.000Z',
-          failedAt: null,
-        },
-      ],
-    });
+    historyMock.getMyAccount.mockResolvedValue(emptyAccount({ payouts: [payout()] }));
     renderPage();
-    await screen.findByText(/On-chain payouts/i);
-    // 12,500,000 stroops = 1.25 GBPLOOP (7-decimal asset)
-    expect(screen.getByText(/1\.25 GBPLOOP/)).toBeDefined();
-    expect(screen.getByText(/Confirmed/)).toBeDefined();
+    expect(await screen.findByText(/^Payouts$/i)).toBeTruthy();
+    expect(screen.getByText('Paid')).toBeTruthy();
+    expect(screen.getByText(/£1\.25/)).toBeTruthy();
   });
 
-  it('links confirmed payouts to stellar.expert using the tx hash', async () => {
+  it('links completed payouts to stellar.expert by tx hash', async () => {
     historyMock.getCashbackHistory.mockResolvedValue({ entries: [] });
-    historyMock.getUserPendingPayouts.mockResolvedValue({
-      payouts: [
-        {
-          id: 'p-1',
-          orderId: 'o-1',
-          assetCode: 'USDLOOP',
-          assetIssuer: 'GISSUER',
-          amountStroops: '10000000',
-          state: 'confirmed',
-          txHash: 'tx-hash-789',
-          attempts: 1,
-          createdAt: '2026-04-20T10:00:00.000Z',
-          submittedAt: '2026-04-20T10:01:00.000Z',
-          confirmedAt: '2026-04-20T10:02:00.000Z',
-          failedAt: null,
-        },
-      ],
-    });
+    historyMock.getMyAccount.mockResolvedValue(
+      emptyAccount({ payouts: [payout({ txHash: 'abc123' })] }),
+    );
     renderPage();
-    const link = await screen.findByRole('link', { name: /View tx/i });
-    expect(link.getAttribute('href')).toBe('https://stellar.expert/explorer/public/tx/tx-hash-789');
-    expect(link.getAttribute('target')).toBe('_blank');
+    const link = (await screen.findByRole('link', { name: /View tx/i })) as HTMLAnchorElement;
+    expect(link.href).toContain('stellar.expert/explorer/public/tx/abc123');
   });
 
-  it('does not show a tx link on submitted rows (no hash yet)', async () => {
+  it('shows no tx link on a pending payout', async () => {
     historyMock.getCashbackHistory.mockResolvedValue({ entries: [] });
-    historyMock.getUserPendingPayouts.mockResolvedValue({
-      payouts: [
-        {
-          id: 'p-1',
-          orderId: 'o-1',
-          assetCode: 'EURLOOP',
-          assetIssuer: 'GISSUER',
-          amountStroops: '5000000',
-          state: 'submitted',
-          txHash: null,
-          attempts: 1,
-          createdAt: '2026-04-20T10:00:00.000Z',
-          submittedAt: '2026-04-20T10:01:00.000Z',
-          confirmedAt: null,
-          failedAt: null,
-        },
-      ],
-    });
+    historyMock.getMyAccount.mockResolvedValue(
+      emptyAccount({ payouts: [payout({ status: 'pending', finalised: null })] }),
+    );
     renderPage();
-    await screen.findByText(/Submitting/);
+    expect(await screen.findByText('Sending')).toBeTruthy();
     expect(screen.queryByRole('link', { name: /View tx/i })).toBeNull();
   });
 
-  it('hides the section silently when the fetch errors (ledger stays authoritative)', async () => {
+  it('hides the section silently when the account fetch errors', async () => {
     historyMock.getCashbackHistory.mockResolvedValue({ entries: [] });
-    historyMock.getUserPendingPayouts.mockRejectedValue(new Error('network down'));
+    historyMock.getMyAccount.mockRejectedValue(new Error('network down'));
     renderPage();
-    // Ledger section still rendered.
     await screen.findByText(/No cashback activity yet/i);
-    expect(screen.queryByText(/On-chain payouts/i)).toBeNull();
+    await waitFor(() => expect(historyMock.getMyAccount).toHaveBeenCalled());
+    expect(screen.queryByText(/^Payouts$/i)).toBeNull();
   });
 });

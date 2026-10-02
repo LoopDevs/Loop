@@ -15,6 +15,12 @@ import {
   removeFavoriteHandler,
 } from '../users/favorites-handler.js';
 import { listRecentlyPurchasedHandler } from '../users/recently-purchased-handler.js';
+import {
+  getAccountHandler,
+  linkWalletHandler,
+  unlinkWalletHandler,
+  updateWalletHandler,
+} from '../users/account-handler.js';
 
 export function mountUserRoutes(app: Hono): void {
   // Cache-Control mount FIRST — must precede `requireAuth` so the
@@ -71,5 +77,26 @@ export function mountUserRoutes(app: Hono): void {
     '/api/users/me/recently-purchased',
     rateLimit('GET /api/users/me/recently-purchased', 60, 60_000),
     listRecentlyPurchasedHandler,
+  );
+
+  app.get(
+    '/api/users/me/account',
+    rateLimit('GET /api/users/me/account', 60, 60_000),
+    getAccountHandler,
+  );
+  app.post(
+    '/api/users/me/wallets',
+    rateLimit('POST /api/users/me/wallets', 10, 60_000),
+    linkWalletHandler,
+  );
+  app.put(
+    '/api/users/me/wallets/:walletId',
+    rateLimit('PUT /api/users/me/wallets/:walletId', 10, 60_000),
+    updateWalletHandler,
+  );
+  app.delete(
+    '/api/users/me/wallets/:walletId',
+    rateLimit('DELETE /api/users/me/wallets/:walletId', 10, 60_000),
+    unlinkWalletHandler,
   );
 }

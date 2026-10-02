@@ -41,6 +41,7 @@ function mkPayment(
 ): LoopOrderPaymentInstructions {
   return {
     ctxPaymentId: 'pay-1',
+    method: 'crypto',
     cryptoCurrency: 'XLM',
     cryptoAmount: SERVER_CRYPTO_AMOUNT,
     address: ADDRESS,

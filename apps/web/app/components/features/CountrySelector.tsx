@@ -10,6 +10,7 @@ import {
   useLocale,
 } from '~/i18n/locale';
 import { useFocusTrap } from '~/hooks/use-focus-trap';
+import { useSupportedCountries } from '~/hooks/use-supported-countries';
 
 /**
  * Country picker (ADR 034 §4). Replaces the four-region selector (ADR 033). With
@@ -35,20 +36,25 @@ export function CountrySelector(): React.JSX.Element {
   // current without moving focus off the input.
   const [activeIndex, setActiveIndex] = useState(0);
 
+  const countries = useSupportedCountries();
+
   const current = useMemo(
-    () => COUNTRIES.find((c) => c.code.toLowerCase() === locale.country) ?? COUNTRIES[0]!,
-    [locale.country],
+    () =>
+      COUNTRIES.find((c) => c.code.toLowerCase() === locale.country) ??
+      countries[0] ??
+      COUNTRIES[0]!,
+    [locale.country, countries],
   );
 
   const folded = foldForSearch(query);
   const matches = useMemo(
     () =>
       folded.length === 0
-        ? COUNTRIES
-        : COUNTRIES.filter(
+        ? countries
+        : countries.filter(
             (c) => foldForSearch(c.label).includes(folded) || c.code.toLowerCase().includes(folded),
           ),
-    [folded],
+    [folded, countries],
   );
 
   // A11Y-004: trap focus inside the modal, move focus to the search input on

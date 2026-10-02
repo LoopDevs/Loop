@@ -6,6 +6,7 @@ import { db } from '../db/client.js';
 import { resolveLoopAuthenticatedUser } from '../auth/authenticated-user.js';
 import { type User } from '../db/users.js';
 import { getStaffRole } from '../db/staff-roles.js';
+import { CtxUserRolesError, updateCtxStableCurrency } from '../ctx/user-roles.js';
 import { logger } from '../logger.js';
 
 const log = logger.child({ handler: 'users' });
@@ -36,7 +37,10 @@ async function resolveStaffRoleFor(row: User): Promise<StaffRole | null> {
     const staffRow = await getStaffRole(row.id);
     if (staffRow !== null) return staffRow.role;
   } catch (err) {
-    log.warn({ err, userId: row.id }, 'staff_roles lookup failed — falling back to the shim');
+    log.warn(
+      { err, userId: row.id },
+      'staff_roles lookup failed — falling back to the CTX-role mirror',
+    );
   }
   return row.isAdmin ? 'admin' : null;
 }
@@ -112,6 +116,21 @@ export async function setHomeCurrencyHandler(c: Context): Promise<Response> {
       },
       409,
     );
+  }
+
+  if (user.ctxUserId !== null) {
+    try {
+      await updateCtxStableCurrency(user.ctxUserId, parsed.data.currency);
+    } catch (err) {
+      if (err instanceof CtxUserRolesError && err.status === 400) {
+        return c.json({ code: 'VALIDATION_ERROR', message: 'Currency not supported' }, 400);
+      }
+      log.error({ err, userId: user.id }, 'CTX stableCurrency update failed');
+      return c.json(
+        { code: 'SUPPLIER_UNAVAILABLE', message: 'Unable to change home currency right now' },
+        503,
+      );
+    }
   }
 
   const updated = await db

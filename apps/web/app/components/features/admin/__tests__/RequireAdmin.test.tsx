@@ -72,8 +72,6 @@ function meView(over: Partial<UserMeView>): UserMeView {
     isAdmin: false,
     staffRole: null,
     homeCurrency: 'USD',
-    stellarAddress: null,
-    homeCurrencyBalanceMinor: '0',
     ...over,
   };
 }

@@ -26,7 +26,12 @@
  */
 
 import { useMemo } from 'react';
-import { DEFAULT_LANG, formatMinorCurrency as sharedFormatMinorCurrency } from '@loop/shared';
+import {
+  DEFAULT_LANG,
+  displayCurrencyCode,
+  fiatForHeldStable,
+  formatMinorCurrency as sharedFormatMinorCurrency,
+} from '@loop/shared';
 import { useLocale } from './locale.js';
 
 /**
@@ -167,4 +172,13 @@ export function formatMinorCurrency(
   if (opts?.fractionDigits !== undefined) sharedOpts.fractionDigits = opts.fractionDigits;
   if (locale !== undefined) sharedOpts.locale = locale;
   return sharedFormatMinorCurrency(minor, currency, sharedOpts);
+}
+
+export function formatAccountAmount(amount: string, currency: string, locale?: string): string {
+  const n = Number(amount);
+  if (!Number.isFinite(n)) return '—';
+  const fiat = fiatForHeldStable(currency);
+  if (fiat !== null) return formatCurrency(n, fiat, locale);
+  const trimmed = amount.includes('.') ? amount.replace(/0+$/, '').replace(/\.$/, '') : amount;
+  return `${trimmed} ${displayCurrencyCode(currency)}`;
 }

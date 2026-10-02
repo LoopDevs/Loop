@@ -51,14 +51,15 @@ vi.mock('~/hooks/use-auth', () => ({
   }),
 }));
 
-vi.mock('~/hooks/use-wallet', () => ({
-  WALLET_QUERY_KEY: ['me', 'wallet'],
-  useWallet: () => ({
-    wallet: undefined,
-    isActivated: false,
-    balanceFor: () => '0',
+vi.mock('~/hooks/use-account', () => ({
+  ACCOUNT_QUERY_KEY: ['me', 'account'],
+  useAccount: () => ({
+    account: undefined,
+    activeLink: null,
     isLoading: false,
     isError: false,
+    error: null,
+    refetch: () => undefined,
   }),
 }));
 
@@ -83,9 +84,6 @@ vi.mock('~/stores/ui.store', () => ({
 }));
 
 vi.mock('~/components/features/Navbar', () => ({ Navbar: () => null }));
-vi.mock('~/components/features/cashback/PendingCashbackChip', () => ({
-  PendingCashbackChip: () => null,
-}));
 
 import AuthRoute from '../auth';
 
@@ -104,8 +102,6 @@ function mkMe(overrides: Partial<UserMeView> = {}): UserMeView {
     isAdmin: false,
     staffRole: null,
     homeCurrency: 'GBP',
-    stellarAddress: null,
-    homeCurrencyBalanceMinor: '12345',
     ...overrides,
   };
 }

@@ -8,7 +8,6 @@
  * re-exports so existing call sites import from `~/services/user`
  * unchanged.
  */
-import { ApiException } from '@loop/shared';
 import type {
   CashbackByMerchantResponse,
   CashbackByMerchantRow,
@@ -16,18 +15,13 @@ import type {
   CashbackHistoryResponse,
   CashbackMonthlyEntry,
   CashbackMonthlyResponse,
-  StellarTrustlineRow,
-  StellarTrustlinesResponse,
   UserCashbackSummary,
-  UserCreditRow,
-  UserCreditsResponse,
   UserMeView,
   UserOrdersSummary,
-  UserPendingPayoutState,
-  UserPendingPayoutView,
-  UserPendingPayoutsResponse,
-  UserPendingPayoutsSummaryResponse,
-  UserPendingPayoutsSummaryRow,
+  UserAccountView,
+  WalletLinkView,
+  LinkWalletRequest,
+  UpdateWalletRequest,
   HomeCurrency,
   OrderState,
 } from '@loop/shared';
@@ -36,24 +30,19 @@ import { authenticatedRequest } from './api-client';
 // A2-1505 re-exports. Types stayed importable from `~/services/user`
 // so 70+ component/test call sites don't fan out a rename.
 export type {
+  UserAccountView,
+  WalletLinkView,
+  LinkWalletRequest,
+  UpdateWalletRequest,
   CashbackByMerchantResponse,
   CashbackByMerchantRow,
   CashbackHistoryEntry,
   CashbackHistoryResponse,
   CashbackMonthlyEntry,
   CashbackMonthlyResponse,
-  StellarTrustlineRow,
-  StellarTrustlinesResponse,
   UserCashbackSummary,
-  UserCreditRow,
-  UserCreditsResponse,
   UserMeView,
   UserOrdersSummary,
-  UserPendingPayoutState,
-  UserPendingPayoutView,
-  UserPendingPayoutsResponse,
-  UserPendingPayoutsSummaryResponse,
-  UserPendingPayoutsSummaryRow,
 };
 
 // Legacy web-side alias retained for call-site stability.
@@ -79,17 +68,32 @@ export async function getMe(): Promise<UserMeView> {
   return authenticatedRequest<UserMeView>('/api/users/me');
 }
 
-/**
- * `PUT /api/users/me/stellar-address` — link or unlink the user's
- * Stellar wallet (ADR 015). `null` unlinks. Server validates the
- * address against Stellar's pubkey format and returns 400 on
- * malformed input.
- */
-export async function setStellarAddress(address: string | null): Promise<UserMeView> {
-  return authenticatedRequest<UserMeView>('/api/users/me/stellar-address', {
-    method: 'PUT',
-    body: { address },
+export async function getMyAccount(): Promise<UserAccountView> {
+  return authenticatedRequest<UserAccountView>('/api/users/me/account');
+}
+
+export async function linkWallet(body: LinkWalletRequest): Promise<WalletLinkView> {
+  return authenticatedRequest<WalletLinkView>('/api/users/me/wallets', {
+    method: 'POST',
+    body,
   });
+}
+
+export async function updateWallet(
+  walletId: string,
+  body: UpdateWalletRequest,
+): Promise<WalletLinkView> {
+  return authenticatedRequest<WalletLinkView>(
+    `/api/users/me/wallets/${encodeURIComponent(walletId)}`,
+    { method: 'PUT', body },
+  );
+}
+
+export async function unlinkWallet(walletId: string): Promise<WalletLinkView> {
+  return authenticatedRequest<WalletLinkView>(
+    `/api/users/me/wallets/${encodeURIComponent(walletId)}`,
+    { method: 'DELETE' },
+  );
 }
 
 /**
@@ -107,61 +111,6 @@ export async function getCashbackHistory(
   return authenticatedRequest<CashbackHistoryResponse>(
     `/api/users/me/cashback-history${query.length > 0 ? `?${query}` : ''}`,
   );
-}
-
-/**
- * `GET /api/users/me/pending-payouts` — caller-scoped on-chain payout
- * backlog. Mirrors the admin shape (state / before / limit) but
- * filtered to `auth.userId` server-side. Rendered on /settings/cashback
- * so the user can track each outbound LOOP-asset emission.
- */
-export async function getUserPendingPayouts(
-  opts: { state?: UserPendingPayoutState; limit?: number; before?: string } = {},
-): Promise<UserPendingPayoutsResponse> {
-  const params = new URLSearchParams();
-  if (opts.state !== undefined) params.set('state', opts.state);
-  if (opts.limit !== undefined) params.set('limit', String(opts.limit));
-  if (opts.before !== undefined) params.set('before', opts.before);
-  const query = params.toString();
-  return authenticatedRequest<UserPendingPayoutsResponse>(
-    `/api/users/me/pending-payouts${query.length > 0 ? `?${query}` : ''}`,
-  );
-}
-
-/** `GET /api/users/me/pending-payouts/summary` */
-export async function getUserPendingPayoutsSummary(): Promise<UserPendingPayoutsSummaryResponse> {
-  return authenticatedRequest<UserPendingPayoutsSummaryResponse>(
-    '/api/users/me/pending-payouts/summary',
-  );
-}
-
-/** `GET /api/users/me/stellar-trustlines` */
-export async function getUserStellarTrustlines(): Promise<StellarTrustlinesResponse> {
-  return authenticatedRequest<StellarTrustlinesResponse>('/api/users/me/stellar-trustlines');
-}
-
-/**
- * `GET /api/users/me/orders/:orderId/payout` — per-order
- * settlement drill. Returns the single pending-payout row tied
- * to one of the caller's own orders, or null when there isn't
- * one (cashback not yet minted, order not fulfilled, or the user
- * doesn't own the order). Cross-user access returns 404 server-
- * side so we turn that into null here to keep call sites simple.
- */
-export async function getUserPayoutByOrder(orderId: string): Promise<UserPendingPayoutView | null> {
-  try {
-    return await authenticatedRequest<UserPendingPayoutView>(
-      `/api/users/me/orders/${encodeURIComponent(orderId)}/payout`,
-    );
-  } catch (err) {
-    if (err instanceof ApiException && err.status === 404) return null;
-    throw err;
-  }
-}
-
-/** `GET /api/users/me/credits` — per-currency credit balances. */
-export async function getMyCredits(): Promise<UserCreditsResponse> {
-  return authenticatedRequest<UserCreditsResponse>('/api/users/me/credits');
 }
 
 /** `GET /api/users/me/cashback-summary` */

@@ -26,9 +26,6 @@ export const ctxSchema = z.object({
     })
     .prefault({}),
 
-  // ADR 052: chain-qualified currencies; CTX validates per company crypto permissions
-  paymentCurrencies: z.array(z.string().min(1)).nonempty().default(['XLM']),
-
   // Attribution contract: creates CTX customer under Loop operator company for `X-User-Id` act-as
   userProvisioning: z
     .object({

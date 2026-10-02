@@ -5,7 +5,12 @@ import { logger } from '../logger.js';
 import { upstreamUrl, upstreamFetch } from '../upstream.js';
 import { scrubUpstreamBody } from '../upstream-body-scrub.js';
 import { notifyCtxSchemaDrift, notifyOrderFulfilled } from '../discord.js';
-import { mapStatus, summariseZodIssues, upstreamHeaders } from './handler-shared.js';
+import {
+  mapStatus,
+  percentFromBasisPoints,
+  summariseZodIssues,
+  upstreamHeaders,
+} from './handler-shared.js';
 import { applyBarcodeFields } from './barcode-fields.js';
 
 const log = logger.child({ handler: 'orders' });
@@ -21,7 +26,7 @@ export const GetOrderUpstreamResponse = z
     paymentCryptoAmount: z.string().optional(),
     status: z.string(),
     fulfilmentStatus: z.string().optional(),
-    percentDiscount: z.string().optional(),
+    userDiscountBasisPoints: z.number().optional(),
     redeemType: z.string().optional(),
     redeemUrl: z.string().optional(),
     redeemUrlChallenge: z.string().optional(),
@@ -133,7 +138,7 @@ export async function getOrderHandler(c: Context): Promise<Response> {
       currency,
       status,
       xlmAmount: validated.data.paymentCryptoAmount ?? '0',
-      percentDiscount: validated.data.percentDiscount,
+      percentDiscount: percentFromBasisPoints(validated.data.userDiscountBasisPoints),
       redeemType: validated.data.redeemType,
       createdAt: validated.data.created,
     };

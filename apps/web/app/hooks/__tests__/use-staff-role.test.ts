@@ -9,8 +9,6 @@ function me(overrides: Partial<UserMeView>): UserMeView {
     isAdmin: false,
     staffRole: null,
     homeCurrency: 'USD',
-    stellarAddress: null,
-    homeCurrencyBalanceMinor: '0',
     ...overrides,
   };
 }

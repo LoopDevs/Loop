@@ -3,12 +3,15 @@ import type { Context } from 'hono';
 import { config } from '../config/index.js';
 import { logger } from '../logger.js';
 import type { LoopAuthContext } from '../auth/require-auth.js';
-import type { CreateLoopOrderResponse, MerchantDenominations } from '@loop/shared';
+import type {
+  CreateLoopOrderResponse,
+  LoopOrderPaymentMethod,
+  MerchantDenominations,
+} from '@loop/shared';
 import { getMerchants } from '../merchants/sync.js';
 import { LoopCreateOrderBody as CreateBody } from './request-schemas.js';
-import { getUserCtxUserId } from '../db/users.js';
-import { ctxActAsHeaders, provisionCtxUser } from '../ctx/user-provisioning.js';
-import { getUserById } from '../db/users.js';
+import { ctxActAsHeaders, resolveCtxUserId } from '../ctx/user-provisioning.js';
+import { loopCryptoPaymentCurrencies, loopFiatPaymentCurrencies } from '../ctx/startup.js';
 import { ctxFetch, CtxRateLimitedError, CtxUnavailableError } from '../ctx/api-fetch.js';
 import { upstreamUrl } from '../upstream.js';
 import { scrubUpstreamBody } from '../upstream-body-scrub.js';
@@ -44,7 +47,13 @@ export const ORDER_IDEMPOTENCY_KEY_MAX = 128;
 const CTX_CREATE_TIMEOUT_MS = 20_000;
 
 export function ctxPaymentCurrencies(): string[] {
-  return config.ctx.paymentCurrencies.map((currency) => currency.trim().toUpperCase());
+  return [...loopCryptoPaymentCurrencies(), ...loopFiatPaymentCurrencies()];
+}
+
+export function classifyPaymentCurrency(currency: string): LoopOrderPaymentMethod | null {
+  if (loopCryptoPaymentCurrencies().includes(currency)) return 'crypto';
+  if (loopFiatPaymentCurrencies().includes(currency)) return 'fiat';
+  return null;
 }
 
 // A4-103: exported for tests to pin parsing rules without handler
@@ -86,20 +95,6 @@ function minorToMajor(minor: bigint): string {
   return `${units.toString()}.${cents.toString().padStart(2, '0')}`;
 }
 
-// One awaited attempt; missing mapping is 503, never anonymous operator purchase
-async function resolveCtxUserId(userId: string): Promise<string | null> {
-  const existing = await getUserCtxUserId(userId);
-  if (existing !== null) return existing;
-  const user = await getUserById(userId);
-  if (user === null || user.email === null) return null;
-  try {
-    await provisionCtxUser({ id: user.id, email: user.email, ctxUserId: null });
-  } catch (err) {
-    log.warn({ userId, err }, 'Synchronous CTX provisioning attempt failed');
-  }
-  return getUserCtxUserId(userId);
-}
-
 async function createResponseForOrder(
   order: Order,
   card: CtxGiftCard | null,
@@ -131,6 +126,7 @@ async function createResponseForOrder(
         ? paymentInstructionsFromCard(resolvedCard, resolvedPayment, fallback)
         : {
             ctxPaymentId: order.ctxPaymentId,
+            method: classifyPaymentCurrency(fallback.cryptoCurrency) ?? 'crypto',
             cryptoCurrency: fallback.cryptoCurrency,
             cryptoAmount: null,
             address: null,
@@ -186,11 +182,21 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
     );
   }
 
-  if (!ctxPaymentCurrencies().includes(parsed.data.cryptoCurrency)) {
+  const paymentMethod = classifyPaymentCurrency(parsed.data.cryptoCurrency);
+  if (paymentMethod === null) {
     return c.json(
       {
         code: 'VALIDATION_ERROR',
         message: `cryptoCurrency must be one of: ${ctxPaymentCurrencies().join(', ')}`,
+      },
+      400,
+    );
+  }
+  if (paymentMethod === 'fiat' && parsed.data.cryptoCurrency !== parsed.data.currency) {
+    return c.json(
+      {
+        code: 'VALIDATION_ERROR',
+        message: `fiat payments must be made in the card currency (${parsed.data.currency})`,
       },
       400,
     );
@@ -285,7 +291,7 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        cryptoCurrency: parsed.data.cryptoCurrency,
+        ...(paymentMethod === 'crypto' ? { cryptoCurrency: parsed.data.cryptoCurrency } : {}),
         fiatCurrency: parsed.data.currency,
         fiatAmount: minorToMajor(parsed.data.amountMinor),
         merchantId: parsed.data.merchantId,

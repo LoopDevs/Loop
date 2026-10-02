@@ -102,6 +102,7 @@ const SERVER_PAYMENT_URI = `web+stellar:pay?destination=${ADDRESS}&amount=${SERV
 function mkPayment(): CreateLoopOrderResponse['payment'] {
   return {
     ctxPaymentId: 'pay-1',
+    method: 'crypto',
     cryptoCurrency: 'XLM',
     cryptoAmount: SERVER_CRYPTO_AMOUNT,
     address: ADDRESS,

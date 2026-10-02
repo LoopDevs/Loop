@@ -54,9 +54,6 @@ ctx:
     web: loopweb
     ios: loopios
     android: loopandroid
-  # ADR 052 — chain-qualified CTX payment currencies offered at checkout.
-  paymentCurrencies:
-    - XLM
   userProvisioning:
     # Create a CTX customer per Loop-native user under Loop's operator
     # company, so procurement can act-as that customer. Set false only in
@@ -116,17 +113,10 @@ auth:
 
 # ── Admin surface ───────────────────────────────────────────────────
 admin:
-  # Bootstrap allowlist. A Loop user whose VERIFIED email appears here
-  # is flagged admin every time they log in, which is how the first
-  # admin reaches /api/admin/* at all — before one exists there is
-  # nobody to grant anyone a staff role. Granting this way is a config
-  # edit plus a redeploy, deliberately heavier than the self-serve
-  # path; after the first admin, use PUT /api/admin/staff/:userId/role.
-  emails: []
-  # The same, for the legacy CTX-proxy auth path — matched on the
-  # user's ctxUserId, which Loop-native users don't carry. Retires with
-  # that path.
-  ctxUserIds: []
+  # Admin access is not configured here. A user is a Loop admin while
+  # their CTX user holds the `operator-admin` role; the flag is
+  # mirrored at login and token refresh. Support roles are granted via
+  # PUT /api/admin/staff/:userId/role.
   # ADR 028 — step-up auth for destructive admin writes. The admin
   # re-presents an OTP, gets a 5-minute single-use token scoped to one
   # action class, and sends it as X-Admin-Step-Up. Signed with

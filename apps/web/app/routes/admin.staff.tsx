@@ -174,11 +174,8 @@ function AdminStaffRouteInner(): React.JSX.Element {
                       {member.grantedByEmail ??
                         (member.grantedByUserId !== null ? (
                           <span className="font-mono">{`${member.grantedByUserId.slice(0, 8)}…`}</span>
-                        ) : member.source === 'legacy_is_admin' ? (
-                          // CTX-allowlist admin with no staff_roles row
-                          // yet — the deprecated users.is_admin shim
-                          // (ADR 037 §1).
-                          'legacy is_admin'
+                        ) : member.source === 'ctx_operator_admin' ? (
+                          'CTX operator-admin'
                         ) : (
                           'migration'
                         ))}

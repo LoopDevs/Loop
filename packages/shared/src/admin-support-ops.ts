@@ -6,8 +6,9 @@
  * backend emits them, the admin web views consume them, and the
  * shared-type-parity gate holds both sides to one definition.
  */
-import type { WalletProvisioningState } from './users-wallet.js';
 import type { CreditTransactionType } from './credit-transaction-type.js';
+
+export type WalletProvisioningState = 'none' | 'wallet_created' | 'activated';
 
 // ─── Watcher skip rows (payment_watcher_skips, migration 0033) ─────────────
 

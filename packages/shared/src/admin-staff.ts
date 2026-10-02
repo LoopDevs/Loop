@@ -19,17 +19,17 @@ export type StaffRole = (typeof STAFF_ROLES)[number];
  * One staff member in `GET /api/admin/staff`.
  *
  * `source` distinguishes a real `staff_roles` row from the
- * deprecated `users.isAdmin` shim (a config-allowlist admin who has
- * no row yet — ADR 037 §1). Shim entries have no grant metadata.
+ * `users.isAdmin` mirror of the CTX operator-admin role (an admin who
+ * has no row — ADR 037 §1). Mirror entries have no grant metadata.
  */
 export interface AdminStaffEntry {
   userId: string;
   email: string;
   role: StaffRole;
-  source: 'staff_roles' | 'legacy_is_admin';
-  /** ISO-8601; null for `legacy_is_admin` entries. */
+  source: 'staff_roles' | 'ctx_operator_admin';
+  /** ISO-8601; null for `ctx_operator_admin` entries. */
   grantedAt: string | null;
-  /** Null for shim entries, which nobody granted. */
+  /** Null for mirror entries, which nobody granted in Loop. */
   grantedByUserId: string | null;
   /** Grantor's email when resolvable; null otherwise. */
   grantedByEmail: string | null;

@@ -44,7 +44,7 @@ export function requireStaff(minimum: StaffRole): MiddlewareHandler {
         lookupFailed = true;
         log.warn(
           { err, userId: user.id },
-          'staff_roles lookup failed — falling back to the users.isAdmin allowlist shim',
+          'staff_roles lookup failed — falling back to the users.isAdmin CTX-role mirror',
         );
       }
       const resolvedRole: StaffRole | null = staffRow?.role ?? (user.isAdmin ? 'admin' : null);
@@ -54,7 +54,7 @@ export function requireStaff(minimum: StaffRole): MiddlewareHandler {
       if (lookupFailed && resolvedRole === 'admin') {
         log.warn(
           { userId: user.id },
-          'Admin access granted via the allowlist shim during a staff_roles outage',
+          'Admin access granted via the CTX-role mirror during a staff_roles outage',
         );
       }
       role = resolvedRole;

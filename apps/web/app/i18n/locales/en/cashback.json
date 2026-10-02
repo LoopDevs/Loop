@@ -26,7 +26,6 @@
     "heading": "Best cashback rates on Loop",
     "sub": "Earn cashback every time you buy a gift card. Paid in LOOP-asset stablecoin that compounds when you spend it on your next order.",
     "loadError": "Couldn’t load the cashback list. Please refresh.",
-    "empty": "No merchants with cashback configured yet — check back soon.",
     "howItWorks": {
       "heading": "How Loop cashback works",
       "step1": "Pick a merchant and buy a gift card — pay in XLM, USDC, or your LOOP balance.",

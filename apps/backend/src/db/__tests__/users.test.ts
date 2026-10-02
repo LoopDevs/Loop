@@ -1,19 +1,4 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import type * as ConfigModule from '../../config/index.js';
-
-const { adminState } = vi.hoisted(() => ({
-  adminState: { emails: [] as string[], ctxUserIds: [] as string[] },
-}));
-
-vi.mock('../../config/index.js', async (importActual) => {
-  const actual = await importActual<typeof ConfigModule>();
-  return {
-    ...actual,
-    get config() {
-      return { ...actual.config, admin: { ...actual.config.admin, ...adminState } };
-    },
-  };
-});
 
 import { db, __resetDbForTests } from '../client.js';
 import { UniqueViolationError } from '../errors.js';
@@ -25,14 +10,13 @@ import {
   getUserTokenVersion,
   bumpUserTokenVersion,
   findOrCreateUserByEmail,
-  isAllowlistedAdmin,
+  setUserIsAdmin,
+  setUserHomeCurrency,
 } from '../users.js';
 import type { UserDoc } from '../types.js';
 
 beforeEach(() => {
   __resetDbForTests();
-  adminState.emails = [];
-  adminState.ctxUserIds = [];
 });
 
 async function seedUser(overrides: Partial<UserDoc> = {}): Promise<UserDoc> {
@@ -171,59 +155,55 @@ describe('findOrCreateUserByEmail', () => {
   });
 });
 
-describe('isAllowlistedAdmin', () => {
-  it('matches an email case-insensitively and ignores surrounding whitespace', () => {
-    adminState.emails = ['  Ops@Loop.TEST '];
-    expect(isAllowlistedAdmin({ email: 'ops@loop.test', ctxUserId: null })).toBe(true);
+describe('setUserIsAdmin', () => {
+  it('flips the flag and reports the change', async () => {
+    await seedUser({ id: 'u-1' });
+    expect(await setUserIsAdmin('u-1', true)).toBe(true);
+    expect((await getUserById('u-1'))?.isAdmin).toBe(true);
+    expect(await setUserIsAdmin('u-1', false)).toBe(true);
+    expect((await getUserById('u-1'))?.isAdmin).toBe(false);
   });
 
-  it('matches a CTX user id exactly', () => {
-    adminState.ctxUserIds = ['ctx-42'];
-    expect(isAllowlistedAdmin({ email: null, ctxUserId: 'ctx-42' })).toBe(true);
-    expect(isAllowlistedAdmin({ email: null, ctxUserId: 'ctx-4' })).toBe(false);
-  });
-
-  it('never matches on an empty or absent identity', () => {
-    adminState.emails = [''];
-    adminState.ctxUserIds = [''];
-    expect(isAllowlistedAdmin({ email: '', ctxUserId: '' })).toBe(false);
-    expect(isAllowlistedAdmin({ email: undefined, ctxUserId: undefined })).toBe(false);
+  it('reports no change when the flag already matches', async () => {
+    await seedUser({ id: 'u-1', isAdmin: true });
+    expect(await setUserIsAdmin('u-1', true)).toBe(false);
+    expect(await setUserIsAdmin('missing', true)).toBe(false);
   });
 });
 
-describe('admin allowlist at upsert', () => {
-  it('flags a new Loop-native user whose verified email is allowlisted', async () => {
-    adminState.emails = ['boss@loop.test'];
+describe('setUserHomeCurrency', () => {
+  it('writes the currency and reports the change', async () => {
+    await seedUser({ id: 'u-1' });
+    expect(await setUserHomeCurrency('u-1', 'EUR')).toBe(true);
+    expect((await getUserById('u-1'))?.homeCurrency).toBe('EUR');
+  });
+
+  it('reports no change when the currency already matches', async () => {
+    await seedUser({ id: 'u-1', homeCurrency: 'EUR' });
+    expect(await setUserHomeCurrency('u-1', 'EUR')).toBe(false);
+    expect(await setUserHomeCurrency('missing', 'EUR')).toBe(false);
+  });
+});
+
+describe('admin flag across logins', () => {
+  it('starts false for a new Loop-native user', async () => {
     const user = await findOrCreateUserByEmail('boss@loop.test');
-    expect(user.isAdmin).toBe(true);
+    expect(user.isAdmin).toBe(false);
   });
 
-  it('promotes an existing user on their next login after a config edit', async () => {
+  it('keeps the mirrored flag on the next login', async () => {
     const before = await findOrCreateUserByEmail('boss@loop.test');
-    expect(before.isAdmin).toBe(false);
-
-    adminState.emails = ['boss@loop.test'];
+    await setUserIsAdmin(before.id, true);
     const after = await findOrCreateUserByEmail('boss@loop.test');
-    expect(after.isAdmin).toBe(true);
     expect(after.id).toBe(before.id);
+    expect(after.isAdmin).toBe(true);
   });
 
-  it('demotes on the next login once the entry is removed', async () => {
-    adminState.emails = ['boss@loop.test'];
-    await findOrCreateUserByEmail('boss@loop.test');
-
-    adminState.emails = [];
-    const after = await findOrCreateUserByEmail('boss@loop.test');
-    expect(after.isAdmin).toBe(false);
-  });
-
-  it('flags a CTX-path user from the ctxUserIds allowlist, and re-derives on the next upsert', async () => {
-    adminState.ctxUserIds = ['ctx-boss'];
+  it('keeps the mirrored flag on a CTX-path re-upsert', async () => {
     const created = await upsertUserFromCtx({ ctxUserId: 'ctx-boss', email: 'b@loop.test' });
-    expect(created.isAdmin).toBe(true);
-
-    adminState.ctxUserIds = [];
+    expect(created.isAdmin).toBe(false);
+    await setUserIsAdmin(created.id, true);
     const refreshed = await upsertUserFromCtx({ ctxUserId: 'ctx-boss', email: 'b@loop.test' });
-    expect(refreshed.isAdmin).toBe(false);
+    expect(refreshed.isAdmin).toBe(true);
   });
 });
