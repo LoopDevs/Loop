@@ -6,6 +6,7 @@ import {
   dsrDeleteHandler,
   dsrExportHandler,
   getMeHandler,
+  setCashbackDestinationHandler,
   setHomeCurrencyHandler,
 } from '../users/handler.js';
 import { getUserOrdersSummaryHandler } from '../users/orders-summary.js';
@@ -16,10 +17,12 @@ import {
 } from '../users/favorites-handler.js';
 import { listRecentlyPurchasedHandler } from '../users/recently-purchased-handler.js';
 import {
+  depositSavingsHandler,
   getAccountHandler,
   linkWalletHandler,
   unlinkWalletHandler,
   updateWalletHandler,
+  withdrawSavingsHandler,
 } from '../users/account-handler.js';
 
 export function mountUserRoutes(app: Hono): void {
@@ -98,5 +101,20 @@ export function mountUserRoutes(app: Hono): void {
     '/api/users/me/wallets/:walletId',
     rateLimit('DELETE /api/users/me/wallets/:walletId', 10, 60_000),
     unlinkWalletHandler,
+  );
+  app.post(
+    '/api/users/me/savings/deposits',
+    rateLimit('POST /api/users/me/savings/deposits', 10, 60_000),
+    depositSavingsHandler,
+  );
+  app.post(
+    '/api/users/me/savings/withdrawals',
+    rateLimit('POST /api/users/me/savings/withdrawals', 10, 60_000),
+    withdrawSavingsHandler,
+  );
+  app.post(
+    '/api/users/me/cashback-destination',
+    rateLimit('POST /api/users/me/cashback-destination', 10, 60_000),
+    setCashbackDestinationHandler,
   );
 }

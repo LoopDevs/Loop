@@ -11,13 +11,15 @@ vi.mock('../../logger.js', () => ({
 }));
 
 const updateCtxStableCurrencyMock = vi.hoisted(() => vi.fn());
+const updateCtxCashbackDestinationMock = vi.hoisted(() => vi.fn());
 vi.mock('../../ctx/user-roles.js', async (importOriginal) => ({
   ...((await importOriginal()) as Record<string, unknown>),
   updateCtxStableCurrency: updateCtxStableCurrencyMock,
+  updateCtxCashbackDestination: updateCtxCashbackDestinationMock,
 }));
 
 import { CtxUserRolesError } from '../../ctx/user-roles.js';
-import { getMeHandler, setHomeCurrencyHandler } from '../handler.js';
+import { getMeHandler, setCashbackDestinationHandler, setHomeCurrencyHandler } from '../handler.js';
 
 // User profile handlers — A2-550, A2-551
 function makeCtx(auth: LoopAuthContext | undefined, body?: unknown): Context {
@@ -97,6 +99,52 @@ beforeEach(() => {
   __resetDbForTests();
   updateCtxStableCurrencyMock.mockReset();
   updateCtxStableCurrencyMock.mockResolvedValue({ isAdmin: false, homeCurrency: 'GBP' });
+  updateCtxCashbackDestinationMock.mockReset();
+  updateCtxCashbackDestinationMock.mockResolvedValue({
+    isAdmin: false,
+    homeCurrency: 'GBP',
+    cashbackDestination: 'savings',
+  });
+});
+
+describe('setCashbackDestinationHandler', () => {
+  it('400 when the destination is not account or savings', async () => {
+    await seedUser();
+    const res = await setCashbackDestinationHandler(makeCtx(loopAuth, { destination: 'mattress' }));
+    expect(res.status).toBe(400);
+  });
+
+  it('401 when no auth on the context', async () => {
+    const res = await setCashbackDestinationHandler(makeCtx(undefined, { destination: 'savings' }));
+    expect(res.status).toBe(401);
+  });
+
+  it('writes the destination at CTX first, then mirrors it locally and returns the view', async () => {
+    await seedUser();
+    const res = await setCashbackDestinationHandler(makeCtx(loopAuth, { destination: 'savings' }));
+    expect(res.status).toBe(200);
+    expect(updateCtxCashbackDestinationMock).toHaveBeenCalledWith('ctx-123', 'savings');
+    const body = (await res.json()) as { cashbackDestination: string };
+    expect(body.cashbackDestination).toBe('savings');
+    const row = await db.collection('users').findOne({ id: UID });
+    expect(row?.cashbackDestination).toBe('savings');
+  });
+
+  it('is a no-op when the destination is unchanged', async () => {
+    await seedUser();
+    const res = await setCashbackDestinationHandler(makeCtx(loopAuth, { destination: 'account' }));
+    expect(res.status).toBe(200);
+    expect(updateCtxCashbackDestinationMock).not.toHaveBeenCalled();
+  });
+
+  it('503 and no local write when CTX is unavailable', async () => {
+    await seedUser();
+    updateCtxCashbackDestinationMock.mockRejectedValueOnce(new CtxUserRolesError('down', 503));
+    const res = await setCashbackDestinationHandler(makeCtx(loopAuth, { destination: 'savings' }));
+    expect(res.status).toBe(503);
+    const row = await db.collection('users').findOne({ id: UID });
+    expect(row?.cashbackDestination).toBeUndefined();
+  });
 });
 
 describe('getMeHandler', () => {
@@ -116,6 +164,7 @@ describe('getMeHandler', () => {
       homeCurrency: 'USD',
       staffRole: null,
       isAdmin: false,
+      cashbackDestination: 'account',
     });
   });
 
@@ -135,6 +184,7 @@ describe('getMeHandler', () => {
     const res = await getMeHandler(makeCtx(loopAuth));
     const body = (await res.json()) as Record<string, unknown>;
     expect(Object.keys(body).sort()).toEqual([
+      'cashbackDestination',
       'email',
       'homeCurrency',
       'id',

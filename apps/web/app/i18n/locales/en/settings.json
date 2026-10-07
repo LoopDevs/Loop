@@ -78,8 +78,8 @@
       "payout": "Payout",
       "payoutBody": "Sent to your linked wallet as soon as it's credited.",
       "savings": "Savings",
-      "savingsBody": "Earn yield on your balance.",
-      "comingSoon": "Coming soon",
+      "savingsBody": "Each credit moves into your savings pot and earns yield.",
+      "savingsNote": "Cashback already in your account stays there. Payouts pause while Savings is selected; move money between account and savings any time from Cashback.",
       "fallbackError": "Couldn't update your payout setting."
     },
     "linked": {
@@ -126,5 +126,43 @@
       "adjustment": "Adjustment"
     },
     "orderReference": "Order {{shortId}}"
+  },
+  "savings": {
+    "heading": "Savings",
+    "intro": "Money in savings earns yield from the pool and is locked for a short period after each deposit.",
+    "empty": "Nothing in savings yet. Deposit from your account balance or set cashback to go to savings.",
+    "value": "Value",
+    "earnt": "Earnt",
+    "locked": "Locked",
+    "available": "Available",
+    "unlocks": "Unlocks {{when}}",
+    "apr": "Est. {{rate}} APR",
+    "projected": "About {{amount}} a year at this rate",
+    "pending": "Pending",
+    "deposit": {
+      "heading": "Deposit",
+      "currency": "Currency",
+      "amount": "Amount",
+      "max": "Max {{amount}}",
+      "submit": "Deposit into savings",
+      "saving": "Depositing…",
+      "done": "Deposited {{amount}} into savings.",
+      "pendingDone": "Deposit of {{amount}} is pending with the provider."
+    },
+    "withdraw": {
+      "heading": "Withdraw",
+      "currency": "Currency",
+      "amount": "Amount",
+      "max": "Max {{amount}}",
+      "submit": "Withdraw to account",
+      "saving": "Withdrawing…",
+      "done": "Withdrew {{amount}} to your account.",
+      "pendingDone": "Withdrawal of {{amount}} is pending with the provider."
+    },
+    "errors": {
+      "amount": "Enter an amount greater than zero.",
+      "exceeds": "That is more than you have available.",
+      "fallback": "Couldn't move your savings right now."
+    }
   }
 }

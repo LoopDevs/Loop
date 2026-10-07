@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import { config } from '../config/index.js';
 import { logger } from '../logger.js';
+import { ctxAuthHeaders } from './api-fetch.js';
 
 const log = logger.child({ module: 'ctx-ws' });
 
@@ -99,11 +100,9 @@ function connect(): void {
   try {
     // Non-standard undici extension: the init object's `headers` ride
     // the upgrade request, which is how CTX authenticates /ws.
-    ws = new WebSocket(wsUrl(), {
-      headers: {
-        'X-Api-Key': config.ctx.credentials.key,
-        'X-Api-Secret': config.ctx.credentials.secret,
-      },
+    const url = wsUrl();
+    ws = new WebSocket(url, {
+      headers: ctxAuthHeaders('GET', url, undefined),
     } as unknown as string[]);
   } catch (err) {
     log.error({ err }, 'CTX ws construction failed');

@@ -4,6 +4,7 @@ import type { z } from 'zod';
 import { logger } from '../logger.js';
 import { config } from '../config/index.js';
 import { upstreamUrl, upstreamFetch } from '../upstream.js';
+import { ctxAuthHeaders } from '../ctx/api-fetch.js';
 import { notifyCtxSchemaDrift } from '../discord.js';
 import { loadCatalogSnapshot, saveCatalogSnapshot } from '../ctx/catalog-snapshots.js';
 import {
@@ -238,11 +239,6 @@ async function refreshMerchantsInternal(opts: { rethrow?: boolean } = {}): Promi
   // merchants CTX serves Loop (linked, with effective per-operator
   // `status` and any per-link discount override) — the same scope the
   // ws merchant topic and /locations use.
-  const authHeaders: Record<string, string> = {
-    'X-Api-Key': config.ctx.credentials.key,
-    'X-Api-Secret': config.ctx.credentials.secret,
-  };
-
   try {
     while (page <= totalPages && page <= MAX_PAGES) {
       const url = new URL(upstreamUrl('/merchants'));
@@ -250,7 +246,7 @@ async function refreshMerchantsInternal(opts: { rethrow?: boolean } = {}): Promi
       url.searchParams.set('perPage', String(PER_PAGE));
 
       const response = await upstreamFetch(url.toString(), {
-        headers: authHeaders,
+        headers: ctxAuthHeaders('GET', url, undefined),
         signal: AbortSignal.timeout(30_000),
       });
 

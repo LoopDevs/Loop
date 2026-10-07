@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { logger } from '../logger.js';
 import { config } from '../config/index.js';
 import { upstreamUrl, upstreamFetch } from '../upstream.js';
+import { ctxAuthHeaders } from '../ctx/api-fetch.js';
 import { scrubUpstreamBody } from '../upstream-body-scrub.js';
 import { getMerchants } from '../merchants/sync.js';
 import { loadCatalogSnapshot, saveCatalogSnapshot } from '../ctx/catalog-snapshots.js';
@@ -125,13 +126,8 @@ export async function refreshLocations(): Promise<void> {
       url.searchParams.set('page', String(page));
       url.searchParams.set('perPage', '1000');
 
-      const headers: Record<string, string> = {
-        'X-Api-Key': config.ctx.credentials.key,
-        'X-Api-Secret': config.ctx.credentials.secret,
-      };
-
       const response = await upstreamFetch(url.toString(), {
-        headers,
+        headers: ctxAuthHeaders('GET', url, undefined),
         signal: AbortSignal.timeout(30_000),
       });
 

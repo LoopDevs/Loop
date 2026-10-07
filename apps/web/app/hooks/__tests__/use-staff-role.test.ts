@@ -9,6 +9,7 @@ function me(overrides: Partial<UserMeView>): UserMeView {
     isAdmin: false,
     staffRole: null,
     homeCurrency: 'USD',
+    cashbackDestination: 'account',
     ...overrides,
   };
 }

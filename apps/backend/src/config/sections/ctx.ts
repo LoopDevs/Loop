@@ -11,11 +11,22 @@ export const ctxSchema = z.object({
       message: 'must use http or https protocol',
     }),
 
-  // ADR 052: CTX is the payment processor; missing credentials prevent boot to avoid stuck `unpaid` orders
-  credentials: z.object({
-    key: z.string().min(1),
-    secret: z.string().min(1),
-  }),
+  // ADR 052: CTX is the payment processor; missing credentials prevent boot to avoid stuck `unpaid` orders.
+  // The key proves itself with either a signing private key (preferred, see ctx/signing.ts) or the legacy secret.
+  credentials: z
+    .object({
+      key: z.string().min(1),
+      secret: z.string().min(1).optional(),
+      privateKey: z
+        .string()
+        .regex(/^[0-9a-fA-F]{64}$/, {
+          message: 'ctx.credentials.privateKey must be a 32 byte hex secp256k1 private key',
+        })
+        .optional(),
+    })
+    .refine((c) => c.secret !== undefined || c.privateKey !== undefined, {
+      message: 'ctx.credentials needs a privateKey (signed requests) or a secret (legacy)',
+    }),
 
   // A-018: defaults from `@loop/shared` prevent silent drift between web bundle and backend allowlist
   clientIds: z

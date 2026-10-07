@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type {
   LinkWalletRequest,
   PayoutView,
+  SavingsMoveRequest,
   SavingsOperationView,
   UpdateWalletRequest,
   UserAccountView,
@@ -18,18 +19,25 @@ const CtxBalanceSchema = z.object({ currency: z.string(), amount: z.string() }).
 
 const CtxSavingsPositionSchema = z
   .object({
+    potId: z.string().optional(),
     currency: z.string(),
     provider: z.string(),
     principal: z.string(),
     value: z.string(),
     earnt: z.string(),
+    locked: z.string().optional(),
+    available: z.string().optional(),
+    unlocksAt: z.string().optional(),
+    estimatedApr: z.number().optional(),
+    projectedYearlyEarnings: z.string().optional(),
   })
   .passthrough();
 
-const CtxSavingsOperationSchema = z
+export const CtxSavingsOperationSchema = z
   .object({
     id: z.string(),
     type: z.enum(['deposit', 'withdraw']),
+    potId: z.string().optional(),
     status: z.enum(['pending', 'processing', 'complete', 'failed']),
     currency: z.string(),
     amount: z.string(),
@@ -38,6 +46,17 @@ const CtxSavingsOperationSchema = z
     error: z.string().optional(),
   })
   .passthrough();
+
+const CTX_PAYOUT_STATUSES = [
+  'pending-approval',
+  'approved',
+  'held',
+  'pending',
+  'complete',
+  'failed',
+  'rejected',
+  'cancelled',
+] as const;
 
 export const CtxWalletLinkSchema = z
   .object({
@@ -54,7 +73,7 @@ export const CtxWalletLinkSchema = z
 const CtxPayoutSchema = z
   .object({
     id: z.string(),
-    status: z.enum(['pending', 'complete', 'failed']),
+    status: z.enum(CTX_PAYOUT_STATUSES),
     chain: z.literal('XLM'),
     address: z.string(),
     currency: z.string(),
@@ -140,6 +159,7 @@ function savingsOperationToView(
   return {
     id: op.id,
     type: op.type,
+    potId: op.potId ?? null,
     status: op.status,
     currency: op.currency,
     amount: op.amount,
@@ -155,11 +175,17 @@ export function accountToView(account: z.infer<typeof CtxAccountSchema>): UserAc
     userId: account.userId,
     wallet: account.wallet.map((b) => ({ currency: b.currency, amount: b.amount })),
     savings: account.savings.map((s) => ({
+      potId: s.potId ?? null,
       currency: s.currency,
       provider: s.provider,
       principal: s.principal,
       value: s.value,
       earnt: s.earnt,
+      locked: s.locked ?? '0',
+      available: s.available ?? s.value,
+      unlocksAt: s.unlocksAt ?? null,
+      estimatedApr: s.estimatedApr ?? null,
+      projectedYearlyEarnings: s.projectedYearlyEarnings ?? null,
     })),
     savingsPrincipal: account.savingsPrincipal.map((b) => ({
       currency: b.currency,
@@ -271,6 +297,34 @@ export async function updateCtxWallet(
     body,
   );
   return walletLinkToView(link);
+}
+
+export async function depositCtxSavings(
+  actAs: ActAs,
+  body: SavingsMoveRequest,
+): Promise<SavingsOperationView> {
+  const operation = await ctxAccountRequest(
+    actAs,
+    'POST',
+    userPath(actAs.ctxUserId, '/account/savings/deposits'),
+    CtxSavingsOperationSchema,
+    body,
+  );
+  return savingsOperationToView(operation);
+}
+
+export async function withdrawCtxSavings(
+  actAs: ActAs,
+  body: SavingsMoveRequest,
+): Promise<SavingsOperationView> {
+  const operation = await ctxAccountRequest(
+    actAs,
+    'POST',
+    userPath(actAs.ctxUserId, '/account/savings/withdrawals'),
+    CtxSavingsOperationSchema,
+    body,
+  );
+  return savingsOperationToView(operation);
 }
 
 export async function unlinkCtxWallet(actAs: ActAs, walletId: string): Promise<WalletLinkView> {

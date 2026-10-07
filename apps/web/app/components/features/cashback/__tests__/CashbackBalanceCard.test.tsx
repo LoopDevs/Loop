@@ -83,11 +83,17 @@ describe('<CashbackBalanceCard />', () => {
     accountState.account = account({
       savings: [
         {
+          potId: 'pot-1',
           currency: 'XLM.USDC',
           provider: 'ctxmock',
           principal: '5.0000000',
           value: '5.1200000',
           earnt: '0.1200000',
+          locked: '0',
+          available: '5.1200000',
+          unlocksAt: null,
+          estimatedApr: null,
+          projectedYearlyEarnings: null,
         },
       ],
     });

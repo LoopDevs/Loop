@@ -26,6 +26,8 @@ const ctx = vi.hoisted(() => ({
   linkCtxWallet: vi.fn(),
   updateCtxWallet: vi.fn(),
   unlinkCtxWallet: vi.fn(),
+  depositCtxSavings: vi.fn(),
+  withdrawCtxSavings: vi.fn(),
 }));
 
 vi.mock('../../ctx/account.js', async (importActual) => ({
@@ -34,15 +36,19 @@ vi.mock('../../ctx/account.js', async (importActual) => ({
   linkCtxWallet: ctx.linkCtxWallet,
   updateCtxWallet: ctx.updateCtxWallet,
   unlinkCtxWallet: ctx.unlinkCtxWallet,
+  depositCtxSavings: ctx.depositCtxSavings,
+  withdrawCtxSavings: ctx.withdrawCtxSavings,
 }));
 
 import { CtxAccountRequestError, CtxAccountShapeError } from '../../ctx/account.js';
 import { CtxUnavailableError } from '../../ctx/api-fetch.js';
 import {
+  depositSavingsHandler,
   getAccountHandler,
   linkWalletHandler,
   unlinkWalletHandler,
   updateWalletHandler,
+  withdrawSavingsHandler,
 } from '../account-handler.js';
 
 const ADDRESS = 'G' + 'A'.repeat(55);
@@ -254,5 +260,72 @@ describe('unlinkWalletHandler', () => {
     const res = await unlinkWalletHandler(makeCtx({ params: { walletId: '' } }));
     expect(res.status).toBe(400);
     expect(ctx.unlinkCtxWallet).not.toHaveBeenCalled();
+  });
+});
+
+describe('savings handlers', () => {
+  const operation = {
+    id: 'sop-1',
+    type: 'deposit',
+    potId: 'pot-1',
+    status: 'complete',
+    currency: 'XLM.USDC',
+    amount: '1.0000000',
+    created: '2026-09-23T10:00:00Z',
+    finalisedAt: '2026-09-23T10:00:01Z',
+    error: null,
+  };
+
+  beforeEach(() => {
+    state.user = { id: 'u-1', ctxUserId: 'ctx-1' };
+    ctx.depositCtxSavings.mockReset();
+    ctx.withdrawCtxSavings.mockReset();
+  });
+
+  it('400 when the amount is not a positive decimal', async () => {
+    const res = await depositSavingsHandler(
+      makeCtx({ body: { currency: 'XLM.USDC', amount: '-1' } }),
+    );
+    expect(res.status).toBe(400);
+    expect(ctx.depositCtxSavings).not.toHaveBeenCalled();
+  });
+
+  it('deposits acting as the customer and returns 201 with the operation', async () => {
+    ctx.depositCtxSavings.mockResolvedValueOnce(operation);
+    const res = await depositSavingsHandler(
+      makeCtx({ body: { currency: 'xlm.usdc', amount: '1' }, clientId: 'loopios' }),
+    );
+    expect(res.status).toBe(201);
+    expect(ctx.depositCtxSavings).toHaveBeenCalledWith(
+      { ctxUserId: 'ctx-1', clientId: 'loopios' },
+      { currency: 'XLM.USDC', amount: '1' },
+    );
+    expect(await res.json()).toEqual(operation);
+  });
+
+  it('maps a CTX lock refusal to a 400 with the supplier message', async () => {
+    ctx.withdrawCtxSavings.mockRejectedValueOnce(
+      new CtxAccountRequestError(
+        400,
+        'part of this savings balance is still within its lock period',
+        null,
+      ),
+    );
+    const res = await withdrawSavingsHandler(
+      makeCtx({ body: { currency: 'XLM.USDC', amount: '5' } }),
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code: string; message: string };
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.message).toMatch(/lock period/);
+  });
+
+  it('503 while the user has no CTX mapping yet', async () => {
+    state.user = { id: 'u-1', ctxUserId: null };
+    state.resolvedCtxUserId = null;
+    const res = await withdrawSavingsHandler(
+      makeCtx({ body: { currency: 'XLM.USDC', amount: '1' } }),
+    );
+    expect(res.status).toBe(503);
   });
 });

@@ -32,6 +32,7 @@ import {
   type CashbackHistoryResponse,
 } from '~/services/user';
 import { CashbackBalanceCard } from '~/components/features/cashback/CashbackBalanceCard';
+import { SavingsCard } from '~/components/features/cashback/SavingsCard';
 import { CashbackByMerchantCard } from '~/components/features/cashback/CashbackByMerchantCard';
 import { LinkWalletNudge } from '~/components/features/cashback/LinkWalletNudge';
 import { MonthlyCashbackChart } from '~/components/features/cashback/MonthlyCashbackChart';
@@ -201,6 +202,11 @@ function SettingsCashbackBody(): React.JSX.Element {
           number is the first thing on the page. Multi-currency users
           get one tile per currency; most users see a single tile. */}
       <CashbackBalanceCard />
+
+      {/* Savings pot: positions with lock state and the yield estimate,
+          plus deposit / withdraw between the account balance and the pot.
+          Self-hiding until the user has savings or a balance to deposit. */}
+      <SavingsCard />
 
       {/* Nudge users with positive balance + no linked wallet to
           connect one. Hides itself when either condition isn't met

@@ -2,9 +2,21 @@ import type { HomeCurrency } from './loop-asset.js';
 
 export type WalletChain = 'XLM';
 export type WalletLinkStatus = 'active' | 'removed';
-export type PayoutStatus = 'pending' | 'complete' | 'failed';
+/** Mirrors CTX's payout lifecycle, including the approval and hold states. */
+export type PayoutStatus =
+  | 'pending-approval'
+  | 'approved'
+  | 'held'
+  | 'pending'
+  | 'complete'
+  | 'failed'
+  | 'rejected'
+  | 'cancelled';
 export type SavingsOperationType = 'deposit' | 'withdraw';
 export type SavingsOperationStatus = 'pending' | 'processing' | 'complete' | 'failed';
+/** Where a customer's cashback lands once credited: the account balance (paid out when a wallet is linked) or the savings pot. */
+export type CashbackDestination = 'account' | 'savings';
+export const CASHBACK_DESTINATIONS: readonly CashbackDestination[] = ['account', 'savings'];
 
 export interface AccountBalanceView {
   currency: string;
@@ -12,22 +24,42 @@ export interface AccountBalanceView {
 }
 
 export interface SavingsPositionView {
+  potId: string | null;
   currency: string;
   provider: string;
   principal: string;
   value: string;
   earnt: string;
+  /** Part of `value` still inside the lock period. */
+  locked: string;
+  /** What a withdrawal may take right now. */
+  available: string;
+  unlocksAt: string | null;
+  /** Annualised rate estimated from the pool's unit price growth; null until observed long enough. */
+  estimatedApr: number | null;
+  projectedYearlyEarnings: string | null;
 }
 
 export interface SavingsOperationView {
   id: string;
   type: SavingsOperationType;
+  potId: string | null;
   status: SavingsOperationStatus;
   currency: string;
   amount: string;
   created: string;
   finalisedAt: string | null;
   error: string | null;
+}
+
+export interface SavingsMoveRequest {
+  currency: string;
+  /** Decimal string in major units, e.g. "1.25". */
+  amount: string;
+}
+
+export interface SetCashbackDestinationRequest {
+  destination: CashbackDestination;
 }
 
 export interface WalletLinkView {

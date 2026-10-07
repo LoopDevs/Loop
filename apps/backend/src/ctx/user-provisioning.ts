@@ -6,7 +6,7 @@ import { logger } from '../logger.js';
 import { upstreamUrl } from '../upstream.js';
 import { scrubUpstreamBody } from '../upstream-body-scrub.js';
 import { getUserById, getUserCtxUserId, setUserCtxUserId } from '../db/users.js';
-import { ctxFetch } from './api-fetch.js';
+import { ctxAuthHeaders, ctxFetch } from './api-fetch.js';
 import { syncCtxAdminRole } from './user-roles.js';
 
 const log = logger.child({ area: 'ctx-user-provisioning' });
@@ -72,19 +72,17 @@ export function enqueueCtxUserProvisioning(user: ProvisionableUser): void {
 }
 
 export async function provisionCtxUser(user: ProvisionableUser): Promise<void> {
-  const res = await fetch(upstreamUrl('/users'), {
+  const url = upstreamUrl('/users');
+  const body = JSON.stringify({
+    email: user.email,
+    type: 'customer',
+    operatorUserId: user.id,
+    stableCurrency: heldStableForCurrency(user.homeCurrency),
+  });
+  const res = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Api-Key': config.ctx.credentials.key,
-      'X-Api-Secret': config.ctx.credentials.secret,
-    },
-    body: JSON.stringify({
-      email: user.email,
-      type: 'customer',
-      operatorUserId: user.id,
-      stableCurrency: heldStableForCurrency(user.homeCurrency),
-    }),
+    headers: ctxAuthHeaders('POST', url, body, { 'Content-Type': 'application/json' }),
+    body,
     signal: AbortSignal.timeout(10_000),
   });
 
@@ -211,7 +209,6 @@ export function ctxActAsHeaders(
   if (ctxUserId === null) return null;
   return {
     'X-Api-Key': config.ctx.credentials.key,
-    'X-Api-Secret': config.ctx.credentials.secret,
     'X-User-Id': ctxUserId,
     'X-Client-Id': clientId ?? config.ctx.clientIds.web,
   };

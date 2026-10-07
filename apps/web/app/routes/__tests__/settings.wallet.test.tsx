@@ -17,6 +17,7 @@ const { userMock, authMock } = vi.hoisted(() => ({
     unlinkWallet: vi.fn(),
     updateWallet: vi.fn(),
     setHomeCurrency: vi.fn(),
+    setCashbackDestination: vi.fn(),
   },
   authMock: { isAuthenticated: true },
 }));
@@ -28,6 +29,8 @@ vi.mock('~/services/user', () => ({
   unlinkWallet: (id: string) => userMock.unlinkWallet(id),
   updateWallet: (id: string, body: { autoPayout: boolean }) => userMock.updateWallet(id, body),
   setHomeCurrency: (code: 'USD' | 'GBP' | 'EUR') => userMock.setHomeCurrency(code),
+  setCashbackDestination: (destination: 'account' | 'savings') =>
+    userMock.setCashbackDestination(destination),
 }));
 
 vi.mock('~/hooks/use-auth', () => ({
@@ -103,11 +106,22 @@ function renderPage(): ReturnType<typeof render> {
 }
 
 beforeEach(() => {
-  me = { id: 'u-1', email: 'a@b.com', isAdmin: false, staffRole: null, homeCurrency: 'GBP' };
+  me = {
+    id: 'u-1',
+    email: 'a@b.com',
+    isAdmin: false,
+    staffRole: null,
+    homeCurrency: 'GBP',
+    cashbackDestination: 'account',
+  };
   links = [];
   authMock.isAuthenticated = true;
   for (const fn of Object.values(userMock)) fn.mockReset();
   userMock.getMe.mockImplementation(async () => me);
+  userMock.setCashbackDestination.mockImplementation(async (destination: 'account' | 'savings') => {
+    me = { ...me, cashbackDestination: destination };
+    return me;
+  });
   userMock.getMyAccount.mockImplementation(async () => account());
   userMock.linkWallet.mockImplementation(async (body: { address: string }) => {
     links = [
@@ -232,13 +246,37 @@ describe('SettingsWalletRoute', () => {
     expect(alert.textContent).toContain('address: invalid');
   });
 
-  it('offers Payout selected and Savings disabled as coming soon', async () => {
+  it('offers Payout selected by default and switches cashback to savings on request', async () => {
     renderPage();
     const payout = (await screen.findByRole('radio', { name: /Payout/i })) as HTMLButtonElement;
     const savings = screen.getByRole('radio', { name: /Savings/i }) as HTMLButtonElement;
     expect(payout.getAttribute('aria-checked')).toBe('true');
-    expect(savings.disabled).toBe(true);
-    expect(savings.textContent).toMatch(/Coming soon/i);
+    expect(savings.getAttribute('aria-checked')).toBe('false');
+    expect(savings.disabled).toBe(false);
+    await act(async () => {
+      fireEvent.click(savings);
+    });
+    await waitFor(() => expect(userMock.setCashbackDestination).toHaveBeenCalledWith('savings'));
+    await waitFor(() =>
+      expect(
+        (screen.getByRole('radio', { name: /Savings/i }) as HTMLButtonElement).getAttribute(
+          'aria-checked',
+        ),
+      ).toBe('true'),
+    );
+    expect(screen.getByText(/Payouts pause while Savings is selected/i)).toBeTruthy();
+  });
+
+  it('switches cashback back to the account when Payout is selected', async () => {
+    me = { ...me, cashbackDestination: 'savings' };
+    renderPage();
+    const payout = (await screen.findByRole('radio', { name: /Payout/i })) as HTMLButtonElement;
+    expect(payout.getAttribute('aria-checked')).toBe('false');
+    await act(async () => {
+      fireEvent.click(payout);
+    });
+    await waitFor(() => expect(userMock.setCashbackDestination).toHaveBeenCalledWith('account'));
+    expect(userMock.updateWallet).not.toHaveBeenCalled();
   });
 
   it('re-enables auto payout when Payout is selected on a link that has it off', async () => {

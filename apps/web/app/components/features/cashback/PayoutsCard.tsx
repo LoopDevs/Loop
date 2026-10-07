@@ -3,11 +3,14 @@ import { useAccount } from '~/hooks/use-account';
 import { formatAccountAmount, formatDateTime, useLocaleTag } from '~/i18n/format';
 import { Spinner } from '~/components/ui/Spinner';
 
+const PENDING_CLASSES = 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300';
+const STOPPED_CLASSES = 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300';
+
 const PAYOUT_STATUS_UI: Record<PayoutStatus, { label: string; classes: string }> = {
-  pending: {
-    label: 'Sending',
-    classes: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
-  },
+  'pending-approval': { label: 'Awaiting approval', classes: PENDING_CLASSES },
+  approved: { label: 'Approved', classes: PENDING_CLASSES },
+  held: { label: 'Held', classes: PENDING_CLASSES },
+  pending: { label: 'Sending', classes: PENDING_CLASSES },
   complete: {
     label: 'Paid',
     classes: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
@@ -16,6 +19,8 @@ const PAYOUT_STATUS_UI: Record<PayoutStatus, { label: string; classes: string }>
     label: 'Failed',
     classes: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
   },
+  rejected: { label: 'Rejected', classes: STOPPED_CLASSES },
+  cancelled: { label: 'Cancelled', classes: STOPPED_CLASSES },
 };
 
 export function PayoutsCard(): React.JSX.Element | null {

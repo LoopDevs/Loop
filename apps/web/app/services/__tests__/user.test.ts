@@ -16,6 +16,9 @@ import {
   getCashbackByMerchant,
   getCashbackMonthly,
   getUserOrdersSummary,
+  depositSavings,
+  withdrawSavings,
+  setCashbackDestination,
 } from '../user';
 import { authenticatedRequest } from '../api-client';
 
@@ -155,5 +158,36 @@ describe('getUserOrdersSummary', () => {
     mockAuth.mockResolvedValue({});
     await getUserOrdersSummary();
     expect(mockAuth).toHaveBeenCalledWith('/api/users/me/orders/summary');
+  });
+});
+
+describe('savings', () => {
+  it('POSTs a deposit body', async () => {
+    mockAuth.mockResolvedValue({ id: 'sop-1' });
+    await depositSavings({ currency: 'XLM.USDC', amount: '1.5' });
+    expect(mockAuth).toHaveBeenCalledWith('/api/users/me/savings/deposits', {
+      method: 'POST',
+      body: { currency: 'XLM.USDC', amount: '1.5' },
+    });
+  });
+
+  it('POSTs a withdrawal body', async () => {
+    mockAuth.mockResolvedValue({ id: 'sop-2' });
+    await withdrawSavings({ currency: 'XLM.USDC', amount: '0.5' });
+    expect(mockAuth).toHaveBeenCalledWith('/api/users/me/savings/withdrawals', {
+      method: 'POST',
+      body: { currency: 'XLM.USDC', amount: '0.5' },
+    });
+  });
+});
+
+describe('setCashbackDestination', () => {
+  it('POSTs the destination', async () => {
+    mockAuth.mockResolvedValue({ id: 'u-1', cashbackDestination: 'savings' });
+    await setCashbackDestination('savings');
+    expect(mockAuth).toHaveBeenCalledWith('/api/users/me/cashback-destination', {
+      method: 'POST',
+      body: { destination: 'savings' },
+    });
   });
 });

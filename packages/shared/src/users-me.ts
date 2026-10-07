@@ -16,6 +16,7 @@
 import type { HomeCurrency } from './loop-asset.js';
 import type { CreditTransactionType } from './credit-transaction-type.js';
 import type { StaffRole } from './admin-staff.js';
+import type { CashbackDestination } from './users-account.js';
 
 /**
  * `GET /api/users/me` / `POST /api/users/me/home-currency` response.
@@ -38,6 +39,8 @@ export interface UserMeView {
    */
   staffRole: StaffRole | null;
   homeCurrency: HomeCurrency;
+  /** Where credited cashback lands at CTX: `account` pays out to the linked wallet, `savings` fills the pot. */
+  cashbackDestination: CashbackDestination;
 }
 
 /** One row of the credit-ledger history (ADR 009 / 015). */

@@ -2,6 +2,7 @@ import { notifyCtxCredentialInvalid } from '../discord.js';
 import { config } from '../config/index.js';
 import { logger } from '../logger.js';
 import { upstreamFetch } from '../upstream.js';
+import { newNonce, requestUri, signCtxRequest, unixNow, type RequestBody } from './signing.js';
 
 const log = logger.child({ area: 'ctx-api' });
 
@@ -44,17 +45,81 @@ export function parseRetryAfterMs(header: string | null): number | null {
 
 export interface CtxApiCredentials {
   apiKey: string;
-  apiSecret: string;
+  apiSecret?: string | undefined;
+  privateKey?: string | undefined;
   clientId: string;
 }
 
-// The operator API-key credentials. Always present — the env schema requires them at boot. Used by call sites (CTX SSE stream) that can't route through `ctxFetch` because the transport isn't a single substitutable `fetch` call.
+// The operator API-key credentials. The key is always present; the proof is either the legacy secret or a secp256k1
+// private key that signs every request (handover-loop.md "Authenticating"). The config schema requires one of the two.
 export function ctxApiCredentials(): CtxApiCredentials {
   return {
     apiKey: config.ctx.credentials.key,
     apiSecret: config.ctx.credentials.secret,
+    privateKey: config.ctx.credentials.privateKey,
     clientId: config.ctx.clientIds.web,
   };
+}
+
+function headersToRecord(headers: RequestInit['headers']): Record<string, string> {
+  if (headers === undefined || headers === null) return {};
+  if (headers instanceof Headers) return Object.fromEntries(headers.entries());
+  if (Array.isArray(headers)) return Object.fromEntries(headers);
+  return { ...(headers as Record<string, string>) };
+}
+
+function headerValue(record: Record<string, string>, name: string): string {
+  const key = Object.keys(record).find((k) => k.toLowerCase() === name.toLowerCase());
+  return key === undefined ? '' : (record[key] ?? '');
+}
+
+function deleteHeader(record: Record<string, string>, name: string): void {
+  for (const key of Object.keys(record)) {
+    if (key.toLowerCase() === name.toLowerCase()) delete record[key];
+  }
+}
+
+// Builds the headers that authenticate one CTX request: the operator key plus either the legacy secret or a signature
+// over this exact method, URI, body and act-as headers. Callers that pre-set `X-User-Id` / `X-Client-Id` keep them; the
+// signature covers whatever they end up as, so a signed request cannot be replayed as another customer.
+export function ctxAuthHeaders(
+  method: string,
+  url: string | URL,
+  body: RequestBody,
+  existing?: RequestInit['headers'],
+): Record<string, string> {
+  const creds = ctxApiCredentials();
+  const headers = headersToRecord(existing);
+  deleteHeader(headers, 'X-Api-Key');
+  deleteHeader(headers, 'X-Api-Secret');
+  headers['X-Api-Key'] = creds.apiKey;
+  if (headerValue(headers, 'X-Client-Id') === '') {
+    headers['X-Client-Id'] = creds.clientId;
+  }
+  if (creds.privateKey !== undefined) {
+    Object.assign(
+      headers,
+      signCtxRequest(
+        {
+          method,
+          uri: requestUri(url),
+          body,
+          apiKey: creds.apiKey,
+          clientId: headerValue(headers, 'X-Client-Id'),
+          userId: headerValue(headers, 'X-User-Id'),
+          timestamp: unixNow(),
+          nonce: newNonce(),
+        },
+        creds.privateKey,
+      ),
+    );
+    return headers;
+  }
+  if (creds.apiSecret === undefined) {
+    throw new Error('ctx.credentials needs a privateKey or a secret');
+  }
+  headers['X-Api-Secret'] = creds.apiSecret;
+  return headers;
 }
 
 // Snapshot of the upstream credential state — for `/health` and the admin
@@ -81,19 +146,14 @@ async function drainBody(res: Response): Promise<void> {
   }
 }
 
-// Injects the CTX API-key headers into `init.headers` and dispatches through `upstreamFetch`, which carries the A2-1305 request-id correlation in both directions. Callers may pre-set `X-User-Id` (act-as) and `X-Client-Id` (request-origin client) — `ctxFetch` only fills `X-Client-Id` when the caller didn't.
+// Injects the CTX auth headers into `init.headers` and dispatches through `upstreamFetch`, which carries the A2-1305 request-id correlation in both directions. Callers may pre-set `X-User-Id` (act-as) and `X-Client-Id` (request-origin client) — `ctxFetch` only fills `X-Client-Id` when the caller didn't.
 export async function ctxFetch(url: string | URL, init?: RequestInit): Promise<Response> {
-  const creds = ctxApiCredentials();
-
   const signal: AbortSignal | undefined =
     init?.signal ?? AbortSignal.timeout(CTX_FETCH_DEFAULT_TIMEOUT_MS);
 
-  const headers = new Headers(init?.headers);
-  headers.set('X-Api-Key', creds.apiKey);
-  headers.set('X-Api-Secret', creds.apiSecret);
-  if (!headers.has('X-Client-Id')) {
-    headers.set('X-Client-Id', creds.clientId);
-  }
+  const headers = new Headers(
+    ctxAuthHeaders(init?.method ?? 'GET', url, init?.body, init?.headers),
+  );
   // A2-1305 in both directions (our id stamped outbound, CTX's id captured off the response for the `X-Ctx-Request-Id` echo) is `upstreamFetch`'s job — see `../upstream.ts`.
   const res = await upstreamFetch(url, { ...init, headers, signal });
 

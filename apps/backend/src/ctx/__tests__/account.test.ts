@@ -32,10 +32,12 @@ vi.mock('../user-provisioning.js', () => ({
 import {
   CtxAccountRequestError,
   CtxAccountShapeError,
+  depositCtxSavings,
   fetchCtxAccount,
   linkCtxWallet,
   unlinkCtxWallet,
   updateCtxWallet,
+  withdrawCtxSavings,
 } from '../account.js';
 
 const ADDRESS = 'G' + 'A'.repeat(55);
@@ -215,5 +217,90 @@ describe('updateCtxWallet / unlinkCtxWallet', () => {
     );
     expect(err).toBeInstanceOf(CtxAccountRequestError);
     expect((err as CtxAccountRequestError).status).toBe(404);
+  });
+});
+
+describe('savings', () => {
+  const operation = {
+    id: 'sop-1',
+    type: 'deposit',
+    potId: 'pot-1',
+    status: 'pending',
+    currency: 'XLM.USDC',
+    amount: '1.0000000',
+    created: '2026-09-23T10:00:00Z',
+  };
+
+  it('POSTs a deposit acting as the customer and maps the operation', async () => {
+    ctxFetchMock.mockResolvedValueOnce(respond(201, operation));
+    const view = await depositCtxSavings(
+      { ctxUserId: 'ctx-user-1', clientId: 'loopios' },
+      { currency: 'XLM.USDC', amount: '1' },
+    );
+    const [url, init] = ctxFetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://ctx.test/users/ctx-user-1/account/savings/deposits');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({ currency: 'XLM.USDC', amount: '1' });
+    expect((init.headers as Record<string, string>)['X-User-Id']).toBe('ctx-user-1');
+    expect(view).toEqual({
+      id: 'sop-1',
+      type: 'deposit',
+      potId: 'pot-1',
+      status: 'pending',
+      currency: 'XLM.USDC',
+      amount: '1.0000000',
+      created: '2026-09-23T10:00:00Z',
+      finalisedAt: null,
+      error: null,
+    });
+  });
+
+  it('POSTs a withdrawal and surfaces the lock refusal as a 400 request error', async () => {
+    ctxFetchMock.mockResolvedValueOnce(
+      respond(400, { error: 'part of this savings balance is still within its lock period' }),
+    );
+    await expect(
+      withdrawCtxSavings({ ctxUserId: 'ctx-user-1' }, { currency: 'XLM.USDC', amount: '5' }),
+    ).rejects.toMatchObject({ status: 400, message: /lock period/ });
+    const [url] = ctxFetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://ctx.test/users/ctx-user-1/account/savings/withdrawals');
+  });
+
+  it('reads the lock and yield fields on positions and accepts every CTX payout status', async () => {
+    const account = ctxAccount();
+    account.savings = [
+      {
+        potId: 'pot-1',
+        currency: 'XLM.USDC',
+        provider: 'defindex',
+        principal: '5.0000000',
+        value: '5.1200000',
+        earnt: '0.1200000',
+        locked: '1.0000000',
+        available: '4.1200000',
+        unlocksAt: '2026-09-24T10:00:00Z',
+        estimatedApr: 0.0412,
+        projectedYearlyEarnings: '0.2109440',
+      },
+    ];
+    account.payouts = [{ ...(account.payouts as Record<string, unknown>[])[0], status: 'held' }];
+    ctxFetchMock.mockResolvedValueOnce(respond(200, account));
+
+    const view = await fetchCtxAccount({ ctxUserId: 'ctx-user-1' });
+
+    expect(view.savings[0]).toEqual({
+      potId: 'pot-1',
+      currency: 'XLM.USDC',
+      provider: 'defindex',
+      principal: '5.0000000',
+      value: '5.1200000',
+      earnt: '0.1200000',
+      locked: '1.0000000',
+      available: '4.1200000',
+      unlocksAt: '2026-09-24T10:00:00Z',
+      estimatedApr: 0.0412,
+      projectedYearlyEarnings: '0.2109440',
+    });
+    expect(view.payouts[0]?.status).toBe('held');
   });
 });

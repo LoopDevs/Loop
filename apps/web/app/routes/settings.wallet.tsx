@@ -16,9 +16,11 @@ import { ACCOUNT_QUERY_KEY, useAccount } from '~/hooks/use-account';
 import {
   getMe,
   linkWallet,
+  setCashbackDestination,
   setHomeCurrency,
   unlinkWallet,
   updateWallet,
+  type CashbackDestination,
   type UserMeView,
 } from '~/services/user';
 import { shouldRetry } from '~/hooks/query-retry';
@@ -125,6 +127,19 @@ function SettingsWalletBody(): React.JSX.Element {
       );
     },
   });
+  const cashbackDestinationMutation = useMutation({
+    mutationFn: (destination: CashbackDestination) => setCashbackDestination(destination),
+    onSuccess: (view: UserMeView) => {
+      queryClient.setQueryData(['me'], view);
+      setDestinationError(null);
+      invalidateAccount();
+    },
+    onError: (err) => {
+      setDestinationError(
+        err instanceof ApiException ? err.message : t('wallet.destination.fallbackError'),
+      );
+    },
+  });
   const currencyMutation = useMutation({
     mutationFn: (code: HomeCurrency) => setHomeCurrency(code),
     onSuccess: (view: UserMeView) => {
@@ -188,7 +203,9 @@ function SettingsWalletBody(): React.JSX.Element {
   const draftValid = trimmed.length > 0;
   const stableCode = displayCurrencyCode(heldStableForCurrency(user.homeCurrency));
   const busy = linkMutation.isPending || unlinkMutation.isPending;
-  const payoutSelected = activeLink === null || activeLink.autoPayout;
+  const savingsSelected = user.cashbackDestination === 'savings';
+  const payoutSelected = !savingsSelected && (activeLink === null || activeLink.autoPayout);
+  const destinationBusy = destinationMutation.isPending || cashbackDestinationMutation.isPending;
 
   const handleLink = (): void => {
     if (!draftValid || busy) return;
@@ -214,9 +231,19 @@ function SettingsWalletBody(): React.JSX.Element {
     currencyMutation.mutate(code);
   };
   const handleSelectPayout = (): void => {
-    if (payoutSelected || activeLink === null || destinationMutation.isPending) return;
+    if (payoutSelected || destinationBusy) return;
     setDestinationError(null);
-    destinationMutation.mutate(activeLink.id);
+    if (savingsSelected) {
+      cashbackDestinationMutation.mutate('account');
+    }
+    if (activeLink !== null && !activeLink.autoPayout) {
+      destinationMutation.mutate(activeLink.id);
+    }
+  };
+  const handleSelectSavings = (): void => {
+    if (savingsSelected || destinationBusy) return;
+    setDestinationError(null);
+    cashbackDestinationMutation.mutate('savings');
   };
 
   return (
@@ -309,7 +336,7 @@ function SettingsWalletBody(): React.JSX.Element {
             role="radio"
             aria-checked={payoutSelected}
             onClick={handleSelectPayout}
-            disabled={destinationMutation.isPending}
+            disabled={destinationBusy}
             className={`rounded-lg border px-4 py-3 text-start disabled:cursor-not-allowed ${
               payoutSelected
                 ? 'border-gray-900 dark:border-white'
@@ -326,24 +353,28 @@ function SettingsWalletBody(): React.JSX.Element {
           <button
             type="button"
             role="radio"
-            aria-checked={false}
-            aria-disabled="true"
-            disabled
-            className="rounded-lg border border-gray-200 px-4 py-3 text-start opacity-60 cursor-not-allowed dark:border-gray-800"
+            aria-checked={savingsSelected}
+            onClick={handleSelectSavings}
+            disabled={destinationBusy}
+            className={`rounded-lg border px-4 py-3 text-start disabled:cursor-not-allowed ${
+              savingsSelected
+                ? 'border-gray-900 dark:border-white'
+                : 'border-gray-300 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800'
+            }`}
           >
-            <span className="flex items-center justify-between gap-2">
-              <span className="text-sm font-semibold text-gray-900 dark:text-white">
-                {t('wallet.destination.savings')}
-              </span>
-              <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-600 dark:bg-gray-800 dark:text-gray-400">
-                {t('wallet.destination.comingSoon')}
-              </span>
+            <span className="block text-sm font-semibold text-gray-900 dark:text-white">
+              {t('wallet.destination.savings')}
             </span>
             <span className="mt-0.5 block text-xs text-gray-600 dark:text-gray-400">
               {t('wallet.destination.savingsBody')}
             </span>
           </button>
         </div>
+        {savingsSelected ? (
+          <p className="text-xs text-gray-600 dark:text-gray-400">
+            {t('wallet.destination.savingsNote')}
+          </p>
+        ) : null}
         {destinationError !== null ? (
           <p role="alert" className="text-sm text-red-600 dark:text-red-400">
             {destinationError}

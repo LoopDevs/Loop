@@ -102,6 +102,7 @@ function mkMe(overrides: Partial<UserMeView> = {}): UserMeView {
     isAdmin: false,
     staffRole: null,
     homeCurrency: 'GBP',
+    cashbackDestination: 'account',
     ...overrides,
   };
 }

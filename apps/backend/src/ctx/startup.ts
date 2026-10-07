@@ -85,9 +85,12 @@ export function loopStableCurrencies(): string[] {
 }
 
 export async function startCtx(): Promise<void> {
-  const { key, secret } = config.ctx.credentials;
-  if (key.trim().length === 0 || secret.trim().length === 0) {
-    throw new Error('CTX startup failed: ctx.credentials.key / ctx.credentials.secret are not set');
+  const { key, secret, privateKey } = config.ctx.credentials;
+  const hasProof = (secret ?? '').trim().length > 0 || (privateKey ?? '').trim().length > 0;
+  if (key.trim().length === 0 || !hasProof) {
+    throw new Error(
+      'CTX startup failed: ctx.credentials.key plus a privateKey or secret are not set',
+    );
   }
 
   await loadCtxCurrencies();

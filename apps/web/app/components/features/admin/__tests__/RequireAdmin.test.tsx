@@ -72,6 +72,7 @@ function meView(over: Partial<UserMeView>): UserMeView {
     isAdmin: false,
     staffRole: null,
     homeCurrency: 'USD',
+    cashbackDestination: 'account',
     ...over,
   };
 }

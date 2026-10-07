@@ -1,15 +1,17 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
-import type { UserAccountView, WalletLinkView } from '@loop/shared';
+import type { SavingsOperationView, UserAccountView, WalletLinkView } from '@loop/shared';
 import { logger } from '../logger.js';
 import { CtxRateLimitedError, CtxUnavailableError } from '../ctx/api-fetch.js';
 import {
   CtxAccountRequestError,
   CtxAccountShapeError,
+  depositCtxSavings,
   fetchCtxAccount,
   linkCtxWallet,
   unlinkCtxWallet,
   updateCtxWallet,
+  withdrawCtxSavings,
 } from '../ctx/account.js';
 import { resolveCtxUserId } from '../ctx/user-provisioning.js';
 import { resolveCallingUser } from './handler.js';
@@ -27,6 +29,15 @@ const UpdateWalletBody = z.object({
 });
 
 const WalletIdParam = z.string().min(1).max(128);
+
+const SavingsMoveBody = z.object({
+  currency: z.string().trim().min(1, 'currency is required').max(32).toUpperCase(),
+  amount: z
+    .string()
+    .trim()
+    .regex(/^\d+(\.\d+)?$/, 'amount must be a positive decimal')
+    .refine((value) => Number(value) > 0, 'amount must be greater than zero'),
+});
 
 interface ActAs {
   ctxUserId: string;
@@ -74,7 +85,7 @@ function supplierErrorResponse(c: Context, err: unknown, action: string): Respon
       );
     }
     if (err.status === 404) {
-      return c.json({ code: 'NOT_FOUND', message: 'Wallet link not found' }, 404);
+      return c.json({ code: 'NOT_FOUND', message: err.message || 'Not found' }, 404);
     }
     log.error({ status: err.status, message: err.message }, `CTX ${action} rejected`);
     return c.json({ code: 'SUPPLIER_UNAVAILABLE', message: `Unable to ${action} right now` }, 503);
@@ -137,6 +148,40 @@ export async function updateWalletHandler(c: Context): Promise<Response> {
     return c.json<WalletLinkView>(await updateCtxWallet(actAs, walletId.data, parsed.data));
   } catch (err) {
     return supplierErrorResponse(c, err, 'update the wallet');
+  }
+}
+
+export async function depositSavingsHandler(c: Context): Promise<Response> {
+  return moveSavings(c, depositCtxSavings, 'deposit into savings');
+}
+
+export async function withdrawSavingsHandler(c: Context): Promise<Response> {
+  return moveSavings(c, withdrawCtxSavings, 'withdraw from savings');
+}
+
+async function moveSavings(
+  c: Context,
+  move: typeof depositCtxSavings,
+  action: string,
+): Promise<Response> {
+  const parsed = SavingsMoveBody.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) {
+    return c.json(
+      { code: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid body' },
+      400,
+    );
+  }
+  const actAs = await resolveActAs(c);
+  if (actAs instanceof Response) return actAs;
+  try {
+    const operation = await move(actAs, parsed.data);
+    log.info(
+      { ctxUserId: actAs.ctxUserId, operationId: operation.id, status: operation.status },
+      `savings ${operation.type} requested`,
+    );
+    return c.json<SavingsOperationView>(operation, 201);
+  } catch (err) {
+    return supplierErrorResponse(c, err, action);
   }
 }
 

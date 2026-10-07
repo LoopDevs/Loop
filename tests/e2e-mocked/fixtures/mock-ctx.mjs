@@ -114,6 +114,9 @@ const commissionSettlements = [];
 const provisionedUsers = new Map();
 const walletLinks = new Map();
 const payouts = new Map();
+// ctx-interop: savings positions per user, keyed `${userId}:${currency}`; deposits settle instantly like the ctxmock provider
+const savingsPositions = new Map();
+const savingsOperations = [];
 
 // ───────── Helpers ───────────────────────────────────────────────────
 
@@ -133,6 +136,20 @@ function json(res, status, body) {
   const payload = JSON.stringify(body);
   res.writeHead(status, { 'Content-Type': 'application/json' });
   res.end(payload);
+}
+
+function savingsPositionJson(position) {
+  return {
+    potId: `pot-ctxmock-${position.currency}`,
+    owner: `system:account:user:${position.userId}:savings`,
+    currency: position.currency,
+    provider: 'ctxmock',
+    principal: position.principal.toFixed(7),
+    value: position.value.toFixed(7),
+    earnt: (position.value - position.principal).toFixed(7),
+    locked: '0.0000000',
+    available: position.value.toFixed(7),
+  };
 }
 
 function walletLinkJson(link) {
@@ -392,6 +409,7 @@ const server = http.createServer(async (req, res) => {
       email: target.email,
       type: target.type,
       stableCurrency: target.stableCurrency,
+      cashbackDestination: target.cashbackDestination ?? 'account',
       ...(target.operatorUserId ? { operatorUserId: target.operatorUserId } : {}),
       roles: [],
     });
@@ -423,11 +441,21 @@ const server = http.createServer(async (req, res) => {
         });
       target.stableCurrency = stableCurrency;
     }
+    if (body.cashbackDestination !== undefined) {
+      const destination = String(body.cashbackDestination).toLowerCase();
+      if (!['account', 'savings'].includes(destination))
+        return json(res, 400, {
+          error: 'bad request',
+          fields: { cashbackDestination: ['must be account or savings'] },
+        });
+      target.cashbackDestination = destination;
+    }
     return json(res, 200, {
       id: target.id,
       email: target.email,
       type: target.type,
       stableCurrency: target.stableCurrency,
+      cashbackDestination: target.cashbackDestination ?? 'account',
       ...(target.operatorUserId ? { operatorUserId: target.operatorUserId } : {}),
     });
   }
@@ -438,18 +466,64 @@ const server = http.createServer(async (req, res) => {
     const userId = accountMatch[1];
     const links = [...walletLinks.values()].filter((l) => l.userId === userId);
     const userPayouts = [...payouts.values()].filter((p) => p.userId === userId);
+    const positions = [...savingsPositions.values()].filter((p) => p.userId === userId);
     return json(res, 200, {
       id: `acct-${userId}`,
       userId,
       wallet: [],
-      savings: [],
-      savingsPrincipal: [],
+      savings: positions.map(savingsPositionJson),
+      savingsPrincipal: positions.map((p) => ({
+        currency: p.currency,
+        amount: p.principal.toFixed(7),
+      })),
       pendingOperations: [],
       linkedWallets: links.map(walletLinkJson),
       payouts: userPayouts,
       created: SEED_UPDATED,
       updated: new Date().toISOString(),
     });
+  }
+
+  const savingsMoveMatch = path.match(
+    /^\/users\/([^/]+)\/account\/savings\/(deposits|withdrawals)$/,
+  );
+  if (method === 'POST' && savingsMoveMatch) {
+    const [, userId, kind] = savingsMoveMatch;
+    const body = await readBody(req);
+    const currency = String(body.currency ?? '').toUpperCase();
+    const amount = Number(body.amount);
+    const fields = {};
+    if (!['XLM.USDC', 'XLM.EURC', 'XLM.GBPLOOP'].includes(currency))
+      fields.currency = ['savings are not available for this currency'];
+    if (!Number.isFinite(amount) || amount <= 0) fields.amount = ['must be a positive number'];
+    if (Object.keys(fields).length) return json(res, 400, { error: 'bad request', fields });
+    const key = `${userId}:${currency}`;
+    const position = savingsPositions.get(key) ?? { userId, currency, principal: 0, value: 0 };
+    if (kind === 'withdrawals') {
+      if (!savingsPositions.has(key))
+        return json(res, 404, { error: 'no savings position for this currency' });
+      if (amount > position.value) return json(res, 400, { error: 'insufficient balance' });
+      const released = (position.principal * amount) / position.value;
+      position.principal -= released;
+      position.value -= amount;
+      if (position.value <= 0) savingsPositions.delete(key);
+    } else {
+      position.principal += amount;
+      position.value += amount;
+      savingsPositions.set(key, position);
+    }
+    const operation = {
+      id: `sop-${savingsOperations.length + 1}`,
+      type: kind === 'deposits' ? 'deposit' : 'withdraw',
+      potId: `pot-ctxmock-${currency}`,
+      status: 'complete',
+      currency,
+      amount: amount.toFixed(7),
+      created: new Date().toISOString(),
+      finalisedAt: new Date().toISOString(),
+    };
+    savingsOperations.push(operation);
+    return json(res, 201, operation);
   }
 
   const walletsMatch = path.match(/^\/users\/([^/]+)\/wallets$/);

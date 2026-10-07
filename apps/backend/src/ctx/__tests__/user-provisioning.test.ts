@@ -351,10 +351,9 @@ describe('ctxActAsHeaders', () => {
     ctxState.credentials = { key: 'op-key', secret: 'op-secret' };
   });
 
-  it('returns the full act-as header set for a mapped user', () => {
+  it('returns the act-as header set for a mapped user, leaving the proof of identity to ctxFetch', () => {
     expect(ctxActAsHeaders('ctx-u9')).toEqual({
       'X-Api-Key': 'op-key',
-      'X-Api-Secret': 'op-secret',
       'X-User-Id': 'ctx-u9',
       'X-Client-Id': 'loopweb',
     });

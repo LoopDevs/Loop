@@ -1,12 +1,21 @@
 // User profile handlers — ADR 015, ADR 037, A2-550, A2-551, A2-1905, A2-1906
 import type { Context } from 'hono';
 import { z } from 'zod';
-import { HOME_CURRENCIES, type StaffRole } from '@loop/shared';
+import {
+  CASHBACK_DESTINATIONS,
+  HOME_CURRENCIES,
+  type CashbackDestination,
+  type StaffRole,
+} from '@loop/shared';
 import { db } from '../db/client.js';
 import { resolveLoopAuthenticatedUser } from '../auth/authenticated-user.js';
 import { type User } from '../db/users.js';
 import { getStaffRole } from '../db/staff-roles.js';
-import { CtxUserRolesError, updateCtxStableCurrency } from '../ctx/user-roles.js';
+import {
+  CtxUserRolesError,
+  updateCtxCashbackDestination,
+  updateCtxStableCurrency,
+} from '../ctx/user-roles.js';
 import { logger } from '../logger.js';
 
 const log = logger.child({ handler: 'users' });
@@ -29,6 +38,8 @@ export interface UserMeView {
    * the last client fallback retires.
    */
   isAdmin: boolean;
+  /** Where credited cashback lands at CTX: the account balance or the savings pot. */
+  cashbackDestination: CashbackDestination;
 }
 
 // Lookup failure degrades to shim: profile endpoint is polled by all clients, staff-role blip must not log out fleet
@@ -53,6 +64,7 @@ export async function toView(row: User): Promise<UserMeView> {
     homeCurrency: row.homeCurrency,
     staffRole,
     isAdmin: staffRole === 'admin',
+    cashbackDestination: row.cashbackDestination ?? 'account',
   };
 }
 
@@ -138,6 +150,66 @@ export async function setHomeCurrencyHandler(c: Context): Promise<Response> {
     .updateOne(
       { id: user.id },
       { $set: { homeCurrency: parsed.data.currency, updatedAt: new Date() } },
+    );
+  if (updated === null) {
+    return c.json({ code: 'NOT_FOUND', message: 'User not found' }, 404);
+  }
+  return c.json<UserMeView>(await toView(updated));
+}
+
+const SetCashbackDestinationBody = z.object({
+  destination: z.enum(CASHBACK_DESTINATIONS),
+});
+
+// CTX owns the routing of credited cashback, so the setting is written there first and only mirrored locally once accepted.
+export async function setCashbackDestinationHandler(c: Context): Promise<Response> {
+  const parsed = SetCashbackDestinationBody.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) {
+    return c.json(
+      { code: 'VALIDATION_ERROR', message: 'destination must be account or savings' },
+      400,
+    );
+  }
+  let user: User | null;
+  try {
+    user = await resolveCallingUser(c);
+  } catch (err) {
+    log.error({ err }, 'Failed to resolve calling user');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
+  }
+  if (user === null) {
+    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+  }
+  const destination = parsed.data.destination;
+  if ((user.cashbackDestination ?? 'account') === destination) {
+    return c.json<UserMeView>(await toView(user));
+  }
+  if (user.ctxUserId === null) {
+    return c.json(
+      {
+        code: 'SERVICE_UNAVAILABLE',
+        message: 'Your account is still being set up with our supplier — please retry shortly',
+      },
+      503,
+    );
+  }
+  try {
+    await updateCtxCashbackDestination(user.ctxUserId, destination);
+  } catch (err) {
+    if (err instanceof CtxUserRolesError && err.status === 400) {
+      return c.json({ code: 'VALIDATION_ERROR', message: 'Destination not supported' }, 400);
+    }
+    log.error({ err, userId: user.id }, 'CTX cashbackDestination update failed');
+    return c.json(
+      { code: 'SUPPLIER_UNAVAILABLE', message: 'Unable to change where cashback goes right now' },
+      503,
+    );
+  }
+  const updated = await db
+    .collection('users')
+    .updateOne(
+      { id: user.id },
+      { $set: { cashbackDestination: destination, updatedAt: new Date() } },
     );
   if (updated === null) {
     return c.json({ code: 'NOT_FOUND', message: 'User not found' }, 404);

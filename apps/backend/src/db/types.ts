@@ -1,5 +1,5 @@
 // document shapes for persisted collections — ADR 013, 014, 017, 037, 052, NS-03, NS-09, A2-566, R3-3, SEC-02
-import type { HomeCurrency, OrderState, StaffRole } from '@loop/shared';
+import type { CashbackDestination, HomeCurrency, OrderState, StaffRole } from '@loop/shared';
 
 export type { HomeCurrency, OrderState };
 
@@ -13,6 +13,8 @@ export interface UserDoc {
   // NS-09 — bumped on logout/sign-out-all/refresh-reuse to invalidate prior access tokens
   tokenVersion: number;
   homeCurrency: HomeCurrency;
+  // Mirror of CTX's cashbackDestination; absent on rows written before the setting existed, read as 'account'
+  cashbackDestination?: CashbackDestination;
   // ADR 037 — mirror of the CTX operator-admin role; `requireStaff` prefers `staff_roles` row
   isAdmin: boolean;
   createdAt: Date;

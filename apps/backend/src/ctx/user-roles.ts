@@ -1,6 +1,12 @@
 // CTX user mirror — ADR 037: Loop admin is CTX's operator-admin role; home currency is CTX's stableCurrency
 import { z } from 'zod';
-import { fiatForHeldStable, heldStableForCurrency, type HomeCurrency } from '@loop/shared';
+import {
+  CASHBACK_DESTINATIONS,
+  fiatForHeldStable,
+  heldStableForCurrency,
+  type CashbackDestination,
+  type HomeCurrency,
+} from '@loop/shared';
 import { logger } from '../logger.js';
 import { upstreamUrl } from '../upstream.js';
 import { scrubUpstreamBody } from '../upstream-body-scrub.js';
@@ -18,12 +24,14 @@ const CtxUserSchema = z
     id: z.string().min(1),
     roles: z.array(z.object({ name: z.string() }).passthrough()).default([]),
     stableCurrency: z.string().optional(),
+    cashbackDestination: z.enum(CASHBACK_DESTINATIONS).optional(),
   })
   .passthrough();
 
 export interface CtxUserMirror {
   isAdmin: boolean;
   homeCurrency: HomeCurrency | null;
+  cashbackDestination: CashbackDestination;
 }
 
 export class CtxUserRolesError extends Error {
@@ -55,6 +63,7 @@ async function parseCtxUser(res: Response, action: string): Promise<CtxUserMirro
   return {
     isAdmin: parsed.data.roles.some((role) => role.name === CTX_OPERATOR_ADMIN_ROLE),
     homeCurrency: stable === undefined ? null : fiatForHeldStable(stable),
+    cashbackDestination: parsed.data.cashbackDestination ?? 'account',
   };
 }
 
@@ -73,6 +82,19 @@ export async function updateCtxStableCurrency(
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ stableCurrency: heldStableForCurrency(homeCurrency) }),
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
+  return parseCtxUser(res, 'update');
+}
+
+export async function updateCtxCashbackDestination(
+  ctxUserId: string,
+  destination: CashbackDestination,
+): Promise<CtxUserMirror> {
+  const res = await ctxFetch(upstreamUrl(`/users/${encodeURIComponent(ctxUserId)}`), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ cashbackDestination: destination }),
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
   return parseCtxUser(res, 'update');

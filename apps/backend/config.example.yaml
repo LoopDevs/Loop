@@ -44,9 +44,18 @@ ctx:
   baseUrl: https://spend.ctx.com
   # REQUIRED — operator API credentials. ADR 052: these authenticate
   # every upstream surface, so the backend refuses to boot without them.
+  # The key proves itself with ONE of:
+  #   privateKey — 32 byte hex secp256k1 key; every request is signed
+  #                (X-Signature headers) and the secret is never sent.
+  #                Register the matching compressed public key on the
+  #                CTX API user (POST /users/:id/signing-keys, or the
+  #                loop-dev-init trigger's signingPublicKey in dev).
+  #   secret     — legacy X-Api-Secret, accepted while the CTX user still
+  #                lists the api-secret auth method.
   credentials:
     key: loop
     secret: loop
+    privateKey: 70b7f4d9e0f49d01bebd3861f37c023c63008b69dc871fb1a50faa964311f9ca
   # Defaults come from @loop/shared DEFAULT_CLIENT_IDS. Override per
   # deployment only alongside a matching web rebuild (audit A-018) —
   # the backend warns at boot if these diverge from the shared default.

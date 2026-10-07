@@ -22,6 +22,9 @@ import type {
   WalletLinkView,
   LinkWalletRequest,
   UpdateWalletRequest,
+  SavingsMoveRequest,
+  SavingsOperationView,
+  CashbackDestination,
   HomeCurrency,
   OrderState,
 } from '@loop/shared';
@@ -34,6 +37,9 @@ export type {
   WalletLinkView,
   LinkWalletRequest,
   UpdateWalletRequest,
+  SavingsMoveRequest,
+  SavingsOperationView,
+  CashbackDestination,
   CashbackByMerchantResponse,
   CashbackByMerchantRow,
   CashbackHistoryEntry,
@@ -94,6 +100,32 @@ export async function unlinkWallet(walletId: string): Promise<WalletLinkView> {
     `/api/users/me/wallets/${encodeURIComponent(walletId)}`,
     { method: 'DELETE' },
   );
+}
+
+/** `POST /api/users/me/savings/deposits` — moves account balance into the savings pot. */
+export async function depositSavings(body: SavingsMoveRequest): Promise<SavingsOperationView> {
+  return authenticatedRequest<SavingsOperationView>('/api/users/me/savings/deposits', {
+    method: 'POST',
+    body,
+  });
+}
+
+/** `POST /api/users/me/savings/withdrawals` — moves unlocked savings back to the account. */
+export async function withdrawSavings(body: SavingsMoveRequest): Promise<SavingsOperationView> {
+  return authenticatedRequest<SavingsOperationView>('/api/users/me/savings/withdrawals', {
+    method: 'POST',
+    body,
+  });
+}
+
+/** `POST /api/users/me/cashback-destination` — account (pay out) or savings (pot). */
+export async function setCashbackDestination(
+  destination: CashbackDestination,
+): Promise<UserMeView> {
+  return authenticatedRequest<UserMeView>('/api/users/me/cashback-destination', {
+    method: 'POST',
+    body: { destination },
+  });
 }
 
 /**
