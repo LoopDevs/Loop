@@ -7,11 +7,19 @@ vi.mock('../../logger.js', () => ({
   },
 }));
 
-const { ctxState } = vi.hoisted(() => ({
-  ctxState: {
-    credentials: { key: 'op-key', secret: 'op-secret' } as { key: string; secret: string },
-  },
-}));
+const { ctxState, PRIVATE_KEY } = vi.hoisted(() => {
+  const PRIVATE_KEY = '11'.repeat(32);
+  return {
+    PRIVATE_KEY,
+    ctxState: {
+      credentials: { key: 'op-key', secret: 'op-secret', privateKey: PRIVATE_KEY } as {
+        key: string;
+        secret?: string;
+        privateKey: string;
+      },
+    },
+  };
+});
 vi.mock('../../config/index.js', async (importActual) => {
   const actual = await importActual<typeof ConfigModule>();
   return {
@@ -112,27 +120,28 @@ describe('startCtx', () => {
     loadCtxCurrenciesMock.mockResolvedValue(undefined);
     refreshCtxCurrenciesMock.mockReset();
     refreshCtxCurrenciesMock.mockResolvedValue(undefined);
-    ctxState.credentials = { key: 'op-key', secret: 'op-secret' };
+    ctxState.credentials = { key: 'op-key', secret: 'op-secret', privateKey: PRIVATE_KEY };
   });
 
-  it('loads the CTX currency registry before reading the company', async () => {
+  it('proves the api key with GET /me before loading the CTX currency registry', async () => {
     ctxFetchMock.mockResolvedValueOnce(meResponse());
 
     await startCtx();
 
     expect(loadCtxCurrenciesMock).toHaveBeenCalledTimes(1);
-    expect(loadCtxCurrenciesMock.mock.invocationCallOrder[0]).toBeLessThan(
-      ctxFetchMock.mock.invocationCallOrder[0]!,
+    expect(ctxFetchMock.mock.invocationCallOrder[0]).toBeLessThan(
+      loadCtxCurrenciesMock.mock.invocationCallOrder[0]!,
     );
   });
 
   it('refuses to start when the CTX currency registry cannot be loaded', async () => {
+    ctxFetchMock.mockResolvedValueOnce(meResponse());
     loadCtxCurrenciesMock.mockRejectedValueOnce(
       new Error('CTX startup failed: GET /currencies failed'),
     );
 
     await expect(startCtx()).rejects.toThrow(/currencies/);
-    expect(ctxFetchMock).not.toHaveBeenCalled();
+    expect(ctxFetchMock).toHaveBeenCalledTimes(1);
     expect(startCtxWsMock).not.toHaveBeenCalled();
   });
 
@@ -212,15 +221,15 @@ describe('startCtx', () => {
   });
 
   it('throws before any CTX call when the api key is unset', async () => {
-    ctxState.credentials = { key: '', secret: 'op-secret' };
+    ctxState.credentials = { key: '', secret: 'op-secret', privateKey: PRIVATE_KEY };
 
     await expect(startCtx()).rejects.toThrow(/credentials/);
     expect(ctxFetchMock).not.toHaveBeenCalled();
     expect(startCtxWsMock).not.toHaveBeenCalled();
   });
 
-  it('throws before any CTX call when the api secret is unset', async () => {
-    ctxState.credentials = { key: 'op-key', secret: '  ' };
+  it('throws before any CTX call when the private key is unset', async () => {
+    ctxState.credentials = { key: 'op-key', secret: 'op-secret', privateKey: '  ' };
 
     await expect(startCtx()).rejects.toThrow(/credentials/);
     expect(ctxFetchMock).not.toHaveBeenCalled();
@@ -296,6 +305,100 @@ describe('startCtx', () => {
       );
 
     await expect(startCtx()).rejects.toThrow(/still false after update/);
+    expect(startCtxWsMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('startCtx signing key registration', () => {
+  const PUBLIC_KEY = '034f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa';
+
+  type FetchCall = [string, RequestInit, { proof?: string; passthrough401?: boolean } | undefined];
+  const calls = (): FetchCall[] => ctxFetchMock.mock.calls as FetchCall[];
+  const rejected = (): Response => new Response('{"error":"not authorized"}', { status: 401 });
+
+  beforeEach(() => {
+    __resetCtxStartupForTests();
+    ctxFetchMock.mockReset();
+    startCtxWsMock.mockReset();
+    registerCtxWsTopicMock.mockReset();
+    loadCtxCurrenciesMock.mockReset();
+    loadCtxCurrenciesMock.mockResolvedValue(undefined);
+    ctxState.credentials = { key: 'op-key', secret: 'op-secret', privateKey: PRIVATE_KEY };
+  });
+
+  it('probes GET /me signed and lets a 401 through instead of throwing', async () => {
+    ctxFetchMock.mockResolvedValueOnce(meResponse());
+
+    await startCtx();
+
+    expect(calls()).toHaveLength(1);
+    expect(calls()[0]![2]).toEqual({ passthrough401: true });
+  });
+
+  it('registers the public key with the secret after a signed 401, then probes signed again', async () => {
+    ctxFetchMock
+      .mockResolvedValueOnce(rejected())
+      .mockResolvedValueOnce(meResponse())
+      .mockResolvedValueOnce(new Response('{"id":"key-1"}', { status: 201 }))
+      .mockResolvedValueOnce(meResponse());
+
+    await startCtx();
+
+    expect(calls()).toHaveLength(4);
+    expect(calls()[0]![0]).toBe('http://ctx.test/me');
+    expect(calls()[0]![2]).toEqual({ passthrough401: true });
+    expect(calls()[1]![0]).toBe('http://ctx.test/me');
+    expect(calls()[1]![2]).toEqual({ proof: 'secret', passthrough401: true });
+    expect(calls()[2]![0]).toBe('http://ctx.test/users/u1/signing-keys');
+    expect(calls()[2]![1].method).toBe('POST');
+    expect(JSON.parse(calls()[2]![1].body as string)).toEqual({
+      publicKey: PUBLIC_KEY,
+      scheme: 'secp256k1',
+    });
+    expect(calls()[2]![2]).toEqual({ proof: 'secret' });
+    expect(calls()[3]![0]).toBe('http://ctx.test/me');
+    expect(calls()[3]![2]).toBeUndefined();
+    expect(startCtxWsMock).toHaveBeenCalledTimes(1);
+    expect(getLoopContext().company.id).toBe('company-1');
+  });
+
+  it('fails when the signed probe is rejected and no secret is configured to register the key', async () => {
+    ctxState.credentials = { key: 'op-key', privateKey: PRIVATE_KEY };
+    ctxFetchMock.mockResolvedValueOnce(rejected());
+
+    await expect(startCtx()).rejects.toThrow(/ctx\.credentials\.secret is not set/);
+    expect(calls()).toHaveLength(1);
+    expect(startCtxWsMock).not.toHaveBeenCalled();
+  });
+
+  it('fails when CTX rejects the legacy secret too', async () => {
+    ctxFetchMock.mockResolvedValueOnce(rejected()).mockResolvedValueOnce(rejected());
+
+    await expect(startCtx()).rejects.toThrow(/legacy secret returned 401/);
+    expect(calls()).toHaveLength(2);
+    expect(startCtxWsMock).not.toHaveBeenCalled();
+  });
+
+  it('fails when CTX refuses the public key registration', async () => {
+    ctxFetchMock
+      .mockResolvedValueOnce(rejected())
+      .mockResolvedValueOnce(meResponse())
+      .mockResolvedValueOnce(new Response('{"fields":{"publicKey":["exists"]}}', { status: 400 }));
+
+    await expect(startCtx()).rejects.toThrow(/signing-keys returned 400/);
+    expect(calls()).toHaveLength(3);
+    expect(startCtxWsMock).not.toHaveBeenCalled();
+  });
+
+  it('fails when the signed probe is still rejected after registration', async () => {
+    ctxFetchMock
+      .mockResolvedValueOnce(rejected())
+      .mockResolvedValueOnce(meResponse())
+      .mockResolvedValueOnce(new Response('{"id":"key-1"}', { status: 201 }))
+      .mockRejectedValueOnce(new Error('CTX rejected the API key (401)'));
+
+    await expect(startCtx()).rejects.toThrow(/GET \/me failed/);
+    expect(calls()).toHaveLength(4);
     expect(startCtxWsMock).not.toHaveBeenCalled();
   });
 });

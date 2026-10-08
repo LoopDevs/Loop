@@ -26,6 +26,7 @@ ctx:
   credentials:
     key: mock-api-key
     secret: mock-api-secret
+    privateKey: '2222222222222222222222222222222222222222222222222222222222222222'
 
 database:
   driver: memory

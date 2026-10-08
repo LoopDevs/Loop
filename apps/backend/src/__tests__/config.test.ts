@@ -23,7 +23,7 @@ const JWT_KEY = 'jwt-test-signing-key-32-chars-min!!';
 const base = {
   ctx: {
     baseUrl: 'https://upstream.example.com',
-    credentials: { key: 'test-operator-key', secret: 'test-operator-secret' },
+    credentials: { key: 'test-operator-key', privateKey: '11'.repeat(32) },
   },
   orders: { redeem: { encryptionKey: REDEEM_KEY } },
 };
@@ -173,9 +173,17 @@ describe('parseConfig', () => {
 
     it('rejects a document without the operator API credentials', () => {
       expect(() => parse({ ctx: { baseUrl: base.ctx.baseUrl } })).toThrow(/ctx\.credentials/);
-      expect(() => parse({ ctx: { ...base.ctx, credentials: { key: '', secret: 'x' } } })).toThrow(
-        /ctx\.credentials\.key/,
-      );
+      expect(() =>
+        parse({ ctx: { ...base.ctx, credentials: { ...base.ctx.credentials, key: '' } } }),
+      ).toThrow(/ctx\.credentials\.key/);
+      expect(() =>
+        parse({ ctx: { ...base.ctx, credentials: { key: 'test-operator-key', secret: 'x' } } }),
+      ).toThrow(/ctx\.credentials\.privateKey/);
+      expect(() =>
+        parse({
+          ctx: { ...base.ctx, credentials: { key: 'test-operator-key', privateKey: 'short' } },
+        }),
+      ).toThrow(/ctx\.credentials\.privateKey/);
     });
 
     // A-018: the web bundle hardcodes DEFAULT_CLIENT_IDS at build time,
@@ -692,7 +700,7 @@ describe('loadConfig', () => {
         '  baseUrl: https://upstream.example.com',
         '  credentials:',
         '    key: k',
-        '    secret: s',
+        `    privateKey: "${'11'.repeat(32)}"`,
         'server:',
         '  port: 9091',
         '',

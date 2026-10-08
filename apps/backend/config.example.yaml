@@ -44,14 +44,16 @@ ctx:
   baseUrl: https://spend.ctx.com
   # REQUIRED — operator API credentials. ADR 052: these authenticate
   # every upstream surface, so the backend refuses to boot without them.
-  # The key proves itself with ONE of:
-  #   privateKey — 32 byte hex secp256k1 key; every request is signed
-  #                (X-Signature headers) and the secret is never sent.
-  #                Register the matching compressed public key on the
-  #                CTX API user (POST /users/:id/signing-keys, or the
-  #                loop-dev-init trigger's signingPublicKey in dev).
-  #   secret     — legacy X-Api-Secret, accepted while the CTX user still
-  #                lists the api-secret auth method.
+  # Every request is signed (X-Signature headers) with `privateKey`,
+  # whose compressed public key must be registered on the CTX API user.
+  # At boot the backend probes GET /me signed; when CTX rejects the key
+  # it registers the public key once with `secret` (the legacy
+  # X-Api-Secret a fresh CTX issues as loop/loop) and probes again.
+  # CTX retires the secret on the first verified signature. The boot
+  # fails if signed auth cannot be established.
+  #   privateKey — REQUIRED, 32 byte hex secp256k1 key
+  #                (`openssl rand -hex 32`).
+  #   secret     — needed only until the public key is registered.
   credentials:
     key: loop
     secret: loop

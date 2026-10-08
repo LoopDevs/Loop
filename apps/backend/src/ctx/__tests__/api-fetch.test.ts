@@ -12,7 +12,11 @@ vi.mock('../../logger.js', () => ({
 
 const { ctxState } = vi.hoisted(() => ({
   ctxState: {
-    credentials: { key: 'loop' } as { key: string; secret?: string; privateKey?: string },
+    credentials: { key: 'loop', privateKey: '11'.repeat(32) } as {
+      key: string;
+      secret?: string;
+      privateKey: string;
+    },
   },
 }));
 vi.mock('../../config/index.js', async (importActual) => {
@@ -73,17 +77,7 @@ describe('ctxAuthHeaders', () => {
     upstreamFetchMock.mockReset();
   });
 
-  it('sends the legacy secret when no private key is configured', () => {
-    ctxState.credentials = { key: 'loop', secret: 'shh' };
-    const headers = ctxAuthHeaders('GET', 'https://ctx.test/merchants?page=1', undefined);
-    expect(headers).toEqual({
-      'X-Api-Key': 'loop',
-      'X-Api-Secret': 'shh',
-      'X-Client-Id': 'loopweb',
-    });
-  });
-
-  it('signs the request and drops the secret when a private key is configured', () => {
+  it('signs the request and drops any secret header', () => {
     ctxState.credentials = { key: 'loop', secret: 'shh', privateKey: PRIVATE_KEY };
     const body = JSON.stringify({ fiatAmount: '5' });
     const headers = ctxAuthHeaders('POST', 'https://ctx.test/gift-cards?page=1', body, {
@@ -150,5 +144,43 @@ describe('ctxAuthHeaders', () => {
         body,
       ),
     ).toBe(true);
+  });
+
+  it('signs the request when a secret is configured too', () => {
+    ctxState.credentials = { key: 'loop', secret: 'shh', privateKey: PRIVATE_KEY };
+    const headers = ctxAuthHeaders('GET', 'https://ctx.test/me', undefined);
+    expect(headers['X-Api-Secret']).toBeUndefined();
+    expect(verifies(headers, 'GET', '/me', undefined)).toBe(true);
+  });
+
+  it('sends the secret instead of signing when the caller asks for the secret proof', () => {
+    ctxState.credentials = { key: 'loop', secret: 'shh', privateKey: PRIVATE_KEY };
+    const headers = ctxAuthHeaders('GET', 'https://ctx.test/me', undefined, undefined, 'secret');
+    expect(headers).toEqual({
+      'X-Api-Key': 'loop',
+      'X-Api-Secret': 'shh',
+      'X-Client-Id': 'loopweb',
+    });
+  });
+
+  it('refuses the secret proof when no secret is configured', () => {
+    ctxState.credentials = { key: 'loop', privateKey: PRIVATE_KEY };
+    expect(() =>
+      ctxAuthHeaders('GET', 'https://ctx.test/me', undefined, undefined, 'secret'),
+    ).toThrow(/secret is not set/);
+  });
+
+  it('ctxFetch returns a 401 untouched when asked to pass it through', async () => {
+    ctxState.credentials = { key: 'loop', privateKey: PRIVATE_KEY };
+    upstreamFetchMock.mockResolvedValue(new Response('{"error":"nope"}', { status: 401 }));
+    const res = await ctxFetch('https://ctx.test/me', { method: 'GET' }, { passthrough401: true });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: 'nope' });
+  });
+
+  it('ctxFetch still raises on a 401 by default', async () => {
+    ctxState.credentials = { key: 'loop', privateKey: PRIVATE_KEY };
+    upstreamFetchMock.mockResolvedValue(new Response('{"error":"nope"}', { status: 401 }));
+    await expect(ctxFetch('https://ctx.test/me', { method: 'GET' })).rejects.toThrow(/401/);
   });
 });

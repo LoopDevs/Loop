@@ -2,13 +2,14 @@ import { z } from 'zod';
 import { config } from '../config/index.js';
 import { logger } from '../logger.js';
 import { upstreamUrl } from '../upstream.js';
-import { ctxFetch } from './api-fetch.js';
+import { ctxFetch, type CtxFetchOptions } from './api-fetch.js';
 import {
   isCtxCryptoCurrency,
   isCtxFiatCurrency,
   loadCtxCurrencies,
   refreshCtxCurrencies,
 } from './currencies.js';
+import { signingPublicKey } from './signing.js';
 import { registerCtxWsTopic, startCtxWs, stopCtxWs } from './ws-events.js';
 
 const log = logger.child({ area: 'ctx-startup' });
@@ -85,16 +86,13 @@ export function loopStableCurrencies(): string[] {
 }
 
 export async function startCtx(): Promise<void> {
-  const { key, secret, privateKey } = config.ctx.credentials;
-  const hasProof = (secret ?? '').trim().length > 0 || (privateKey ?? '').trim().length > 0;
-  if (key.trim().length === 0 || !hasProof) {
-    throw new Error(
-      'CTX startup failed: ctx.credentials.key plus a privateKey or secret are not set',
-    );
+  const { key, privateKey } = config.ctx.credentials;
+  if (key.trim().length === 0 || privateKey.trim().length === 0) {
+    throw new Error('CTX startup failed: ctx.credentials.key and privateKey are not set');
   }
 
+  const context = await establishSignedAuth();
   await loadCtxCurrencies();
-  const context = await fetchLoopContext();
   loopContext = await ensureUserEmailsDisabled(context);
 
   log.info(
@@ -177,26 +175,106 @@ function applyCompany(company: CtxCompany, source: string): void {
   );
 }
 
-async function fetchLoopContext(): Promise<LoopContext> {
-  let res: Response;
-  try {
-    res = await ctxFetch(upstreamUrl('/me'), {
+const MeUserSchema = z
+  .object({
+    user: z.object({ id: z.string().min(1) }).passthrough(),
+  })
+  .passthrough();
+
+function fetchMe(options?: CtxFetchOptions): Promise<Response> {
+  return ctxFetch(
+    upstreamUrl('/me'),
+    {
       method: 'GET',
       headers: { Accept: 'application/json' },
       signal: AbortSignal.timeout(STARTUP_TIMEOUT_MS),
-    });
-  } catch (err) {
-    throw new Error('CTX startup failed: GET /me failed', { cause: err });
-  }
-  if (!res.ok) {
-    await res.arrayBuffer().catch(() => undefined);
-    throw new Error(`CTX startup failed: GET /me returned ${res.status}`);
-  }
+    },
+    options,
+  );
+}
+
+async function parseLoopContext(res: Response): Promise<LoopContext> {
   const parsed = LoopContextSchema.safeParse(await res.json());
   if (!parsed.success) {
     throw new Error(`CTX startup failed: GET /me response shape invalid: ${parsed.error.message}`);
   }
   return parsed.data;
+}
+
+async function registerSigningKey(): Promise<void> {
+  const { secret, privateKey } = config.ctx.credentials;
+  if ((secret ?? '').trim().length === 0) {
+    throw new Error(
+      'CTX startup failed: CTX rejected the signing key and ctx.credentials.secret is not set to register it',
+    );
+  }
+  log.warn('CTX rejected the signing key — registering the public key with the legacy secret');
+
+  const meRes = await fetchMe({ proof: 'secret', passthrough401: true });
+  if (!meRes.ok) {
+    await meRes.arrayBuffer().catch(() => undefined);
+    throw new Error(`CTX startup failed: GET /me with the legacy secret returned ${meRes.status}`);
+  }
+  const me = MeUserSchema.safeParse(await meRes.json());
+  if (!me.success) {
+    throw new Error(`CTX startup failed: GET /me response shape invalid: ${me.error.message}`);
+  }
+
+  const userId = me.data.user.id;
+  const publicKey = signingPublicKey(privateKey);
+  const res = await ctxFetch(
+    upstreamUrl(`/users/${encodeURIComponent(userId)}/signing-keys`),
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ publicKey, scheme: 'secp256k1' }),
+      signal: AbortSignal.timeout(STARTUP_TIMEOUT_MS),
+    },
+    { proof: 'secret' },
+  );
+  const detail = await res.text().catch(() => '');
+  if (!res.ok) {
+    throw new Error(
+      `CTX startup failed: POST /users/${userId}/signing-keys returned ${res.status}: ${detail}`,
+    );
+  }
+  log.info({ userId, publicKey }, 'CTX signing key registered');
+}
+
+// Proves the api key with a signature before anything else talks to CTX. When CTX does not know the key yet, the
+// legacy secret registers the public key once and the signed probe is repeated; CTX retires the secret on that first
+// verified signature.
+async function establishSignedAuth(): Promise<LoopContext> {
+  try {
+    let res = await fetchMe({ passthrough401: true });
+    if (res.status === 401) {
+      await res.arrayBuffer().catch(() => undefined);
+      await registerSigningKey();
+      res = await fetchMe();
+    }
+    if (!res.ok) {
+      await res.arrayBuffer().catch(() => undefined);
+      throw new Error(`CTX startup failed: GET /me returned ${res.status}`);
+    }
+    return await parseLoopContext(res);
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith('CTX startup failed')) throw err;
+    throw new Error('CTX startup failed: GET /me failed', { cause: err });
+  }
+}
+
+async function fetchLoopContext(): Promise<LoopContext> {
+  let res: Response;
+  try {
+    res = await fetchMe();
+  } catch (err) {
+    throw new Error('CTX loop context fetch failed', { cause: err });
+  }
+  if (!res.ok) {
+    await res.arrayBuffer().catch(() => undefined);
+    throw new Error(`GET /me returned ${res.status}`);
+  }
+  return parseLoopContext(res);
 }
 
 async function ensureUserEmailsDisabled(context: LoopContext): Promise<LoopContext> {

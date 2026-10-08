@@ -46,12 +46,12 @@ export function parseRetryAfterMs(header: string | null): number | null {
 export interface CtxApiCredentials {
   apiKey: string;
   apiSecret?: string | undefined;
-  privateKey?: string | undefined;
+  privateKey: string;
   clientId: string;
 }
 
-// The operator API-key credentials. The key is always present; the proof is either the legacy secret or a secp256k1
-// private key that signs every request (handover-loop.md "Authenticating"). The config schema requires one of the two.
+// The operator API-key credentials. The key proves itself with a secp256k1 signature over every request
+// (handover-loop.md "Authenticating"); the legacy secret exists only to register the public key at startup.
 export function ctxApiCredentials(): CtxApiCredentials {
   return {
     apiKey: config.ctx.credentials.key,
@@ -59,6 +59,13 @@ export function ctxApiCredentials(): CtxApiCredentials {
     privateKey: config.ctx.credentials.privateKey,
     clientId: config.ctx.clientIds.web,
   };
+}
+
+export type CtxAuthProof = 'signature' | 'secret';
+
+export interface CtxFetchOptions {
+  proof?: CtxAuthProof;
+  passthrough401?: boolean;
 }
 
 function headersToRecord(headers: RequestInit['headers']): Record<string, string> {
@@ -79,14 +86,16 @@ function deleteHeader(record: Record<string, string>, name: string): void {
   }
 }
 
-// Builds the headers that authenticate one CTX request: the operator key plus either the legacy secret or a signature
-// over this exact method, URI, body and act-as headers. Callers that pre-set `X-User-Id` / `X-Client-Id` keep them; the
-// signature covers whatever they end up as, so a signed request cannot be replayed as another customer.
+// Builds the headers that authenticate one CTX request: the operator key plus a signature over this exact method,
+// URI, body and act-as headers, or the legacy secret when startup is registering the signing key. Callers that
+// pre-set `X-User-Id` / `X-Client-Id` keep them; the signature covers whatever they end up as, so a signed request
+// cannot be replayed as another customer.
 export function ctxAuthHeaders(
   method: string,
   url: string | URL,
   body: RequestBody,
   existing?: RequestInit['headers'],
+  proof?: CtxAuthProof,
 ): Record<string, string> {
   const creds = ctxApiCredentials();
   const headers = headersToRecord(existing);
@@ -96,7 +105,7 @@ export function ctxAuthHeaders(
   if (headerValue(headers, 'X-Client-Id') === '') {
     headers['X-Client-Id'] = creds.clientId;
   }
-  if (creds.privateKey !== undefined) {
+  if (proof !== 'secret') {
     Object.assign(
       headers,
       signCtxRequest(
@@ -116,7 +125,7 @@ export function ctxAuthHeaders(
     return headers;
   }
   if (creds.apiSecret === undefined) {
-    throw new Error('ctx.credentials needs a privateKey or a secret');
+    throw new Error('ctx.credentials.secret is not set, cannot register the signing key');
   }
   headers['X-Api-Secret'] = creds.apiSecret;
   return headers;
@@ -147,18 +156,22 @@ async function drainBody(res: Response): Promise<void> {
 }
 
 // Injects the CTX auth headers into `init.headers` and dispatches through `upstreamFetch`, which carries the A2-1305 request-id correlation in both directions. Callers may pre-set `X-User-Id` (act-as) and `X-Client-Id` (request-origin client) — `ctxFetch` only fills `X-Client-Id` when the caller didn't.
-export async function ctxFetch(url: string | URL, init?: RequestInit): Promise<Response> {
+export async function ctxFetch(
+  url: string | URL,
+  init?: RequestInit,
+  options?: CtxFetchOptions,
+): Promise<Response> {
   const signal: AbortSignal | undefined =
     init?.signal ?? AbortSignal.timeout(CTX_FETCH_DEFAULT_TIMEOUT_MS);
 
   const headers = new Headers(
-    ctxAuthHeaders(init?.method ?? 'GET', url, init?.body, init?.headers),
+    ctxAuthHeaders(init?.method ?? 'GET', url, init?.body, init?.headers, options?.proof),
   );
   // A2-1305 in both directions (our id stamped outbound, CTX's id captured off the response for the `X-Ctx-Request-Id` echo) is `upstreamFetch`'s job — see `../upstream.ts`.
   const res = await upstreamFetch(url, { ...init, headers, signal });
 
   // CF-13 (single-key form): a 401 means CTX rejected the API key — revoked, rotated on the CTX side, or misconfigured. It is an ops incident, not a request-shape bug: alert and surface a transient error so paid orders stay retryable while the key is restored. `notifyCtxCredentialInvalid` carries its own dedup window, so a tick that keeps retrying through the outage pages once, not once per call.
-  if (res.status === 401) {
+  if (res.status === 401 && options?.passthrough401 !== true) {
     await drainBody(res);
     log.warn('CTX returned 401 — API key rejected');
     notifyCtxCredentialInvalid();

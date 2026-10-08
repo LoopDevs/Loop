@@ -10,7 +10,7 @@ vi.mock('../../config/index.js', async (importActual) => {
       ctx: {
         ...actual.config.ctx,
         baseUrl: 'http://test-upstream.local',
-        credentials: { key: 'test-key', secret: 'test-secret' },
+        credentials: { key: 'test-key', privateKey: '11'.repeat(32) },
       },
     },
   };

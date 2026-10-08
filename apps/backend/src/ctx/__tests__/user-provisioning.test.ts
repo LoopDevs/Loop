@@ -10,7 +10,7 @@ vi.mock('../../logger.js', () => ({
 const { ctxState } = vi.hoisted(() => ({
   ctxState: {
     userProvisioningEnabled: true,
-    credentials: { key: 'op-key', secret: 'op-secret' } as { key: string; secret: string },
+    credentials: { key: 'op-key', privateKey: '11'.repeat(32) },
   },
 }));
 vi.mock('../../config/index.js', async (importActual) => {
@@ -61,7 +61,7 @@ describe('provisionCtxUser', () => {
     setUserCtxUserIdMock.mockReset();
     setUserCtxUserIdMock.mockResolvedValue(true);
     ctxState.userProvisioningEnabled = true;
-    ctxState.credentials = { key: 'op-key', secret: 'op-secret' };
+    ctxState.credentials = { key: 'op-key', privateKey: '11'.repeat(32) };
   });
 
   it('POSTs /users with operator API creds, operatorUserId and the held stable, and stores the returned id', async () => {
@@ -76,7 +76,8 @@ describe('provisionCtxUser', () => {
     expect(init.method).toBe('POST');
     const headers = init.headers as Record<string, string>;
     expect(headers['X-Api-Key']).toBe('op-key');
-    expect(headers['X-Api-Secret']).toBe('op-secret');
+    expect(headers['X-Api-Secret']).toBeUndefined();
+    expect(headers['X-Signature']).toHaveLength(130);
     const body = JSON.parse(init.body as string) as Record<string, string>;
     expect(body).toEqual({
       email: 'u1@test.io',
@@ -139,7 +140,7 @@ describe('adoption on email-exists 400', () => {
     setUserCtxUserIdMock.mockReset();
     setUserCtxUserIdMock.mockResolvedValue(true);
     ctxState.userProvisioningEnabled = true;
-    ctxState.credentials = { key: 'op-key', secret: 'op-secret' };
+    ctxState.credentials = { key: 'op-key', privateKey: '11'.repeat(32) };
   });
 
   it('claims the unclaimed pre-contract customer and stores its id', async () => {
@@ -318,7 +319,7 @@ describe('enqueueCtxUserProvisioning', () => {
     setUserCtxUserIdMock.mockReset();
     setUserCtxUserIdMock.mockResolvedValue(true);
     ctxState.userProvisioningEnabled = true;
-    ctxState.credentials = { key: 'op-key', secret: 'op-secret' };
+    ctxState.credentials = { key: 'op-key', privateKey: '11'.repeat(32) };
   });
 
   it('is a no-op when the feature flag is off', async () => {
@@ -348,7 +349,7 @@ describe('enqueueCtxUserProvisioning', () => {
 
 describe('ctxActAsHeaders', () => {
   beforeEach(() => {
-    ctxState.credentials = { key: 'op-key', secret: 'op-secret' };
+    ctxState.credentials = { key: 'op-key', privateKey: '11'.repeat(32) };
   });
 
   it('returns the act-as header set for a mapped user, leaving the proof of identity to ctxFetch', () => {

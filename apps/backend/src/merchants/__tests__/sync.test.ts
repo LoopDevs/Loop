@@ -7,7 +7,7 @@ const { configState } = vi.hoisted(() => ({
   configState: {
     ctx: {
       baseUrl: 'http://test',
-      credentials: { key: 'test-key', secret: 'test-secret' },
+      credentials: { key: 'test-key', privateKey: '11'.repeat(32) },
     },
     merchantDenylist: [] as string[],
   },
@@ -434,7 +434,7 @@ describe('refreshMerchants', () => {
   });
 
   it('maps operator-scoped rows: effective status + per-link discount override', async () => {
-    configState.ctx.credentials = { key: 'op-key', secret: 'op-secret' };
+    configState.ctx.credentials = { key: 'op-key', privateKey: '11'.repeat(32) };
     try {
       mockFetch.mockResolvedValueOnce(
         new Response(
@@ -461,14 +461,14 @@ describe('refreshMerchants', () => {
       const [, init] = mockFetch.mock.calls[0]!;
       expect((init as RequestInit).headers).toMatchObject({
         'X-Api-Key': 'op-key',
-        'X-Api-Secret': 'op-secret',
+        'X-Signature-Scheme': 'secp256k1',
       });
 
       const store = getMerchants();
       expect(store.merchantsById.get('m-linked')?.savingsPercentage).toBe(7.5);
       expect(store.merchantsById.has('m-link-off')).toBe(false);
     } finally {
-      configState.ctx.credentials = { key: 'test-key', secret: 'test-secret' };
+      configState.ctx.credentials = { key: 'test-key', privateKey: '11'.repeat(32) };
     }
   });
 

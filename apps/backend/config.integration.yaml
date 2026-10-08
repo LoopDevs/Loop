@@ -22,6 +22,7 @@ ctx:
   credentials:
     key: integration-test-api-key
     secret: integration-test-api-secret
+    privateKey: '1111111111111111111111111111111111111111111111111111111111111111'
 
 database:
   driver: memory

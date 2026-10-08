@@ -18,7 +18,7 @@ vi.mock('../../config/index.js', async (importActual) => {
         ctx: {
           ...actual.config.ctx,
           baseUrl: 'https://ctx.test',
-          credentials: { key: 'k', secret: 's' },
+          credentials: { key: 'k', privateKey: '11'.repeat(32) },
         },
         auth: {
           ...actual.config.auth,
