@@ -12,6 +12,7 @@ import {
 } from '~/services/orders-loop';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
+import { Button } from '~/components/ui/Button';
 import { safeRedeemHref, safePaymentUriHref } from '~/native/webview';
 import { formatMinorCurrency, useLocaleTag } from '~/i18n/format';
 import { copySensitive } from '~/native/clipboard';
@@ -32,6 +33,8 @@ export interface LoopPaymentStepProps {
    * fetched.
    */
   onOrderNotFound?: (() => void) | undefined;
+  /** Called when the user taps "Back" on a payment screen whose payment window has lapsed. */
+  onBack?: (() => void) | undefined;
 }
 
 /**
@@ -51,6 +54,7 @@ export function LoopPaymentStep({
   create,
   onTerminal,
   onOrderNotFound,
+  onBack,
 }: LoopPaymentStepProps): React.JSX.Element {
   const [notifiedTerminal, setNotifiedTerminal] = useState(false);
   const [notifiedNotFound, setNotifiedNotFound] = useState(false);
@@ -142,7 +146,7 @@ export function LoopPaymentStep({
       ) : state === 'paid' ? (
         <PaidBody />
       ) : (
-        <CtxPaymentBody payment={create.payment} />
+        <CtxPaymentBody payment={create.payment} onBack={onBack} />
       )}
     </section>
   );
@@ -244,29 +248,88 @@ function FailureBody({
   );
 }
 
+interface WalletMethod {
+  id: 'uri' | 'walletconnect';
+  label: string;
+  help: string;
+  href: string;
+}
+
+function paymentUriHelp(href: string): string {
+  const scheme = href.slice(0, href.indexOf(':') + 1);
+  switch (scheme) {
+    case 'web+stellar:':
+    case 'stellar:':
+      return 'Uses the standard SEP-0007 Stellar payment URI';
+    case 'bitcoin:':
+    case 'bitcoincash:':
+    case 'litecoin:':
+    case 'dogecoin:':
+    case 'dash:':
+      return 'Uses the standard BIP-21 payment URI';
+    case 'ethereum:':
+      return 'Uses the standard EIP-681 payment URI';
+    default:
+      return "Uses the wallet's native payment URI";
+  }
+}
+
+// PAYMENTURI-UNGATED (XSS): `paymentUrls` values are upstream-supplied
+// (see safePaymentUriHref). A `javascript:`/`data:` scheme dropped into
+// an anchor would execute on tap inside the native WebView. Gate every
+// value to the wallet-scheme allow-list; a rejected URI is dropped and
+// the address copy path still lets the user pay.
+function walletMethods(payment: LoopOrderPaymentInstructions): WalletMethod[] {
+  if (payment.method === 'fiat') return [];
+  const methods: WalletMethod[] = [];
+  const uri = payment.paymentUrls[payment.cryptoCurrency];
+  const uriHref = uri !== undefined ? safePaymentUriHref(uri) : null;
+  if (uriHref !== null) {
+    methods.push({ id: 'uri', label: 'Payment URL', help: paymentUriHelp(uriHref), href: uriHref });
+  }
+  const wc = payment.paymentUrls[`${payment.cryptoCurrency}/walletconnect`];
+  const wcHref = wc !== undefined ? safePaymentUriHref(wc) : null;
+  if (wcHref !== null) {
+    methods.push({
+      id: 'walletconnect',
+      label: 'WalletConnect',
+      help: 'Uses the Reown WalletConnect protocol',
+      href: wcHref,
+    });
+  }
+  return methods;
+}
+
 /**
  * `unpaid` — CTX's payment instructions (ADR 052). The customer pays
  * CTX directly: fiat charge, crypto amount + currency, deposit address
- * with copy + QR, an "Open in wallet" deep-link when CTX supplied a
- * payment URI for the chosen currency, and a countdown to the
- * payment-window expiry (hidden when CTX didn't report one).
+ * with copy + QR, an "Open in wallet" deep-link for each wallet method
+ * CTX supplied (switchable when there is more than one), and a
+ * countdown to the payment-window expiry (hidden when CTX didn't
+ * report one).
  */
-function CtxPaymentBody({ payment }: { payment: LoopOrderPaymentInstructions }): React.JSX.Element {
+function CtxPaymentBody({
+  payment,
+  onBack,
+}: {
+  payment: LoopOrderPaymentInstructions;
+  onBack: (() => void) | undefined;
+}): React.JSX.Element {
   const locale = useLocaleTag();
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [methodId, setMethodId] = useState<WalletMethod['id']>('uri');
   const secondsLeft = useSecondsLeft(payment.expiresAt);
   const expired = secondsLeft !== null && secondsLeft <= 0;
 
-  // PAYMENTURI-UNGATED (XSS): `paymentUrls` values are upstream-supplied
-  // (see safePaymentUriHref). A `javascript:`/`data:` scheme dropped into
-  // this anchor would execute on tap inside the native WebView. Gate it
-  // to the wallet-scheme allow-list; a rejected URI yields null and we
-  // render no live link — the address copy path below still lets the
-  // user pay.
   const isFiat = payment.method === 'fiat';
-  const rawUri = payment.paymentUrls[payment.cryptoCurrency];
-  const paymentHref =
-    rawUri !== undefined ? (isFiat ? safeRedeemHref(rawUri) : safePaymentUriHref(rawUri)) : null;
+  const methods = walletMethods(payment);
+  const method = methods.find((m) => m.id === methodId) ?? methods[0] ?? null;
+  const fiatUri = payment.paymentUrls[payment.cryptoCurrency];
+  const paymentHref = isFiat
+    ? fiatUri !== undefined
+      ? safeRedeemHref(fiatUri)
+      : null
+    : (method?.href ?? null);
 
   // QR encodes the wallet URI when CTX supplied one (wallets prefill
   // amount + destination from it) and falls back to the bare address.
@@ -308,6 +371,10 @@ function CtxPaymentBody({ payment }: { payment: LoopOrderPaymentInstructions }):
         ) : null}
       </div>
 
+      {methods.length > 1 && method !== null && !expired ? (
+        <WalletMethodSwitch methods={methods} selected={method.id} onSelect={setMethodId} />
+      ) : null}
+
       {qrDataUrl !== null && !expired ? (
         <div className="flex justify-center">
           <img src={qrDataUrl} alt="Payment QR code" className="rounded-lg" />
@@ -325,17 +392,106 @@ function CtxPaymentBody({ payment }: { payment: LoopOrderPaymentInstructions }):
         </a>
       ) : null}
 
-      <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
-        {isFiat
-          ? `Complete the ${payment.cryptoCurrency} payment with our payment partner. Your order updates automatically once the payment confirms.`
-          : `Send exactly this amount from any ${payment.cryptoCurrency} wallet. Your order updates automatically once the payment confirms.`}
-      </p>
+      {!expired ? (
+        <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
+          {isFiat
+            ? `Complete the ${payment.cryptoCurrency} payment with our payment partner. Your order updates automatically once the payment confirms.`
+            : `Send exactly this amount from any ${payment.cryptoCurrency} wallet. Your order updates automatically once the payment confirms.`}
+        </p>
+      ) : null}
 
       <ExpiryCountdown secondsLeft={secondsLeft} />
 
-      <div className="flex justify-center">
-        <Spinner />
-      </div>
+      {expired ? (
+        onBack !== undefined ? (
+          <Button type="button" variant="secondary" className="w-full" onClick={onBack}>
+            Back
+          </Button>
+        ) : null
+      ) : (
+        <div className="flex justify-center">
+          <Spinner />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WalletMethodSwitch({
+  methods,
+  selected,
+  onSelect,
+}: {
+  methods: WalletMethod[];
+  selected: WalletMethod['id'];
+  onSelect: (id: WalletMethod['id']) => void;
+}): React.JSX.Element {
+  return (
+    <div
+      role="group"
+      aria-label="Wallet method"
+      className="flex gap-1 rounded-lg border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 p-1"
+    >
+      {methods.map((m) => {
+        const active = m.id === selected;
+        return (
+          <div key={m.id} className="flex flex-1 items-center gap-1">
+            <button
+              type="button"
+              aria-pressed={active}
+              onClick={() => onSelect(m.id)}
+              className={`flex-1 rounded-md px-3 py-2 text-sm font-medium ${
+                active
+                  ? 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white shadow-sm'
+                  : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+              }`}
+            >
+              {m.label}
+            </button>
+            <HelpPopover label={m.label} text={m.help} />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function HelpPopover({ label, text }: { label: string; text: string }): React.JSX.Element {
+  const [open, setOpen] = useState(false);
+  const id = `wallet-method-help-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        aria-label={`About ${label}`}
+        aria-expanded={open}
+        aria-controls={id}
+        onClick={() => setOpen((v) => !v)}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') setOpen(false);
+        }}
+        className="flex h-6 w-6 items-center justify-center rounded-full text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
+          <path
+            d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .8-1 1.5v.2"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+          />
+          <circle cx="12" cy="17" r="1" fill="currentColor" />
+        </svg>
+      </button>
+      {open ? (
+        <div
+          id={id}
+          role="tooltip"
+          className="absolute right-0 top-full z-10 mt-1 w-56 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-2 text-xs text-gray-700 dark:text-gray-200 shadow-lg"
+        >
+          {text}
+        </div>
+      ) : null}
     </div>
   );
 }

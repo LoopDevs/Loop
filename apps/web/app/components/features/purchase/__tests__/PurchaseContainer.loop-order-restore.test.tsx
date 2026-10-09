@@ -113,11 +113,13 @@ function mkPayment(): CreateLoopOrderResponse['payment'] {
   };
 }
 
-function mkCreateResponse(): CreateLoopOrderResponse {
+function mkCreateResponse(
+  paymentOverrides: Partial<CreateLoopOrderResponse['payment']> = {},
+): CreateLoopOrderResponse {
   return {
     orderId: '12345678-aaaa-bbbb-cccc-000000000000',
     state: 'unpaid',
-    payment: mkPayment(),
+    payment: { ...mkPayment(), ...paymentOverrides },
   };
 }
 
@@ -296,6 +298,30 @@ describe('loop-native order restore across a remount', () => {
       expect(await loadPendingOrder(LOOP_NATIVE_PENDING_ORDER_KEY)).toBeNull();
     });
     expect(createLoopOrderMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('lapsed payment window: "Back" clears the persisted record and returns to amount selection', async () => {
+    createLoopOrderMock.mockResolvedValue(
+      mkCreateResponse({ expiresAt: new Date(Date.now() - 1000).toISOString() }),
+    );
+    getLoopOrderMock.mockResolvedValue(mkOrderView());
+    renderContainer();
+    fireEvent.click(await screen.findByText('confirm-amount'));
+    await waitFor(() => screen.getByText(/Order 12345678/i));
+    await waitFor(async () => {
+      expect(await loadPendingOrder(LOOP_NATIVE_PENDING_ORDER_KEY)).not.toBeNull();
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Back' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('confirm-amount')).toBeDefined();
+    });
+    expect(screen.queryByText(/Order 12345678/i)).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+    await waitFor(async () => {
+      expect(await loadPendingOrder(LOOP_NATIVE_PENDING_ORDER_KEY)).toBeNull();
+    });
   });
 
   it('fulfilled order: clears the persisted record (so a LATER remount does not try to resurrect it) while this tab keeps showing "Ready"', async () => {

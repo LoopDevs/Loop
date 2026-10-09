@@ -14,6 +14,15 @@ vi.mock('~/services/orders-loop', async () => {
   };
 });
 
+const qrTexts: string[] = [];
+vi.mock('qrcode', () => {
+  const toDataURL = async (text: string): Promise<string> => {
+    qrTexts.push(text);
+    return `data:image/png;base64,${Buffer.from(text).toString('base64')}`;
+  };
+  return { default: { toDataURL }, toDataURL };
+});
+
 import { LoopPaymentStep } from '../LoopPaymentStep';
 import type {
   CreateLoopOrderResponse,
@@ -34,6 +43,7 @@ function wrap(ui: React.ReactElement): React.JSX.Element {
 
 const ADDRESS = 'GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW';
 const XLM_URI = `web+stellar:pay?destination=${ADDRESS}&amount=10.0000000`;
+const WC_URI = 'wc:7f6e8a9b@2?relay-protocol=irn&symKey=0123456789abcdef';
 
 function mkPayment(
   overrides: Partial<LoopOrderPaymentInstructions> = {},
@@ -88,6 +98,7 @@ function mkOrder(overrides: Partial<LoopOrderView> = {}): LoopOrderView {
 
 beforeEach(() => {
   getLoopOrderMock.mockReset();
+  qrTexts.length = 0;
 });
 afterEach(cleanup);
 
@@ -145,6 +156,31 @@ describe('LoopPaymentStep — unpaid (ctx payment instructions)', () => {
     expect(screen.queryByAltText('Payment QR code')).toBeNull();
     expect(screen.queryByRole('link', { name: /Open in wallet/i })).toBeNull();
     expect(screen.getByText(/GABCDEFGHIJKLMNOPQRSTUVWXYZ234567/)).toBeDefined();
+  });
+
+  it('replaces the spinner with a Back button once the expiry passes', async () => {
+    getLoopOrderMock.mockResolvedValue(mkOrder());
+    const onBack = vi.fn();
+    render(
+      wrap(
+        <LoopPaymentStep
+          create={mkCreate({ expiresAt: new Date(Date.now() - 1000).toISOString() })}
+          onBack={onBack}
+        />,
+      ),
+    );
+    const back = await waitFor(() => screen.getByRole('button', { name: 'Back' }));
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.queryByText(/Send exactly this amount/i)).toBeNull();
+    fireEvent.click(back);
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the spinner and no Back button while the payment window is open', async () => {
+    getLoopOrderMock.mockResolvedValue(mkOrder());
+    render(wrap(<LoopPaymentStep create={mkCreate()} onBack={vi.fn()} />));
+    await waitFor(() => screen.getByRole('status'));
+    expect(screen.queryByRole('button', { name: 'Back' })).toBeNull();
   });
 
   it('shows the QR code while the payment window is open', async () => {
@@ -224,6 +260,99 @@ describe('LoopPaymentStep — unpaid (ctx payment instructions)', () => {
       fireEvent.click(buttons[0]!);
     });
     expect(writeText).toHaveBeenCalled();
+  });
+});
+
+describe('LoopPaymentStep — wallet method switch', () => {
+  it('shows no switch when CTX supplied a single wallet URI', async () => {
+    getLoopOrderMock.mockResolvedValue(mkOrder());
+    render(wrap(<LoopPaymentStep create={mkCreate()} />));
+    await waitFor(() => screen.getByAltText('Payment QR code'));
+    expect(screen.queryByRole('group', { name: /Wallet method/i })).toBeNull();
+    expect(qrTexts.at(-1)).toBe(XLM_URI);
+  });
+
+  it('defaults to the payment URL and switches the QR + wallet link to WalletConnect', async () => {
+    getLoopOrderMock.mockResolvedValue(mkOrder());
+    render(
+      wrap(
+        <LoopPaymentStep
+          create={mkCreate({ paymentUrls: { XLM: XLM_URI, 'XLM/walletconnect': WC_URI } })}
+        />,
+      ),
+    );
+    await waitFor(() => screen.getByAltText('Payment QR code'));
+    const group = screen.getByRole('group', { name: /Wallet method/i });
+    expect(group).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Payment URL' }).getAttribute('aria-pressed')).toBe(
+      'true',
+    );
+    expect(screen.getByRole('link', { name: /Open in wallet/i }).getAttribute('href')).toBe(
+      XLM_URI,
+    );
+    expect(qrTexts.at(-1)).toBe(XLM_URI);
+
+    fireEvent.click(screen.getByRole('button', { name: 'WalletConnect' }));
+    await waitFor(() => expect(qrTexts.at(-1)).toBe(WC_URI));
+    expect(screen.getByRole('button', { name: 'WalletConnect' }).getAttribute('aria-pressed')).toBe(
+      'true',
+    );
+    expect(screen.getByRole('link', { name: /Open in wallet/i }).getAttribute('href')).toBe(WC_URI);
+  });
+
+  it('explains each method behind its question-mark button', async () => {
+    getLoopOrderMock.mockResolvedValue(mkOrder());
+    render(
+      wrap(
+        <LoopPaymentStep
+          create={mkCreate({ paymentUrls: { XLM: XLM_URI, 'XLM/walletconnect': WC_URI } })}
+        />,
+      ),
+    );
+    await waitFor(() => screen.getByRole('group', { name: /Wallet method/i }));
+    expect(screen.queryByRole('tooltip')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'About Payment URL' }));
+    expect(screen.getByRole('tooltip').textContent).toBe(
+      'Uses the standard SEP-0007 Stellar payment URI',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'About Payment URL' }));
+    expect(screen.queryByRole('tooltip')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'About WalletConnect' }));
+    expect(screen.getByRole('tooltip').textContent).toBe('Uses the Reown WalletConnect protocol');
+    fireEvent.keyDown(screen.getByRole('button', { name: 'About WalletConnect' }), {
+      key: 'Escape',
+    });
+    expect(screen.queryByRole('tooltip')).toBeNull();
+  });
+
+  it('offers WalletConnect alone when it is the only safe URI', async () => {
+    getLoopOrderMock.mockResolvedValue(mkOrder());
+    render(
+      wrap(<LoopPaymentStep create={mkCreate({ paymentUrls: { 'XLM/walletconnect': WC_URI } })} />),
+    );
+    const link = await waitFor(() => screen.getByRole('link', { name: /Open in wallet/i }));
+    expect(link.getAttribute('href')).toBe(WC_URI);
+    expect(screen.queryByRole('group', { name: /Wallet method/i })).toBeNull();
+  });
+
+  it('drops a dangerous WalletConnect value instead of offering it', async () => {
+    getLoopOrderMock.mockResolvedValue(mkOrder());
+    render(
+      wrap(
+        <LoopPaymentStep
+          create={mkCreate({
+            paymentUrls: { XLM: XLM_URI, 'XLM/walletconnect': 'javascript:alert(1)' },
+          })}
+        />,
+      ),
+    );
+    await waitFor(() => screen.getByAltText('Payment QR code'));
+    expect(screen.queryByRole('group', { name: /Wallet method/i })).toBeNull();
+    expect(screen.getByRole('link', { name: /Open in wallet/i }).getAttribute('href')).toBe(
+      XLM_URI,
+    );
   });
 });
 

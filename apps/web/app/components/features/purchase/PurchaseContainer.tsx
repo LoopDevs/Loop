@@ -188,6 +188,10 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
           setLoopCreate(null);
           setOrderError('This order could not be found. Please start again.');
         }}
+        onBack={() => {
+          clearLoopPendingOrder();
+          setLoopCreate(null);
+        }}
       />
     );
   }

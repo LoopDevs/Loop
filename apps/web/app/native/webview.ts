@@ -71,8 +71,9 @@ export function safeRedeemHref(url: string): string | null {
 
 /**
  * Wallet-URI schemes CTX's `paymentUrls` map legitimately carries
- * (ADR 052): BIP21-family per-chain schemes, SEP-7 for Stellar, plus
- * the EVM/Solana/Monero-family conventions. Deliberately an explicit
+ * (ADR 052): BIP21-family per-chain schemes, SEP-7 for Stellar, the
+ * EVM/Solana/Monero-family conventions, plus WalletConnect pairing
+ * URIs. Deliberately an explicit
  * allow-list — a new chain's scheme must be added here consciously
  * rather than any unknown scheme becoming a live tappable link.
  */
@@ -91,6 +92,7 @@ const PAYMENT_URI_SCHEMES = new Set([
   'zano:',
   'radix:',
   'tron:',
+  'wc:',
 ]);
 
 /**
