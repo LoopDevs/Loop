@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router';
-import { ApiException, isHomeCurrency } from '@loop/shared';
+import { ApiException, fiatForHeldStable } from '@loop/shared';
 import type { Route } from './+types/admin.users.$userId';
 import { shouldRetry } from '~/hooks/query-retry';
 import { getAdminUser, getAdminUserCredits, type AdminUserCreditRow } from '~/services/admin';
@@ -13,7 +13,7 @@ import { CashbackSummaryChip } from '~/components/features/admin/CashbackSummary
 import { CopyButton } from '~/components/features/admin/CopyButton';
 import { CreditAdjustmentForm } from '~/components/features/admin/CreditAdjustmentForm';
 import { AdminEmissionForm } from '~/components/features/admin/AdminEmissionForm';
-import { HomeCurrencyForm } from '~/components/features/admin/HomeCurrencyForm';
+import { StableCurrencyForm } from '~/components/features/admin/StableCurrencyForm';
 import { CreditTransactionsTable } from '~/components/features/admin/CreditTransactionsTable';
 import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
 import { UserCashbackByMerchantTable } from '~/components/features/admin/UserCashbackByMerchantTable';
@@ -147,8 +147,10 @@ function AdminUserDetailRouteInner(): React.JSX.Element {
           </div>
           <dl className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 text-sm">
             <div>
-              <dt className="text-gray-500 dark:text-gray-400">Home currency</dt>
-              <dd className="text-gray-900 dark:text-white">{userQuery.data.homeCurrency}</dd>
+              <dt className="text-gray-500 dark:text-gray-400">Stable currency</dt>
+              <dd className="text-gray-900 dark:text-white">
+                {userQuery.data.stableCurrency === '' ? '—' : userQuery.data.stableCurrency}
+              </dd>
             </div>
             <div>
               <dt className="text-gray-500 dark:text-gray-400">Stellar address</dt>
@@ -272,9 +274,7 @@ function AdminUserDetailRouteInner(): React.JSX.Element {
           <div className="px-6 py-5">
             <CreditAdjustmentForm
               userId={userId}
-              defaultCurrency={
-                isHomeCurrency(userQuery.data.homeCurrency) ? userQuery.data.homeCurrency : 'USD'
-              }
+              defaultCurrency={fiatForHeldStable(userQuery.data.stableCurrency) ?? 'USD'}
             />
           </div>
         </section>
@@ -301,9 +301,7 @@ function AdminUserDetailRouteInner(): React.JSX.Element {
           <div className="px-6 py-5">
             <AdminEmissionForm
               userId={userId}
-              defaultCurrency={
-                isHomeCurrency(userQuery.data.homeCurrency) ? userQuery.data.homeCurrency : 'USD'
-              }
+              defaultCurrency={fiatForHeldStable(userQuery.data.stableCurrency) ?? 'USD'}
             />
           </div>
         </section>
@@ -313,22 +311,18 @@ function AdminUserDetailRouteInner(): React.JSX.Element {
         <section className="rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
           <header className="border-b border-gray-200 px-6 py-4 dark:border-gray-800">
             <h2 className="text-base font-semibold text-gray-900 dark:text-white">
-              Change home currency (ADR 015)
+              Change stable currency (ADR 015)
             </h2>
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              Support-mediated only. The backend rejects the change with{' '}
-              <code className="font-mono">409</code> if the user has a non-zero credit balance in
-              the current currency or any in-flight payouts — zero those out via a credit-adjustment
-              and let pending payouts settle first. Idempotent + Discord-audited like every other
-              admin write.
+              Support-mediated only. Written to CTX, which rejects the change with{' '}
+              <code className="font-mono">409</code> unless the user&rsquo;s wallet and savings are
+              empty. Idempotent + Discord-audited like every other admin write.
             </p>
           </header>
           <div className="px-6 py-5">
-            <HomeCurrencyForm
+            <StableCurrencyForm
               userId={userId}
-              currentHomeCurrency={
-                isHomeCurrency(userQuery.data.homeCurrency) ? userQuery.data.homeCurrency : 'USD'
-              }
+              currentStableCurrency={userQuery.data.stableCurrency}
             />
           </div>
         </section>

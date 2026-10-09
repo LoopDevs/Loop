@@ -30,7 +30,7 @@ import {
   getMeHandler,
   setCashbackDestinationHandler,
   setCountryHandler,
-  setHomeCurrencyHandler,
+  setStableCurrencyHandler,
 } from '../handler.js';
 
 // User profile handlers — A2-550, A2-551
@@ -65,7 +65,7 @@ async function seedUser(overrides: Partial<UserDoc> = {}): Promise<UserDoc> {
     ctxUserId: 'ctx-123',
     email: 'a@b.com',
     tokenVersion: 0,
-    homeCurrency: 'USD',
+    stableCurrency: 'XLM.USDC',
     isAdmin: false,
     createdAt: now,
     updatedAt: now,
@@ -111,18 +111,23 @@ async function seedOrder(overrides: Partial<OrderDoc> = {}): Promise<OrderDoc> {
 beforeEach(() => {
   __resetDbForTests();
   updateCtxStableCurrencyMock.mockReset();
-  updateCtxStableCurrencyMock.mockResolvedValue({ isAdmin: false, homeCurrency: 'GBP' });
+  updateCtxStableCurrencyMock.mockResolvedValue({
+    isAdmin: false,
+    stableCurrency: 'XLM.GBPLOOP',
+    cashbackDestination: 'account',
+    country: null,
+  });
   updateCtxCashbackDestinationMock.mockReset();
   updateCtxCashbackDestinationMock.mockResolvedValue({
     isAdmin: false,
-    homeCurrency: 'GBP',
+    stableCurrency: 'XLM.GBPLOOP',
     cashbackDestination: 'savings',
     country: null,
   });
   updateCtxCountryMock.mockReset();
   updateCtxCountryMock.mockResolvedValue({
     isAdmin: false,
-    homeCurrency: null,
+    stableCurrency: '',
     cashbackDestination: 'account',
     country: 'GB',
   });
@@ -162,17 +167,17 @@ describe('setCountryHandler', () => {
     expect(stored?.country).toBe('GB');
   });
 
-  it('adopts the held stable CTX derives from the country as the home currency', async () => {
+  it('mirrors the stable CTX derives from the country', async () => {
     updateCtxCountryMock.mockResolvedValue({
       isAdmin: false,
-      homeCurrency: 'GBP',
+      stableCurrency: 'XLM.GBPLOOP',
       cashbackDestination: 'account',
       country: 'GB',
     });
-    await seedUser({ homeCurrency: 'USD' });
+    await seedUser({ stableCurrency: 'XLM.USDC' });
     const res = await setCountryHandler(makeCtx(loopAuth, { country: 'GB' }));
     const body = (await res.json()) as Record<string, unknown>;
-    expect(body['homeCurrency']).toBe('GBP');
+    expect(body['stableCurrency']).toBe('XLM.GBPLOOP');
   });
 
   it('no-op when the country is unchanged', async () => {
@@ -253,7 +258,7 @@ describe('getMeHandler', () => {
     expect(body).toEqual({
       id: UID,
       email: 'a@b.com',
-      homeCurrency: 'USD',
+      stableCurrency: 'XLM.USDC',
       staffRole: null,
       isAdmin: false,
       cashbackDestination: 'account',
@@ -280,9 +285,9 @@ describe('getMeHandler', () => {
       'cashbackDestination',
       'country',
       'email',
-      'homeCurrency',
       'id',
       'isAdmin',
+      'stableCurrency',
       'staffRole',
     ]);
     expect(JSON.stringify(body)).not.toContain('ctx-123');
@@ -313,108 +318,122 @@ describe('getMeHandler', () => {
   });
 });
 
-describe('setHomeCurrencyHandler', () => {
-  it('400 when body is malformed (no currency)', async () => {
+describe('setStableCurrencyHandler', () => {
+  it('400 when body is malformed (no stableCurrency)', async () => {
     await seedUser();
-    const res = await setHomeCurrencyHandler(makeCtx(loopAuth, {}));
+    const res = await setStableCurrencyHandler(makeCtx(loopAuth, {}));
     expect(res.status).toBe(400);
   });
 
-  it('400 when currency is not in the enum', async () => {
+  it('400 when stableCurrency is blank', async () => {
     await seedUser();
-    const res = await setHomeCurrencyHandler(makeCtx(loopAuth, { currency: 'JPY' }));
+    const res = await setStableCurrencyHandler(makeCtx(loopAuth, { stableCurrency: '  ' }));
     expect(res.status).toBe(400);
   });
 
   it('400 when the body is not JSON at all', async () => {
     await seedUser();
-    const res = await setHomeCurrencyHandler(makeCtx(loopAuth, undefined));
+    const res = await setStableCurrencyHandler(makeCtx(loopAuth, undefined));
     expect(res.status).toBe(400);
   });
 
   it('401 when no auth on the context', async () => {
-    const res = await setHomeCurrencyHandler(makeCtx(undefined, { currency: 'GBP' }));
+    const res = await setStableCurrencyHandler(
+      makeCtx(undefined, { stableCurrency: 'XLM.GBPLOOP' }),
+    );
     expect(res.status).toBe(401);
   });
 
   it('401 for a CTX pass-through bearer', async () => {
     await seedUser();
-    const res = await setHomeCurrencyHandler(makeCtx(ctxAuth, { currency: 'GBP' }));
+    const res = await setStableCurrencyHandler(makeCtx(ctxAuth, { stableCurrency: 'XLM.GBPLOOP' }));
     expect(res.status).toBe(401);
   });
 
-  it('happy path — order-less user gets the CTX stableCurrency and homeCurrency written and returns the new view', async () => {
-    await seedUser({ homeCurrency: 'USD' });
-    const res = await setHomeCurrencyHandler(makeCtx(loopAuth, { currency: 'GBP' }));
+  it("writes the stable to CTX uppercased, mirrors CTX's reply and returns the new view", async () => {
+    await seedUser({ stableCurrency: 'XLM.USDC' });
+    const res = await setStableCurrencyHandler(
+      makeCtx(loopAuth, { stableCurrency: 'xlm.gbploop' }),
+    );
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
-    expect(body['homeCurrency']).toBe('GBP');
-    expect(updateCtxStableCurrencyMock).toHaveBeenCalledWith('ctx-123', 'GBP');
+    expect(body['stableCurrency']).toBe('XLM.GBPLOOP');
+    expect(updateCtxStableCurrencyMock).toHaveBeenCalledWith('ctx-123', 'XLM.GBPLOOP');
     const stored = await db.collection('users').findOne({ id: UID });
-    expect(stored?.homeCurrency).toBe('GBP');
+    expect(stored?.stableCurrency).toBe('XLM.GBPLOOP');
   });
 
-  it('writes locally only while the user has no CTX mapping yet', async () => {
-    await seedUser({ homeCurrency: 'USD', ctxUserId: null });
-    const res = await setHomeCurrencyHandler(makeCtx(loopAuth, { currency: 'GBP' }));
-    expect(res.status).toBe(200);
+  it('503 and no local write while the user has no CTX mapping yet', async () => {
+    await seedUser({ stableCurrency: 'XLM.USDC', ctxUserId: null });
+    const res = await setStableCurrencyHandler(
+      makeCtx(loopAuth, { stableCurrency: 'XLM.GBPLOOP' }),
+    );
+    expect(res.status).toBe(503);
     expect(updateCtxStableCurrencyMock).not.toHaveBeenCalled();
     const stored = await db.collection('users').findOne({ id: UID });
-    expect(stored?.homeCurrency).toBe('GBP');
+    expect(stored?.stableCurrency).toBe('XLM.USDC');
   });
 
   it('503 and no local write when the CTX stableCurrency update fails', async () => {
-    await seedUser({ homeCurrency: 'USD' });
+    await seedUser({ stableCurrency: 'XLM.USDC' });
     updateCtxStableCurrencyMock.mockRejectedValue(new CtxUserRolesError('ctx down', 503));
-    const res = await setHomeCurrencyHandler(makeCtx(loopAuth, { currency: 'GBP' }));
+    const res = await setStableCurrencyHandler(
+      makeCtx(loopAuth, { stableCurrency: 'XLM.GBPLOOP' }),
+    );
     expect(res.status).toBe(503);
     const body = (await res.json()) as Record<string, unknown>;
     expect(body['code']).toBe('SUPPLIER_UNAVAILABLE');
     const stored = await db.collection('users').findOne({ id: UID });
-    expect(stored?.homeCurrency).toBe('USD');
+    expect(stored?.stableCurrency).toBe('XLM.USDC');
   });
 
   it('400 when CTX rejects the stable for the company', async () => {
-    await seedUser({ homeCurrency: 'USD' });
+    await seedUser({ stableCurrency: 'XLM.USDC' });
     updateCtxStableCurrencyMock.mockRejectedValue(new CtxUserRolesError('not supported', 400));
-    const res = await setHomeCurrencyHandler(makeCtx(loopAuth, { currency: 'GBP' }));
+    const res = await setStableCurrencyHandler(makeCtx(loopAuth, { stableCurrency: 'XLM.JPYX' }));
     expect(res.status).toBe(400);
     const stored = await db.collection('users').findOne({ id: UID });
-    expect(stored?.homeCurrency).toBe('USD');
+    expect(stored?.stableCurrency).toBe('XLM.USDC');
   });
 
-  it('409 HOME_CURRENCY_LOCKED once the user has any order (first-time-only write)', async () => {
-    await seedUser({ homeCurrency: 'USD' });
+  it('409 STABLE_CURRENCY_LOCKED once the user has any order (first-time-only write)', async () => {
+    await seedUser({ stableCurrency: 'XLM.USDC' });
     await seedOrder();
-    const res = await setHomeCurrencyHandler(makeCtx(loopAuth, { currency: 'GBP' }));
+    const res = await setStableCurrencyHandler(
+      makeCtx(loopAuth, { stableCurrency: 'XLM.GBPLOOP' }),
+    );
     expect(res.status).toBe(409);
     const body = (await res.json()) as Record<string, unknown>;
-    expect(body['code']).toBe('HOME_CURRENCY_LOCKED');
+    expect(body['code']).toBe('STABLE_CURRENCY_LOCKED');
     const stored = await db.collection('users').findOne({ id: UID });
-    expect(stored?.homeCurrency).toBe('USD');
+    expect(stored?.stableCurrency).toBe('XLM.USDC');
   });
 
-  it('short-circuits when the requested currency already matches — no write, even with orders present', async () => {
-    const seeded = await seedUser({ homeCurrency: 'GBP' });
+  it('short-circuits when the requested stable already matches — no write, even with orders present', async () => {
+    const seeded = await seedUser({ stableCurrency: 'XLM.GBPLOOP' });
     await seedOrder();
-    const res = await setHomeCurrencyHandler(makeCtx(loopAuth, { currency: 'GBP' }));
+    const res = await setStableCurrencyHandler(
+      makeCtx(loopAuth, { stableCurrency: 'XLM.GBPLOOP' }),
+    );
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
-    expect(body['homeCurrency']).toBe('GBP');
+    expect(body['stableCurrency']).toBe('XLM.GBPLOOP');
     expect(updateCtxStableCurrencyMock).not.toHaveBeenCalled();
     const stored = await db.collection('users').findOne({ id: UID });
     expect(stored?.updatedAt).toEqual(seeded.updatedAt);
   });
 
   it('404 when the user row disappears between resolve and update (race with deletion)', async () => {
-    await seedUser({ homeCurrency: 'USD' });
+    await seedUser({ stableCurrency: 'XLM.USDC' });
     const users = db.collection('users');
     const realUpdateOne = users.updateOne.bind(users);
     vi.spyOn(users, 'updateOne').mockImplementationOnce(async (filter, update, options) => {
       await users.deleteMany({ id: UID });
       return realUpdateOne(filter, update, options);
     });
-    const res = await setHomeCurrencyHandler(makeCtx(loopAuth, { currency: 'GBP' }));
+    const res = await setStableCurrencyHandler(
+      makeCtx(loopAuth, { stableCurrency: 'XLM.GBPLOOP' }),
+    );
     expect(res.status).toBe(404);
   });
 });

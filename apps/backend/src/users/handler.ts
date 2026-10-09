@@ -1,15 +1,10 @@
 // User profile handlers — ADR 015, ADR 037, A2-550, A2-551, A2-1905, A2-1906
 import type { Context } from 'hono';
 import { z } from 'zod';
-import {
-  CASHBACK_DESTINATIONS,
-  HOME_CURRENCIES,
-  type CashbackDestination,
-  type StaffRole,
-} from '@loop/shared';
+import { CASHBACK_DESTINATIONS, type CashbackDestination, type StaffRole } from '@loop/shared';
 import { db } from '../db/client.js';
 import { resolveLoopAuthenticatedUser } from '../auth/authenticated-user.js';
-import { type User } from '../db/users.js';
+import { applyCtxUserMirror, type CtxUserMirror, type User } from '../db/users.js';
 import { getStaffRole } from '../db/staff-roles.js';
 import {
   CtxUserRolesError,
@@ -25,8 +20,8 @@ const log = logger.child({ handler: 'users' });
 export interface UserMeView {
   id: string;
   email: string;
-  /** ADR 015 — USD / GBP / EUR. Drives order denomination. */
-  homeCurrency: string;
+  /** CTX `user.stableCurrency`; empty until CTX assigns or the user picks one. */
+  stableCurrency: string;
   /**
    * ADR 037 — the caller's staff tier, or null for an ordinary user.
    * This is what the web admin shell gates its navigation on: without
@@ -65,7 +60,7 @@ export async function toView(row: User): Promise<UserMeView> {
   return {
     id: row.id,
     email: row.email,
-    homeCurrency: row.homeCurrency,
+    stableCurrency: row.stableCurrency,
     staffRole,
     isAdmin: staffRole === 'admin',
     cashbackDestination: row.cashbackDestination ?? 'account',
@@ -92,21 +87,19 @@ export async function getMeHandler(c: Context): Promise<Response> {
   return c.json<UserMeView>(await toView(user));
 }
 
-const SetHomeCurrencyBody = z.object({
-  currency: z.enum(HOME_CURRENCIES),
+const SetStableCurrencyBody = z.object({
+  stableCurrency: z
+    .string()
+    .trim()
+    .min(1)
+    .transform((value) => value.toUpperCase()),
 });
 
-// 409 on existing orders: pricing history pins currency at order creation
-export async function setHomeCurrencyHandler(c: Context): Promise<Response> {
-  const parsed = SetHomeCurrencyBody.safeParse(await c.req.json().catch(() => null));
+// CTX owns the stable, so it is written there first and the local mirror refreshed from CTX's reply.
+export async function setStableCurrencyHandler(c: Context): Promise<Response> {
+  const parsed = SetStableCurrencyBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) {
-    return c.json(
-      {
-        code: 'VALIDATION_ERROR',
-        message: 'currency must be USD, GBP, or EUR',
-      },
-      400,
-    );
+    return c.json({ code: 'VALIDATION_ERROR', message: 'stableCurrency is required' }, 400);
   }
   let user: User | null;
   try {
@@ -119,8 +112,8 @@ export async function setHomeCurrencyHandler(c: Context): Promise<Response> {
     return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
   }
 
-  // No-op if already on requested currency: allows unconditional onboarding calls without prior GET /me
-  if (user.homeCurrency === parsed.data.currency) {
+  // No-op if already on requested stable: allows unconditional onboarding calls without prior GET /me
+  if (user.stableCurrency === parsed.data.stableCurrency) {
     return c.json<UserMeView>(await toView(user));
   }
 
@@ -128,34 +121,37 @@ export async function setHomeCurrencyHandler(c: Context): Promise<Response> {
   if (hasOrder !== null) {
     return c.json(
       {
-        code: 'HOME_CURRENCY_LOCKED',
-        message: 'Home currency cannot be changed after placing an order',
+        code: 'STABLE_CURRENCY_LOCKED',
+        message: 'Stable currency cannot be changed after placing an order',
       },
       409,
     );
   }
 
-  if (user.ctxUserId !== null) {
-    try {
-      await updateCtxStableCurrency(user.ctxUserId, parsed.data.currency);
-    } catch (err) {
-      if (err instanceof CtxUserRolesError && err.status === 400) {
-        return c.json({ code: 'VALIDATION_ERROR', message: 'Currency not supported' }, 400);
-      }
-      log.error({ err, userId: user.id }, 'CTX stableCurrency update failed');
-      return c.json(
-        { code: 'SUPPLIER_UNAVAILABLE', message: 'Unable to change home currency right now' },
-        503,
-      );
+  if (user.ctxUserId === null) {
+    return c.json(
+      {
+        code: 'SERVICE_UNAVAILABLE',
+        message: 'Your account is still being set up with our supplier — please retry shortly',
+      },
+      503,
+    );
+  }
+  let mirror: CtxUserMirror;
+  try {
+    mirror = await updateCtxStableCurrency(user.ctxUserId, parsed.data.stableCurrency);
+  } catch (err) {
+    if (err instanceof CtxUserRolesError && err.status === 400) {
+      return c.json({ code: 'VALIDATION_ERROR', message: 'Currency not supported' }, 400);
     }
+    log.error({ err, userId: user.id }, 'CTX stableCurrency update failed');
+    return c.json(
+      { code: 'SUPPLIER_UNAVAILABLE', message: 'Unable to change stable currency right now' },
+      503,
+    );
   }
 
-  const updated = await db
-    .collection('users')
-    .updateOne(
-      { id: user.id },
-      { $set: { homeCurrency: parsed.data.currency, updatedAt: new Date() } },
-    );
+  const updated = await applyCtxUserMirror(user.id, mirror);
   if (updated === null) {
     return c.json({ code: 'NOT_FOUND', message: 'User not found' }, 404);
   }
@@ -198,8 +194,9 @@ export async function setCashbackDestinationHandler(c: Context): Promise<Respons
       503,
     );
   }
+  let mirror: CtxUserMirror;
   try {
-    await updateCtxCashbackDestination(user.ctxUserId, destination);
+    mirror = await updateCtxCashbackDestination(user.ctxUserId, destination);
   } catch (err) {
     if (err instanceof CtxUserRolesError && err.status === 400) {
       return c.json({ code: 'VALIDATION_ERROR', message: 'Destination not supported' }, 400);
@@ -210,12 +207,7 @@ export async function setCashbackDestinationHandler(c: Context): Promise<Respons
       503,
     );
   }
-  const updated = await db
-    .collection('users')
-    .updateOne(
-      { id: user.id },
-      { $set: { cashbackDestination: destination, updatedAt: new Date() } },
-    );
+  const updated = await applyCtxUserMirror(user.id, mirror);
   if (updated === null) {
     return c.json({ code: 'NOT_FOUND', message: 'User not found' }, 404);
   }
@@ -230,7 +222,7 @@ const SetCountryBody = z.object({
     .transform((value) => value.toUpperCase()),
 });
 
-// CTX owns the user's country (it also derives the held stable from it), so it is written there first and mirrored locally once accepted.
+// CTX owns the user's country (it also derives the stable from it), so it is written there first and the local mirror refreshed from CTX's reply.
 export async function setCountryHandler(c: Context): Promise<Response> {
   const parsed = SetCountryBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) {
@@ -266,10 +258,9 @@ export async function setCountryHandler(c: Context): Promise<Response> {
       503,
     );
   }
-  let homeCurrency = user.homeCurrency;
+  let mirror: CtxUserMirror;
   try {
-    const mirror = await updateCtxCountry(user.ctxUserId, country);
-    if (mirror.homeCurrency !== null) homeCurrency = mirror.homeCurrency;
+    mirror = await updateCtxCountry(user.ctxUserId, country);
   } catch (err) {
     if (err instanceof CtxUserRolesError && err.status === 400) {
       return c.json({ code: 'VALIDATION_ERROR', message: 'Country not supported' }, 400);
@@ -280,9 +271,7 @@ export async function setCountryHandler(c: Context): Promise<Response> {
       503,
     );
   }
-  const updated = await db
-    .collection('users')
-    .updateOne({ id: user.id }, { $set: { country, homeCurrency, updatedAt: new Date() } });
+  const updated = await applyCtxUserMirror(user.id, mirror);
   if (updated === null) {
     return c.json({ code: 'NOT_FOUND', message: 'User not found' }, 404);
   }

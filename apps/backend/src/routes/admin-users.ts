@@ -8,7 +8,7 @@ import { adminListUsersHandler } from '../admin/users-list.js';
 import { adminGetUserHandler, adminUserByEmailHandler } from '../admin/user-detail.js';
 import { adminUserAuthStateHandler } from '../admin/user-auth-state.js';
 import { adminClearOtpLockoutHandler } from '../admin/clear-otp-lockout.js';
-import { adminHomeCurrencySetHandler } from '../admin/home-currency-set.js';
+import { adminStableCurrencySetHandler } from '../admin/stable-currency-set.js';
 import { adminRevokeUserSessionsHandler } from '../auth/revoke-sessions-handler.js';
 
 export function mountAdminUserRoutes(app: Hono): void {
@@ -52,10 +52,10 @@ export function mountAdminUserRoutes(app: Hono): void {
   );
   // ADR 015; step-up gated because it re-denominates customer charges
   app.post(
-    '/api/admin/users/:userId/home-currency',
-    rateLimit('POST /api/admin/users/:userId/home-currency', 10, 60_000),
+    '/api/admin/users/:userId/stable-currency',
+    rateLimit('POST /api/admin/users/:userId/stable-currency', 10, 60_000),
     requireStaff('admin'),
-    requireAdminStepUp('home-currency'),
-    adminHomeCurrencySetHandler,
+    requireAdminStepUp('stable-currency'),
+    adminStableCurrencySetHandler,
   );
 }

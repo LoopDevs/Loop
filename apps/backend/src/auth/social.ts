@@ -8,7 +8,7 @@ import { resolveOrCreateUserForIdentity } from './identities.js';
 import { isLoopAuthConfigured } from './tokens.js';
 import { issueTokenPair } from './issue-token-pair.js';
 import { enqueueCtxUserProvisioning } from '../ctx/user-provisioning.js';
-import { syncCtxAdminRole } from '../ctx/user-roles.js';
+import { syncCtxUser } from '../ctx/user-roles.js';
 import type { SocialProvider } from '../db/types.js';
 // D1: request body schema matches OpenAPI spec
 import { SocialLoginBody as Body } from './social-schemas.js';
@@ -110,7 +110,7 @@ export function makeSocialLoginHandler(providerConfig: SocialProviderConfig) {
         email,
         country: parsed.data.country,
       });
-      await syncCtxAdminRole(user);
+      await syncCtxUser(user);
       // NS-09: stamp token_version for revocability
       const pair = await issueTokenPair({
         id: user.id,

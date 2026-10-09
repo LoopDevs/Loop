@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { currencyOf, isHomeCurrency } from '@loop/shared';
+import type { CashbackDestination } from '@loop/shared';
 import { db } from './client.js';
 import { isUniqueViolation } from './errors.js';
-import type { HomeCurrency, UserDoc } from './types.js';
+import type { UserDoc } from './types.js';
 
 export type User = UserDoc;
 
@@ -27,7 +27,7 @@ export async function upsertUserFromCtx(args: {
     ctxUserId: args.ctxUserId,
     email: args.email ?? '',
     tokenVersion: 0,
-    homeCurrency: 'USD',
+    stableCurrency: '',
     isAdmin: false,
     createdAt: now,
     updatedAt: now,
@@ -53,32 +53,27 @@ export async function setUserCtxUserId(id: string, ctxUserId: string): Promise<b
   return updated !== null;
 }
 
-// ADR 037: mirror of the CTX operator-admin role; a staff_roles row still wins in requireStaff.
-export async function setUserIsAdmin(id: string, isAdmin: boolean): Promise<boolean> {
-  const updated = await db
-    .collection('users')
-    .updateOne({ id, isAdmin: !isAdmin }, { $set: { isAdmin, updatedAt: new Date() } });
-  return updated !== null;
+export interface CtxUserMirror {
+  isAdmin: boolean;
+  stableCurrency: string;
+  cashbackDestination: CashbackDestination;
+  country: string | null;
 }
 
-export async function setUserHomeCurrency(
-  id: string,
-  homeCurrency: HomeCurrency,
-): Promise<boolean> {
-  const updated = await db
-    .collection('users')
-    .updateOne(
-      { id, homeCurrency: { $ne: homeCurrency } },
-      { $set: { homeCurrency, updatedAt: new Date() } },
-    );
-  return updated !== null;
-}
-
-export async function setUserCountry(id: string, country: string): Promise<boolean> {
-  const updated = await db
-    .collection('users')
-    .updateOne({ id, country: { $ne: country } }, { $set: { country, updatedAt: new Date() } });
-  return updated !== null;
+// ADR 037: every CTX user response overwrites the mirror; a staff_roles row still wins in requireStaff.
+export async function applyCtxUserMirror(id: string, mirror: CtxUserMirror): Promise<User | null> {
+  return db.collection('users').updateOne(
+    { id },
+    {
+      $set: {
+        isAdmin: mirror.isAdmin,
+        stableCurrency: mirror.stableCurrency,
+        cashbackDestination: mirror.cashbackDestination,
+        ...(mirror.country !== null ? { country: mirror.country } : {}),
+        updatedAt: new Date(),
+      },
+    },
+  );
 }
 
 // NS-09: caller fails closed if user row is missing.
@@ -108,14 +103,12 @@ export async function resolveOrCreateUserByEmail(
   const existing = await users.findOne({ email: normalised });
   if (existing !== null) return { user: existing, created: false };
   const now = new Date();
-  const countryCurrency = currencyOf(country);
   const doc: UserDoc = {
     id: randomUUID(),
     ctxUserId: null,
     email: normalised,
     tokenVersion: 0,
-    homeCurrency:
-      countryCurrency !== undefined && isHomeCurrency(countryCurrency) ? countryCurrency : 'USD',
+    stableCurrency: '',
     ...(country !== undefined ? { country: country.toUpperCase() } : {}),
     isAdmin: false,
     createdAt: now,

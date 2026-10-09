@@ -40,9 +40,8 @@ vi.mock('~/services/user', async (importActual) => {
       id: 'u1',
       email: 'admin@loop.test',
       isAdmin: true,
-      homeCurrency: 'USD' as const,
+      stableCurrency: 'XLM.USDC',
       stellarAddress: null,
-      homeCurrencyBalanceMinor: '0',
     })),
   };
 });
@@ -96,7 +95,7 @@ describe('AdminUsersRoute — find-by-email', () => {
       id: 'u-42',
       email: 'alice@example.com',
       isAdmin: false,
-      homeCurrency: 'GBP',
+      stableCurrency: 'XLM.GBPLOOP',
       stellarAddress: null,
       ctxUserId: null,
       createdAt: '2026-01-10T00:00:00Z',
@@ -119,7 +118,7 @@ describe('AdminUsersRoute — find-by-email', () => {
       id: 'u-42',
       email: 'alice@example.com',
       isAdmin: false,
-      homeCurrency: 'GBP',
+      stableCurrency: 'XLM.GBPLOOP',
       stellarAddress: null,
       ctxUserId: null,
       createdAt: '2026-01-10T00:00:00Z',

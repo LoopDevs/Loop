@@ -11,8 +11,7 @@ import {
   bumpUserTokenVersion,
   findOrCreateUserByEmail,
   resolveOrCreateUserByEmail,
-  setUserIsAdmin,
-  setUserHomeCurrency,
+  applyCtxUserMirror,
 } from '../users.js';
 import type { UserDoc } from '../types.js';
 
@@ -27,7 +26,7 @@ async function seedUser(overrides: Partial<UserDoc> = {}): Promise<UserDoc> {
     ctxUserId: null,
     email: 'seed@b.com',
     tokenVersion: 0,
-    homeCurrency: 'USD',
+    stableCurrency: 'XLM.USDC',
     isAdmin: false,
     createdAt: now,
     updatedAt: now,
@@ -43,7 +42,7 @@ describe('upsertUserFromCtx', () => {
     expect(user.ctxUserId).toBe('ctx-1');
     expect(user.email).toBe('a@b.com');
     expect(user.tokenVersion).toBe(0);
-    expect(user.homeCurrency).toBe('USD');
+    expect(user.stableCurrency).toBe('');
     const stored = await db.collection('users').findOne({ ctxUserId: 'ctx-1' });
     expect(stored?.id).toBe(user.id);
   });
@@ -142,7 +141,7 @@ describe('findOrCreateUserByEmail', () => {
         ctxUserId: null,
         email: 'raced@b.com',
         tokenVersion: 0,
-        homeCurrency: 'USD',
+        stableCurrency: 'XLM.USDC',
         isAdmin: false,
         createdAt: now,
         updatedAt: now,
@@ -156,33 +155,47 @@ describe('findOrCreateUserByEmail', () => {
   });
 });
 
-describe('setUserIsAdmin', () => {
-  it('flips the flag and reports the change', async () => {
+describe('applyCtxUserMirror', () => {
+  it('overwrites the mirrored fields from the CTX user and returns the row', async () => {
     await seedUser({ id: 'u-1' });
-    expect(await setUserIsAdmin('u-1', true)).toBe(true);
-    expect((await getUserById('u-1'))?.isAdmin).toBe(true);
-    expect(await setUserIsAdmin('u-1', false)).toBe(true);
-    expect((await getUserById('u-1'))?.isAdmin).toBe(false);
+    const updated = await applyCtxUserMirror('u-1', {
+      isAdmin: true,
+      stableCurrency: 'XLM.EURC',
+      cashbackDestination: 'savings',
+      country: 'PT',
+    });
+    expect(updated).toMatchObject({
+      isAdmin: true,
+      stableCurrency: 'XLM.EURC',
+      cashbackDestination: 'savings',
+      country: 'PT',
+    });
   });
 
-  it('reports no change when the flag already matches', async () => {
-    await seedUser({ id: 'u-1', isAdmin: true });
-    expect(await setUserIsAdmin('u-1', true)).toBe(false);
-    expect(await setUserIsAdmin('missing', true)).toBe(false);
+  it('clears the stable and the admin flag when CTX carries none, keeping the country', async () => {
+    await seedUser({ id: 'u-1', isAdmin: true, country: 'GB' });
+    await applyCtxUserMirror('u-1', {
+      isAdmin: false,
+      stableCurrency: '',
+      cashbackDestination: 'account',
+      country: null,
+    });
+    expect(await getUserById('u-1')).toMatchObject({
+      isAdmin: false,
+      stableCurrency: '',
+      country: 'GB',
+    });
   });
-});
 
-describe('setUserHomeCurrency', () => {
-  it('writes the currency and reports the change', async () => {
-    await seedUser({ id: 'u-1' });
-    expect(await setUserHomeCurrency('u-1', 'EUR')).toBe(true);
-    expect((await getUserById('u-1'))?.homeCurrency).toBe('EUR');
-  });
-
-  it('reports no change when the currency already matches', async () => {
-    await seedUser({ id: 'u-1', homeCurrency: 'EUR' });
-    expect(await setUserHomeCurrency('u-1', 'EUR')).toBe(false);
-    expect(await setUserHomeCurrency('missing', 'EUR')).toBe(false);
+  it('returns null for a missing user', async () => {
+    expect(
+      await applyCtxUserMirror('missing', {
+        isAdmin: false,
+        stableCurrency: '',
+        cashbackDestination: 'account',
+        country: null,
+      }),
+    ).toBeNull();
   });
 });
 
@@ -194,7 +207,12 @@ describe('admin flag across logins', () => {
 
   it('keeps the mirrored flag on the next login', async () => {
     const before = await findOrCreateUserByEmail('boss@loop.test');
-    await setUserIsAdmin(before.id, true);
+    await applyCtxUserMirror(before.id, {
+      isAdmin: true,
+      stableCurrency: '',
+      cashbackDestination: 'account',
+      country: null,
+    });
     const after = await findOrCreateUserByEmail('boss@loop.test');
     expect(after.id).toBe(before.id);
     expect(after.isAdmin).toBe(true);
@@ -203,7 +221,12 @@ describe('admin flag across logins', () => {
   it('keeps the mirrored flag on a CTX-path re-upsert', async () => {
     const created = await upsertUserFromCtx({ ctxUserId: 'ctx-boss', email: 'b@loop.test' });
     expect(created.isAdmin).toBe(false);
-    await setUserIsAdmin(created.id, true);
+    await applyCtxUserMirror(created.id, {
+      isAdmin: true,
+      stableCurrency: '',
+      cashbackDestination: 'account',
+      country: null,
+    });
     const refreshed = await upsertUserFromCtx({ ctxUserId: 'ctx-boss', email: 'b@loop.test' });
     expect(refreshed.isAdmin).toBe(true);
   });
@@ -215,19 +238,11 @@ describe('resolveOrCreateUserByEmail', () => {
     expect(first.created).toBe(true);
     expect(first.user.email).toBe('new@example.com');
     expect(first.user.country).toBe('GB');
-    expect(first.user.homeCurrency).toBe('GBP');
   });
 
-  it("derives the home currency from the country's display currency, USD when it has none", async () => {
-    expect((await resolveOrCreateUserByEmail('pt@example.com', 'PT')).user.homeCurrency).toBe(
-      'EUR',
-    );
-    expect((await resolveOrCreateUserByEmail('ca@example.com', 'CA')).user.homeCurrency).toBe(
-      'USD',
-    );
-    expect((await resolveOrCreateUserByEmail('iq@example.com', 'IQ')).user.homeCurrency).toBe(
-      'USD',
-    );
+  it('starts with no stable; CTX assigns one from the country', async () => {
+    expect((await resolveOrCreateUserByEmail('pt@example.com', 'PT')).user.stableCurrency).toBe('');
+    expect((await resolveOrCreateUserByEmail('ca@example.com', 'CA')).user.stableCurrency).toBe('');
   });
 
   it('returns the existing row untouched and reports it as not created', async () => {
@@ -241,6 +256,6 @@ describe('resolveOrCreateUserByEmail', () => {
   it('leaves the country unset when the caller has none', async () => {
     const { user } = await resolveOrCreateUserByEmail('bare@example.com');
     expect(user.country).toBeUndefined();
-    expect(user.homeCurrency).toBe('USD');
+    expect(user.stableCurrency).toBe('');
   });
 });

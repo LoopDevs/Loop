@@ -28,7 +28,7 @@ src/
 ├── clustering/         ← Location store + map clustering (protobuf wire)
 ├── ctx/                ← CTX API client, ws maintainers, catalog snapshots, user provisioning,
 │                          operator-admin role mirror, per-user account + wallet links
-├── users/              ← Profile, home-currency, account/wallets proxy, favorites,
+├── users/              ← Profile, stable-currency, account/wallets proxy, favorites,
 │                          recently-purchased, DSR
 ├── public/             ← /api/public/* (ADR 020: never-500, no PII, CDN-friendly)
 ├── images/             ← Reference-keyed image proxy (ADR 050)

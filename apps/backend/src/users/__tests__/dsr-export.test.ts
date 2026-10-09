@@ -16,7 +16,7 @@ async function seedUser(overrides: Partial<UserDoc> = {}): Promise<UserDoc> {
     ctxUserId: null,
     email: 'alice@example.com',
     tokenVersion: 0,
-    homeCurrency: 'GBP',
+    stableCurrency: 'XLM.GBPLOOP',
     isAdmin: false,
     createdAt: NOW,
     updatedAt: NOW,

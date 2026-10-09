@@ -143,9 +143,8 @@ vi.mock('~/services/user', async (importActual) => {
       email: 'staff@loop.test',
       isAdmin: userMock.isAdmin,
       staffRole: userMock.staffRole,
-      homeCurrency: 'USD' as const,
+      stableCurrency: 'XLM.USDC',
       stellarAddress: null,
-      homeCurrencyBalanceMinor: '0',
     })),
   };
 });
@@ -158,7 +157,7 @@ const targetUser = {
   id: 'u-360',
   email: 'customer@example.com',
   isAdmin: false,
-  homeCurrency: 'GBP',
+  stableCurrency: 'XLM.GBPLOOP',
   stellarAddress: null,
   ctxUserId: null,
   createdAt: '2026-05-01T00:00:00.000Z',
@@ -217,7 +216,7 @@ describe('<AdminUserDetailRoute /> — ADR 037 role gating', () => {
     // phrases, so text queries would be ambiguous).
     expect(screen.getByRole('heading', { name: /Apply adjustment/i })).toBeDefined();
     expect(screen.getByRole('heading', { name: /Queue emission/i })).toBeDefined();
-    expect(screen.getByRole('heading', { name: /Change home currency/i })).toBeDefined();
+    expect(screen.getByRole('heading', { name: /Change stable currency/i })).toBeDefined();
     expect(screen.getByRole('button', { name: /Download CSV/i })).toBeDefined();
     // Global lookup search renders for staff.
     expect(screen.getByRole('search', { name: /Global admin lookup/i })).toBeDefined();
@@ -246,7 +245,7 @@ describe('<AdminUserDetailRoute /> — ADR 037 role gating', () => {
     // Money writes + CSV are hidden (not disabled) for support.
     expect(screen.queryByRole('heading', { name: /Apply adjustment/i })).toBeNull();
     expect(screen.queryByRole('heading', { name: /Queue emission/i })).toBeNull();
-    expect(screen.queryByRole('heading', { name: /Change home currency/i })).toBeNull();
+    expect(screen.queryByRole('heading', { name: /Change stable currency/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /Download CSV/i })).toBeNull();
     // Ledger browser (read) still renders.
     expect(screen.getByRole('heading', { name: /Credit transactions/i })).toBeDefined();

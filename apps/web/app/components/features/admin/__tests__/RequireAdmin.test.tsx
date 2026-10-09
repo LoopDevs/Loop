@@ -71,7 +71,7 @@ function meView(over: Partial<UserMeView>): UserMeView {
     email: 'staff@loop.test',
     isAdmin: false,
     staffRole: null,
-    homeCurrency: 'USD',
+    stableCurrency: 'XLM.USDC',
     cashbackDestination: 'account',
     country: null,
     ...over,

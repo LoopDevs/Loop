@@ -101,7 +101,7 @@ function userDoc(id: string, email: string, isAdmin: boolean): UserDoc {
     ctxUserId: null,
     email,
     tokenVersion: 0,
-    homeCurrency: 'USD',
+    stableCurrency: 'XLM.USDC',
     isAdmin,
     createdAt: now,
     updatedAt: now,

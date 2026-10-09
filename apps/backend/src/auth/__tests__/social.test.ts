@@ -48,9 +48,9 @@ vi.mock('../identities.js', () => ({
 vi.mock('../refresh-tokens.js', () => ({
   recordRefreshToken: (args: unknown) => recordRefreshMock(args),
 }));
-const syncCtxAdminRoleMock = vi.fn();
+const syncCtxUserMock = vi.fn();
 vi.mock('../../ctx/user-roles.js', () => ({
-  syncCtxAdminRole: (user: unknown) => syncCtxAdminRoleMock(user),
+  syncCtxUser: (user: unknown) => syncCtxUserMock(user),
 }));
 vi.mock('../../logger.js', () => ({
   logger: {
@@ -161,7 +161,7 @@ describe('googleSocialLoginHandler', () => {
       email: 'a@b.com',
       country: 'PT',
     });
-    expect(syncCtxAdminRoleMock).toHaveBeenCalledWith(
+    expect(syncCtxUserMock).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'user-uuid', email: 'a@b.com' }),
     );
     expect(recordRefreshMock).toHaveBeenCalled();

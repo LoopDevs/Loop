@@ -44,7 +44,7 @@ async function seedUser(): Promise<UserDoc> {
     ctxUserId: null,
     email: 'a@b.com',
     tokenVersion: 0,
-    homeCurrency: 'GBP',
+    stableCurrency: 'XLM.GBPLOOP',
     isAdmin: false,
     createdAt: now,
     updatedAt: now,
@@ -135,7 +135,7 @@ describe('getUserOrdersSummaryHandler', () => {
     });
   });
 
-  it('is home-currency locked — other-currency and other-user orders are excluded', async () => {
+  it("counts only orders in the stable's fiat for the calling user", async () => {
     await seedUser();
     await seedOrder({ state: 'fulfilled', chargeMinor: 5_000 });
     await seedOrder({ state: 'fulfilled', chargeMinor: 7_000, chargeCurrency: 'USD' });

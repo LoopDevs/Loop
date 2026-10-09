@@ -25,7 +25,6 @@ import type {
   SavingsMoveRequest,
   SavingsOperationView,
   CashbackDestination,
-  HomeCurrency,
   OrderState,
 } from '@loop/shared';
 import { authenticatedRequest } from './api-client';
@@ -54,18 +53,11 @@ export type {
 // Legacy web-side alias retained for call-site stability.
 export type UserOrderState = OrderState;
 
-/**
- * `POST /api/users/me/home-currency` — onboarding-time picker
- * (ADR 015). Server validates the currency against the enum and
- * returns 409 if the user has already placed an order. The
- * onboarding flow calls this pre-first-order so the 409 branch
- * is practically unreachable; callers still surface it as an
- * error rather than swallowing.
- */
-export async function setHomeCurrency(code: HomeCurrency): Promise<UserMeView> {
-  return authenticatedRequest<UserMeView>('/api/users/me/home-currency', {
+/** `POST /api/users/me/stable-currency` — the CTX stable code; 409 once the user has placed an order. */
+export async function setStableCurrency(stableCurrency: string): Promise<UserMeView> {
+  return authenticatedRequest<UserMeView>('/api/users/me/stable-currency', {
     method: 'POST',
-    body: { currency: code },
+    body: { stableCurrency },
   });
 }
 

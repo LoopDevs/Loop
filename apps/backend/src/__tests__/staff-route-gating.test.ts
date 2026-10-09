@@ -95,7 +95,7 @@ function user(id: string, email: string, isAdmin: boolean): UserDoc {
     ctxUserId: null,
     email,
     tokenVersion: 0,
-    homeCurrency: 'USD',
+    stableCurrency: 'XLM.USDC',
     isAdmin,
     createdAt: now,
     updatedAt: now,
@@ -131,7 +131,7 @@ const ADMIN_ONLY_PROBES: Array<[string, string]> = [
   ['POST', '/api/admin/step-up'],
   ['POST', `/api/admin/users/${NOBODY_ID}/revoke-sessions`],
   ['POST', `/api/admin/users/${NOBODY_ID}/clear-otp-lockout`],
-  ['POST', `/api/admin/users/${NOBODY_ID}/home-currency`],
+  ['POST', `/api/admin/users/${NOBODY_ID}/stable-currency`],
   ['POST', `/api/admin/orders/${ORDER_ID}/redrive`],
   ['PUT', '/api/admin/merchant-cashback-configs/some-merchant'],
   ['POST', '/api/admin/merchants/resync'],
@@ -273,8 +273,8 @@ describe('ADR 037 mount inventory (default-deny)', () => {
     const mustCarryStepUp: Record<string, string> = {
       'PUT /api/admin/staff/:userId/role': 'requireAdminStepUp(staff-role-grant)',
       'DELETE /api/admin/staff/:userId/role': 'requireAdminStepUp(staff-role-revoke)',
-      // ADR 015: re-denominates what the customer is quoted and charged.
-      'POST /api/admin/users/:userId/home-currency': 'requireAdminStepUp(home-currency)',
+      // ADR 015: re-denominates the customer's cashback.
+      'POST /api/admin/users/:userId/stable-currency': 'requireAdminStepUp(stable-currency)',
       // A5-1: runs a real CTX sweep step that can move the order's state.
       'POST /api/admin/orders/:orderId/redrive': 'requireAdminStepUp(order-redrive)',
       // Hardening B1: sets the split FUTURE orders stamp at creation.

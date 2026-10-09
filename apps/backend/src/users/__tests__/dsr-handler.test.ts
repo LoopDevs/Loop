@@ -26,7 +26,7 @@ const baseUser = {
   id: 'user-uuid',
   email: 'a@b.com',
   isAdmin: false,
-  homeCurrency: 'GBP',
+  stableCurrency: 'XLM.GBPLOOP',
   ctxUserId: null,
   createdAt: new Date(),
   updatedAt: new Date(),

@@ -90,7 +90,7 @@ function mkMe(overrides: Partial<UserMeView> = {}): UserMeView {
     email: 'a@b.com',
     isAdmin: false,
     staffRole: null,
-    homeCurrency: 'GBP',
+    stableCurrency: 'XLM.GBPLOOP',
     cashbackDestination: 'account',
     country: null,
     ...overrides,

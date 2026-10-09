@@ -12,7 +12,7 @@ export interface UserDoc {
   email: string;
   // NS-09 — bumped on logout/sign-out-all/refresh-reuse to invalidate prior access tokens
   tokenVersion: number;
-  homeCurrency: HomeCurrency;
+  stableCurrency: string;
   // Mirror of CTX's user.country (ISO 3166-1 alpha-2, uppercase); absent until the user picks one
   country?: string;
   // Mirror of CTX's cashbackDestination; absent on rows written before the setting existed, read as 'account'

@@ -218,7 +218,7 @@ function AdminUsersRouteInner(): React.JSX.Element {
           <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800 text-sm">
             <thead className="bg-gray-50 dark:bg-gray-900/50">
               <tr>
-                {['Signed up', 'Email', 'Home', 'Role', 'ID'].map((h) => (
+                {['Signed up', 'Email', 'Stable', 'Role', 'ID'].map((h) => (
                   <th
                     key={h}
                     className="px-3 py-2 text-start font-medium text-gray-500 dark:text-gray-400"
@@ -245,7 +245,9 @@ function AdminUsersRouteInner(): React.JSX.Element {
                       {u.email}
                     </Link>
                   </td>
-                  <td className="px-3 py-2 text-gray-700 dark:text-gray-300">{u.homeCurrency}</td>
+                  <td className="px-3 py-2 text-gray-700 dark:text-gray-300">
+                    {u.stableCurrency === '' ? '—' : u.stableCurrency}
+                  </td>
                   <td className="px-3 py-2">
                     {u.isAdmin ? (
                       <span className="rounded-full bg-purple-100 px-2.5 py-0.5 text-xs font-medium text-purple-800 dark:bg-purple-900/30 dark:text-purple-300">

@@ -5,10 +5,7 @@
  * `apps/web/app/services/user.ts`. They move here because both
  * `apps/backend` and `apps/web` need the same wire contract — web
  * consumes it, backend emits it, and a second definition on either
- * side is drift waiting to happen. Examples the move catches:
- *
- *  - `UserMeView.homeCurrency` was `string` on the backend and
- *    `'USD' | 'GBP' | 'EUR'` on the web. Here it's `HomeCurrency`.
+ * side is drift waiting to happen.
  *
  * Integer columns serialise as strings (BigInt-safe). Timestamps are
  * ISO-8601.
@@ -19,7 +16,7 @@ import type { StaffRole } from './admin-staff.js';
 import type { CashbackDestination } from './users-account.js';
 
 /**
- * `GET /api/users/me` / `POST /api/users/me/home-currency` response.
+ * `GET /api/users/me` / `POST /api/users/me/stable-currency` response.
  * Balances and linked wallets live on `UserAccountView`.
  */
 export interface UserMeView {
@@ -38,7 +35,7 @@ export interface UserMeView {
    * rollout completes — see `useStaffRole`).
    */
   staffRole: StaffRole | null;
-  homeCurrency: HomeCurrency;
+  stableCurrency: string;
   /** Where credited cashback lands at CTX: `account` pays out to the linked wallet, `savings` fills the pot. */
   cashbackDestination: CashbackDestination;
   /** Home country (ISO 3166-1 alpha-2, uppercase), mirrored from CTX's `user.country`; null until chosen. */
@@ -102,7 +99,7 @@ export interface CashbackMonthlyResponse {
 
 /** `GET /api/users/me/orders/summary` */
 export interface UserOrdersSummary {
-  currency: HomeCurrency;
+  currency: HomeCurrency | null;
   totalOrders: number;
   fulfilledCount: number;
   /** `pending_payment` + `paid` + `procuring` — in-flight states. */

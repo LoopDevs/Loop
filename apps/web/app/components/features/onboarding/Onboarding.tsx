@@ -4,12 +4,12 @@ import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { checkBiometrics } from '~/native/biometrics';
 import type { BiometricResult } from '~/native/biometrics';
-import { setHomeCurrency } from '~/services/user';
+import { setStableCurrency } from '~/services/user';
 import { useAuthStore } from '~/stores/auth.store';
 import { useAppConfig } from '~/hooks/use-app-config';
 import { readCountryCookie } from '~/i18n/locale';
 import { isValidEmail } from '~/utils/email';
-import { ApiException, isSupportedCountryCode } from '@loop/shared';
+import { ApiException, heldStableForCurrency, isSupportedCountryCode } from '@loop/shared';
 import { Dots, useReducedMotion } from './atoms';
 import { TrustWelcome, TrustHowItWorks, TrustMerchants } from './screens-trust';
 import { EmailEntry, OtpEntry, WelcomeIn, useOnboardingAuth } from './signup-tail';
@@ -268,7 +268,7 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
     setSavingCurrency(true);
     setCurrencyError(null);
     try {
-      await setHomeCurrency(currency);
+      await setStableCurrency(heldStableForCurrency(currency));
       useAuthStore.getState().setStableCurrencyPromptPending(false);
       next();
     } catch (err) {

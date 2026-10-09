@@ -26,7 +26,7 @@ async function seedUser(id: string): Promise<UserDoc> {
     ctxUserId: null,
     email: `${id}@test.local`,
     tokenVersion: 0,
-    homeCurrency: 'USD',
+    stableCurrency: 'XLM.USDC',
     isAdmin: false,
     createdAt: now,
     updatedAt: now,

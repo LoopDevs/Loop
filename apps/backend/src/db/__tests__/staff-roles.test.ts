@@ -22,7 +22,7 @@ async function seedUser(id: string, isAdmin = false): Promise<UserDoc> {
     ctxUserId: null,
     email: `${id}@loop.test`,
     tokenVersion: 0,
-    homeCurrency: 'USD',
+    stableCurrency: 'XLM.USDC',
     isAdmin,
     createdAt: now,
     updatedAt: now,

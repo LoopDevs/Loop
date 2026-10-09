@@ -18,7 +18,7 @@ export interface AdminUserSearchResult {
   id: string;
   email: string;
   isAdmin: boolean;
-  homeCurrency: string;
+  stableCurrency: string;
   createdAt: string;
 }
 
@@ -71,7 +71,7 @@ export async function adminUserSearchHandler(c: Context): Promise<Response> {
       id: r.id,
       email: r.email,
       isAdmin: r.isAdmin,
-      homeCurrency: r.homeCurrency,
+      stableCurrency: r.stableCurrency,
       createdAt: r.createdAt.toISOString(),
     }));
 

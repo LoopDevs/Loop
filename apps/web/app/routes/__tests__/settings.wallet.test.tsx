@@ -16,7 +16,7 @@ const { userMock, authMock } = vi.hoisted(() => ({
     linkWallet: vi.fn(),
     unlinkWallet: vi.fn(),
     updateWallet: vi.fn(),
-    setHomeCurrency: vi.fn(),
+    setStableCurrency: vi.fn(),
     setCashbackDestination: vi.fn(),
   },
   authMock: { isAuthenticated: true },
@@ -28,7 +28,7 @@ vi.mock('~/services/user', () => ({
   linkWallet: (body: { chain: 'XLM'; address: string }) => userMock.linkWallet(body),
   unlinkWallet: (id: string) => userMock.unlinkWallet(id),
   updateWallet: (id: string, body: { autoPayout: boolean }) => userMock.updateWallet(id, body),
-  setHomeCurrency: (code: 'USD' | 'GBP' | 'EUR') => userMock.setHomeCurrency(code),
+  setStableCurrency: (stableCurrency: string) => userMock.setStableCurrency(stableCurrency),
   setCashbackDestination: (destination: 'account' | 'savings') =>
     userMock.setCashbackDestination(destination),
 }));
@@ -111,7 +111,7 @@ beforeEach(() => {
     email: 'a@b.com',
     isAdmin: false,
     staffRole: null,
-    homeCurrency: 'GBP',
+    stableCurrency: 'XLM.GBPLOOP',
     cashbackDestination: 'account',
     country: null,
   };
@@ -139,8 +139,8 @@ beforeEach(() => {
     links = links.map((l) => (l.id === id ? { ...l, autoPayout: body.autoPayout } : l));
     return links.find((l) => l.id === id);
   });
-  userMock.setHomeCurrency.mockImplementation(async (code: 'USD' | 'GBP' | 'EUR') => {
-    me = { ...me, homeCurrency: code };
+  userMock.setStableCurrency.mockImplementation(async (stableCurrency: string) => {
+    me = { ...me, stableCurrency };
     return me;
   });
   clipboardMock.copyToClipboard.mockReset();
@@ -300,23 +300,23 @@ describe('SettingsWalletRoute', () => {
     );
   });
 
-  it('switches home currency and reflects the new held stable', async () => {
+  it('sends the picked fiat as its CTX stable and reflects the new held stable', async () => {
     renderPage();
     await screen.findByRole('radio', { name: /GBP/i });
     await act(async () => {
       fireEvent.click(screen.getByRole('radio', { name: /^USD/i }));
     });
-    await waitFor(() => expect(userMock.setHomeCurrency).toHaveBeenCalledWith('USD'));
+    await waitFor(() => expect(userMock.setStableCurrency).toHaveBeenCalledWith('XLM.USDC'));
     await waitFor(() => {
       expect(screen.getAllByText((t) => t.includes('USDC')).length).toBeGreaterThan(0);
     });
   });
 
   it('renders a locked-state callout when the backend returns 409', async () => {
-    userMock.setHomeCurrency.mockRejectedValue(
+    userMock.setStableCurrency.mockRejectedValue(
       new ApiException(409, {
-        code: 'HOME_CURRENCY_LOCKED',
-        message: 'Home currency cannot be changed after placing an order',
+        code: 'STABLE_CURRENCY_LOCKED',
+        message: 'Stable currency cannot be changed after placing an order',
       }),
     );
     renderPage();

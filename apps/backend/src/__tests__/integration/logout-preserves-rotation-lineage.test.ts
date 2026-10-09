@@ -57,7 +57,7 @@ async function seedChain(): Promise<{
     ctxUserId: null,
     email: `cor11-${Date.now()}@test.local`,
     tokenVersion: 0,
-    homeCurrency: 'USD',
+    stableCurrency: 'XLM.USDC',
     isAdmin: false,
     createdAt: seededAt,
     updatedAt: seededAt,

@@ -15,7 +15,7 @@ async function seedUser(overrides: Partial<UserDoc> = {}): Promise<UserDoc> {
     ctxUserId: null,
     email: 'seed@b.com',
     tokenVersion: 0,
-    homeCurrency: 'USD',
+    stableCurrency: 'XLM.USDC',
     isAdmin: false,
     createdAt: now,
     updatedAt: now,

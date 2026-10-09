@@ -69,9 +69,8 @@ vi.mock('~/services/user', async (importActual) => {
       id: 'u1',
       email: 'admin@loop.test',
       isAdmin: true,
-      homeCurrency: 'USD' as const,
+      stableCurrency: 'XLM.USDC',
       stellarAddress: null,
-      homeCurrencyBalanceMinor: '0',
     })),
   };
 });

@@ -17,22 +17,18 @@ vi.mock('../api-fetch.js', async (importOriginal) => ({
   ctxFetch: ctxFetchMock,
 }));
 
-const setUserIsAdminMock = vi.hoisted(() => vi.fn());
-const setUserHomeCurrencyMock = vi.hoisted(() => vi.fn());
-const setUserCountryMock = vi.hoisted(() => vi.fn());
+const applyCtxUserMirrorMock = vi.hoisted(() => vi.fn());
 const getUserCtxUserIdMock = vi.hoisted(() => vi.fn());
 vi.mock('../../db/users.js', () => ({
-  setUserIsAdmin: setUserIsAdminMock,
-  setUserHomeCurrency: setUserHomeCurrencyMock,
-  setUserCountry: setUserCountryMock,
+  applyCtxUserMirror: applyCtxUserMirrorMock,
   getUserCtxUserId: getUserCtxUserIdMock,
 }));
 
 import {
   CtxUserRolesError,
-  enqueueCtxAdminRoleSync,
+  enqueueCtxUserSync,
   fetchCtxUserMirror,
-  syncCtxAdminRole,
+  syncCtxUser,
   updateCtxCountry,
   updateCtxStableCurrency,
 } from '../user-roles.js';
@@ -59,12 +55,8 @@ function ctxUser(
 
 beforeEach(() => {
   ctxFetchMock.mockReset();
-  setUserIsAdminMock.mockReset();
-  setUserIsAdminMock.mockResolvedValue(true);
-  setUserHomeCurrencyMock.mockReset();
-  setUserHomeCurrencyMock.mockResolvedValue(true);
-  setUserCountryMock.mockReset();
-  setUserCountryMock.mockResolvedValue(true);
+  applyCtxUserMirrorMock.mockReset();
+  applyCtxUserMirrorMock.mockResolvedValue(null);
   getUserCtxUserIdMock.mockReset();
 });
 
@@ -84,18 +76,20 @@ describe('fetchCtxUserMirror', () => {
     await expect(fetchCtxUserMirror('ctx-u1')).resolves.toMatchObject({ isAdmin: false });
   });
 
-  it('maps the held stable to a Loop home currency, case-insensitively', async () => {
+  it('reports the CTX stableCurrency uppercased', async () => {
     ctxFetchMock.mockResolvedValueOnce(ctxUser([], 'XLM.EURC'));
-    await expect(fetchCtxUserMirror('ctx-u1')).resolves.toMatchObject({ homeCurrency: 'EUR' });
+    await expect(fetchCtxUserMirror('ctx-u1')).resolves.toMatchObject({
+      stableCurrency: 'XLM.EURC',
+    });
     ctxFetchMock.mockResolvedValueOnce(ctxUser([], 'xlm.gbploop'));
-    await expect(fetchCtxUserMirror('ctx-u1')).resolves.toMatchObject({ homeCurrency: 'GBP' });
+    await expect(fetchCtxUserMirror('ctx-u1')).resolves.toMatchObject({
+      stableCurrency: 'XLM.GBPLOOP',
+    });
   });
 
-  it('reports no home currency when CTX carries none or an unknown stable', async () => {
+  it('reports an empty stableCurrency when CTX carries none', async () => {
     ctxFetchMock.mockResolvedValueOnce(ctxUser([]));
-    await expect(fetchCtxUserMirror('ctx-u1')).resolves.toMatchObject({ homeCurrency: null });
-    ctxFetchMock.mockResolvedValueOnce(ctxUser([], 'XLM.XYZ'));
-    await expect(fetchCtxUserMirror('ctx-u1')).resolves.toMatchObject({ homeCurrency: null });
+    await expect(fetchCtxUserMirror('ctx-u1')).resolves.toMatchObject({ stableCurrency: '' });
   });
 
   it('throws on a non-ok status and on schema drift', async () => {
@@ -107,10 +101,10 @@ describe('fetchCtxUserMirror', () => {
 });
 
 describe('updateCtxStableCurrency', () => {
-  it('PUTs the held stable for the home currency and returns the mirror', async () => {
+  it('PUTs the stable and returns the mirror', async () => {
     ctxFetchMock.mockResolvedValue(ctxUser([], 'XLM.GBPLOOP'));
-    await expect(updateCtxStableCurrency('ctx-u1', 'GBP')).resolves.toMatchObject({
-      homeCurrency: 'GBP',
+    await expect(updateCtxStableCurrency('ctx-u1', 'XLM.GBPLOOP')).resolves.toMatchObject({
+      stableCurrency: 'XLM.GBPLOOP',
     });
     const [url, init] = ctxFetchMock.mock.calls[0] as [string, RequestInit];
     expect(String(url)).toBe('http://ctx.test/users/ctx-u1');
@@ -122,7 +116,9 @@ describe('updateCtxStableCurrency', () => {
     ctxFetchMock.mockResolvedValue(
       new Response(JSON.stringify({ error: 'bad request' }), { status: 400 }),
     );
-    await expect(updateCtxStableCurrency('ctx-u1', 'GBP')).rejects.toMatchObject({ status: 400 });
+    await expect(updateCtxStableCurrency('ctx-u1', 'XLM.GBPLOOP')).rejects.toMatchObject({
+      status: 400,
+    });
   });
 });
 
@@ -142,72 +138,58 @@ describe('updateCtxCountry', () => {
   });
 });
 
-describe('syncCtxAdminRole', () => {
-  it('mirrors the CTX user country onto the Loop user', async () => {
-    ctxFetchMock.mockResolvedValue(ctxUser([], undefined, 'PT'));
-    await syncCtxAdminRole({ id: 'loop-u1', ctxUserId: 'ctx-u1' });
-    expect(setUserCountryMock).toHaveBeenCalledWith('loop-u1', 'PT');
+describe('syncCtxUser', () => {
+  it('writes the whole CTX mirror onto the Loop user', async () => {
+    ctxFetchMock.mockResolvedValue(ctxUser([{ name: 'operator-admin' }], 'XLM.EURC', 'PT'));
+    await syncCtxUser({ id: 'loop-u1', ctxUserId: 'ctx-u1' });
+    expect(applyCtxUserMirrorMock).toHaveBeenCalledWith('loop-u1', {
+      isAdmin: true,
+      stableCurrency: 'XLM.EURC',
+      cashbackDestination: 'account',
+      country: 'PT',
+    });
   });
 
-  it('leaves the country alone when CTX carries none', async () => {
+  it('writes an empty stable, no country and a cleared role when CTX carries none', async () => {
     ctxFetchMock.mockResolvedValue(ctxUser([]));
-    await syncCtxAdminRole({ id: 'loop-u1', ctxUserId: 'ctx-u1' });
-    expect(setUserCountryMock).not.toHaveBeenCalled();
-  });
-
-  it('mirrors the role onto the Loop user', async () => {
-    ctxFetchMock.mockResolvedValue(ctxUser([{ name: 'operator-admin' }]));
-    await syncCtxAdminRole({ id: 'loop-u1', ctxUserId: 'ctx-u1' });
-    expect(setUserIsAdminMock).toHaveBeenCalledWith('loop-u1', true);
-  });
-
-  it('clears the flag when CTX no longer lists the role', async () => {
-    ctxFetchMock.mockResolvedValue(ctxUser([]));
-    await syncCtxAdminRole({ id: 'loop-u1', ctxUserId: 'ctx-u1' });
-    expect(setUserIsAdminMock).toHaveBeenCalledWith('loop-u1', false);
-  });
-
-  it('mirrors the CTX stableCurrency onto the Loop home currency', async () => {
-    ctxFetchMock.mockResolvedValue(ctxUser([], 'XLM.EURC'));
-    await syncCtxAdminRole({ id: 'loop-u1', ctxUserId: 'ctx-u1' });
-    expect(setUserHomeCurrencyMock).toHaveBeenCalledWith('loop-u1', 'EUR');
-  });
-
-  it('leaves the home currency alone when CTX carries no mappable stable', async () => {
-    ctxFetchMock.mockResolvedValueOnce(ctxUser([]));
-    await syncCtxAdminRole({ id: 'loop-u1', ctxUserId: 'ctx-u1' });
-    ctxFetchMock.mockResolvedValueOnce(ctxUser([], 'XLM.XYZ'));
-    await syncCtxAdminRole({ id: 'loop-u1', ctxUserId: 'ctx-u1' });
-    expect(setUserHomeCurrencyMock).not.toHaveBeenCalled();
+    await syncCtxUser({ id: 'loop-u1', ctxUserId: 'ctx-u1' });
+    expect(applyCtxUserMirrorMock).toHaveBeenCalledWith('loop-u1', {
+      isAdmin: false,
+      stableCurrency: '',
+      cashbackDestination: 'account',
+      country: null,
+    });
   });
 
   it('skips unmapped users without touching CTX', async () => {
-    await syncCtxAdminRole({ id: 'loop-u1', ctxUserId: null });
+    await syncCtxUser({ id: 'loop-u1', ctxUserId: null });
     expect(ctxFetchMock).not.toHaveBeenCalled();
-    expect(setUserIsAdminMock).not.toHaveBeenCalled();
+    expect(applyCtxUserMirrorMock).not.toHaveBeenCalled();
   });
 
   it('keeps the last mirrored values when CTX is unreachable', async () => {
     ctxFetchMock.mockRejectedValue(new Error('ctx down'));
-    await expect(syncCtxAdminRole({ id: 'loop-u1', ctxUserId: 'ctx-u1' })).resolves.toBeUndefined();
-    expect(setUserIsAdminMock).not.toHaveBeenCalled();
-    expect(setUserHomeCurrencyMock).not.toHaveBeenCalled();
+    await expect(syncCtxUser({ id: 'loop-u1', ctxUserId: 'ctx-u1' })).resolves.toBeUndefined();
+    expect(applyCtxUserMirrorMock).not.toHaveBeenCalled();
   });
 });
 
-describe('enqueueCtxAdminRoleSync', () => {
+describe('enqueueCtxUserSync', () => {
   it('resolves the mapping and syncs in the background', async () => {
     getUserCtxUserIdMock.mockResolvedValue('ctx-u1');
     ctxFetchMock.mockResolvedValue(ctxUser([{ name: 'operator-admin' }]));
-    enqueueCtxAdminRoleSync('loop-u1');
+    enqueueCtxUserSync('loop-u1');
     await flush();
     await flush();
-    expect(setUserIsAdminMock).toHaveBeenCalledWith('loop-u1', true);
+    expect(applyCtxUserMirrorMock).toHaveBeenCalledWith(
+      'loop-u1',
+      expect.objectContaining({ isAdmin: true }),
+    );
   });
 
   it('never throws into the caller', async () => {
     getUserCtxUserIdMock.mockRejectedValue(new Error('db down'));
-    expect(() => enqueueCtxAdminRoleSync('loop-u1')).not.toThrow();
+    expect(() => enqueueCtxUserSync('loop-u1')).not.toThrow();
     await flush();
     expect(ctxFetchMock).not.toHaveBeenCalled();
   });

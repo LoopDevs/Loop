@@ -18,8 +18,8 @@ export const STEP_UP_SCOPES = [
   'staff-role-revoke',
   // Hardening B1: cashback-config upsert sets split for FUTURE orders — gate like other money writes.
   'cashback-config',
-  // ADR 015: flipping home currency re-denominates quotes and charges.
-  'home-currency',
+  // ADR 015: flipping the stable re-denominates cashback.
+  'stable-currency',
   // A5-1: re-driving a stuck order re-runs procurement against CTX, which can create a real gift card.
   'order-redrive',
 ] as const;

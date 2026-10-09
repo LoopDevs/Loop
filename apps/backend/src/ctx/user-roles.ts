@@ -1,21 +1,10 @@
-// CTX user mirror — ADR 037: Loop admin is CTX's operator-admin role; home currency is CTX's stableCurrency
+// CTX user mirror — ADR 037: Loop admin is CTX's operator-admin role; every CTX user response overwrites the local copy
 import { z } from 'zod';
-import {
-  CASHBACK_DESTINATIONS,
-  fiatForHeldStable,
-  heldStableForCurrency,
-  type CashbackDestination,
-  type HomeCurrency,
-} from '@loop/shared';
+import { CASHBACK_DESTINATIONS, type CashbackDestination } from '@loop/shared';
 import { logger } from '../logger.js';
 import { upstreamUrl } from '../upstream.js';
 import { scrubUpstreamBody } from '../upstream-body-scrub.js';
-import {
-  getUserCtxUserId,
-  setUserCountry,
-  setUserHomeCurrency,
-  setUserIsAdmin,
-} from '../db/users.js';
+import { applyCtxUserMirror, getUserCtxUserId, type CtxUserMirror } from '../db/users.js';
 import { ctxFetch } from './api-fetch.js';
 
 const log = logger.child({ area: 'ctx-user-roles' });
@@ -34,12 +23,7 @@ const CtxUserSchema = z
   })
   .passthrough();
 
-export interface CtxUserMirror {
-  isAdmin: boolean;
-  homeCurrency: HomeCurrency | null;
-  cashbackDestination: CashbackDestination;
-  country: string | null;
-}
+export type { CtxUserMirror };
 
 export class CtxUserRolesError extends Error {
   constructor(
@@ -66,10 +50,9 @@ async function parseCtxUser(res: Response, action: string): Promise<CtxUserMirro
       null,
     );
   }
-  const stable = parsed.data.stableCurrency?.toUpperCase();
   return {
     isAdmin: parsed.data.roles.some((role) => role.name === CTX_OPERATOR_ADMIN_ROLE),
-    homeCurrency: stable === undefined ? null : fiatForHeldStable(stable),
+    stableCurrency: parsed.data.stableCurrency?.toUpperCase() ?? '',
     cashbackDestination: parsed.data.cashbackDestination ?? 'account',
     country: parsed.data.country ? parsed.data.country.toUpperCase() : null,
   };
@@ -84,12 +67,12 @@ export async function fetchCtxUserMirror(ctxUserId: string): Promise<CtxUserMirr
 
 export async function updateCtxStableCurrency(
   ctxUserId: string,
-  homeCurrency: HomeCurrency,
+  stableCurrency: string,
 ): Promise<CtxUserMirror> {
   const res = await ctxFetch(upstreamUrl(`/users/${encodeURIComponent(ctxUserId)}`), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ stableCurrency: heldStableForCurrency(homeCurrency) }),
+    body: JSON.stringify({ stableCurrency }),
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
   return parseCtxUser(res, 'update');
@@ -119,47 +102,20 @@ export async function updateCtxCashbackDestination(
 }
 
 // Fails soft: the mirror keeps its last values while CTX is unreachable.
-export async function syncCtxAdminRole(user: {
-  id: string;
-  ctxUserId: string | null;
-}): Promise<void> {
+export async function syncCtxUser(user: { id: string; ctxUserId: string | null }): Promise<void> {
   if (user.ctxUserId === null) return;
   try {
     const mirror = await fetchCtxUserMirror(user.ctxUserId);
-    const changed = await setUserIsAdmin(user.id, mirror.isAdmin);
-    if (changed) {
-      log.info(
-        { userId: user.id, isAdmin: mirror.isAdmin },
-        'Loop admin flag updated from the CTX operator-admin role',
-      );
-    }
-    if (mirror.homeCurrency !== null) {
-      const currencyChanged = await setUserHomeCurrency(user.id, mirror.homeCurrency);
-      if (currencyChanged) {
-        log.info(
-          { userId: user.id, homeCurrency: mirror.homeCurrency },
-          'Loop home currency updated from the CTX stableCurrency',
-        );
-      }
-    }
-    if (mirror.country !== null) {
-      const countryChanged = await setUserCountry(user.id, mirror.country);
-      if (countryChanged) {
-        log.info(
-          { userId: user.id, country: mirror.country },
-          'Loop home country updated from the CTX user country',
-        );
-      }
-    }
+    await applyCtxUserMirror(user.id, mirror);
   } catch (err) {
     log.warn({ err, userId: user.id }, 'CTX user sync failed — keeping the last mirrored values');
   }
 }
 
-export function enqueueCtxAdminRoleSync(userId: string): void {
+export function enqueueCtxUserSync(userId: string): void {
   void (async () => {
     const ctxUserId = await getUserCtxUserId(userId);
-    await syncCtxAdminRole({ id: userId, ctxUserId });
+    await syncCtxUser({ id: userId, ctxUserId });
   })().catch((err: unknown) => {
     log.warn({ err, userId }, 'CTX user sync failed — keeping the last mirrored values');
   });

@@ -6,9 +6,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import '~/i18n/i18next';
 import { useAuthStore } from '~/stores/auth.store';
 
-const meState = vi.hoisted(() => ({ country: null as string | null, homeCurrency: 'USD' }));
+const meState = vi.hoisted(() => ({ country: null as string | null, stableCurrency: 'XLM.USDC' }));
 vi.mock('~/services/user', () => ({
-  getMe: async () => ({ country: meState.country, homeCurrency: meState.homeCurrency }),
+  getMe: async () => ({ country: meState.country, stableCurrency: meState.stableCurrency }),
 }));
 
 import { StableCurrencyPrompt } from '../StableCurrencyPrompt';
@@ -30,7 +30,7 @@ beforeEach(() => {
   }
   useAuthStore.setState({ stableCurrencyPromptPending: false });
   meState.country = null;
-  meState.homeCurrency = 'USD';
+  meState.stableCurrency = 'XLM.USDC';
 });
 afterEach(cleanup);
 
@@ -70,7 +70,7 @@ describe('<StableCurrencyPrompt />', () => {
 
   it('shows the country and the stable CTX selected for it', async () => {
     meState.country = 'GB';
-    meState.homeCurrency = 'GBP';
+    meState.stableCurrency = 'XLM.GBPLOOP';
     useAuthStore.setState({ stableCurrencyPromptPending: true });
     renderPrompt();
     await waitFor(() => expect(dialog()?.hasAttribute('open')).toBe(true));
@@ -86,6 +86,14 @@ describe('<StableCurrencyPrompt />', () => {
     renderPrompt();
     await waitFor(() => expect(dialog()?.hasAttribute('open')).toBe(true));
     expect(screen.getByText(/Your cashback will be held in USDC \(USD\)/)).toBeDefined();
+  });
+
+  it('tells the user to choose a currency in Settings when CTX holds none', async () => {
+    meState.stableCurrency = '';
+    useAuthStore.setState({ stableCurrencyPromptPending: true });
+    renderPrompt();
+    await waitFor(() => expect(dialog()?.hasAttribute('open')).toBe(true));
+    expect(screen.getByText(/No cashback currency is set for your account yet/)).toBeDefined();
   });
 
   it('Confirm closes the prompt and clears the pending flag', async () => {

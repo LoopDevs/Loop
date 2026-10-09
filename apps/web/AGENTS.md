@@ -12,7 +12,7 @@ app/
 │   │   privacy.tsx, terms.tsx, not-found.tsx
 │   ├── orders.tsx, orders.$id.tsx          ← order history + detail
 │   ├── cashback.tsx, cashback.$slug.tsx    ← user cashback dashboard
-│   ├── settings.*.tsx                      ← profile / wallet / cashback / home-currency
+│   ├── settings.*.tsx                      ← profile / wallet / cashback / stable-currency
 │   └── admin.*.tsx                         ← admin panel: treasury / cashback /
 │                                             orders / users / merchants / payouts /
 │                                             assets / audit / staff (ADR 037 role

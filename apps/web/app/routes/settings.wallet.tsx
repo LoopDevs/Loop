@@ -6,6 +6,7 @@ import {
   ApiException,
   HOME_CURRENCIES,
   displayCurrencyCode,
+  fiatForHeldStable,
   heldStableForCurrency,
   type HomeCurrency,
 } from '@loop/shared';
@@ -17,7 +18,7 @@ import {
   getMe,
   linkWallet,
   setCashbackDestination,
-  setHomeCurrency,
+  setStableCurrency,
   unlinkWallet,
   updateWallet,
   type CashbackDestination,
@@ -141,7 +142,7 @@ function SettingsWalletBody(): React.JSX.Element {
     },
   });
   const currencyMutation = useMutation({
-    mutationFn: (code: HomeCurrency) => setHomeCurrency(code),
+    mutationFn: (stableCurrency: string) => setStableCurrency(stableCurrency),
     onSuccess: (view: UserMeView) => {
       queryClient.setQueryData(['me'], view);
       setCurrencyError(null);
@@ -201,7 +202,8 @@ function SettingsWalletBody(): React.JSX.Element {
   const user = meQuery.data;
   const trimmed = draftAddress.trim();
   const draftValid = trimmed.length > 0;
-  const stableCode = displayCurrencyCode(heldStableForCurrency(user.homeCurrency));
+  const stableCode = displayCurrencyCode(user.stableCurrency);
+  const fiatCode = fiatForHeldStable(user.stableCurrency);
   const busy = linkMutation.isPending || unlinkMutation.isPending;
   const savingsSelected = user.cashbackDestination === 'savings';
   const payoutSelected = !savingsSelected && (activeLink === null || activeLink.autoPayout);
@@ -226,9 +228,10 @@ function SettingsWalletBody(): React.JSX.Element {
     }
   };
   const handleCurrencyChange = (code: HomeCurrency): void => {
-    if (currencyMutation.isPending || code === user.homeCurrency) return;
+    const stableCurrency = heldStableForCurrency(code);
+    if (currencyMutation.isPending || stableCurrency === user.stableCurrency) return;
     setCurrencyError(null);
-    currencyMutation.mutate(code);
+    currencyMutation.mutate(stableCurrency);
   };
   const handleSelectPayout = (): void => {
     if (payoutSelected || destinationBusy) return;
@@ -264,19 +267,25 @@ function SettingsWalletBody(): React.JSX.Element {
         >
           {t('wallet.homeCurrency.heading')}
         </h2>
-        <p className="text-sm text-gray-600 dark:text-gray-400">
-          {t('wallet.homeCurrency.introPrefix')} <strong>{user.homeCurrency}</strong>
-          {t('wallet.homeCurrency.introMiddle')} <strong>{stableCode}</strong>
-          {t('wallet.homeCurrency.introSuffix')}
-        </p>
+        {user.stableCurrency === '' ? (
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            {t('wallet.homeCurrency.unset')}
+          </p>
+        ) : (
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            {t('wallet.homeCurrency.introPrefix')} <strong>{fiatCode ?? stableCode}</strong>
+            {t('wallet.homeCurrency.introMiddle')} <strong>{stableCode}</strong>
+            {t('wallet.homeCurrency.introSuffix')}
+          </p>
+        )}
         <div
           role="radiogroup"
           aria-label={t('wallet.homeCurrency.radiogroupLabel')}
           className="flex flex-wrap gap-2"
         >
           {HOME_CURRENCIES.map((code, i) => {
-            const active = code === user.homeCurrency;
-            const selectedIndex = HOME_CURRENCIES.indexOf(user.homeCurrency);
+            const active = heldStableForCurrency(code) === user.stableCurrency;
+            const selectedIndex = fiatCode === null ? -1 : HOME_CURRENCIES.indexOf(fiatCode);
             const tabStop = selectedIndex === -1 ? 0 : selectedIndex;
             return (
               <button

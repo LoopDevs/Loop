@@ -8,7 +8,7 @@ import {
   getMeHandler,
   setCashbackDestinationHandler,
   setCountryHandler,
-  setHomeCurrencyHandler,
+  setStableCurrencyHandler,
 } from '../users/handler.js';
 import { getUserOrdersSummaryHandler } from '../users/orders-summary.js';
 import {
@@ -37,9 +37,9 @@ export function mountUserRoutes(app: Hono): void {
 
   app.get('/api/users/me', rateLimit('GET /api/users/me', 60, 60_000), getMeHandler);
   app.post(
-    '/api/users/me/home-currency',
-    rateLimit('POST /api/users/me/home-currency', 10, 60_000),
-    setHomeCurrencyHandler,
+    '/api/users/me/stable-currency',
+    rateLimit('POST /api/users/me/stable-currency', 10, 60_000),
+    setStableCurrencyHandler,
   );
 
   // low limit: destructive, but leaves room for retries after

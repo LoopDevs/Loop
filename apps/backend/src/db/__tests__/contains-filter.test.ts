@@ -15,7 +15,7 @@ async function seed(email: string): Promise<void> {
     ctxUserId: null,
     email,
     tokenVersion: 0,
-    homeCurrency: 'USD',
+    stableCurrency: 'XLM.USDC',
     isAdmin: false,
     createdAt: now,
     updatedAt: now,

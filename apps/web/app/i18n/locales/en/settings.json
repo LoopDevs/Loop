@@ -68,6 +68,7 @@
       "introPrefix": "Determines which stable your cashback is held in. Your current currency is",
       "introMiddle": ", so payouts arrive as",
       "introSuffix": ".",
+      "unset": "No cashback currency is set yet. Pick one below to choose which stable your cashback is held in.",
       "radiogroupLabel": "Home currency",
       "locked": "You've already placed an order, so your home currency is locked. Contact support to change it.",
       "fallbackError": "Couldn't change currency."

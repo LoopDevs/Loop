@@ -32,7 +32,7 @@ export type AdminStepUpScope =
   | 'emission'
   | 'payout-retry'
   | 'payout-compensation'
-  | 'home-currency'
+  | 'stable-currency'
   | 'operator-float'
   | 'staff-role-grant'
   | 'staff-role-revoke'

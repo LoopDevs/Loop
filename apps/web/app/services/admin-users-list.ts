@@ -7,7 +7,7 @@
  *   email-fragment search. ILIKE-based on email and id; cursor
  *   via `before=<iso>`.
  * - `GET /api/admin/users/:userId` — single user drill-down
- *   header. Surfaces `homeCurrency`, `stellarAddress`,
+ *   header. Surfaces `stableCurrency`, `stellarAddress`,
  *   `ctxUserId`. The drill page composes this with the per-user
  *   slices already extracted (credits in #1119, monthly in #1122,
  *   payment-method-share in #1118, etc.).
@@ -30,7 +30,7 @@ export interface AdminUserRow {
   id: string;
   email: string;
   isAdmin: boolean;
-  homeCurrency: string;
+  stableCurrency: string;
   createdAt: string;
 }
 
@@ -39,7 +39,7 @@ export interface AdminUserDetail {
   id: string;
   email: string;
   isAdmin: boolean;
-  homeCurrency: string;
+  stableCurrency: string;
   stellarAddress: string | null;
   ctxUserId: string | null;
   createdAt: string;

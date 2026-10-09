@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   countryByCode,
   displayCurrencyCode,
-  heldStableForCurrency,
+  fiatForHeldStable,
   type UserMeView,
 } from '@loop/shared';
 import { Button } from '~/components/ui/Button';
@@ -36,8 +36,9 @@ export function StableCurrencyPrompt(): React.JSX.Element {
   };
 
   const country = me.data?.country ? countryByCode(me.data.country) : undefined;
-  const homeCurrency = me.data?.homeCurrency ?? 'USD';
-  const stable = displayCurrencyCode(heldStableForCurrency(homeCurrency));
+  const stableCurrency = me.data?.stableCurrency ?? '';
+  const stable = displayCurrencyCode(stableCurrency);
+  const currency = fiatForHeldStable(stableCurrency) ?? stable;
 
   return (
     <Dialog
@@ -57,16 +58,22 @@ export function StableCurrencyPrompt(): React.JSX.Element {
         >
           {open ? (
             <>
-              <p>
-                {country !== undefined
-                  ? t('stableCurrencyPrompt.bodyWithCountry', {
-                      country: `${country.flag} ${country.label}`,
-                      stable,
-                      currency: homeCurrency,
-                    })
-                  : t('stableCurrencyPrompt.body', { stable, currency: homeCurrency })}
-              </p>
-              <p>{t('stableCurrencyPrompt.actions')}</p>
+              {stableCurrency === '' ? (
+                <p>{t('stableCurrencyPrompt.bodyUnset')}</p>
+              ) : (
+                <>
+                  <p>
+                    {country !== undefined
+                      ? t('stableCurrencyPrompt.bodyWithCountry', {
+                          country: `${country.flag} ${country.label}`,
+                          stable,
+                          currency,
+                        })
+                      : t('stableCurrencyPrompt.body', { stable, currency })}
+                  </p>
+                  <p>{t('stableCurrencyPrompt.actions')}</p>
+                </>
+              )}
             </>
           ) : null}
         </div>

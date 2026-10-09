@@ -5,7 +5,7 @@ vi.mock('../api-client', () => ({
 }));
 
 import {
-  setHomeCurrency,
+  setStableCurrency,
   getMe,
   getMyAccount,
   linkWallet,
@@ -38,13 +38,13 @@ beforeEach(() => {
  * to drive the wrapper's return path.
  */
 
-describe('setHomeCurrency', () => {
-  it('POSTs /api/users/me/home-currency with { currency }', async () => {
+describe('setStableCurrency', () => {
+  it('POSTs /api/users/me/stable-currency with { stableCurrency }', async () => {
     mockAuth.mockResolvedValue({});
-    await setHomeCurrency('GBP');
-    expect(mockAuth).toHaveBeenCalledWith('/api/users/me/home-currency', {
+    await setStableCurrency('XLM.GBPLOOP');
+    expect(mockAuth).toHaveBeenCalledWith('/api/users/me/stable-currency', {
       method: 'POST',
-      body: { currency: 'GBP' },
+      body: { stableCurrency: 'XLM.GBPLOOP' },
     });
   });
 });

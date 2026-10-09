@@ -56,7 +56,11 @@ export function OrdersSummaryHeader(): React.JSX.Element | null {
       />
       <Stat
         label={t('summary.spent')}
-        value={formatMinor(summary.totalSpentMinor, summary.currency, locale)}
+        value={
+          summary.currency === null
+            ? '—'
+            : formatMinor(summary.totalSpentMinor, summary.currency, locale)
+        }
       />
     </section>
   );

@@ -15,7 +15,7 @@ export interface AdminUserListRow {
   id: string;
   email: string;
   isAdmin: boolean;
-  homeCurrency: string;
+  stableCurrency: string;
   createdAt: string;
 }
 
@@ -67,7 +67,7 @@ export async function adminListUsersHandler(c: Context): Promise<Response> {
         id: r.id,
         email: r.email,
         isAdmin: r.isAdmin,
-        homeCurrency: r.homeCurrency,
+        stableCurrency: r.stableCurrency,
         createdAt: r.createdAt.toISOString(),
       })),
     });

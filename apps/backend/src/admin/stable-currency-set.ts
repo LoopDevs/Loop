@@ -1,10 +1,9 @@
-// Admin home-currency override — ADR 015, ADR 017
+// Admin stable-currency override — ADR 015, ADR 017; CTX owns the stable, so it is written there first
 import type { Context } from 'hono';
 import { z } from 'zod';
-import { HOME_CURRENCIES } from '@loop/shared';
 import { UUID_RE } from '../uuid.js';
-import { db } from '../db/client.js';
-import { getUserById, type User } from '../db/users.js';
+import { applyCtxUserMirror, getUserById, type User } from '../db/users.js';
+import { CtxUserRolesError, updateCtxStableCurrency } from '../ctx/user-roles.js';
 import { notifyAdminAudit } from '../discord.js';
 import { logger } from '../logger.js';
 import { buildAuditEnvelope, type AdminAuditEnvelope } from './audit-envelope.js';
@@ -15,28 +14,39 @@ import {
   withIdempotencyGuard,
 } from './idempotency.js';
 
-const log = logger.child({ handler: 'admin-home-currency-set' });
+const log = logger.child({ handler: 'admin-stable-currency-set' });
 
 const BodySchema = z.object({
-  homeCurrency: z.enum(HOME_CURRENCIES),
+  stableCurrency: z
+    .string()
+    .trim()
+    .min(1)
+    .transform((value) => value.toUpperCase()),
   reason: z.string().min(2).max(500),
 });
 
-export interface HomeCurrencySetResult {
+export interface StableCurrencySetResult {
   userId: string;
-  priorHomeCurrency: string;
-  newHomeCurrency: string;
+  priorStableCurrency: string;
+  newStableCurrency: string;
   updatedAt: string;
 }
 
-class HomeCurrencyUnchangedError extends Error {
+class StableCurrencyUnchangedError extends Error {
   constructor() {
-    super('User is already on that home currency');
-    this.name = 'HomeCurrencyUnchangedError';
+    super('User is already on that stable currency');
+    this.name = 'StableCurrencyUnchangedError';
   }
 }
 
-export async function adminHomeCurrencySetHandler(c: Context): Promise<Response> {
+class CtxUserUnprovisionedError extends Error {
+  constructor() {
+    super('User has no CTX account yet');
+    this.name = 'CtxUserUnprovisionedError';
+  }
+}
+
+export async function adminStableCurrencySetHandler(c: Context): Promise<Response> {
   const userId = c.req.param('userId');
   if (userId === undefined || !UUID_RE.test(userId)) {
     return c.json({ code: 'VALIDATION_ERROR', message: 'userId must be a uuid' }, 400);
@@ -84,27 +94,25 @@ export async function adminHomeCurrencySetHandler(c: Context): Promise<Response>
         adminUserId: actor.id,
         key: idempotencyKey,
         method: 'POST',
-        path: `/api/admin/users/${userId}/home-currency`,
+        path: `/api/admin/users/${userId}/stable-currency`,
       },
       async () => {
-        const updatedAt = new Date();
-        // Guarded on current value to prevent race conditions where two admins
-        // both report success; loser sees no row and gets 409.
-        const updated = await db
-          .collection('users')
-          .updateOne(
-            { id: userId, homeCurrency: { $ne: parsed.data.homeCurrency } },
-            { $set: { homeCurrency: parsed.data.homeCurrency, updatedAt } },
-          );
-        if (updated === null) throw new HomeCurrencyUnchangedError();
+        if (target.stableCurrency === parsed.data.stableCurrency) {
+          throw new StableCurrencyUnchangedError();
+        }
+        if (target.ctxUserId === null) throw new CtxUserUnprovisionedError();
+        const mirror = await updateCtxStableCurrency(target.ctxUserId, parsed.data.stableCurrency);
+        const updated = await applyCtxUserMirror(userId, mirror);
+        if (updated === null) throw new StableCurrencyUnchangedError();
+        const updatedAt = updated.updatedAt;
 
-        const result: HomeCurrencySetResult = {
+        const result: StableCurrencySetResult = {
           userId,
-          priorHomeCurrency: target.homeCurrency,
-          newHomeCurrency: parsed.data.homeCurrency,
+          priorStableCurrency: target.stableCurrency,
+          newStableCurrency: updated.stableCurrency,
           updatedAt: updatedAt.toISOString(),
         };
-        const envelope: AdminAuditEnvelope<HomeCurrencySetResult> = buildAuditEnvelope({
+        const envelope: AdminAuditEnvelope<StableCurrencySetResult> = buildAuditEnvelope({
           result,
           actor,
           idempotencyKey,
@@ -115,24 +123,30 @@ export async function adminHomeCurrencySetHandler(c: Context): Promise<Response>
       },
     );
   } catch (err) {
-    if (err instanceof HomeCurrencyUnchangedError) {
+    if (err instanceof StableCurrencyUnchangedError) {
       return c.json(
         {
-          code: 'HOME_CURRENCY_UNCHANGED',
-          message: 'User is already on that home currency',
+          code: 'STABLE_CURRENCY_UNCHANGED',
+          message: 'User is already on that stable currency',
         },
         409,
       );
     }
-    log.error({ err, userId, adminUserId: actor.id }, 'Admin home-currency change failed');
-    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to change home currency' }, 500);
+    if (err instanceof CtxUserUnprovisionedError) {
+      return c.json({ code: 'CTX_USER_UNPROVISIONED', message: err.message }, 409);
+    }
+    if (err instanceof CtxUserRolesError && err.status === 400) {
+      return c.json({ code: 'STABLE_CURRENCY_REJECTED', message: err.message }, 409);
+    }
+    log.error({ err, userId, adminUserId: actor.id }, 'Admin stable-currency change failed');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to change stable currency' }, 500);
   }
 
   notifyAdminAudit({
     actorUserId: actor.id,
-    endpoint: `POST /api/admin/users/${userId}/home-currency`,
+    endpoint: `POST /api/admin/users/${userId}/stable-currency`,
     targetUserId: userId,
-    reason: `${target.homeCurrency} → ${parsed.data.homeCurrency}: ${parsed.data.reason}`,
+    reason: `${target.stableCurrency} → ${parsed.data.stableCurrency}: ${parsed.data.reason}`,
     idempotencyKey,
     replayed: guardResult.replayed,
   });

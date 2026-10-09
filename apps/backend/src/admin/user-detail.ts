@@ -15,7 +15,7 @@ export interface AdminUserView {
   id: string;
   email: string;
   isAdmin: boolean;
-  homeCurrency: string;
+  stableCurrency: string;
   ctxUserId: string | null;
   createdAt: string;
   updatedAt: string;
@@ -26,7 +26,7 @@ function toView(row: UserDoc): AdminUserView {
     id: row.id,
     email: row.email,
     isAdmin: row.isAdmin,
-    homeCurrency: row.homeCurrency,
+    stableCurrency: row.stableCurrency,
     ctxUserId: row.ctxUserId,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),

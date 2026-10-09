@@ -8,7 +8,7 @@ function me(overrides: Partial<UserMeView>): UserMeView {
     email: 'u@loop.test',
     isAdmin: false,
     staffRole: null,
-    homeCurrency: 'USD',
+    stableCurrency: 'XLM.USDC',
     cashbackDestination: 'account',
     country: null,
     ...overrides,

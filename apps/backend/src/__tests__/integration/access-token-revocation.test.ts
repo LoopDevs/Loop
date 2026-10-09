@@ -87,7 +87,7 @@ async function seedUser(): Promise<{ userId: string; email: string }> {
     ctxUserId: null,
     email,
     tokenVersion: 0,
-    homeCurrency: 'USD',
+    stableCurrency: 'XLM.USDC',
     isAdmin: false,
     createdAt: now,
     updatedAt: now,

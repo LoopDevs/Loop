@@ -29,7 +29,6 @@ import {
 } from '~/services/user';
 import { formatAccountAmount, formatDateTime, useLocaleTag } from '~/i18n/format';
 import { useAccount } from '~/hooks/use-account';
-import { heldStableForCurrency } from '@loop/shared';
 
 // ADR 043 (B-6): `meta()` runs outside the React tree (no hooks) — uses the
 // i18next singleton's `.t()` directly rather than `useTranslation()`.
@@ -192,9 +191,11 @@ function CashbackBalanceCard({
   const showWithdrawNudge = !phase1Only && account !== undefined && activeLink === null;
   let headline = '—';
   if (!isLoading && me !== undefined) {
-    const stable = heldStableForCurrency(me.homeCurrency);
-    const amount = account?.wallet.find((b) => b.currency === stable)?.amount ?? '0';
-    headline = formatAccountAmount(amount, stable, locale);
+    const stable = me.stableCurrency;
+    if (stable !== '') {
+      const amount = account?.wallet.find((b) => b.currency === stable)?.amount ?? '0';
+      headline = formatAccountAmount(amount, stable, locale);
+    }
   }
   return (
     <div className="mb-6 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-4">

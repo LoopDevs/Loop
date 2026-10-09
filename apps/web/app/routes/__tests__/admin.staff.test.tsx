@@ -78,9 +78,8 @@ vi.mock('~/services/user', async (importActual) => {
       email: 'admin@loop.test',
       isAdmin: userMock.isAdmin,
       staffRole: userMock.staffRole,
-      homeCurrency: 'USD' as const,
+      stableCurrency: 'XLM.USDC',
       stellarAddress: null,
-      homeCurrencyBalanceMinor: '0',
     })),
   };
 });
@@ -287,7 +286,7 @@ describe('<AdminStaffRoute /> — grant', () => {
       id: 'u-new',
       email: 'jo@loop.test',
       isAdmin: false,
-      homeCurrency: 'GBP',
+      stableCurrency: 'XLM.GBPLOOP',
       stellarAddress: null,
       ctxUserId: null,
       createdAt: '2026-06-01T00:00:00.000Z',
@@ -349,7 +348,7 @@ describe('<AdminStaffRoute /> — grant', () => {
       id: 'u-new',
       email: 'jo@loop.test',
       isAdmin: false,
-      homeCurrency: 'GBP',
+      stableCurrency: 'XLM.GBPLOOP',
       stellarAddress: null,
       ctxUserId: null,
       createdAt: '2026-06-01T00:00:00.000Z',

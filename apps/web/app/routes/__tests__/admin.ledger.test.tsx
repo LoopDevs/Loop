@@ -36,9 +36,8 @@ vi.mock('~/services/user', async (importActual) => {
       email: 'staff@loop.test',
       isAdmin: userMock.staffRole === 'admin',
       staffRole: userMock.staffRole,
-      homeCurrency: 'USD' as const,
+      stableCurrency: 'XLM.USDC',
       stellarAddress: null,
-      homeCurrencyBalanceMinor: '0',
     })),
   };
 });

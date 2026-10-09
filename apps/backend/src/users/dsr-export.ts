@@ -9,7 +9,7 @@ export interface DsrExport {
   user: {
     id: string;
     email: string;
-    homeCurrency: string;
+    stableCurrency: string;
     createdAt: string;
     ctxUserId: string | null;
   };
@@ -58,7 +58,7 @@ export async function buildDsrExport(userId: string): Promise<DsrExport | null> 
     user: {
       id: userDoc.id,
       email: userDoc.email,
-      homeCurrency: userDoc.homeCurrency,
+      stableCurrency: userDoc.stableCurrency,
       createdAt: userDoc.createdAt.toISOString(),
       ctxUserId: userDoc.ctxUserId,
     },

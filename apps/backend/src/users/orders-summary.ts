@@ -1,5 +1,6 @@
 // User orders summary — ADR 010 / 015
 import type { Context } from 'hono';
+import { fiatForHeldStable } from '@loop/shared';
 import { db } from '../db/client.js';
 import type { User } from '../db/users.js';
 import { resolveLoopAuthenticatedUser } from '../auth/authenticated-user.js';
@@ -8,12 +9,21 @@ import { logger } from '../logger.js';
 const log = logger.child({ handler: 'user-orders-summary' });
 
 export interface UserOrdersSummary {
-  currency: string;
+  currency: string | null;
   totalOrders: number;
   fulfilledCount: number;
   pendingCount: number;
   failedCount: number;
   totalSpentMinor: string;
+}
+
+async function summaryCurrency(user: User): Promise<string | null> {
+  const fiat = fiatForHeldStable(user.stableCurrency);
+  if (fiat !== null) return fiat;
+  const latest = await db
+    .collection('orders')
+    .findOne({ userId: user.id }, { sort: [['createdAt', 'desc']] });
+  return latest?.chargeCurrency ?? null;
 }
 
 // A2-550 / A2-551: requires verified Loop-signed token
@@ -34,9 +44,11 @@ export async function getUserOrdersSummaryHandler(c: Context): Promise<Response>
   }
 
   try {
-    const rows = await db
-      .collection('orders')
-      .findMany({ userId: user.id, chargeCurrency: user.homeCurrency });
+    const currency = await summaryCurrency(user);
+    const rows =
+      currency === null
+        ? []
+        : await db.collection('orders').findMany({ userId: user.id, chargeCurrency: currency });
     let fulfilledCount = 0;
     let pendingCount = 0;
     let failedCount = 0;
@@ -53,7 +65,7 @@ export async function getUserOrdersSummaryHandler(c: Context): Promise<Response>
     }
 
     return c.json<UserOrdersSummary>({
-      currency: user.homeCurrency,
+      currency,
       totalOrders: rows.length,
       fulfilledCount,
       pendingCount,

@@ -19,7 +19,7 @@ vi.mock('~/native/biometrics', () => ({
 }));
 
 vi.mock('~/services/user', () => ({
-  setHomeCurrency: vi.fn(),
+  setStableCurrency: vi.fn(),
 }));
 
 vi.mock('~/services/auth', () => ({
