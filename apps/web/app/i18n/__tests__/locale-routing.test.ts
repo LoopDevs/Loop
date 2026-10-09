@@ -6,6 +6,7 @@ import {
   stripLocale,
   isLocalizablePath,
   parseCountryCookie,
+  merchantLocale,
   DEFAULT_LOCALE,
 } from '../locale.js';
 
@@ -84,5 +85,21 @@ describe('parseCountryCookie', () => {
     expect(parseCountryCookie('other=1')).toBeNull();
     expect(parseCountryCookie('')).toBeNull();
     expect(parseCountryCookie(null)).toBeNull();
+  });
+});
+
+describe('merchantLocale', () => {
+  it("re-points the locale at a routed merchant country that differs from the page's", () => {
+    expect(merchantLocale('GB', { country: 'pt', lang: 'en' })).toEqual({
+      country: 'gb',
+      lang: 'en',
+    });
+  });
+  it('returns null when the page already sits in the merchant country', () => {
+    expect(merchantLocale('gb', { country: 'gb', lang: 'en' })).toBeNull();
+  });
+  it('returns null for an unrouted or missing merchant country', () => {
+    expect(merchantLocale('IQ', { country: 'pt', lang: 'en' })).toBeNull();
+    expect(merchantLocale(undefined, { country: 'pt', lang: 'en' })).toBeNull();
   });
 });

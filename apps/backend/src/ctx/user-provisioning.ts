@@ -16,6 +16,7 @@ export interface ProvisionableUser {
   email: string;
   ctxUserId: string | null;
   homeCurrency: HomeCurrency;
+  country?: string | undefined;
 }
 
 const CtxCreateUserResponse = z.object({ id: z.string().min(1) });
@@ -77,7 +78,9 @@ export async function provisionCtxUser(user: ProvisionableUser): Promise<void> {
     email: user.email,
     type: 'customer',
     operatorUserId: user.id,
-    stableCurrency: heldStableForCurrency(user.homeCurrency),
+    ...(user.country
+      ? { country: user.country }
+      : { stableCurrency: heldStableForCurrency(user.homeCurrency) }),
   });
   const res = await fetch(url, {
     method: 'POST',

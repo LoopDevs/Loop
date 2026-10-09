@@ -18,8 +18,11 @@ vi.mock('~/services/merchants', async (importActual) => {
   };
 });
 
-function runLoader(params: Record<string, string>): Promise<null> {
-  return loader({ params } as unknown as Route.LoaderArgs);
+function runLoader(
+  params: Record<string, string>,
+  url = 'http://localhost/gift-card/amazon',
+): Promise<null> {
+  return loader({ params, request: new Request(url) } as unknown as Route.LoaderArgs);
 }
 
 async function caught(p: Promise<unknown>): Promise<unknown> {
@@ -65,5 +68,55 @@ describe('gift-card.$name-ssr loader', () => {
       new ApiException(500, { code: 'INTERNAL', message: 'boom' }),
     );
     await expect(runLoader({ name: 'amazon' })).resolves.toBeNull();
+  });
+
+  it("redirects to the merchant's country locale when the page locale differs", async () => {
+    mocks.fetchMerchantBySlug.mockResolvedValue({
+      merchant: { id: 'm-gb', name: 'Shop', country: 'GB', enabled: true },
+    });
+    const thrown = await caught(
+      runLoader(
+        { country: 'pt', lang: 'en', name: 'shop-gb' },
+        'http://localhost/pt/en/gift-card/shop-gb?ref=1',
+      ),
+    );
+    expect(thrown).toBeInstanceOf(Response);
+    expect((thrown as Response).status).toBe(302);
+    expect((thrown as Response).headers.get('Location')).toBe('/gb/en/gift-card/shop-gb?ref=1');
+  });
+
+  it("redirects an unprefixed URL into the merchant's country locale", async () => {
+    mocks.fetchMerchantBySlug.mockResolvedValue({
+      merchant: { id: 'm-gb', name: 'Shop', country: 'GB', enabled: true },
+    });
+    const thrown = await caught(
+      runLoader({ name: 'shop-gb' }, 'http://localhost/gift-card/shop-gb'),
+    );
+    expect(thrown).toBeInstanceOf(Response);
+    expect((thrown as Response).headers.get('Location')).toBe('/gb/en/gift-card/shop-gb');
+  });
+
+  it('resolves without redirecting when the page already sits in the merchant country', async () => {
+    mocks.fetchMerchantBySlug.mockResolvedValue({
+      merchant: { id: 'm-gb', name: 'Shop', country: 'GB', enabled: true },
+    });
+    await expect(
+      runLoader(
+        { country: 'gb', lang: 'en', name: 'shop-gb' },
+        'http://localhost/gb/en/gift-card/shop-gb',
+      ),
+    ).resolves.toBeNull();
+  });
+
+  it('resolves without redirecting for a merchant in an unrouted country', async () => {
+    mocks.fetchMerchantBySlug.mockResolvedValue({
+      merchant: { id: 'm-iq', name: 'Shop', country: 'IQ', enabled: true },
+    });
+    await expect(
+      runLoader(
+        { country: 'pt', lang: 'en', name: 'shop-iq' },
+        'http://localhost/pt/en/gift-card/shop-iq',
+      ),
+    ).resolves.toBeNull();
   });
 });

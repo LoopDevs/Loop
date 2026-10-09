@@ -3,13 +3,14 @@ import { randomUUID } from 'node:crypto';
 import { db } from '../db/client.js';
 import { isUniqueViolation } from '../db/errors.js';
 import type { SocialProvider, UserDoc, UserIdentityDoc } from '../db/types.js';
-import { findOrCreateUserByEmail, type User } from '../db/users.js';
+import { resolveOrCreateUserByEmail, type User } from '../db/users.js';
 import { normalizeEmail } from './normalize-email.js';
 
 export interface ResolveOrCreateArgs {
   provider: SocialProvider;
   providerSub: string;
   email: string;
+  country?: string | undefined;
 }
 
 /**
@@ -63,9 +64,9 @@ export async function resolveOrCreateUserForIdentity(
   }
 
   // Step 3 — brand-new user.
-  const user = await findOrCreateUserByEmail(email);
+  const { user, created } = await resolveOrCreateUserByEmail(email, args.country);
   await linkIdentity(user.id, args, email);
-  return { user, created: true };
+  return { user, created };
 }
 
 /**

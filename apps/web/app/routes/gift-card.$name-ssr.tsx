@@ -1,8 +1,9 @@
-import { isRouteErrorResponse, useRouteError } from 'react-router';
+import { isRouteErrorResponse, redirect, useRouteError } from 'react-router';
 import { ApiException } from '@loop/shared';
 import type { Route } from './+types/gift-card.$name-ssr';
 import i18n from '~/i18n/i18next';
 import { fetchMerchantBySlug } from '~/services/merchants';
+import { localizedHref, merchantLocale, normalizeLocale } from '~/i18n/locale';
 import { NotFoundContent } from './not-found';
 import GiftCardRoute, {
   meta as baseMeta,
@@ -29,21 +30,30 @@ export default GiftCardRoute;
  * SPA mode rejects `loader` exports, so the mobile build wires the
  * component-only `gift-card.$name.tsx` via `BUILD_TARGET` in `routes.ts`.
  */
-export async function loader({ params }: Route.LoaderArgs): Promise<null> {
+export async function loader({ params, request }: Route.LoaderArgs): Promise<null> {
   // Match the component's `useMerchantBySlug`: trim, and treat a blank slug as
   // not-found (it disables the fetch there and renders the not-found page).
   const name = (params.name ?? '').trim();
   if (name.length === 0) {
     throw new Response(null, { status: 404, statusText: 'Not Found' });
   }
+  let merchantCountry: string | undefined;
   try {
-    await fetchMerchantBySlug(name);
+    ({
+      merchant: { country: merchantCountry },
+    } = await fetchMerchantBySlug(name));
   } catch (err) {
     if (err instanceof ApiException && err.status === 404) {
       throw new Response(null, { status: 404, statusText: 'Not Found' });
     }
     // Fail open on any other error — never 404 a real merchant on a transient
     // upstream failure; the client query surfaces a persistent error instead.
+    return null;
+  }
+  const target = merchantLocale(merchantCountry, normalizeLocale(params.country, params.lang));
+  if (target !== null) {
+    const url = new URL(request.url);
+    throw redirect(localizedHref(`${url.pathname}${url.search}`, target));
   }
   return null;
 }

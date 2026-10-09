@@ -31,6 +31,7 @@ import { OfflineBanner } from '~/components/ui/OfflineBanner';
 import { NativeBackButton } from '~/components/features/NativeBackButton';
 import { ToastContainer } from '~/components/ui/ToastContainer';
 import { SessionExpiredPrompt } from '~/components/features/SessionExpiredPrompt';
+import { StableCurrencyPrompt } from '~/components/features/StableCurrencyPrompt';
 import { useAuthStore } from '~/stores/auth.store';
 import { useUiStore } from '~/stores/ui.store';
 import { buildSecurityHeaders } from '~/utils/security-headers';
@@ -535,6 +536,7 @@ function NativeShell({ children }: { children: React.ReactNode }): React.JSX.Ele
           prompt when a mid-flow 401 kills the session, instead of the
           call site's generic error. */}
       <SessionExpiredPrompt />
+      <StableCurrencyPrompt />
       <div
         className={
           isNative

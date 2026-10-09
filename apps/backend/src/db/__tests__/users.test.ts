@@ -10,6 +10,7 @@ import {
   getUserTokenVersion,
   bumpUserTokenVersion,
   findOrCreateUserByEmail,
+  resolveOrCreateUserByEmail,
   setUserIsAdmin,
   setUserHomeCurrency,
 } from '../users.js';
@@ -205,5 +206,41 @@ describe('admin flag across logins', () => {
     await setUserIsAdmin(created.id, true);
     const refreshed = await upsertUserFromCtx({ ctxUserId: 'ctx-boss', email: 'b@loop.test' });
     expect(refreshed.isAdmin).toBe(true);
+  });
+});
+
+describe('resolveOrCreateUserByEmail', () => {
+  it('creates the row with the chosen country and reports it as created', async () => {
+    const first = await resolveOrCreateUserByEmail('New@Example.com', 'gb');
+    expect(first.created).toBe(true);
+    expect(first.user.email).toBe('new@example.com');
+    expect(first.user.country).toBe('GB');
+    expect(first.user.homeCurrency).toBe('GBP');
+  });
+
+  it("derives the home currency from the country's display currency, USD when it has none", async () => {
+    expect((await resolveOrCreateUserByEmail('pt@example.com', 'PT')).user.homeCurrency).toBe(
+      'EUR',
+    );
+    expect((await resolveOrCreateUserByEmail('ca@example.com', 'CA')).user.homeCurrency).toBe(
+      'USD',
+    );
+    expect((await resolveOrCreateUserByEmail('iq@example.com', 'IQ')).user.homeCurrency).toBe(
+      'USD',
+    );
+  });
+
+  it('returns the existing row untouched and reports it as not created', async () => {
+    const first = await resolveOrCreateUserByEmail('again@example.com', 'GB');
+    const second = await resolveOrCreateUserByEmail('again@example.com', 'PT');
+    expect(second.created).toBe(false);
+    expect(second.user.id).toBe(first.user.id);
+    expect(second.user.country).toBe('GB');
+  });
+
+  it('leaves the country unset when the caller has none', async () => {
+    const { user } = await resolveOrCreateUserByEmail('bare@example.com');
+    expect(user.country).toBeUndefined();
+    expect(user.homeCurrency).toBe('USD');
   });
 });

@@ -104,10 +104,11 @@ export function makeSocialLoginHandler(providerConfig: SocialProviderConfig) {
     }
 
     try {
-      const { user } = await resolveOrCreateUserForIdentity({
+      const { user, created } = await resolveOrCreateUserForIdentity({
         provider: providerConfig.provider,
         providerSub: claims.sub,
         email,
+        country: parsed.data.country,
       });
       await syncCtxAdminRole(user);
       // NS-09: stamp token_version for revocability
@@ -121,6 +122,7 @@ export function makeSocialLoginHandler(providerConfig: SocialProviderConfig) {
         accessToken: pair.accessToken,
         refreshToken: pair.refreshToken,
         email: user.email,
+        created,
       });
     } catch (err) {
       log.error({ err, provider: providerConfig.provider }, 'Social login failed unexpectedly');

@@ -32,5 +32,12 @@
   },
   "terms": {
     "heading": "Terms & conditions"
+  },
+  "outsideHomeCountry": {
+    "heading": "This merchant is outside your home country",
+    "body": "This merchant is based in {{merchantCountry}}, but your home country is {{homeCountry}}. Purchases from this merchant can only be redeemed in {{merchantCountryName}}.",
+    "actions": "Select Home to see merchants in your country, or Continue to buy from this merchant anyway.",
+    "home": "Home",
+    "continue": "Continue"
   }
 }

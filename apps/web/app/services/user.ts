@@ -69,6 +69,14 @@ export async function setHomeCurrency(code: HomeCurrency): Promise<UserMeView> {
   });
 }
 
+/** `POST /api/users/me/country` — home country, written through to CTX's `user.country`. */
+export async function setCountry(code: string): Promise<UserMeView> {
+  return authenticatedRequest<UserMeView>('/api/users/me/country', {
+    method: 'POST',
+    body: { country: code.toUpperCase() },
+  });
+}
+
 /** `GET /api/users/me` — full profile. Used by settings pages. */
 export async function getMe(): Promise<UserMeView> {
   return authenticatedRequest<UserMeView>('/api/users/me');

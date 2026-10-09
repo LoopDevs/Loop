@@ -72,7 +72,8 @@ vi.mock('../email.js', () => ({
   }),
 }));
 vi.mock('../../db/users.js', () => ({
-  findOrCreateUserByEmail: (email: string) => findOrCreateUserMock(email),
+  resolveOrCreateUserByEmail: (email: string, country?: string) =>
+    findOrCreateUserMock(email, country),
   getUserTokenVersion: (id: string) => getUserTokenVersionMock(id),
 }));
 const syncCtxAdminRoleMock = vi.fn();
@@ -327,20 +328,28 @@ describe('nativeVerifyOtpHandler', () => {
 
   it('consumes the OTP, upserts the user, mints a pair, and clears the counter on success', async () => {
     findLiveOtpMock.mockResolvedValue({ id: 'otp-1', attempts: 0 });
-    findOrCreateUserMock.mockResolvedValue({ id: 'user-1', email: 'a@b.com', tokenVersion: 0 });
-    const { ctx } = makeCtx({ email: 'a@b.com', otp: '123456' });
+    findOrCreateUserMock.mockResolvedValue({
+      user: { id: 'user-1', email: 'a@b.com', tokenVersion: 0 },
+      created: true,
+    });
+    const { ctx } = makeCtx({ email: 'a@b.com', otp: '123456', country: 'gb' });
     const res = await nativeVerifyOtpHandler(ctx);
     expect(res.status).toBe(200);
     expect(tryConsumeOtpMock).toHaveBeenCalledWith('otp-1');
-    expect(findOrCreateUserMock).toHaveBeenCalledWith('a@b.com');
+    expect(findOrCreateUserMock).toHaveBeenCalledWith('a@b.com', 'GB');
     expect(syncCtxAdminRoleMock).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'user-1', email: 'a@b.com' }),
     );
     expect(recordRefreshMock).toHaveBeenCalled();
     expect(clearOtpAttemptsMock).toHaveBeenCalledWith('a@b.com');
-    const body = (await res.json()) as { accessToken: string; refreshToken: string };
+    const body = (await res.json()) as {
+      accessToken: string;
+      refreshToken: string;
+      created: boolean;
+    };
     expect(body.accessToken.split('.')).toHaveLength(3);
     expect(body.refreshToken.split('.')).toHaveLength(3);
+    expect(body.created).toBe(true);
   });
 
   it('BK-otpatomic: losing the consume CAS (row already consumed) → 401, mints nothing', async () => {

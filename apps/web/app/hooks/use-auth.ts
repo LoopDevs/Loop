@@ -75,8 +75,9 @@ export function useAuth(): UseAuthResult {
 
     verifyOtp: async (email: string, otp: string) => {
       try {
-        const { accessToken, refreshToken } = await verifyOtp(email, otp);
+        const { accessToken, refreshToken, created } = await verifyOtp(email, otp);
         store.setSession(email, accessToken, refreshToken ?? null);
+        if (created) store.setStableCurrencyPromptPending(true);
       } catch (err) {
         throw new Error(authErrorMessage(err, 'Verification failed. Please try again.'));
       }
@@ -86,6 +87,7 @@ export function useAuth(): UseAuthResult {
       try {
         const pair = await socialLoginGoogle(idToken);
         store.setSession(pair.email ?? '', pair.accessToken, pair.refreshToken);
+        if (pair.created) store.setStableCurrencyPromptPending(true);
       } catch (err) {
         throw new Error(authErrorMessage(err, 'Google sign-in failed. Please try again.'));
       }
@@ -95,6 +97,7 @@ export function useAuth(): UseAuthResult {
       try {
         const pair = await socialLoginApple(idToken);
         store.setSession(pair.email ?? '', pair.accessToken, pair.refreshToken);
+        if (pair.created) store.setStableCurrencyPromptPending(true);
       } catch (err) {
         throw new Error(authErrorMessage(err, 'Apple sign-in failed. Please try again.'));
       }

@@ -366,12 +366,16 @@ export interface VerifyOtpRequest {
   otp: string;
   /** Backend defaults to 'web' if omitted. */
   platform?: Platform;
+  /** ISO 3166-1 alpha-2 country the visitor is browsing; stored on a newly created user and sent to CTX. */
+  country?: string;
 }
 
 /** Response from POST /api/auth/verify-otp */
 export interface VerifyOtpResponse {
   accessToken: string;
   refreshToken: string;
+  /** True when this sign-in created the Loop user. */
+  created: boolean;
 }
 
 /**

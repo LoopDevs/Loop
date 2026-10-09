@@ -23,6 +23,7 @@ const { userMock, authMock, navMock, nativePlatformMock, shareMock } = vi.hoiste
 }));
 
 vi.mock('~/services/user', () => ({
+  getMe: () => new Promise(() => undefined),
   downloadMyData: () => userMock.downloadMyData(),
   getMyDataExport: () => userMock.getMyDataExport(),
   requestAccountDeletion: () => userMock.requestAccountDeletion(),

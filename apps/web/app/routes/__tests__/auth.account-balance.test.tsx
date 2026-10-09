@@ -92,6 +92,7 @@ function mkMe(overrides: Partial<UserMeView> = {}): UserMeView {
     staffRole: null,
     homeCurrency: 'GBP',
     cashbackDestination: 'account',
+    country: null,
     ...overrides,
   };
 }

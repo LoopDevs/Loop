@@ -56,6 +56,8 @@ interface AuthState {
    * gates on the access token and the `/me` staff role.
    */
   restoreComplete: boolean;
+  /** Set when a sign-in created the account, until the stable-currency prompt is answered. */
+  stableCurrencyPromptPending: boolean;
 }
 
 interface AuthActions {
@@ -64,6 +66,7 @@ interface AuthActions {
   clearSession: () => void;
   /** Marks the cold-boot restore attempt complete (see `restoreComplete`). Idempotent. */
   setRestoreComplete: () => void;
+  setStableCurrencyPromptPending: (pending: boolean) => void;
 }
 
 /**
@@ -81,6 +84,7 @@ export const useAuthStore = create<AuthState & AuthActions>((set) => ({
   email: null,
   accessToken: null,
   restoreComplete: false,
+  stableCurrencyPromptPending: false,
 
   setSession: (email, accessToken, refreshToken) => {
     if (refreshToken !== null) {
@@ -103,7 +107,11 @@ export const useAuthStore = create<AuthState & AuthActions>((set) => ({
   clearSession: () => {
     void clearRefreshToken();
     setWasAuthed(false);
-    set({ email: null, accessToken: null });
+    set({ email: null, accessToken: null, stableCurrencyPromptPending: false });
+  },
+
+  setStableCurrencyPromptPending: (pending) => {
+    set({ stableCurrencyPromptPending: pending });
   },
 
   // FE-10: the restore attempt is a one-shot per app load. Explicit

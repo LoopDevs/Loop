@@ -16,6 +16,7 @@ const { historyMock, authMock } = vi.hoisted(() => ({
 }));
 
 vi.mock('~/services/user', () => ({
+  getMe: () => new Promise(() => undefined),
   getCashbackHistory: (opts?: { limit?: number; before?: string }) =>
     historyMock.getCashbackHistory(opts),
   getMyAccount: () => historyMock.getMyAccount(),

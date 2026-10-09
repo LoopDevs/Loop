@@ -1,4 +1,5 @@
-import { useParams, useNavigate } from 'react-router';
+import { useEffect } from 'react';
+import { useParams, useNavigate, useLocation } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import type { MetaDescriptor } from 'react-router';
@@ -14,6 +15,8 @@ import { LazyImage } from '~/components/ui/LazyImage';
 import { getMerchantImageUrl } from '~/utils/image';
 import { brandTileStyle } from '~/utils/brand-color';
 import { currencySymbol, useLocaleTag } from '~/i18n/format';
+import { localizedHref, merchantLocale, useLocale } from '~/i18n/locale';
+import { OutsideHomeCountryDialog } from '~/components/features/OutsideHomeCountryDialog';
 
 // P2-10/P2-11: component-only (mobile / SPA) variant — the SSR build wires
 // `gift-card.$name-ssr.tsx` (loader throws a real 404 for an unknown merchant),
@@ -75,6 +78,16 @@ export default function GiftCardRoute(): React.JSX.Element {
   // `enabled` guard skips the fetch in that case.
   const { userCashbackPct } = useMerchantCashbackRate(merchant?.id ?? '');
   const locale = useLocaleTag();
+  const activeLocale = useLocale();
+  const location = useLocation();
+  const merchantCountry = merchant?.country;
+  useEffect(() => {
+    const target = merchantLocale(merchantCountry, activeLocale);
+    if (target === null) return;
+    void navigate(localizedHref(`${location.pathname}${location.search}`, target), {
+      replace: true,
+    });
+  }, [merchantCountry, activeLocale, location, navigate]);
 
   const handleBack = (): void => {
     if (window.history.length > 1) {
@@ -128,6 +141,7 @@ export default function GiftCardRoute(): React.JSX.Element {
   return (
     <div>
       {!isNative && <Navbar />}
+      <OutsideHomeCountryDialog merchantId={merchant.id} merchantCountry={merchant.country} />
 
       {/* Floating back button — native only. On web the Navbar (now
           shown at all widths) carries the home link + browser back

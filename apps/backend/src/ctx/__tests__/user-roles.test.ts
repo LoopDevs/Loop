@@ -19,10 +19,12 @@ vi.mock('../api-fetch.js', async (importOriginal) => ({
 
 const setUserIsAdminMock = vi.hoisted(() => vi.fn());
 const setUserHomeCurrencyMock = vi.hoisted(() => vi.fn());
+const setUserCountryMock = vi.hoisted(() => vi.fn());
 const getUserCtxUserIdMock = vi.hoisted(() => vi.fn());
 vi.mock('../../db/users.js', () => ({
   setUserIsAdmin: setUserIsAdminMock,
   setUserHomeCurrency: setUserHomeCurrencyMock,
+  setUserCountry: setUserCountryMock,
   getUserCtxUserId: getUserCtxUserIdMock,
 }));
 
@@ -31,12 +33,17 @@ import {
   enqueueCtxAdminRoleSync,
   fetchCtxUserMirror,
   syncCtxAdminRole,
+  updateCtxCountry,
   updateCtxStableCurrency,
 } from '../user-roles.js';
 
 const flush = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 
-function ctxUser(roles: Array<Record<string, unknown>>, stableCurrency?: string): Response {
+function ctxUser(
+  roles: Array<Record<string, unknown>>,
+  stableCurrency?: string,
+  country?: string,
+): Response {
   return new Response(
     JSON.stringify({
       id: 'ctx-u1',
@@ -44,6 +51,7 @@ function ctxUser(roles: Array<Record<string, unknown>>, stableCurrency?: string)
       type: 'customer',
       roles,
       ...(stableCurrency === undefined ? {} : { stableCurrency }),
+      ...(country === undefined ? {} : { country }),
     }),
     { status: 200 },
   );
@@ -55,6 +63,8 @@ beforeEach(() => {
   setUserIsAdminMock.mockResolvedValue(true);
   setUserHomeCurrencyMock.mockReset();
   setUserHomeCurrencyMock.mockResolvedValue(true);
+  setUserCountryMock.mockReset();
+  setUserCountryMock.mockResolvedValue(true);
   getUserCtxUserIdMock.mockReset();
 });
 
@@ -116,7 +126,35 @@ describe('updateCtxStableCurrency', () => {
   });
 });
 
+describe('updateCtxCountry', () => {
+  it('PUTs the country and returns it uppercased in the mirror', async () => {
+    ctxFetchMock.mockResolvedValue(ctxUser([], undefined, 'gb'));
+    await expect(updateCtxCountry('ctx-u1', 'GB')).resolves.toMatchObject({ country: 'GB' });
+    const [url, init] = ctxFetchMock.mock.calls[0] as [string, RequestInit];
+    expect(String(url)).toBe('http://ctx.test/users/ctx-u1');
+    expect(init.method).toBe('PUT');
+    expect(JSON.parse(init.body as string)).toEqual({ country: 'GB' });
+  });
+
+  it('reports no country when CTX carries none', async () => {
+    ctxFetchMock.mockResolvedValue(ctxUser([]));
+    await expect(fetchCtxUserMirror('ctx-u1')).resolves.toMatchObject({ country: null });
+  });
+});
+
 describe('syncCtxAdminRole', () => {
+  it('mirrors the CTX user country onto the Loop user', async () => {
+    ctxFetchMock.mockResolvedValue(ctxUser([], undefined, 'PT'));
+    await syncCtxAdminRole({ id: 'loop-u1', ctxUserId: 'ctx-u1' });
+    expect(setUserCountryMock).toHaveBeenCalledWith('loop-u1', 'PT');
+  });
+
+  it('leaves the country alone when CTX carries none', async () => {
+    ctxFetchMock.mockResolvedValue(ctxUser([]));
+    await syncCtxAdminRole({ id: 'loop-u1', ctxUserId: 'ctx-u1' });
+    expect(setUserCountryMock).not.toHaveBeenCalled();
+  });
+
   it('mirrors the role onto the Loop user', async () => {
     ctxFetchMock.mockResolvedValue(ctxUser([{ name: 'operator-admin' }]));
     await syncCtxAdminRole({ id: 'loop-u1', ctxUserId: 'ctx-u1' });

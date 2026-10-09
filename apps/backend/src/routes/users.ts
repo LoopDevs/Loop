@@ -7,6 +7,7 @@ import {
   dsrExportHandler,
   getMeHandler,
   setCashbackDestinationHandler,
+  setCountryHandler,
   setHomeCurrencyHandler,
 } from '../users/handler.js';
 import { getUserOrdersSummaryHandler } from '../users/orders-summary.js';
@@ -116,5 +117,10 @@ export function mountUserRoutes(app: Hono): void {
     '/api/users/me/cashback-destination',
     rateLimit('POST /api/users/me/cashback-destination', 10, 60_000),
     setCashbackDestinationHandler,
+  );
+  app.post(
+    '/api/users/me/country',
+    rateLimit('POST /api/users/me/country', 10, 60_000),
+    setCountryHandler,
   );
 }

@@ -18,7 +18,7 @@ import { enqueueCtxUserProvisioning } from '../ctx/user-provisioning.js';
 import { enqueueCtxAdminRoleSync, syncCtxAdminRole } from '../ctx/user-roles.js';
 import { normalizeEmail, NonAsciiEmailError } from './normalize-email.js';
 import { verifyLoopToken, isLoopAuthConfigured } from './tokens.js';
-import { findOrCreateUserByEmail, getUserTokenVersion } from '../db/users.js';
+import { resolveOrCreateUserByEmail, getUserTokenVersion } from '../db/users.js';
 import {
   findLiveRefreshToken,
   findRefreshTokenRecord,
@@ -92,7 +92,7 @@ export async function nativeVerifyOtpHandler(c: Context): Promise<Response> {
     }
     // B5: legitimate verify clears the email's failed-attempt counter
     await clearOtpAttempts(email);
-    const user = await findOrCreateUserByEmail(email);
+    const { user, created } = await resolveOrCreateUserByEmail(email, parsed.data.country);
     await syncCtxAdminRole(user);
     // NS-09: stamp current token_version for invalidation support
     const pair = await issueTokenPair({
@@ -103,7 +103,7 @@ export async function nativeVerifyOtpHandler(c: Context): Promise<Response> {
     // Attributed-operator-traffic: self-heals provisioning on every login
     enqueueCtxUserProvisioning(user);
     // A2-557: strip internal fields for wire contract
-    return c.json({ accessToken: pair.accessToken, refreshToken: pair.refreshToken });
+    return c.json({ accessToken: pair.accessToken, refreshToken: pair.refreshToken, created });
   } catch (err) {
     log.error({ err, email }, 'Native verify-otp failed unexpectedly');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Verification failed' }, 500);

@@ -43,7 +43,11 @@ describe('auth flow integration', () => {
   });
 
   it('successful verifyOtp through the hook stores the session in the auth store', async () => {
-    vi.mocked(verifyOtp).mockResolvedValue({ accessToken: 'at-123', refreshToken: 'rt-456' });
+    vi.mocked(verifyOtp).mockResolvedValue({
+      accessToken: 'at-123',
+      refreshToken: 'rt-456',
+      created: false,
+    });
 
     const { result } = renderHook(() => useAuth(), { wrapper: makeWrapper() });
     await act(async () => {
@@ -54,6 +58,22 @@ describe('auth flow integration', () => {
     expect(useAuthStore.getState().email).toBe('test@example.com');
     expect(useAuthStore.getState().accessToken).toBe('at-123');
     expect(result.current.isAuthenticated).toBe(true);
+    expect(useAuthStore.getState().stableCurrencyPromptPending).toBe(false);
+  });
+
+  it('a sign-in that created the account arms the stable-currency prompt', async () => {
+    vi.mocked(verifyOtp).mockResolvedValue({
+      accessToken: 'at-123',
+      refreshToken: 'rt-456',
+      created: true,
+    });
+
+    const { result } = renderHook(() => useAuth(), { wrapper: makeWrapper() });
+    await act(async () => {
+      await result.current.verifyOtp('new@example.com', '123456');
+    });
+
+    expect(useAuthStore.getState().stableCurrencyPromptPending).toBe(true);
   });
 
   it('requestOtp through the hook calls the service with the email', async () => {

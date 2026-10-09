@@ -113,6 +113,7 @@ beforeEach(() => {
     staffRole: null,
     homeCurrency: 'GBP',
     cashbackDestination: 'account',
+    country: null,
   };
   links = [];
   authMock.isAuthenticated = true;

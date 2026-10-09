@@ -135,6 +135,12 @@ export function isLocalizablePath(path: string): boolean {
   return LOCALIZABLE_PATHS.some((re) => re.test(stripped));
 }
 
+export function merchantLocale(merchantCountry: string | undefined, locale: Locale): Locale | null {
+  if (!isSupportedCountryCode(merchantCountry)) return null;
+  const country = merchantCountry!.toLowerCase();
+  return country === locale.country ? null : { country, lang: locale.lang };
+}
+
 /** Cookie that persists the visitor's explicit country choice (no PII). */
 export const COUNTRY_COOKIE = 'loop_country';
 
@@ -158,6 +164,16 @@ export function parseCountryCookie(cookieHeader: string | null | undefined): str
 export function readCountryCookie(): string | null {
   if (typeof document === 'undefined') return null;
   return parseCountryCookie(document.cookie);
+}
+
+export function countryFromPath(path: string): string | null {
+  const segment = path.split('/')[1];
+  return isSupportedCountryCode(segment) ? segment!.toLowerCase() : null;
+}
+
+export function currentCountryChoice(): string | null {
+  if (typeof window === 'undefined') return null;
+  return readCountryCookie() ?? countryFromPath(window.location.pathname);
 }
 
 /** Persist the visitor's explicit country choice (client-only, 1-year, Lax). */

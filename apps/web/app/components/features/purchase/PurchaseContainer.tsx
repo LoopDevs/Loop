@@ -211,8 +211,9 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
       setAuthLoading(true);
       setAuthError(null);
       try {
-        const { accessToken, refreshToken } = await verifyOtp(authEmail, authOtp);
+        const { accessToken, refreshToken, created } = await verifyOtp(authEmail, authOtp);
         useAuthStore.getState().setSession(authEmail, accessToken, refreshToken ?? null);
+        if (created) useAuthStore.getState().setStableCurrencyPromptPending(true);
         void triggerHapticNotification('success');
       } catch (err) {
         setAuthError(friendlyError(err, 'Invalid code. Please try again.'));

@@ -14,8 +14,10 @@ import { getStaffRole } from '../db/staff-roles.js';
 import {
   CtxUserRolesError,
   updateCtxCashbackDestination,
+  updateCtxCountry,
   updateCtxStableCurrency,
 } from '../ctx/user-roles.js';
+import { peekLoopCompany } from '../ctx/startup.js';
 import { logger } from '../logger.js';
 
 const log = logger.child({ handler: 'users' });
@@ -40,6 +42,8 @@ export interface UserMeView {
   isAdmin: boolean;
   /** Where credited cashback lands at CTX: the account balance or the savings pot. */
   cashbackDestination: CashbackDestination;
+  /** Home country (ISO 3166-1 alpha-2), mirrored from CTX; null until chosen. */
+  country: string | null;
 }
 
 // Lookup failure degrades to shim: profile endpoint is polled by all clients, staff-role blip must not log out fleet
@@ -65,6 +69,7 @@ export async function toView(row: User): Promise<UserMeView> {
     staffRole,
     isAdmin: staffRole === 'admin',
     cashbackDestination: row.cashbackDestination ?? 'account',
+    country: row.country ?? null,
   };
 }
 
@@ -211,6 +216,73 @@ export async function setCashbackDestinationHandler(c: Context): Promise<Respons
       { id: user.id },
       { $set: { cashbackDestination: destination, updatedAt: new Date() } },
     );
+  if (updated === null) {
+    return c.json({ code: 'NOT_FOUND', message: 'User not found' }, 404);
+  }
+  return c.json<UserMeView>(await toView(updated));
+}
+
+const SetCountryBody = z.object({
+  country: z
+    .string()
+    .trim()
+    .length(2)
+    .transform((value) => value.toUpperCase()),
+});
+
+// CTX owns the user's country (it also derives the held stable from it), so it is written there first and mirrored locally once accepted.
+export async function setCountryHandler(c: Context): Promise<Response> {
+  const parsed = SetCountryBody.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) {
+    return c.json(
+      { code: 'VALIDATION_ERROR', message: 'country must be an ISO 3166-1 alpha-2 code' },
+      400,
+    );
+  }
+  const country = parsed.data.country;
+  const offered = peekLoopCompany()?.countries.map((code) => code.toUpperCase()) ?? [];
+  if (offered.length > 0 && !offered.includes(country)) {
+    return c.json({ code: 'VALIDATION_ERROR', message: 'Country not supported' }, 400);
+  }
+  let user: User | null;
+  try {
+    user = await resolveCallingUser(c);
+  } catch (err) {
+    log.error({ err }, 'Failed to resolve calling user');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
+  }
+  if (user === null) {
+    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+  }
+  if (user.country === country) {
+    return c.json<UserMeView>(await toView(user));
+  }
+  if (user.ctxUserId === null) {
+    return c.json(
+      {
+        code: 'SERVICE_UNAVAILABLE',
+        message: 'Your account is still being set up with our supplier — please retry shortly',
+      },
+      503,
+    );
+  }
+  let homeCurrency = user.homeCurrency;
+  try {
+    const mirror = await updateCtxCountry(user.ctxUserId, country);
+    if (mirror.homeCurrency !== null) homeCurrency = mirror.homeCurrency;
+  } catch (err) {
+    if (err instanceof CtxUserRolesError && err.status === 400) {
+      return c.json({ code: 'VALIDATION_ERROR', message: 'Country not supported' }, 400);
+    }
+    log.error({ err, userId: user.id }, 'CTX country update failed');
+    return c.json(
+      { code: 'SUPPLIER_UNAVAILABLE', message: 'Unable to change home country right now' },
+      503,
+    );
+  }
+  const updated = await db
+    .collection('users')
+    .updateOne({ id: user.id }, { $set: { country, homeCurrency, updatedAt: new Date() } });
   if (updated === null) {
     return c.json({ code: 'NOT_FOUND', message: 'User not found' }, 404);
   }

@@ -1,16 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router';
+import { useQueryClient } from '@tanstack/react-query';
 import { COUNTRIES, foldForSearch } from '@loop/shared';
 import {
   isLocalizablePath,
   localizedHref,
   setCountryCookie,
   stripLocale,
+  useActiveLocale,
   useLocale,
 } from '~/i18n/locale';
+import { useHomeCountry } from '~/hooks/use-home-country';
 import { useFocusTrap } from '~/hooks/use-focus-trap';
 import { useSupportedCountries } from '~/hooks/use-supported-countries';
+import { useAuth } from '~/hooks/use-auth';
+import { setCountry } from '~/services/user';
 
 /**
  * Country picker (ADR 034 §4). Replaces the four-region selector (ADR 033). With
@@ -25,6 +30,10 @@ export function CountrySelector(): React.JSX.Element {
   const locale = useLocale();
   const navigate = useNavigate();
   const location = useLocation();
+  const queryClient = useQueryClient();
+  const { isAuthenticated } = useAuth();
+  const activeLocale = useActiveLocale();
+  const homeCountry = useHomeCountry();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -38,12 +47,11 @@ export function CountrySelector(): React.JSX.Element {
 
   const countries = useSupportedCountries();
 
+  const shownCountry = activeLocale?.country ?? homeCountry ?? locale.country;
   const current = useMemo(
     () =>
-      COUNTRIES.find((c) => c.code.toLowerCase() === locale.country) ??
-      countries[0] ??
-      COUNTRIES[0]!,
-    [locale.country, countries],
+      COUNTRIES.find((c) => c.code.toLowerCase() === shownCountry) ?? countries[0] ?? COUNTRIES[0]!,
+    [shownCountry, countries],
   );
 
   const folded = foldForSearch(query);
@@ -83,6 +91,11 @@ export function CountrySelector(): React.JSX.Element {
   const choose = (code: string): void => {
     const lower = code.toLowerCase();
     setCountryCookie(lower);
+    if (isAuthenticated) {
+      void setCountry(code)
+        .then((me) => queryClient.setQueryData(['me'], me))
+        .catch(() => undefined);
+    }
     const target = { country: lower, lang: locale.lang };
     const here = `${location.pathname}${location.search}`;
     // Stay on the same page when it has a localized mount; otherwise the path

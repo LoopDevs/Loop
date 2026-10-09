@@ -5,6 +5,7 @@ import type {
   VerifyOtpResponse,
 } from '@loop/shared';
 import { DEFAULT_CLIENT_IDS } from '@loop/shared';
+import { currentCountryChoice } from '~/i18n/locale';
 import { getPlatform } from '~/native/platform';
 import { apiRequest } from './api-client';
 
@@ -21,8 +22,13 @@ export async function requestOtp(email: string): Promise<void> {
  * Verifies the OTP. Returns { accessToken, refreshToken } for all clients.
  * The caller is responsible for storing the refresh token via secure-storage.
  */
+function countryField(): { country: string } | Record<string, never> {
+  const country = currentCountryChoice();
+  return country === null ? {} : { country: country.toUpperCase() };
+}
+
 export async function verifyOtp(email: string, otp: string): Promise<VerifyOtpResponse> {
-  const body: VerifyOtpRequest = { email, otp, platform: getPlatform() };
+  const body: VerifyOtpRequest = { email, otp, platform: getPlatform(), ...countryField() };
   return apiRequest<VerifyOtpResponse>('/api/auth/verify-otp', {
     method: 'POST',
     body,
@@ -46,7 +52,7 @@ export type LoopAuthPair = SocialLoginResponse;
 export async function socialLoginGoogle(idToken: string): Promise<SocialLoginResponse> {
   return apiRequest<SocialLoginResponse>('/api/auth/social/google', {
     method: 'POST',
-    body: { idToken, platform: getPlatform() },
+    body: { idToken, platform: getPlatform(), ...countryField() },
   });
 }
 
@@ -58,7 +64,7 @@ export async function socialLoginGoogle(idToken: string): Promise<SocialLoginRes
 export async function socialLoginApple(idToken: string): Promise<SocialLoginResponse> {
   return apiRequest<SocialLoginResponse>('/api/auth/social/apple', {
     method: 'POST',
-    body: { idToken, platform: getPlatform() },
+    body: { idToken, platform: getPlatform(), ...countryField() },
   });
 }
 

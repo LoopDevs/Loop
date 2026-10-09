@@ -5,6 +5,7 @@ import type { TFunction } from 'i18next';
 import { checkBiometrics } from '~/native/biometrics';
 import type { BiometricResult } from '~/native/biometrics';
 import { setHomeCurrency } from '~/services/user';
+import { useAuthStore } from '~/stores/auth.store';
 import { useAppConfig } from '~/hooks/use-app-config';
 import { readCountryCookie } from '~/i18n/locale';
 import { isValidEmail } from '~/utils/email';
@@ -268,6 +269,7 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
     setCurrencyError(null);
     try {
       await setHomeCurrency(currency);
+      useAuthStore.getState().setStableCurrencyPromptPending(false);
       next();
     } catch (err) {
       const message =

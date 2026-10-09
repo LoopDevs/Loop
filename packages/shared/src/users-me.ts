@@ -41,6 +41,8 @@ export interface UserMeView {
   homeCurrency: HomeCurrency;
   /** Where credited cashback lands at CTX: `account` pays out to the linked wallet, `savings` fills the pot. */
   cashbackDestination: CashbackDestination;
+  /** Home country (ISO 3166-1 alpha-2, uppercase), mirrored from CTX's `user.country`; null until chosen. */
+  country: string | null;
 }
 
 /** One row of the credit-ledger history (ADR 009 / 015). */

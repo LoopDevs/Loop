@@ -73,6 +73,7 @@ function meView(over: Partial<UserMeView>): UserMeView {
     staffRole: null,
     homeCurrency: 'USD',
     cashbackDestination: 'account',
+    country: null,
     ...over,
   };
 }

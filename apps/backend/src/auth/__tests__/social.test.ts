@@ -145,15 +145,21 @@ describe('googleSocialLoginHandler', () => {
       user: { id: 'user-uuid', email: 'a@b.com', isAdmin: false },
       created: false,
     });
-    const res = await googleSocialLoginHandler(makeCtx({ idToken: 'x.y.z' }));
+    const res = await googleSocialLoginHandler(makeCtx({ idToken: 'x.y.z', country: 'pt' }));
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { accessToken: string; refreshToken: string };
+    const body = (await res.json()) as {
+      accessToken: string;
+      refreshToken: string;
+      created: boolean;
+    };
     expect(body.accessToken.split('.')).toHaveLength(3);
     expect(body.refreshToken.split('.')).toHaveLength(3);
+    expect(body.created).toBe(false);
     expect(resolveMock).toHaveBeenCalledWith({
       provider: 'google',
       providerSub: 'google-sub-1',
       email: 'a@b.com',
+      country: 'PT',
     });
     expect(syncCtxAdminRoleMock).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'user-uuid', email: 'a@b.com' }),

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { currencyOf, isHomeCurrency } from '@loop/shared';
 import { db } from './client.js';
 import { isUniqueViolation } from './errors.js';
 import type { HomeCurrency, UserDoc } from './types.js';
@@ -73,6 +74,13 @@ export async function setUserHomeCurrency(
   return updated !== null;
 }
 
+export async function setUserCountry(id: string, country: string): Promise<boolean> {
+  const updated = await db
+    .collection('users')
+    .updateOne({ id, country: { $ne: country } }, { $set: { country, updatedAt: new Date() } });
+  return updated !== null;
+}
+
 // NS-09: caller fails closed if user row is missing.
 export async function getUserTokenVersion(id: string): Promise<number | null> {
   const user = await db.collection('users').findOne({ id });
@@ -88,28 +96,38 @@ export async function bumpUserTokenVersion(id: string): Promise<void> {
 
 // ADR 013: callers MUST only pass a provider/OTP-verified email.
 export async function findOrCreateUserByEmail(email: string): Promise<User> {
+  return (await resolveOrCreateUserByEmail(email)).user;
+}
+
+export async function resolveOrCreateUserByEmail(
+  email: string,
+  country?: string,
+): Promise<{ user: User; created: boolean }> {
   const users = db.collection('users');
   const normalised = email.toLowerCase().trim();
   const existing = await users.findOne({ email: normalised });
-  if (existing !== null) return existing;
+  if (existing !== null) return { user: existing, created: false };
   const now = new Date();
+  const countryCurrency = currencyOf(country);
   const doc: UserDoc = {
     id: randomUUID(),
     ctxUserId: null,
     email: normalised,
     tokenVersion: 0,
-    homeCurrency: 'USD',
+    homeCurrency:
+      countryCurrency !== undefined && isHomeCurrency(countryCurrency) ? countryCurrency : 'USD',
+    ...(country !== undefined ? { country: country.toUpperCase() } : {}),
     isAdmin: false,
     createdAt: now,
     updatedAt: now,
   };
   try {
     await users.insertOne(doc);
-    return doc;
+    return { user: doc, created: true };
   } catch (err) {
     if (isUniqueViolation(err)) {
       const raced = await users.findOne({ email: normalised });
-      if (raced !== null) return raced;
+      if (raced !== null) return { user: raced, created: false };
     }
     throw err;
   }

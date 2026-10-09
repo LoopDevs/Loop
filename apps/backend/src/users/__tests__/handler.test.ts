@@ -12,14 +12,26 @@ vi.mock('../../logger.js', () => ({
 
 const updateCtxStableCurrencyMock = vi.hoisted(() => vi.fn());
 const updateCtxCashbackDestinationMock = vi.hoisted(() => vi.fn());
+const updateCtxCountryMock = vi.hoisted(() => vi.fn());
 vi.mock('../../ctx/user-roles.js', async (importOriginal) => ({
   ...((await importOriginal()) as Record<string, unknown>),
   updateCtxStableCurrency: updateCtxStableCurrencyMock,
   updateCtxCashbackDestination: updateCtxCashbackDestinationMock,
+  updateCtxCountry: updateCtxCountryMock,
+}));
+const loopCompanyState = vi.hoisted(() => ({ countries: null as string[] | null }));
+vi.mock('../../ctx/startup.js', () => ({
+  peekLoopCompany: () =>
+    loopCompanyState.countries === null ? null : { countries: loopCompanyState.countries },
 }));
 
 import { CtxUserRolesError } from '../../ctx/user-roles.js';
-import { getMeHandler, setCashbackDestinationHandler, setHomeCurrencyHandler } from '../handler.js';
+import {
+  getMeHandler,
+  setCashbackDestinationHandler,
+  setCountryHandler,
+  setHomeCurrencyHandler,
+} from '../handler.js';
 
 // User profile handlers — A2-550, A2-551
 function makeCtx(auth: LoopAuthContext | undefined, body?: unknown): Context {
@@ -104,6 +116,85 @@ beforeEach(() => {
     isAdmin: false,
     homeCurrency: 'GBP',
     cashbackDestination: 'savings',
+    country: null,
+  });
+  updateCtxCountryMock.mockReset();
+  updateCtxCountryMock.mockResolvedValue({
+    isAdmin: false,
+    homeCurrency: null,
+    cashbackDestination: 'account',
+    country: 'GB',
+  });
+  loopCompanyState.countries = null;
+});
+
+describe('setCountryHandler', () => {
+  it('400 when the body carries no two-letter country', async () => {
+    await seedUser();
+    expect((await setCountryHandler(makeCtx(loopAuth, {}))).status).toBe(400);
+    expect((await setCountryHandler(makeCtx(loopAuth, { country: 'GBR' }))).status).toBe(400);
+    expect(updateCtxCountryMock).not.toHaveBeenCalled();
+  });
+
+  it('400 when the country is not one the operator offers', async () => {
+    loopCompanyState.countries = ['US', 'GB'];
+    await seedUser();
+    const res = await setCountryHandler(makeCtx(loopAuth, { country: 'PT' }));
+    expect(res.status).toBe(400);
+    expect(updateCtxCountryMock).not.toHaveBeenCalled();
+  });
+
+  it('401 when no auth on the context', async () => {
+    const res = await setCountryHandler(makeCtx(undefined, { country: 'GB' }));
+    expect(res.status).toBe(401);
+  });
+
+  it('writes the country to CTX first, then mirrors it and returns the view', async () => {
+    loopCompanyState.countries = ['US', 'GB'];
+    await seedUser();
+    const res = await setCountryHandler(makeCtx(loopAuth, { country: 'gb' }));
+    expect(res.status).toBe(200);
+    expect(updateCtxCountryMock).toHaveBeenCalledWith('ctx-123', 'GB');
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body['country']).toBe('GB');
+    const stored = await db.collection('users').findOne({ id: UID });
+    expect(stored?.country).toBe('GB');
+  });
+
+  it('adopts the held stable CTX derives from the country as the home currency', async () => {
+    updateCtxCountryMock.mockResolvedValue({
+      isAdmin: false,
+      homeCurrency: 'GBP',
+      cashbackDestination: 'account',
+      country: 'GB',
+    });
+    await seedUser({ homeCurrency: 'USD' });
+    const res = await setCountryHandler(makeCtx(loopAuth, { country: 'GB' }));
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body['homeCurrency']).toBe('GBP');
+  });
+
+  it('no-op when the country is unchanged', async () => {
+    await seedUser({ country: 'GB' });
+    const res = await setCountryHandler(makeCtx(loopAuth, { country: 'GB' }));
+    expect(res.status).toBe(200);
+    expect(updateCtxCountryMock).not.toHaveBeenCalled();
+  });
+
+  it('503 and no local write when CTX is unavailable', async () => {
+    await seedUser();
+    updateCtxCountryMock.mockRejectedValueOnce(new CtxUserRolesError('down', 503));
+    const res = await setCountryHandler(makeCtx(loopAuth, { country: 'GB' }));
+    expect(res.status).toBe(503);
+    const stored = await db.collection('users').findOne({ id: UID });
+    expect(stored?.country).toBeUndefined();
+  });
+
+  it('400 when CTX rejects the country', async () => {
+    await seedUser();
+    updateCtxCountryMock.mockRejectedValueOnce(new CtxUserRolesError('bad', 400));
+    const res = await setCountryHandler(makeCtx(loopAuth, { country: 'GB' }));
+    expect(res.status).toBe(400);
   });
 });
 
@@ -165,6 +256,7 @@ describe('getMeHandler', () => {
       staffRole: null,
       isAdmin: false,
       cashbackDestination: 'account',
+      country: null,
     });
   });
 
@@ -185,6 +277,7 @@ describe('getMeHandler', () => {
     const body = (await res.json()) as Record<string, unknown>;
     expect(Object.keys(body).sort()).toEqual([
       'cashbackDestination',
+      'country',
       'email',
       'homeCurrency',
       'id',

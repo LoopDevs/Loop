@@ -89,6 +89,22 @@ describe('provisionCtxUser', () => {
     expect(syncCtxAdminRoleMock).toHaveBeenCalledWith({ id: 'loop-u1', ctxUserId: 'ctx-u1' });
   });
 
+  it('sends the country instead of a held stable when the user chose one, so CTX derives the stable', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify({ id: 'ctx-u1' }), { status: 201 }));
+
+    await provisionCtxUser({ ...user, country: 'GB' });
+
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({
+      email: 'u1@test.io',
+      type: 'customer',
+      operatorUserId: 'loop-u1',
+      country: 'GB',
+    });
+  });
+
   it('logs and stores nothing on a non-email 400 (operatorUserId uniqueness rejection)', async () => {
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')

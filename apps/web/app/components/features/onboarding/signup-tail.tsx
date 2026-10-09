@@ -550,8 +550,9 @@ export function useOnboardingAuth(): {
     setOtpError(null);
     setVerifyingOtp(true);
     try {
-      const { accessToken, refreshToken } = await verifyOtp(email, otp);
+      const { accessToken, refreshToken, created } = await verifyOtp(email, otp);
       useAuthStore.getState().setSession(email, accessToken, refreshToken ?? null);
+      if (created) useAuthStore.getState().setStableCurrencyPromptPending(true);
       return true;
     } catch (err) {
       setOtpError(friendlyError(err, t('error.verifyFallback')));

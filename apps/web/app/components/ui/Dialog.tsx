@@ -57,7 +57,7 @@ export interface DialogProps {
 // Shared shell: rounding, shadow, scrim, dark-mode surface + text. Kept
 // verbatim from the extracted call sites so the migration is visual-parity.
 const SHELL_CLASSES =
-  'rounded-lg shadow-xl backdrop:bg-black/60 p-0 w-[90vw] bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100';
+  'm-auto rounded-lg shadow-xl backdrop:bg-black/60 p-0 w-[90vw] bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100';
 
 const SIZE_CLASSES: Record<NonNullable<DialogProps['size']>, string> = {
   md: 'max-w-md',

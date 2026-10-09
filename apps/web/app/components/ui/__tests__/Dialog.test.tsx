@@ -36,6 +36,15 @@ function getDialog(): HTMLDialogElement {
 }
 
 describe('<Dialog /> primitive (FE-33)', () => {
+  it('centres itself in the viewport', () => {
+    render(
+      <Dialog open onClose={() => {}} labelledBy="t">
+        <p id="t">body</p>
+      </Dialog>,
+    );
+    expect(getDialog().classList.contains('m-auto')).toBe(true);
+  });
+
   it('opens when `open` is true and closes when it flips false', () => {
     const { rerender } = render(
       <Dialog open onClose={() => {}} labelledBy="t">

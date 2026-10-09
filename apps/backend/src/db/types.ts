@@ -13,6 +13,8 @@ export interface UserDoc {
   // NS-09 — bumped on logout/sign-out-all/refresh-reuse to invalidate prior access tokens
   tokenVersion: number;
   homeCurrency: HomeCurrency;
+  // Mirror of CTX's user.country (ISO 3166-1 alpha-2, uppercase); absent until the user picks one
+  country?: string;
   // Mirror of CTX's cashbackDestination; absent on rows written before the setting existed, read as 'account'
   cashbackDestination?: CashbackDestination;
   // ADR 037 — mirror of the CTX operator-admin role; `requireStaff` prefers `staff_roles` row
