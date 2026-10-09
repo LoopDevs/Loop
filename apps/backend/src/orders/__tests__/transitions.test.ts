@@ -27,11 +27,11 @@ vi.mock('../../config/index.js', async (importActual) => {
 
 import { resetRedeemKeyCache } from '../redeem-crypto.js';
 import {
-  markOrderExpired,
   markOrderFulfilled,
   markOrderPaid,
   markOrderRefunded,
   markOrderRejected,
+  markOrderUnpaid,
 } from '../transitions.js';
 
 beforeEach(() => {
@@ -62,6 +62,7 @@ async function seedOrder(state: OrderState, overrides: Partial<OrderDoc> = {}): 
     redeemUrl: null,
     redemptionBackfillAttempts: 0,
     redemptionBackfillLastAttemptAt: null,
+    mirrorSyncedAt: null,
     state,
     failureReason: null,
     idempotencyKey: null,
@@ -85,11 +86,38 @@ describe('markOrderPaid', () => {
     expect((await getOrder(id))?.state).toBe('paid');
   });
 
-  it('returns null when the guard does not match (already past unpaid)', async () => {
-    const id = await seedOrder('fulfilled');
+  it('returns null when the doc is already paid', async () => {
+    const id = await seedOrder('paid');
     expect(await markOrderPaid(id)).toBeNull();
-    // A replayed event never regresses the mirror.
-    expect((await getOrder(id))?.state).toBe('fulfilled');
+  });
+
+  it('follows CTX out of expired, rejected and fulfilled, clearing the failure fields', async () => {
+    for (const from of ['expired', 'rejected', 'refunded', 'fulfilled'] as const) {
+      const id = await seedOrder(from, { failedAt: new Date(), failureReason: 'stale' });
+      const r = await markOrderPaid(id);
+      expect(r?.state).toBe('paid');
+      const stored = await getOrder(id);
+      expect(stored?.failedAt).toBeNull();
+      expect(stored?.failureReason).toBeNull();
+    }
+  });
+});
+
+describe('markOrderUnpaid', () => {
+  it('sets state=unpaid from any other state and clears the failure fields', async () => {
+    for (const from of ['paid', 'fulfilled', 'rejected', 'refunded', 'expired'] as const) {
+      const id = await seedOrder(from, { failedAt: new Date(), failureReason: 'stale' });
+      const r = await markOrderUnpaid(id);
+      expect(r?.state).toBe('unpaid');
+      const stored = await getOrder(id);
+      expect(stored?.failedAt).toBeNull();
+      expect(stored?.failureReason).toBeNull();
+    }
+  });
+
+  it('returns null when the doc is already unpaid', async () => {
+    const id = await seedOrder('unpaid');
+    expect(await markOrderUnpaid(id)).toBeNull();
   });
 });
 
@@ -136,9 +164,24 @@ describe('markOrderFulfilled', () => {
     expect(stored?.redeemUrl).toBeNull();
   });
 
-  it('returns null on a terminal doc (guard miss)', async () => {
-    const id = await seedOrder('refunded');
+  it('fulfils from expired, rejected and refunded, clearing the failure fields', async () => {
+    for (const from of ['expired', 'rejected', 'refunded'] as const) {
+      const id = await seedOrder(from, { failedAt: new Date(), failureReason: 'stale' });
+      const r = await markOrderFulfilled(id, {
+        redemption: { code: 'CODE-2', pin: null, url: null },
+      });
+      expect(r?.state).toBe('fulfilled');
+      const stored = await getOrder(id);
+      expect(stored?.failedAt).toBeNull();
+      expect(stored?.failureReason).toBeNull();
+      expect(stored?.redeemCode).toBe('CODE-2');
+    }
+  });
+
+  it('returns null and keeps the stored redemption when already fulfilled', async () => {
+    const id = await seedOrder('fulfilled', { redeemCode: 'KEEP' });
     expect(await markOrderFulfilled(id, {})).toBeNull();
+    expect((await getOrder(id))?.redeemCode).toBe('KEEP');
   });
 });
 
@@ -171,24 +214,15 @@ describe('markOrderRefunded', () => {
     }
   });
 
-  it('returns null from expired (guard miss)', async () => {
-    const id = await seedOrder('expired');
+  it('refunds from expired and rejected', async () => {
+    for (const from of ['expired', 'rejected'] as const) {
+      const id = await seedOrder(from);
+      expect((await markOrderRefunded(id))?.state).toBe('refunded');
+    }
+  });
+
+  it('returns null when the doc is already refunded', async () => {
+    const id = await seedOrder('refunded');
     expect(await markOrderRefunded(id)).toBeNull();
-  });
-});
-
-describe('markOrderExpired', () => {
-  it('sets state=expired with the payment-window reason', async () => {
-    const id = await seedOrder('unpaid');
-    await markOrderExpired(id);
-    const stored = await getOrder(id);
-    expect(stored?.state).toBe('expired');
-    expect(stored?.failureReason).toBe('payment window expired');
-  });
-
-  it('returns null when the doc already left unpaid (paid event won)', async () => {
-    const id = await seedOrder('paid');
-    expect(await markOrderExpired(id)).toBeNull();
-    expect((await getOrder(id))?.state).toBe('paid');
   });
 });

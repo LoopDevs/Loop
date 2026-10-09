@@ -77,6 +77,9 @@ function isOperatorObject(v: unknown): v is Record<string, unknown> {
 }
 
 function compareValues(a: unknown, b: unknown): number {
+  const aMissing = a === null || a === undefined;
+  const bMissing = b === null || b === undefined;
+  if (aMissing || bMissing) return aMissing === bMissing ? 0 : aMissing ? -1 : 1;
   if (a instanceof Date && b instanceof Date) return a.getTime() - b.getTime();
   if (typeof a === 'number' && typeof b === 'number') return a - b;
   if (typeof a === 'string' && typeof b === 'string') return a < b ? -1 : a > b ? 1 : 0;

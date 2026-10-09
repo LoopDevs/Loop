@@ -58,6 +58,7 @@ async function seedPaidOrder(): Promise<string> {
     redeemUrl: null,
     redemptionBackfillAttempts: 0,
     redemptionBackfillLastAttemptAt: null,
+    mirrorSyncedAt: null,
     state: 'paid',
     failureReason: null,
     idempotencyKey: null,

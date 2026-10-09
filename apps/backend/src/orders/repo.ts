@@ -55,6 +55,7 @@ export async function createOrder(args: CreateOrderArgs): Promise<Order> {
     redeemUrl: null,
     redemptionBackfillAttempts: 0,
     redemptionBackfillLastAttemptAt: null,
+    mirrorSyncedAt: null,
     state: 'unpaid',
     failureReason: null,
     idempotencyKey: args.idempotencyKey ?? null,
@@ -128,15 +129,22 @@ export async function getOrderByCtxOrderId(ctxOrderId: string): Promise<Order | 
   return db.collection('orders').findOne({ ctxOrderId });
 }
 
-/**
- * Non-terminal docs for the mirror sweep, oldest-first. `unpaid`
- * docs are polled for payment expiry + missed paid events; `paid`
- * docs for missed fulfilment events.
- */
+// Rows CTX may still move, least-recently-synced first so no row starves the batch
 export async function listOpenMirrorOrders(limit: number): Promise<Order[]> {
-  return db
-    .collection('orders')
-    .findMany({ state: { $in: ['unpaid', 'paid'] } }, { sort: [['createdAt', 'asc']], limit });
+  return db.collection('orders').findMany(
+    { state: { $in: ['unpaid', 'paid', 'expired'] } },
+    {
+      sort: [
+        ['mirrorSyncedAt', 'asc'],
+        ['createdAt', 'asc'],
+      ],
+      limit,
+    },
+  );
+}
+
+export async function recordMirrorSynced(orderId: string, at: Date): Promise<void> {
+  await db.collection('orders').updateOne({ id: orderId }, { $set: { mirrorSyncedAt: at } });
 }
 
 export async function findOwnedOrder(userId: string, orderId: string): Promise<Order | null> {

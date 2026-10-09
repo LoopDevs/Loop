@@ -118,6 +118,7 @@ function baseRow(overrides?: Record<string, unknown>): Record<string, unknown> {
     redeemUrl: null,
     redemptionBackfillAttempts: 0,
     redemptionBackfillLastAttemptAt: null,
+    mirrorSyncedAt: null,
     state: 'unpaid',
     failureReason: null,
     idempotencyKey: null,

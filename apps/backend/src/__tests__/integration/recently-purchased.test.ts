@@ -66,6 +66,7 @@ async function seedOrder(args: SeedOrderArgs): Promise<void> {
     redeemUrl: null,
     redemptionBackfillAttempts: 0,
     redemptionBackfillLastAttemptAt: null,
+    mirrorSyncedAt: null,
     state: args.state,
     failureReason: null,
     idempotencyKey: null,

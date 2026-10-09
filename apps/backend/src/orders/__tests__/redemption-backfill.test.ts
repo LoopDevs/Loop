@@ -82,6 +82,7 @@ async function seedRow(
     redeemUrl: null,
     redemptionBackfillAttempts: overrides.attempts ?? 0,
     redemptionBackfillLastAttemptAt: overrides.lastAttemptAt ?? null,
+    mirrorSyncedAt: null,
     state: 'fulfilled',
     failureReason: null,
     idempotencyKey: null,

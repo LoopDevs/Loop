@@ -66,6 +66,7 @@ describe('redemption-backfill — persistRecoveredRedemption encrypts at rest (C
       redeemUrl: null,
       redemptionBackfillAttempts: 0,
       redemptionBackfillLastAttemptAt: null,
+      mirrorSyncedAt: null,
       state: 'fulfilled',
       failureReason: null,
       idempotencyKey: null,

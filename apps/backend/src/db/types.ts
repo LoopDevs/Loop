@@ -70,7 +70,7 @@ export interface SocialIdTokenUseDoc {
   createdAt: Date;
 }
 
-// ADR 052 — CTX is payment processor; `state` mirrors CTX displayStatus plus Loop-local `expired`
+// ADR 052 — CTX is payment processor; `state` mirrors CTX displayStatus
 export interface OrderDoc {
   id: string;
   userId: string;
@@ -89,6 +89,7 @@ export interface OrderDoc {
   redeemUrl: string | null;
   redemptionBackfillAttempts: number;
   redemptionBackfillLastAttemptAt: Date | null;
+  mirrorSyncedAt: Date | null;
   state: OrderState;
   failureReason: string | null;
   idempotencyKey: string | null;

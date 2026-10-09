@@ -47,6 +47,7 @@ async function seedFulfilledOrder(userId: string): Promise<void> {
     redeemUrl: null,
     redemptionBackfillAttempts: 0,
     redemptionBackfillLastAttemptAt: null,
+    mirrorSyncedAt: null,
     state: 'fulfilled',
     failureReason: null,
     idempotencyKey: null,

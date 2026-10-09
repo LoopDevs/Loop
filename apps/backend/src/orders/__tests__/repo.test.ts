@@ -239,7 +239,7 @@ describe('read helpers', () => {
     expect(await findOwnedOrder('u-2', row.id)).toBeNull();
   });
 
-  it('listOpenMirrorOrders returns only non-terminal docs, oldest-first, honouring the limit', async () => {
+  it('listOpenMirrorOrders returns unpaid, paid and expired docs, least-recently-synced first, honouring the limit', async () => {
     const a = await createOrder({
       userId: 'u-1',
       merchantId: 'm-1',
@@ -261,19 +261,44 @@ describe('read helpers', () => {
       currency: 'USD',
       paymentCryptoCurrency: 'XLM',
     });
+    const d = await createOrder({
+      userId: 'u-1',
+      merchantId: 'm-4',
+      faceValueMinor: 100n,
+      currency: 'USD',
+      paymentCryptoCurrency: 'XLM',
+    });
     const orders = db.collection('orders');
-    await orders.updateOne({ id: a.id }, { $set: { createdAt: new Date('2026-01-01T00:00:00Z') } });
+    await orders.updateOne(
+      { id: a.id },
+      {
+        $set: {
+          createdAt: new Date('2026-01-01T00:00:00Z'),
+          mirrorSyncedAt: new Date('2026-01-05T00:00:00Z'),
+        },
+      },
+    );
     await orders.updateOne(
       { id: b.id },
-      { $set: { createdAt: new Date('2026-01-02T00:00:00Z'), state: 'paid' } },
+      {
+        $set: {
+          createdAt: new Date('2026-01-02T00:00:00Z'),
+          mirrorSyncedAt: new Date('2026-01-04T00:00:00Z'),
+          state: 'paid',
+        },
+      },
     );
     await orders.updateOne(
       { id: c.id },
       { $set: { createdAt: new Date('2026-01-03T00:00:00Z'), state: 'fulfilled' } },
     );
+    await orders.updateOne(
+      { id: d.id },
+      { $set: { createdAt: new Date('2026-01-04T00:00:00Z'), state: 'expired' } },
+    );
 
     const open = await listOpenMirrorOrders(10);
-    expect(open.map((o) => o.id)).toEqual([a.id, b.id]);
+    expect(open.map((o) => o.id)).toEqual([d.id, b.id, a.id]);
     expect(await listOpenMirrorOrders(1)).toHaveLength(1);
   });
 });

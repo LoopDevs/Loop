@@ -166,15 +166,6 @@ export async function adminOrderRedriveHandler(c: Context): Promise<Response> {
         switch (outcome.kind) {
           case 'order_not_found':
             return { status: 404, body: { code: 'NOT_FOUND', message: 'Order not found' } };
-          case 'not_eligible':
-            return {
-              status: 409,
-              body: {
-                code: 'REDRIVE_NOT_ELIGIBLE',
-                message:
-                  'Order is in a terminal state — there is nothing left for CTX to report on it',
-              },
-            };
           case 'resynced': {
             const result: AdminOrderRedriveResult = { orderId, state: outcome.state };
             const envelope: AdminAuditEnvelope<AdminOrderRedriveResult> = buildAuditEnvelope({

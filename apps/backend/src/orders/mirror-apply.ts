@@ -8,6 +8,7 @@ import {
   markOrderPaid,
   markOrderRefunded,
   markOrderRejected,
+  markOrderUnpaid,
 } from './transitions.js';
 import { fetchRedemption } from './procurement-redemption.js';
 
@@ -40,8 +41,11 @@ export async function applyCtxCardStatus(order: Order, card: CtxGiftCard): Promi
   }
 
   switch (mapped) {
-    case 'unpaid':
+    case 'unpaid': {
+      const updated = await markOrderUnpaid(order.id);
+      if (updated !== null) log.info({ orderId: order.id }, 'Order mirror → unpaid');
       return;
+    }
     case 'paid': {
       const updated = await markOrderPaid(order.id);
       if (updated !== null) log.info({ orderId: order.id }, 'Order mirror → paid');

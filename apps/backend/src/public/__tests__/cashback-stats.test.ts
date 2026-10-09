@@ -61,6 +61,7 @@ async function seedOrder(args: {
     redeemUrl: null,
     redemptionBackfillAttempts: 0,
     redemptionBackfillLastAttemptAt: null,
+    mirrorSyncedAt: null,
     state: args.state ?? 'fulfilled',
     failureReason: null,
     idempotencyKey: null,

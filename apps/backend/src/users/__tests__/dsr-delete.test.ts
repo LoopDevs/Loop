@@ -53,6 +53,7 @@ async function seedOrder(overrides: Partial<OrderDoc> = {}): Promise<OrderDoc> {
     redeemUrl: null,
     redemptionBackfillAttempts: 0,
     redemptionBackfillLastAttemptAt: null,
+    mirrorSyncedAt: null,
     state: 'fulfilled',
     failureReason: null,
     idempotencyKey: null,
