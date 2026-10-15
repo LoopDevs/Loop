@@ -42,8 +42,8 @@
       "axios": "1.20.0"
     },
     "fast-uri": "^3.1.2",
-    "brace-expansion@5": "5.0.9",
-    "shell-quote": "1.10.0",
+    "brace-expansion@5": "5.0.12",
+    "shell-quote": "1.12.0",
     "ip-address": "10.5.0",
     "eslint-plugin-jsx-a11y": {
       "eslint": "$eslint"
@@ -59,7 +59,7 @@
     "@stellar/stellar-sdk": "15.1.0",
     "@typescript-eslint/eslint-plugin": "8.59.2",
     "@typescript-eslint/parser": "8.59.2",
-    "concurrently": "9.2.4",
+    "concurrently": "9.2.5",
     "eslint": "10.3.0",
     "eslint-plugin-jsx-a11y": "6.10.2",
     "eslint-plugin-react-hooks": "7.1.1",
