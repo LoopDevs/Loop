@@ -1,82 +1,71 @@
 /**
- * Stellar Wallets Kit v2 integration — STUB pending ADR + npm install.
+ * Stellar Wallets Kit bridge for the "Connect wallet" pay path.
  *
- * Per CLAUDE.md "new dependency" rule, adding
- * `@creit.tech/stellar-wallets-kit` and `@stellar/stellar-sdk` to
- * apps/web's package.json requires an ADR justifying the addition.
- * This file is the integration shape the team will fill in once that
- * ADR is accepted; checking it in keeps the design intent visible to
- * reviewers without committing the install.
- *
- * Why we want this:
- *   - Web users with Freighter / xBull / Lobstr extension / Hana extension
- *     can already use the SEP-7 "Open in wallet" button rendered in
- *     `LoopPaymentStep.tsx`. That works because those extensions
- *     register the `web+stellar:` URL scheme.
- *   - Browsers without a registered handler (most desktop users without
- *     a wallet extension installed; some mobile webview contexts)
- *     can't follow the SEP-7 link. SWK gives a vendor-neutral
- *     "Connect wallet" modal that builds + signs + submits the tx
- *     entirely in-app.
- *
- * Adoption plan:
- *   1. Write ADR: "Stellar Wallets Kit for web payment UX"
- *      - Decision: vendor-neutral wallet selection on web
- *      - Rejected alternative: shipping our own per-wallet integration
- *        (Freighter API + xBull API + ...) — combinatorial mess
- *      - Bundle-size cost: ~80kb gzipped (acceptable; lazy-loaded only
- *        on the payment step)
- *   2. `npm install @creit.tech/stellar-wallets-kit @stellar/stellar-sdk -w @loop/web`
- *   3. Replace the body of this module with the real implementation
- *   4. Wire `connectAndPay` into `StellarPaymentBody` web variant
- *
- * Until then: every export below is a stub that throws if called.
- * The current `LoopPaymentStep.tsx` web flow uses the SEP-7
- * `paymentUri` "Open in wallet" anchor — no SWK calls yet.
+ * The kit is browser-only and heavy, so it is imported on first use and
+ * never on the server or inside the native shell. CTX builds and submits
+ * the transaction (via the Loop backend); the kit only supplies the
+ * connected account and the signature.
  */
+import type { StellarWalletsKit } from '@creit.tech/stellar-wallets-kit/sdk';
+import type { Networks } from '@creit.tech/stellar-wallets-kit/types';
 
-export interface ConnectedWallet {
-  address: string;
-  walletName: string;
+type Kit = typeof StellarWalletsKit;
+
+let kitPromise: Promise<Kit> | null = null;
+
+async function loadKit(): Promise<Kit> {
+  kitPromise ??= Promise.all([
+    import('@creit.tech/stellar-wallets-kit/sdk'),
+    import('@creit.tech/stellar-wallets-kit/modules/utils'),
+  ]).then(([sdk, modules]) => {
+    sdk.StellarWalletsKit.init({ modules: modules.defaultModules() });
+    return sdk.StellarWalletsKit;
+  });
+  return kitPromise;
 }
 
-export interface PayParams {
-  /** Stellar deposit address from `CreateLoopOrderResponse.payment.stellarAddress`. */
-  destination: string;
-  /** Memo (text) — `CreateLoopOrderResponse.payment.memo`. */
-  memo: string;
-  /** Asset-native amount as 7-decimal string — `CreateLoopOrderResponse.payment.assetAmount`. */
-  amount: string;
-  /** Native XLM, USDC, or a LOOP-asset code. */
-  assetCode: 'XLM' | 'USDC' | 'USDLOOP' | 'GBPLOOP' | 'EURLOOP';
-  /** Required for non-native assets. Empty string for XLM. */
-  assetIssuer: string;
+/** Renders the kit's own connect / profile button into `container`. */
+export async function mountWalletButton(container: HTMLElement): Promise<void> {
+  const kit = await loadKit();
+  await kit.createButton(container);
 }
 
-/**
- * Opens the SWK modal so the user picks a wallet (Freighter / xBull /
- * Lobstr / Hana / Albedo / etc), then returns the connected address +
- * wallet name. Caller stores this and reuses for `signAndSubmit`.
- *
- * STUB — calls into a not-yet-installed dep. Throws on invocation.
- */
-export async function connectWallet(): Promise<ConnectedWallet> {
-  throw new Error(
-    'stellar-wallets-kit not yet installed — see ADR-pending and the SWK adoption plan in this file',
-  );
+/** The account the kit currently holds, or null when no wallet is connected. */
+export async function connectedWalletAddress(): Promise<string | null> {
+  const kit = await loadKit();
+  try {
+    return (await kit.getAddress()).address;
+  } catch {
+    return null;
+  }
 }
 
-/**
- * Builds a Stellar payment transaction and asks the connected wallet
- * to sign + submit. Returns the Horizon-confirmed tx hash on success.
- *
- * STUB — calls into a not-yet-installed dep. Throws on invocation.
- */
-export async function signAndSubmit(
-  _wallet: ConnectedWallet,
-  _payment: PayParams,
-): Promise<{ txHash: string }> {
-  throw new Error(
-    'stellar-wallets-kit not yet installed — see ADR-pending and the SWK adoption plan in this file',
-  );
+/** Calls `onChange` whenever the connected account changes; returns the unsubscribe. */
+export async function subscribeWalletAddress(
+  onChange: (address: string | null) => void,
+): Promise<() => void> {
+  const [kit, { KitEventType }] = await Promise.all([
+    loadKit(),
+    import('@creit.tech/stellar-wallets-kit/types'),
+  ]);
+  const offState = kit.on(KitEventType.STATE_UPDATED, (event) => {
+    onChange(event.payload.address ?? null);
+  });
+  const offDisconnect = kit.on(KitEventType.DISCONNECT, () => onChange(null));
+  return () => {
+    offState();
+    offDisconnect();
+  };
+}
+
+/** Asks the connected wallet to sign `xdr` for the network CTX named. */
+export async function signWithWallet(
+  xdr: string,
+  networkPassphrase: string,
+  address: string,
+): Promise<string> {
+  const kit = await loadKit();
+  kit.setNetwork(networkPassphrase as Networks);
+  const { signedTxXdr } = await kit.signTransaction(xdr, { networkPassphrase, address });
+  return signedTxXdr;
 }

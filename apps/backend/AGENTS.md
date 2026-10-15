@@ -23,7 +23,8 @@ src/
 ├── admin/              ← ADR 017/028/037 admin surface: staff roles, step-up, idempotency,
 │                          audit tail, user-360 drill, order triage, cashback rates
 ├── orders/             ← ADR 052 order mirror: create at CTX, ws/sweep transitions,
-│                          redemption backfill, redeem-secret crypto
+│                          redemption backfill, redeem-secret crypto, connected-wallet
+│                          pay passthrough (CTX builds + submits the Stellar tx)
 ├── merchants/          ← In-memory catalog synced from CTX + ws maintainer + cashback rates
 ├── clustering/         ← Location store + map clustering (protobuf wire)
 ├── ctx/                ← CTX API client, ws maintainers, catalog snapshots, user provisioning,

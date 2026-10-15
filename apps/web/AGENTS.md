@@ -42,7 +42,8 @@ app/
 │                       use-session-restore, query-retry,
 │                       use-staff-role — ADR 037 staffRole resolver over the ['me'] line)
 ├── services/         ← Typed API client (api-client, auth, clusters, merchants,
-│                       orders, orders-loop, config,
+│                       orders, orders-loop (+ connected-wallet pay calls),
+│                       stellar-wallet (Stellar Wallets Kit bridge, lazy, web only), config,
 │                       admin (+ per-surface admin-*
 │                       slices incl. ADR 037 admin-staff /
 │                       admin-user-wallet / admin-lookup / admin-order-redemption /

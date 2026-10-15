@@ -69,6 +69,12 @@ vi.mock('~/hooks/use-auth', () => ({
   useAuth: () => ({ isAuthenticated: authState.accessToken !== null }),
 }));
 vi.mock('~/hooks/query-retry', () => ({ shouldRetry: () => false }));
+vi.mock('~/services/stellar-wallet', () => ({
+  mountWalletButton: async () => undefined,
+  connectedWalletAddress: async () => null,
+  subscribeWalletAddress: async () => () => {},
+  signWithWallet: async () => '',
+}));
 vi.mock('~/native/haptics', () => ({
   triggerHaptic: vi.fn(),
   triggerHapticNotification: vi.fn(),
@@ -217,6 +223,7 @@ describe('loop-native order restore across a remount', () => {
     });
     // The rendered pay screen is built from the SERVER GET response.
     expect(screen.getByText(new RegExp(`${SERVER_CRYPTO_AMOUNT} XLM`))).toBeDefined();
+    fireEvent.click(screen.getByRole('button', { name: 'Payment URL' }));
     expect(screen.getByRole('link', { name: /Open in wallet/i }).getAttribute('href')).toBe(
       SERVER_PAYMENT_URI,
     );
@@ -268,6 +275,7 @@ describe('loop-native order restore across a remount', () => {
     expect(screen.queryByText(/1000\.0000000 XLM/)).toBeNull();
     expect(screen.getByText(/\$10\.00/)).toBeDefined();
     expect(screen.queryByText(/\$1,000\.00/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Payment URL' }));
     expect(screen.getByRole('link', { name: /Open in wallet/i }).getAttribute('href')).toBe(
       SERVER_PAYMENT_URI,
     );

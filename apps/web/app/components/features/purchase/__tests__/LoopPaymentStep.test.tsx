@@ -6,13 +6,50 @@ import { MemoryRouter } from 'react-router';
 
 import type * as OrdersLoopModule from '~/services/orders-loop';
 const getLoopOrderMock = vi.fn();
+const { platformState, walletState, fetchTxMock, submitTxMock, mountWalletButtonMock, signMock } =
+  vi.hoisted(() => ({
+    platformState: { isNative: false },
+    walletState: {
+      address: null as string | null,
+      listeners: [] as Array<(address: string | null) => void>,
+      signError: null as Error | null,
+    },
+    fetchTxMock: vi.fn(),
+    submitTxMock: vi.fn(),
+    mountWalletButtonMock: vi.fn(),
+    signMock: vi.fn(),
+  }));
 vi.mock('~/services/orders-loop', async () => {
   const actual = await vi.importActual<typeof OrdersLoopModule>('~/services/orders-loop');
   return {
     ...actual,
     getLoopOrder: (id: string) => getLoopOrderMock(id),
+    fetchStellarTransaction: (id: string, body: unknown) => fetchTxMock(id, body),
+    submitStellarTransaction: (id: string, body: unknown) => submitTxMock(id, body),
   };
 });
+vi.mock('~/hooks/use-native-platform', () => ({
+  useNativePlatform: () => ({
+    platform: platformState.isNative ? 'ios' : 'web',
+    isNative: platformState.isNative,
+  }),
+}));
+vi.mock('~/services/stellar-wallet', () => ({
+  mountWalletButton: async (container: HTMLElement) => {
+    mountWalletButtonMock(container);
+    container.textContent = 'Kit wallet button';
+  },
+  connectedWalletAddress: async () => walletState.address,
+  subscribeWalletAddress: async (onChange: (address: string | null) => void) => {
+    walletState.listeners.push(onChange);
+    return () => {};
+  },
+  signWithWallet: async (xdr: string, networkPassphrase: string, address: string) => {
+    signMock(xdr, networkPassphrase, address);
+    if (walletState.signError !== null) throw walletState.signError;
+    return 'SIGNED';
+  },
+}));
 
 const qrTexts: string[] = [];
 vi.mock('qrcode', () => {
@@ -99,10 +136,22 @@ function mkOrder(overrides: Partial<LoopOrderView> = {}): LoopOrderView {
 beforeEach(() => {
   getLoopOrderMock.mockReset();
   qrTexts.length = 0;
+  platformState.isNative = false;
+  walletState.address = null;
+  walletState.listeners.length = 0;
+  walletState.signError = null;
+  fetchTxMock.mockReset();
+  submitTxMock.mockReset();
+  mountWalletButtonMock.mockReset();
+  signMock.mockReset();
 });
 afterEach(cleanup);
 
-describe('LoopPaymentStep — unpaid (ctx payment instructions)', () => {
+describe('LoopPaymentStep — unpaid (ctx payment instructions, native shell)', () => {
+  beforeEach(() => {
+    platformState.isNative = true;
+  });
+
   it('renders the fiat charge, crypto amount + currency, and deposit address', async () => {
     getLoopOrderMock.mockResolvedValue(mkOrder());
     render(wrap(<LoopPaymentStep create={mkCreate()} />));
@@ -264,6 +313,10 @@ describe('LoopPaymentStep — unpaid (ctx payment instructions)', () => {
 });
 
 describe('LoopPaymentStep — wallet method switch', () => {
+  beforeEach(() => {
+    platformState.isNative = true;
+  });
+
   it('shows no switch when CTX supplied a single wallet URI', async () => {
     getLoopOrderMock.mockResolvedValue(mkOrder());
     render(wrap(<LoopPaymentStep create={mkCreate()} />));
@@ -362,6 +415,10 @@ describe('LoopPaymentStep — wallet method switch', () => {
 // the Capacitor native WebView. The scheme must be gated so a dangerous URI
 // never becomes a live href, while a legitimate wallet URI passes through.
 describe('LoopPaymentStep — payment URI XSS gate', () => {
+  beforeEach(() => {
+    platformState.isNative = true;
+  });
+
   const MALICIOUS: Array<[string, string]> = [
     ['javascript:', 'javascript:alert(document.cookie)'],
     ['data:', 'data:text/html,<script>alert(1)</script>'],
@@ -663,5 +720,126 @@ describe('LoopPaymentStep — FE-05 sensitive copy auto-clear', () => {
     expect(screen.queryByRole('button', { name: /Copy to address/i })).toBeNull();
     expect(screen.queryByAltText('Payment QR code')).toBeNull();
     expect(screen.queryByText(/wallet/i)).toBeNull();
+  });
+});
+
+describe('LoopPaymentStep — connected wallet (web)', () => {
+  const WALLET = 'GWALLETAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+  const ORDER_ID = '12345678-aaaa-bbbb-cccc-000000000000';
+
+  it('offers the connected wallet first and switches to the payment URL and WalletConnect', async () => {
+    getLoopOrderMock.mockResolvedValue(mkOrder());
+    render(
+      wrap(
+        <LoopPaymentStep
+          create={mkCreate({ paymentUrls: { XLM: XLM_URI, 'XLM/walletconnect': WC_URI } })}
+        />,
+      ),
+    );
+    await waitFor(() => screen.getByAltText('Payment QR code'));
+    expect(
+      screen.getByRole('button', { name: 'Connect wallet' }).getAttribute('aria-pressed'),
+    ).toBe('true');
+    expect(screen.queryByRole('link', { name: /Open in wallet/i })).toBeNull();
+    expect(qrTexts.at(-1)).toBe(XLM_URI);
+    await waitFor(() => expect(mountWalletButtonMock).toHaveBeenCalledTimes(1));
+    expect(screen.getByText('Kit wallet button')).toBeDefined();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Payment URL' }));
+    expect(screen.getByRole('link', { name: /Open in wallet/i }).getAttribute('href')).toBe(
+      XLM_URI,
+    );
+    expect(screen.queryByText('Kit wallet button')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'WalletConnect' }));
+    await waitFor(() => expect(qrTexts.at(-1)).toBe(WC_URI));
+    expect(screen.getByRole('link', { name: /Open in wallet/i }).getAttribute('href')).toBe(WC_URI);
+  });
+
+  it('pays from the connected wallet: backend builds, wallet signs, backend submits', async () => {
+    getLoopOrderMock.mockResolvedValue(mkOrder());
+    walletState.address = WALLET;
+    fetchTxMock.mockResolvedValue({
+      xdr: 'UNSIGNED',
+      networkPassphrase: 'Test SDF Network ; September 2015',
+    });
+    submitTxMock.mockResolvedValue({ txId: 'tx-1' });
+    render(wrap(<LoopPaymentStep create={mkCreate()} />));
+
+    const pay = await waitFor(() =>
+      screen.getByRole('button', { name: 'Pay 10.0000000 XLM from wallet' }),
+    );
+    fireEvent.click(pay);
+
+    await waitFor(() => screen.getByText(/Payment sent/i));
+    expect(fetchTxMock).toHaveBeenCalledWith(ORDER_ID, { source: WALLET });
+    expect(signMock).toHaveBeenCalledWith('UNSIGNED', 'Test SDF Network ; September 2015', WALLET);
+    expect(submitTxMock).toHaveBeenCalledWith(ORDER_ID, { source: WALLET, signedXdr: 'SIGNED' });
+    expect(screen.queryByRole('button', { name: /from wallet/i })).toBeNull();
+  });
+
+  it('keeps the pay button and shows the reason when the wallet declines', async () => {
+    getLoopOrderMock.mockResolvedValue(mkOrder());
+    walletState.address = WALLET;
+    walletState.signError = new Error('User declined access');
+    fetchTxMock.mockResolvedValue({ xdr: 'UNSIGNED', networkPassphrase: 'Test' });
+    render(wrap(<LoopPaymentStep create={mkCreate()} />));
+
+    fireEvent.click(
+      await waitFor(() => screen.getByRole('button', { name: 'Pay 10.0000000 XLM from wallet' })),
+    );
+
+    await waitFor(() => screen.getByRole('alert'));
+    expect(screen.getByRole('alert').textContent).toBe('User declined access');
+    expect(submitTxMock).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Pay 10.0000000 XLM from wallet' })).toBeDefined();
+  });
+
+  it('shows the pay button once a wallet connects', async () => {
+    getLoopOrderMock.mockResolvedValue(mkOrder());
+    render(wrap(<LoopPaymentStep create={mkCreate()} />));
+    await waitFor(() => expect(walletState.listeners.length).toBe(1));
+    expect(screen.queryByRole('button', { name: /from wallet/i })).toBeNull();
+
+    act(() => {
+      walletState.listeners.forEach((listener) => listener(WALLET));
+    });
+    await waitFor(() => screen.getByRole('button', { name: 'Pay 10.0000000 XLM from wallet' }));
+
+    act(() => {
+      walletState.listeners.forEach((listener) => listener(null));
+    });
+    await waitFor(() => expect(screen.queryByRole('button', { name: /from wallet/i })).toBeNull());
+  });
+
+  it('offers the connected wallet for a Stellar asset too', async () => {
+    getLoopOrderMock.mockResolvedValue(mkOrder());
+    render(
+      wrap(
+        <LoopPaymentStep
+          create={mkCreate({ cryptoCurrency: 'XLM.USDC', paymentUrls: { 'XLM.USDC': XLM_URI } })}
+        />,
+      ),
+    );
+    await waitFor(() => screen.getByRole('button', { name: 'Connect wallet' }));
+    expect(
+      screen.getByRole('button', { name: 'Connect wallet' }).getAttribute('aria-pressed'),
+    ).toBe('true');
+  });
+
+  it('keeps the deep link as the default for a non-Stellar currency', async () => {
+    const DASH_URI = 'dash:XekiLaxnqpFb2m4NQAEcsKutZcZgcyfo6W?amount=0.5';
+    getLoopOrderMock.mockResolvedValue(mkOrder());
+    render(
+      wrap(
+        <LoopPaymentStep
+          create={mkCreate({ cryptoCurrency: 'DASH', paymentUrls: { DASH: DASH_URI } })}
+        />,
+      ),
+    );
+    const link = await waitFor(() => screen.getByRole('link', { name: /Open in wallet/i }));
+    expect(link.getAttribute('href')).toBe(DASH_URI);
+    expect(screen.queryByRole('button', { name: 'Connect wallet' })).toBeNull();
+    expect(mountWalletButtonMock).not.toHaveBeenCalled();
   });
 });

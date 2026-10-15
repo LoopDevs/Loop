@@ -108,3 +108,32 @@ export interface LoopOrderView {
 export interface LoopOrderListResponse {
   orders: LoopOrderView[];
 }
+
+/**
+ * Connected-wallet payment for a Stellar order. Loop relays both calls to
+ * CTX acting as the customer: CTX builds the unsigned payment from
+ * `source` to its own deposit address, the wallet signs it in the
+ * browser, and CTX verifies + submits the signed envelope.
+ */
+export interface LoopStellarTransactionRequest {
+  /** Stellar account (G...) that will sign and fund the payment. */
+  source: string;
+}
+
+export interface LoopStellarTransactionResponse {
+  /** Unsigned transaction envelope, base64 XDR. */
+  xdr: string;
+  /** Network passphrase the wallet must sign against. */
+  networkPassphrase: string;
+}
+
+export interface LoopStellarSubmitRequest {
+  source: string;
+  /** Signed transaction envelope, base64 XDR. */
+  signedXdr: string;
+}
+
+export interface LoopStellarSubmitResponse {
+  /** Transaction hash as accepted by the network. */
+  txId: string;
+}

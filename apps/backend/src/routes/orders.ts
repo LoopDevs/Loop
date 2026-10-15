@@ -9,6 +9,10 @@ import { orderBarcodeImageHandler } from '../orders/barcode-image-handler.js';
 import { loopCreateOrderHandler } from '../orders/loop-handler.js';
 import { loopGetOrderHandler, loopListOrdersHandler } from '../orders/loop-read-handlers.js';
 import { loopOrderBarcodeImageHandler } from '../orders/loop-barcode-image-handler.js';
+import {
+  loopStellarSubmitHandler,
+  loopStellarTransactionHandler,
+} from '../orders/loop-stellar-wallet-handlers.js';
 
 export function mountOrderRoutes(app: Hono): void {
   // Cache-Control must precede requireAuth so 401s carry private, no-store
@@ -37,6 +41,16 @@ export function mountOrderRoutes(app: Hono): void {
     '/api/orders/loop/:id/barcode-image',
     rateLimit('GET /api/orders/loop/:id/barcode-image', 60, 60_000),
     loopOrderBarcodeImageHandler,
+  );
+  app.post(
+    '/api/orders/loop/:id/stellar/transaction',
+    rateLimit('POST /api/orders/loop/:id/stellar/transaction', 20, 60_000),
+    loopStellarTransactionHandler,
+  );
+  app.post(
+    '/api/orders/loop/:id/stellar/submit',
+    rateLimit('POST /api/orders/loop/:id/stellar/submit', 20, 60_000),
+    loopStellarSubmitHandler,
   );
   app.get('/api/orders/:id', rateLimit('GET /api/orders/:id', 120, 60_000), getOrderHandler);
   // ADR 050: authed, reference-keyed barcode-image proxy

@@ -20,6 +20,10 @@ import type {
   LoopOrderListResponse,
   LoopOrderPaymentInstructions,
   LoopOrderView,
+  LoopStellarSubmitRequest,
+  LoopStellarSubmitResponse,
+  LoopStellarTransactionRequest,
+  LoopStellarTransactionResponse,
   OrderState,
 } from '@loop/shared';
 import { authenticatedRequest } from './api-client';
@@ -72,6 +76,28 @@ export async function createLoopOrder(
 /** GET /api/orders/loop/:id — owner-scoped read of a Loop-native order. */
 export async function getLoopOrder(id: string): Promise<LoopOrderView> {
   return authenticatedRequest<LoopOrderView>(`/api/orders/loop/${encodeURIComponent(id)}`);
+}
+
+/** POST /api/orders/loop/:id/stellar/transaction — CTX builds the unsigned payment for the connected account. */
+export async function fetchStellarTransaction(
+  id: string,
+  body: LoopStellarTransactionRequest,
+): Promise<LoopStellarTransactionResponse> {
+  return authenticatedRequest<LoopStellarTransactionResponse>(
+    `/api/orders/loop/${encodeURIComponent(id)}/stellar/transaction`,
+    { method: 'POST', body },
+  );
+}
+
+/** POST /api/orders/loop/:id/stellar/submit — CTX verifies and submits the wallet-signed envelope. */
+export async function submitStellarTransaction(
+  id: string,
+  body: LoopStellarSubmitRequest,
+): Promise<LoopStellarSubmitResponse> {
+  return authenticatedRequest<LoopStellarSubmitResponse>(
+    `/api/orders/loop/${encodeURIComponent(id)}/stellar/submit`,
+    { method: 'POST', body },
+  );
 }
 
 /** GET /api/orders/loop/:id/barcode-image — CTX-rendered barcode as an authed JPEG blob. */

@@ -28,6 +28,7 @@
     "@capacitor/share": "8.0.1",
     "@capacitor/status-bar": "8.0.2",
     "@capgo/inappbrowser": "8.6.2",
+    "@creit.tech/stellar-wallets-kit": "2.7.1",
     "@loop/shared": "*",
     "@react-router/node": "7.18.2",
     "@react-router/serve": "7.18.2",

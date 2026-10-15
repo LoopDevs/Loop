@@ -16,6 +16,8 @@ import { Button } from '~/components/ui/Button';
 import { safeRedeemHref, safePaymentUriHref } from '~/native/webview';
 import { formatMinorCurrency, useLocaleTag } from '~/i18n/format';
 import { copySensitive } from '~/native/clipboard';
+import { useNativePlatform } from '~/hooks/use-native-platform';
+import { StellarWalletPay } from './StellarWalletPay';
 
 export interface LoopPaymentStepProps {
   /** Result of `createLoopOrder` — CTX's payment instructions we display to the user. */
@@ -146,7 +148,7 @@ export function LoopPaymentStep({
       ) : state === 'paid' ? (
         <PaidBody />
       ) : (
-        <CtxPaymentBody payment={create.payment} onBack={onBack} />
+        <CtxPaymentBody orderId={create.orderId} payment={create.payment} onBack={onBack} />
       )}
     </section>
   );
@@ -249,10 +251,14 @@ function FailureBody({
 }
 
 interface WalletMethod {
-  id: 'uri' | 'walletconnect';
+  id: 'wallet' | 'uri' | 'walletconnect';
   label: string;
   help: string;
-  href: string;
+  href: string | null;
+}
+
+function isStellarCurrency(currency: string): boolean {
+  return currency === 'XLM' || currency.startsWith('XLM.');
 }
 
 function paymentUriHelp(href: string): string {
@@ -279,9 +285,20 @@ function paymentUriHelp(href: string): string {
 // an anchor would execute on tap inside the native WebView. Gate every
 // value to the wallet-scheme allow-list; a rejected URI is dropped and
 // the address copy path still lets the user pay.
-function walletMethods(payment: LoopOrderPaymentInstructions): WalletMethod[] {
+function walletMethods(
+  payment: LoopOrderPaymentInstructions,
+  connectWallet: boolean,
+): WalletMethod[] {
   if (payment.method === 'fiat') return [];
   const methods: WalletMethod[] = [];
+  if (connectWallet && isStellarCurrency(payment.cryptoCurrency) && payment.address !== null) {
+    methods.push({
+      id: 'wallet',
+      label: 'Connect wallet',
+      help: 'Connects a browser wallet such as Freighter, xBull or Lobstr and signs the payment here',
+      href: null,
+    });
+  }
   const uri = payment.paymentUrls[payment.cryptoCurrency];
   const uriHref = uri !== undefined ? safePaymentUriHref(uri) : null;
   if (uriHref !== null) {
@@ -303,26 +320,29 @@ function walletMethods(payment: LoopOrderPaymentInstructions): WalletMethod[] {
 /**
  * `unpaid` — CTX's payment instructions (ADR 052). The customer pays
  * CTX directly: fiat charge, crypto amount + currency, deposit address
- * with copy + QR, an "Open in wallet" deep-link for each wallet method
- * CTX supplied (switchable when there is more than one), and a
- * countdown to the payment-window expiry (hidden when CTX didn't
- * report one).
+ * with copy + QR, a wallet method switch (the connected-wallet pay flow
+ * first on web for Stellar currencies, then an "Open in wallet"
+ * deep-link per URI CTX supplied), and a countdown to the
+ * payment-window expiry (hidden when CTX didn't report one).
  */
 function CtxPaymentBody({
+  orderId,
   payment,
   onBack,
 }: {
+  orderId: string;
   payment: LoopOrderPaymentInstructions;
   onBack: (() => void) | undefined;
 }): React.JSX.Element {
   const locale = useLocaleTag();
+  const { isNative } = useNativePlatform();
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
-  const [methodId, setMethodId] = useState<WalletMethod['id']>('uri');
+  const [methodId, setMethodId] = useState<WalletMethod['id']>('wallet');
   const secondsLeft = useSecondsLeft(payment.expiresAt);
   const expired = secondsLeft !== null && secondsLeft <= 0;
 
   const isFiat = payment.method === 'fiat';
-  const methods = walletMethods(payment);
+  const methods = walletMethods(payment, !isNative);
   const method = methods.find((m) => m.id === methodId) ?? methods[0] ?? null;
   const fiatUri = payment.paymentUrls[payment.cryptoCurrency];
   const paymentHref = isFiat
@@ -330,10 +350,13 @@ function CtxPaymentBody({
       ? safeRedeemHref(fiatUri)
       : null
     : (method?.href ?? null);
+  const connectWallet = !isFiat && method?.id === 'wallet';
 
   // QR encodes the wallet URI when CTX supplied one (wallets prefill
   // amount + destination from it) and falls back to the bare address.
-  const qrContent = isFiat ? null : (paymentHref ?? payment.address);
+  const qrContent = isFiat
+    ? null
+    : (paymentHref ?? methods.find((m) => m.id === 'uri')?.href ?? payment.address);
 
   useEffect(() => {
     if (qrContent === null) return;
@@ -379,6 +402,17 @@ function CtxPaymentBody({
         <div className="flex justify-center">
           <img src={qrDataUrl} alt="Payment QR code" className="rounded-lg" />
         </div>
+      ) : null}
+
+      {connectWallet && !expired ? (
+        <StellarWalletPay
+          orderId={orderId}
+          amountLabel={
+            payment.cryptoAmount !== null
+              ? `${payment.cryptoAmount} ${payment.cryptoCurrency}`
+              : payment.cryptoCurrency
+          }
+        />
       ) : null}
 
       {paymentHref !== null && !expired ? (
