@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { CASHBACK_DESTINATIONS, type CashbackDestination, type StaffRole } from '@loop/shared';
 import { db } from '../db/client.js';
 import { resolveLoopAuthenticatedUser } from '../auth/authenticated-user.js';
-import { applyCtxUserMirror, type CtxUserMirror, type User } from '../db/users.js';
+import { cacheCtxUser, type CtxUser, type User } from '../db/users.js';
 import { getStaffRole } from '../db/staff-roles.js';
 import {
   CtxUserRolesError,
@@ -128,18 +128,9 @@ export async function setStableCurrencyHandler(c: Context): Promise<Response> {
     );
   }
 
-  if (user.ctxUserId === null) {
-    return c.json(
-      {
-        code: 'SERVICE_UNAVAILABLE',
-        message: 'Your account is still being set up with our supplier — please retry shortly',
-      },
-      503,
-    );
-  }
-  let mirror: CtxUserMirror;
+  let ctxUser: CtxUser;
   try {
-    mirror = await updateCtxStableCurrency(user.ctxUserId, parsed.data.stableCurrency);
+    ctxUser = await updateCtxStableCurrency(user.id, parsed.data.stableCurrency);
   } catch (err) {
     if (err instanceof CtxUserRolesError && err.status === 400) {
       return c.json({ code: 'VALIDATION_ERROR', message: 'Currency not supported' }, 400);
@@ -151,10 +142,7 @@ export async function setStableCurrencyHandler(c: Context): Promise<Response> {
     );
   }
 
-  const updated = await applyCtxUserMirror(user.id, mirror);
-  if (updated === null) {
-    return c.json({ code: 'NOT_FOUND', message: 'User not found' }, 404);
-  }
+  const { user: updated } = await cacheCtxUser(ctxUser);
   return c.json<UserMeView>(await toView(updated));
 }
 
@@ -185,18 +173,9 @@ export async function setCashbackDestinationHandler(c: Context): Promise<Respons
   if ((user.cashbackDestination ?? 'account') === destination) {
     return c.json<UserMeView>(await toView(user));
   }
-  if (user.ctxUserId === null) {
-    return c.json(
-      {
-        code: 'SERVICE_UNAVAILABLE',
-        message: 'Your account is still being set up with our supplier — please retry shortly',
-      },
-      503,
-    );
-  }
-  let mirror: CtxUserMirror;
+  let ctxUser: CtxUser;
   try {
-    mirror = await updateCtxCashbackDestination(user.ctxUserId, destination);
+    ctxUser = await updateCtxCashbackDestination(user.id, destination);
   } catch (err) {
     if (err instanceof CtxUserRolesError && err.status === 400) {
       return c.json({ code: 'VALIDATION_ERROR', message: 'Destination not supported' }, 400);
@@ -207,10 +186,7 @@ export async function setCashbackDestinationHandler(c: Context): Promise<Respons
       503,
     );
   }
-  const updated = await applyCtxUserMirror(user.id, mirror);
-  if (updated === null) {
-    return c.json({ code: 'NOT_FOUND', message: 'User not found' }, 404);
-  }
+  const { user: updated } = await cacheCtxUser(ctxUser);
   return c.json<UserMeView>(await toView(updated));
 }
 
@@ -249,18 +225,9 @@ export async function setCountryHandler(c: Context): Promise<Response> {
   if (user.country === country) {
     return c.json<UserMeView>(await toView(user));
   }
-  if (user.ctxUserId === null) {
-    return c.json(
-      {
-        code: 'SERVICE_UNAVAILABLE',
-        message: 'Your account is still being set up with our supplier — please retry shortly',
-      },
-      503,
-    );
-  }
-  let mirror: CtxUserMirror;
+  let ctxUser: CtxUser;
   try {
-    mirror = await updateCtxCountry(user.ctxUserId, country);
+    ctxUser = await updateCtxCountry(user.id, country);
   } catch (err) {
     if (err instanceof CtxUserRolesError && err.status === 400) {
       return c.json({ code: 'VALIDATION_ERROR', message: 'Country not supported' }, 400);
@@ -271,10 +238,7 @@ export async function setCountryHandler(c: Context): Promise<Response> {
       503,
     );
   }
-  const updated = await applyCtxUserMirror(user.id, mirror);
-  if (updated === null) {
-    return c.json({ code: 'NOT_FOUND', message: 'User not found' }, 404);
-  }
+  const { user: updated } = await cacheCtxUser(ctxUser);
   return c.json<UserMeView>(await toView(updated));
 }
 

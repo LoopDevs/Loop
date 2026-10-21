@@ -14,11 +14,10 @@ import {
   clearOtpAttempts,
   OTP_EMAIL_LOCKOUT_MS,
 } from './otp-attempt-counter.js';
-import { enqueueCtxUserProvisioning } from '../ctx/user-provisioning.js';
-import { enqueueCtxUserSync, syncCtxUser } from '../ctx/user-roles.js';
+import { ctxSignInErrorResponse, signInCtxUserByEmail, signInCtxUserById } from './ctx-login.js';
 import { normalizeEmail, NonAsciiEmailError } from './normalize-email.js';
 import { verifyLoopToken, isLoopAuthConfigured } from './tokens.js';
-import { resolveOrCreateUserByEmail, getUserTokenVersion } from '../db/users.js';
+import { getUserTokenVersion } from '../db/users.js';
 import {
   findLiveRefreshToken,
   findRefreshTokenRecord,
@@ -92,19 +91,18 @@ export async function nativeVerifyOtpHandler(c: Context): Promise<Response> {
     }
     // B5: legitimate verify clears the email's failed-attempt counter
     await clearOtpAttempts(email);
-    const { user, created } = await resolveOrCreateUserByEmail(email, parsed.data.country);
-    await syncCtxUser(user);
+    const { user, created } = await signInCtxUserByEmail(email, parsed.data.country);
     // NS-09: stamp current token_version for invalidation support
     const pair = await issueTokenPair({
       id: user.id,
       email: user.email,
       tokenVersion: user.tokenVersion,
     });
-    // Attributed-operator-traffic: self-heals provisioning on every login
-    enqueueCtxUserProvisioning(user);
     // A2-557: strip internal fields for wire contract
     return c.json({ accessToken: pair.accessToken, refreshToken: pair.refreshToken, created });
   } catch (err) {
+    const refused = ctxSignInErrorResponse(c, err);
+    if (refused !== null) return refused;
     log.error({ err, email }, 'Native verify-otp failed unexpectedly');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Verification failed' }, 500);
   }
@@ -155,7 +153,8 @@ export async function nativeRefreshHandler(c: Context): Promise<Response> {
       log.warn({ sub: claims.sub }, 'Refresh for a user row that no longer exists');
       return c.json({ code: 'UNAUTHORIZED', message: 'Invalid refresh token' }, 401);
     }
-    const minted = mintTokenPair({ id: claims.sub, email: claims.email, tokenVersion });
+    const user = await signInCtxUserById(claims.sub);
+    const minted = mintTokenPair({ id: user.id, email: user.email, tokenVersion });
     const won = await tryRevokeIfLive({ jti: claims.jti, replacedByJti: minted.refreshJti });
     if (!won) {
       // Concurrent rotation lost the race
@@ -167,10 +166,11 @@ export async function nativeRefreshHandler(c: Context): Promise<Response> {
     }
     // Fail-closed: if persist fails, old token is revoked and successor is not stored
     await persistMintedRefreshToken(minted);
-    enqueueCtxUserSync(claims.sub);
     // Strip internal fields for wire contract
     return c.json({ accessToken: minted.accessToken, refreshToken: minted.refreshToken });
   } catch (err) {
+    const refused = ctxSignInErrorResponse(c, err);
+    if (refused !== null) return refused;
     log.error({ err }, 'Native refresh failed unexpectedly');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Refresh failed' }, 500);
   }

@@ -27,7 +27,7 @@ function toView(row: UserDoc): AdminUserView {
     email: row.email,
     isAdmin: row.isAdmin,
     stableCurrency: row.stableCurrency,
-    ctxUserId: row.ctxUserId,
+    ctxUserId: row.id,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

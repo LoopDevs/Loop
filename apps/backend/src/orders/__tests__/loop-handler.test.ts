@@ -48,7 +48,6 @@ vi.mock('../../logger.js', () => ({
 
 const {
   merchantsState,
-  usersState,
   repoState,
   ctxFetchMock,
   ctxOrderState,
@@ -58,7 +57,6 @@ const {
   merchantsState: {
     map: new Map<string, { id: string; name: string; enabled: boolean; denominations?: unknown }>(),
   },
-  usersState: { ctxUserId: 'ctx-u-1' as string | null },
   repoState: {
     created: undefined as Record<string, unknown> | undefined,
     priorByKey: null as Record<string, unknown> | null,
@@ -77,24 +75,18 @@ vi.mock('../../merchants/sync.js', () => ({
   getMerchants: () => ({ merchantsById: merchantsState.map }),
 }));
 vi.mock('../../db/users.js', () => ({
-  getUserCtxUserId: vi.fn(async () => usersState.ctxUserId),
   getUserById: vi.fn(async () => ({ id: 'user-uuid', email: 'a@b.com' })),
 }));
 vi.mock('../../ctx/user-provisioning.js', async (importActual) => {
   const actual = (await importActual()) as Record<string, unknown>;
   return {
     ...actual,
-    provisionCtxUser: vi.fn(async () => undefined),
-    resolveCtxUserId: vi.fn(async () => usersState.ctxUserId),
-    ctxActAsHeaders: (ctxUserId: string | null, clientId?: string) =>
-      ctxUserId === null
-        ? null
-        : {
-            'X-Api-Key': 'k',
-            'X-Api-Secret': 's',
-            'X-User-Id': ctxUserId,
-            'X-Client-Id': clientId ?? 'loopweb',
-          },
+    ctxActAsHeaders: (ctxUserId: string, clientId?: string) => ({
+      'X-Api-Key': 'k',
+      'X-Api-Secret': 's',
+      'X-User-Id': ctxUserId,
+      'X-Client-Id': clientId ?? 'loopweb',
+    }),
   };
 });
 vi.mock('../../ctx/api-fetch.js', async (importActual) => {
@@ -214,7 +206,6 @@ function ctx201(body?: Record<string, unknown>): Response {
 beforeEach(() => {
   configState.nativeAuthEnabled = true;
   merchantsState.map = new Map([['amazon', { id: 'amazon', name: 'Amazon', enabled: true }]]);
-  usersState.ctxUserId = 'ctx-u-1';
   repoState.created = undefined;
   repoState.priorByKey = null;
   ctxFetchMock.mockReset();
@@ -315,15 +306,6 @@ describe('gate ladder', () => {
     );
     expect(res.status).toBe(400);
   });
-
-  it('503s when the CTX customer mapping cannot be resolved', async () => {
-    usersState.ctxUserId = null;
-    const res = await loopCreateOrderHandler(
-      makeCtx({ auth: LOOP_AUTH, clientId: 'loopweb', body: GOOD_BODY }),
-    );
-    expect(res.status).toBe(503);
-    expect(ctxFetchMock).not.toHaveBeenCalled();
-  });
 });
 
 describe('the CTX create call', () => {
@@ -350,7 +332,7 @@ describe('the CTX create call', () => {
       operatorReference: 'o-local-1',
     });
     const headers = init.headers as Record<string, string>;
-    expect(headers['X-User-Id']).toBe('ctx-u-1');
+    expect(headers['X-User-Id']).toBe('user-uuid');
     expect(headers['X-Client-Id']).toBe('loopios');
   });
 

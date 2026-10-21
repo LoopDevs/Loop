@@ -6,7 +6,6 @@ import { toLiteMerchant } from './lite.js';
 import { upstreamUrl, upstreamFetch } from '../upstream.js';
 import { logger } from '../logger.js';
 import type { LoopAuthContext } from '../auth/require-auth.js';
-import { getUserCtxUserId } from '../db/users.js';
 import { ctxActAsHeaders } from '../ctx/user-provisioning.js';
 
 const log = logger.child({ handler: 'merchants' });
@@ -108,9 +107,9 @@ export async function merchantDetailHandler(c: Context): Promise<Response> {
     // Loop JWT is not forwardable to CTX; act-as headers required for native users
     const clientId = c.get('clientId') as string | undefined;
     const auth = c.get('auth') as LoopAuthContext | undefined;
-    let headers: Record<string, string> | null;
+    let headers: Record<string, string>;
     if (auth?.kind === 'loop') {
-      headers = ctxActAsHeaders(await getUserCtxUserId(auth.userId), clientId);
+      headers = ctxActAsHeaders(auth.userId, clientId);
     } else {
       const bearer = c.get('bearerToken') as string | undefined;
       headers = {};
@@ -118,30 +117,28 @@ export async function merchantDetailHandler(c: Context): Promise<Response> {
       if (clientId) headers['X-Client-Id'] = clientId;
     }
 
-    if (headers !== null) {
-      const response = await upstreamFetch(upstreamUrl(`/merchants/${id}`), {
-        headers,
-        signal: AbortSignal.timeout(10_000),
-      });
+    const response = await upstreamFetch(upstreamUrl(`/merchants/${id}`), {
+      headers,
+      signal: AbortSignal.timeout(10_000),
+    });
 
-      if (response.ok) {
-        const raw = (await response.json().catch(() => null)) as unknown;
-        const parsed = UpstreamMerchantDetailResponse.safeParse(raw);
-        if (parsed.success && parsed.data.info) {
-          const { intro, description, longDescription, terms, instructions } = parsed.data.info;
-          // longDescription is full-length body copy; description is often just a headline repeat
-          if (longDescription) merchant.description = longDescription;
-          else if (description) merchant.description = description;
-          if (intro) merchant.intro = intro;
-          if (terms) merchant.terms = terms;
-          if (instructions) merchant.instructions = instructions;
-        }
-      } else {
-        log.warn(
-          { id, status: response.status },
-          'Upstream /merchants/:id returned non-OK — serving cached',
-        );
+    if (response.ok) {
+      const raw = (await response.json().catch(() => null)) as unknown;
+      const parsed = UpstreamMerchantDetailResponse.safeParse(raw);
+      if (parsed.success && parsed.data.info) {
+        const { intro, description, longDescription, terms, instructions } = parsed.data.info;
+        // longDescription is full-length body copy; description is often just a headline repeat
+        if (longDescription) merchant.description = longDescription;
+        else if (description) merchant.description = description;
+        if (intro) merchant.intro = intro;
+        if (terms) merchant.terms = terms;
+        if (instructions) merchant.instructions = instructions;
       }
+    } else {
+      log.warn(
+        { id, status: response.status },
+        'Upstream /merchants/:id returned non-OK — serving cached',
+      );
     }
   } catch (err) {
     log.warn(

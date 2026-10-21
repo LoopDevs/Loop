@@ -108,13 +108,7 @@ async function fetchUpstreamOrders(
     url.searchParams.set(key, value);
   }
 
-  const headers = await upstreamHeaders(c);
-  if (headers === null) {
-    return {
-      ok: true,
-      data: { result: [], pagination: { page: 1, pages: 0, perPage: 0, total: 0 } },
-    };
-  }
+  const headers = upstreamHeaders(c);
 
   const response = await upstreamFetch(url.toString(), {
     headers,

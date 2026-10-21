@@ -3,6 +3,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type * as ConfigModule from '../../config/index.js';
 import type { Context } from 'hono';
+import type * as CtxLoginModule from '../ctx-login.js';
 
 interface StoreRow {
   jti: string;
@@ -122,8 +123,9 @@ vi.mock('../refresh-tokens.js', () => ({
     }
   },
 }));
-vi.mock('../../ctx/user-roles.js', () => ({
-  enqueueCtxUserSync: vi.fn(),
+vi.mock('../ctx-login.js', async (importActual) => ({
+  ...(await importActual<typeof CtxLoginModule>()),
+  signInCtxUserById: async (id: string) => ({ id, email: 'a@b.com', tokenVersion: 0 }),
 }));
 // NS-09: the refresh handler reads the user's current token_version to
 // stamp the rotated access token. This suite is about the refresh-row

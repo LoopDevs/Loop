@@ -60,7 +60,7 @@ export async function buildDsrExport(userId: string): Promise<DsrExport | null> 
       email: userDoc.email,
       stableCurrency: userDoc.stableCurrency,
       createdAt: userDoc.createdAt.toISOString(),
-      ctxUserId: userDoc.ctxUserId,
+      ctxUserId: userDoc.id,
     },
     identities: identities.map((r) => ({
       id: r.id,

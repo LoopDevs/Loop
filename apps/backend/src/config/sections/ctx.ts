@@ -29,13 +29,6 @@ export const ctxSchema = z.object({
       android: z.string().default(DEFAULT_CLIENT_IDS.android),
     })
     .prefault({}),
-
-  // Attribution contract: creates CTX customer under Loop operator company for `X-User-Id` act-as
-  userProvisioning: z
-    .object({
-      enabled: z.boolean().default(true),
-    })
-    .prefault({}),
 });
 
 export const catalogSchema = z

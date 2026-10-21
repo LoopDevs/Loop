@@ -2,7 +2,7 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
 import { UUID_RE } from '../uuid.js';
-import { applyCtxUserMirror, getUserById, type User } from '../db/users.js';
+import { cacheCtxUser, getUserById, type User } from '../db/users.js';
 import { CtxUserRolesError, updateCtxStableCurrency } from '../ctx/user-roles.js';
 import { notifyAdminAudit } from '../discord.js';
 import { logger } from '../logger.js';
@@ -36,13 +36,6 @@ class StableCurrencyUnchangedError extends Error {
   constructor() {
     super('User is already on that stable currency');
     this.name = 'StableCurrencyUnchangedError';
-  }
-}
-
-class CtxUserUnprovisionedError extends Error {
-  constructor() {
-    super('User has no CTX account yet');
-    this.name = 'CtxUserUnprovisionedError';
   }
 }
 
@@ -100,10 +93,8 @@ export async function adminStableCurrencySetHandler(c: Context): Promise<Respons
         if (target.stableCurrency === parsed.data.stableCurrency) {
           throw new StableCurrencyUnchangedError();
         }
-        if (target.ctxUserId === null) throw new CtxUserUnprovisionedError();
-        const mirror = await updateCtxStableCurrency(target.ctxUserId, parsed.data.stableCurrency);
-        const updated = await applyCtxUserMirror(userId, mirror);
-        if (updated === null) throw new StableCurrencyUnchangedError();
+        const ctxUser = await updateCtxStableCurrency(userId, parsed.data.stableCurrency);
+        const { user: updated } = await cacheCtxUser(ctxUser);
         const updatedAt = updated.updatedAt;
 
         const result: StableCurrencySetResult = {
@@ -131,9 +122,6 @@ export async function adminStableCurrencySetHandler(c: Context): Promise<Respons
         },
         409,
       );
-    }
-    if (err instanceof CtxUserUnprovisionedError) {
-      return c.json({ code: 'CTX_USER_UNPROVISIONED', message: err.message }, 409);
     }
     if (err instanceof CtxUserRolesError && err.status === 400) {
       return c.json({ code: 'STABLE_CURRENCY_REJECTED', message: err.message }, 409);

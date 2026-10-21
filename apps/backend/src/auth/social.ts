@@ -4,11 +4,10 @@ import { logger } from '../logger.js';
 import { config } from '../config/index.js';
 import { verifyIdToken, type VerifyIdTokenResult } from './id-token.js';
 import { consumeIdToken } from './id-token-replay.js';
-import { resolveOrCreateUserForIdentity } from './identities.js';
+import { signInUserForIdentity } from './identities.js';
+import { ctxSignInErrorResponse } from './ctx-login.js';
 import { isLoopAuthConfigured } from './tokens.js';
 import { issueTokenPair } from './issue-token-pair.js';
-import { enqueueCtxUserProvisioning } from '../ctx/user-provisioning.js';
-import { syncCtxUser } from '../ctx/user-roles.js';
 import type { SocialProvider } from '../db/types.js';
 // D1: request body schema matches OpenAPI spec
 import { SocialLoginBody as Body } from './social-schemas.js';
@@ -104,20 +103,18 @@ export function makeSocialLoginHandler(providerConfig: SocialProviderConfig) {
     }
 
     try {
-      const { user, created } = await resolveOrCreateUserForIdentity({
+      const { user, created } = await signInUserForIdentity({
         provider: providerConfig.provider,
         providerSub: claims.sub,
         email,
         country: parsed.data.country,
       });
-      await syncCtxUser(user);
       // NS-09: stamp token_version for revocability
       const pair = await issueTokenPair({
         id: user.id,
         email: user.email,
         tokenVersion: user.tokenVersion,
       });
-      enqueueCtxUserProvisioning(user);
       return c.json({
         accessToken: pair.accessToken,
         refreshToken: pair.refreshToken,
@@ -125,6 +122,8 @@ export function makeSocialLoginHandler(providerConfig: SocialProviderConfig) {
         created,
       });
     } catch (err) {
+      const refused = ctxSignInErrorResponse(c, err);
+      if (refused !== null) return refused;
       log.error({ err, provider: providerConfig.provider }, 'Social login failed unexpectedly');
       return c.json({ code: 'INTERNAL_ERROR', message: 'Social sign-in failed' }, 500);
     }

@@ -20,8 +20,8 @@ async function seedUser(overrides: Partial<UserDoc> = {}): Promise<UserDoc> {
   const now = new Date();
   const doc: UserDoc = {
     id: 'u-1',
-    ctxUserId: 'ctx-1',
     email: 'real@b.com',
+    status: 'enabled',
     tokenVersion: 0,
     stableCurrency: 'XLM.USDC',
     isAdmin: false,
@@ -76,7 +76,6 @@ describe('deleteUserViaAnonymisation (A2-1905)', () => {
       expect(out).toEqual({ ok: false, blockedBy: 'in_flight_orders' });
       const user = await db.collection('users').findOne({ id: 'u-1' });
       expect(user?.email).toBe('real@b.com');
-      expect(user?.ctxUserId).toBe('ctx-1');
       expect(revokeMock).not.toHaveBeenCalled();
     },
   );
@@ -122,7 +121,6 @@ describe('deleteUserViaAnonymisation (A2-1905)', () => {
 
     const user = await db.collection('users').findOne({ id: 'u-1' });
     expect(user?.email).toBe('deleted-u-1@deleted.loopfinance.io');
-    expect(user?.ctxUserId).toBeNull();
 
     expect(await db.collection('user_identities').count({ userId: 'u-1' })).toBe(0);
     expect(await db.collection('user_identities').count({ userId: 'u-other' })).toBe(1);

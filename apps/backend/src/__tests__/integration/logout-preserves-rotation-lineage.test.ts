@@ -54,8 +54,8 @@ async function seedChain(): Promise<{
   const seededAt = new Date();
   await db.collection('users').insertOne({
     id: userId,
-    ctxUserId: null,
     email: `cor11-${Date.now()}@test.local`,
+    status: 'enabled',
     tokenVersion: 0,
     stableCurrency: 'XLM.USDC',
     isAdmin: false,

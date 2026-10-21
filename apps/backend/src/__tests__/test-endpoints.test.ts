@@ -25,12 +25,14 @@ vi.mock('../config/index.js', async (importActual) => {
   };
 });
 
-vi.mock('../db/users.js', () => ({
-  findOrCreateUserByEmail: vi.fn(async (email: string) => ({
-    id: 'user-1',
-    email,
-    isAdmin: false,
+const signInByEmailMock = vi.hoisted(() =>
+  vi.fn(async (email: string) => ({
+    user: { id: 'user-1', email, tokenVersion: 0, isAdmin: false },
+    created: false,
   })),
+);
+vi.mock('../auth/ctx-login.js', () => ({
+  signInCtxUserByEmail: signInByEmailMock,
 }));
 
 vi.mock('../auth/issue-token-pair.js', () => ({
@@ -51,7 +53,7 @@ vi.mock('../health.js', () => ({
 import { mountTestEndpoints } from '../test-endpoints.js';
 
 const SECRET = 'correct-secret-at-least-16-chars';
-const MINT_BODY = JSON.stringify({ email: 'someone@example.com' });
+const MINT_BODY = JSON.stringify({ email: 'Someone@Example.com' });
 
 function buildApp(): Hono {
   const app = new Hono();
@@ -145,6 +147,7 @@ describe('mountTestEndpoints — AUDIT-2-E secret gate', () => {
     const body = (await res.json()) as { accessToken: string; refreshToken: string };
     expect(body.accessToken).toBe('access-token-stub');
     expect(body.refreshToken).toBe('refresh-token-stub');
+    expect(signInByEmailMock).toHaveBeenCalledWith('someone@example.com');
   });
 
   it('resets successfully when NODE_ENV=test AND the correct secret is presented', async () => {

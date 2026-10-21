@@ -11,6 +11,7 @@ import {
 import { getEmailProvider } from './email.js';
 import { normalizeEmail, NonAsciiEmailError } from './normalize-email.js';
 import { RequestOtpBody } from './request-schemas.js';
+import { ctxSignInErrorResponse, registerCtxUserForOtp } from './ctx-login.js';
 
 const log = logger.child({ handler: 'auth-native' });
 
@@ -42,6 +43,8 @@ export async function nativeRequestOtpHandler(c: Context): Promise<Response> {
       return c.json({ message: 'Verification code sent' });
     }
 
+    await registerCtxUserForOtp(email);
+
     const code = generateOtpCode();
     const { expiresAt } = await createOtp({ email, code });
 
@@ -60,6 +63,8 @@ export async function nativeRequestOtpHandler(c: Context): Promise<Response> {
 
     return c.json({ message: 'Verification code sent' });
   } catch (err) {
+    const refused = ctxSignInErrorResponse(c, err);
+    if (refused !== null) return refused;
     // A4-002: match the CTX-proxy enumeration-defense response shape.
     // The CTX-proxy `requestOtpHandler` collapses every internal
     // failure into a generic 200 envelope so an attacker probing the

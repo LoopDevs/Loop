@@ -65,11 +65,6 @@ ctx:
     web: loopweb
     ios: loopios
     android: loopandroid
-  userProvisioning:
-    # Create a CTX customer per Loop-native user under Loop's operator
-    # company, so procurement can act-as that customer. Set false only in
-    # an environment with no CTX-side Loop company.
-    enabled: true
 
 # ── Merchant catalog ────────────────────────────────────────────────
 catalog:

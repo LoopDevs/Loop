@@ -3,15 +3,11 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { db, __resetDbForTests } from '../client.js';
 import { UniqueViolationError } from '../errors.js';
 import {
-  upsertUserFromCtx,
   getUserById,
-  getUserCtxUserId,
-  setUserCtxUserId,
   getUserTokenVersion,
   bumpUserTokenVersion,
-  findOrCreateUserByEmail,
-  resolveOrCreateUserByEmail,
-  applyCtxUserMirror,
+  cacheCtxUser,
+  type CtxUser,
 } from '../users.js';
 import type { UserDoc } from '../types.js';
 
@@ -23,8 +19,8 @@ async function seedUser(overrides: Partial<UserDoc> = {}): Promise<UserDoc> {
   const now = new Date();
   const doc: UserDoc = {
     id: overrides.id ?? 'uuid-seed',
-    ctxUserId: null,
     email: 'seed@b.com',
+    status: 'enabled',
     tokenVersion: 0,
     stableCurrency: 'XLM.USDC',
     isAdmin: false,
@@ -36,37 +32,18 @@ async function seedUser(overrides: Partial<UserDoc> = {}): Promise<UserDoc> {
   return doc;
 }
 
-describe('upsertUserFromCtx', () => {
-  it('inserts a fresh row (with defaults) for an unknown CTX user id', async () => {
-    const user = await upsertUserFromCtx({ ctxUserId: 'ctx-1', email: 'a@b.com' });
-    expect(user.ctxUserId).toBe('ctx-1');
-    expect(user.email).toBe('a@b.com');
-    expect(user.tokenVersion).toBe(0);
-    expect(user.stableCurrency).toBe('');
-    const stored = await db.collection('users').findOne({ ctxUserId: 'ctx-1' });
-    expect(stored?.id).toBe(user.id);
-  });
-
-  it('stores an empty-string email when the token carried none', async () => {
-    const user = await upsertUserFromCtx({ ctxUserId: 'ctx-2', email: undefined });
-    expect(user.email).toBe('');
-  });
-
-  it('returns the existing row (same id) on a repeat upsert', async () => {
-    const first = await upsertUserFromCtx({ ctxUserId: 'ctx-3', email: 'a@b.com' });
-    const second = await upsertUserFromCtx({ ctxUserId: 'ctx-3', email: 'a@b.com' });
-    expect(second.id).toBe(first.id);
-    expect(await db.collection('users').count({ ctxUserId: 'ctx-3' })).toBe(1);
-  });
-
-  it('refreshes the stored email only when the token actually carried one', async () => {
-    await upsertUserFromCtx({ ctxUserId: 'ctx-4', email: '' });
-    const fixed = await upsertUserFromCtx({ ctxUserId: 'ctx-4', email: 'now@b.com' });
-    expect(fixed.email).toBe('now@b.com');
-    const kept = await upsertUserFromCtx({ ctxUserId: 'ctx-4', email: undefined });
-    expect(kept.email).toBe('now@b.com');
-  });
-});
+function ctxUser(overrides: Partial<CtxUser> = {}): CtxUser {
+  return {
+    id: 'ctx-1',
+    email: 'a@b.com',
+    status: 'enabled',
+    isAdmin: false,
+    stableCurrency: 'XLM.USDC',
+    cashbackDestination: 'account',
+    country: null,
+    ...overrides,
+  };
+}
 
 describe('getUserById', () => {
   it('returns the row when found', async () => {
@@ -77,25 +54,6 @@ describe('getUserById', () => {
 
   it('returns null when no such user exists', async () => {
     expect(await getUserById('missing')).toBeNull();
-  });
-});
-
-describe('getUserCtxUserId / setUserCtxUserId', () => {
-  it('reads back the CTX mapping (null when unmapped, null for a missing user)', async () => {
-    await seedUser({ id: 'uuid-c1', ctxUserId: null });
-    expect(await getUserCtxUserId('uuid-c1')).toBeNull();
-    expect(await getUserCtxUserId('missing')).toBeNull();
-  });
-
-  it('records the provisioned CTX id exactly once — first write wins', async () => {
-    await seedUser({ id: 'uuid-c2', ctxUserId: null });
-    expect(await setUserCtxUserId('uuid-c2', 'ctx-prov-1')).toBe(true);
-    expect(await setUserCtxUserId('uuid-c2', 'ctx-prov-2')).toBe(false);
-    expect(await getUserCtxUserId('uuid-c2')).toBe('ctx-prov-1');
-  });
-
-  it('returns false for a missing user', async () => {
-    expect(await setUserCtxUserId('missing', 'ctx-x')).toBe(false);
   });
 });
 
@@ -114,148 +72,79 @@ describe('NS-09: token-version counter', () => {
   });
 });
 
-describe('findOrCreateUserByEmail', () => {
-  it('returns the existing row when the (normalised) email is already known', async () => {
-    const seeded = await seedUser({ id: 'uuid-e1', email: 'a@b.com' });
-    const user = await findOrCreateUserByEmail('A@B.COM');
-    expect(user.id).toBe(seeded.id);
-    expect(await db.collection('users').count()).toBe(1);
+describe('cacheCtxUser', () => {
+  it('inserts a row keyed by the CTX user id with token version 0 and reports it as created', async () => {
+    const { user, created } = await cacheCtxUser(ctxUser({ country: 'GB' }));
+    expect(created).toBe(true);
+    expect(user).toMatchObject({
+      id: 'ctx-1',
+      email: 'a@b.com',
+      status: 'enabled',
+      tokenVersion: 0,
+      stableCurrency: 'XLM.USDC',
+      country: 'GB',
+    });
+    expect(await getUserById('ctx-1')).toEqual(user);
   });
 
-  it('inserts a fresh row with a lowercased/trimmed email when unknown', async () => {
-    const user = await findOrCreateUserByEmail('  New@B.com ');
-    expect(user.email).toBe('new@b.com');
-    expect(user.ctxUserId).toBeNull();
-    expect(user.tokenVersion).toBe(0);
-    const stored = await db.collection('users').findOne({ email: 'new@b.com' });
-    expect(stored?.id).toBe(user.id);
+  it('leaves the country unset when CTX has none', async () => {
+    const { user } = await cacheCtxUser(ctxUser());
+    expect(user.country).toBeUndefined();
   });
 
-  it('A2-706: the losing side of a signup race re-selects the winner instead of throwing', async () => {
+  it('overwrites the CTX-owned fields on a repeat and keeps the token version', async () => {
+    await seedUser({ id: 'ctx-1', tokenVersion: 4, country: 'GB' });
+    const { user, created } = await cacheCtxUser(
+      ctxUser({
+        email: 'new@b.com',
+        status: 'suspended',
+        isAdmin: true,
+        stableCurrency: 'XLM.EURC',
+        cashbackDestination: 'savings',
+        country: 'PT',
+      }),
+    );
+    expect(created).toBe(false);
+    expect(user).toMatchObject({
+      id: 'ctx-1',
+      email: 'new@b.com',
+      status: 'suspended',
+      isAdmin: true,
+      stableCurrency: 'XLM.EURC',
+      cashbackDestination: 'savings',
+      country: 'PT',
+      tokenVersion: 4,
+    });
+    expect(await db.collection('users').count({ id: 'ctx-1' })).toBe(1);
+  });
+
+  it('keeps the cached country when CTX has none', async () => {
+    await seedUser({ id: 'ctx-1', country: 'GB' });
+    const { user } = await cacheCtxUser(ctxUser({ country: null }));
+    expect(user.country).toBe('GB');
+  });
+
+  it('applies the CTX fields onto the winning row when a concurrent insert races it', async () => {
     const users = db.collection('users');
     const realInsert = users.insertOne.bind(users);
     const insertSpy = vi.spyOn(users, 'insertOne').mockImplementationOnce(async () => {
       const now = new Date();
       await realInsert({
-        id: 'uuid-winner',
-        ctxUserId: null,
-        email: 'raced@b.com',
-        tokenVersion: 0,
-        stableCurrency: 'XLM.USDC',
+        id: 'ctx-1',
+        email: 'a@b.com',
+        status: 'enabled',
+        tokenVersion: 2,
+        stableCurrency: '',
         isAdmin: false,
         createdAt: now,
         updatedAt: now,
       });
-      throw new UniqueViolationError('users', ['email']);
+      throw new UniqueViolationError('users', ['id']);
     });
-    const user = await findOrCreateUserByEmail('raced@b.com');
+    const { user, created } = await cacheCtxUser(ctxUser({ isAdmin: true }));
     expect(insertSpy).toHaveBeenCalledTimes(1);
-    expect(user.id).toBe('uuid-winner');
-    expect(await db.collection('users').count({ email: 'raced@b.com' })).toBe(1);
-  });
-});
-
-describe('applyCtxUserMirror', () => {
-  it('overwrites the mirrored fields from the CTX user and returns the row', async () => {
-    await seedUser({ id: 'u-1' });
-    const updated = await applyCtxUserMirror('u-1', {
-      isAdmin: true,
-      stableCurrency: 'XLM.EURC',
-      cashbackDestination: 'savings',
-      country: 'PT',
-    });
-    expect(updated).toMatchObject({
-      isAdmin: true,
-      stableCurrency: 'XLM.EURC',
-      cashbackDestination: 'savings',
-      country: 'PT',
-    });
-  });
-
-  it('clears the stable and the admin flag when CTX carries none, keeping the country', async () => {
-    await seedUser({ id: 'u-1', isAdmin: true, country: 'GB' });
-    await applyCtxUserMirror('u-1', {
-      isAdmin: false,
-      stableCurrency: '',
-      cashbackDestination: 'account',
-      country: null,
-    });
-    expect(await getUserById('u-1')).toMatchObject({
-      isAdmin: false,
-      stableCurrency: '',
-      country: 'GB',
-    });
-  });
-
-  it('returns null for a missing user', async () => {
-    expect(
-      await applyCtxUserMirror('missing', {
-        isAdmin: false,
-        stableCurrency: '',
-        cashbackDestination: 'account',
-        country: null,
-      }),
-    ).toBeNull();
-  });
-});
-
-describe('admin flag across logins', () => {
-  it('starts false for a new Loop-native user', async () => {
-    const user = await findOrCreateUserByEmail('boss@loop.test');
-    expect(user.isAdmin).toBe(false);
-  });
-
-  it('keeps the mirrored flag on the next login', async () => {
-    const before = await findOrCreateUserByEmail('boss@loop.test');
-    await applyCtxUserMirror(before.id, {
-      isAdmin: true,
-      stableCurrency: '',
-      cashbackDestination: 'account',
-      country: null,
-    });
-    const after = await findOrCreateUserByEmail('boss@loop.test');
-    expect(after.id).toBe(before.id);
-    expect(after.isAdmin).toBe(true);
-  });
-
-  it('keeps the mirrored flag on a CTX-path re-upsert', async () => {
-    const created = await upsertUserFromCtx({ ctxUserId: 'ctx-boss', email: 'b@loop.test' });
-    expect(created.isAdmin).toBe(false);
-    await applyCtxUserMirror(created.id, {
-      isAdmin: true,
-      stableCurrency: '',
-      cashbackDestination: 'account',
-      country: null,
-    });
-    const refreshed = await upsertUserFromCtx({ ctxUserId: 'ctx-boss', email: 'b@loop.test' });
-    expect(refreshed.isAdmin).toBe(true);
-  });
-});
-
-describe('resolveOrCreateUserByEmail', () => {
-  it('creates the row with the chosen country and reports it as created', async () => {
-    const first = await resolveOrCreateUserByEmail('New@Example.com', 'gb');
-    expect(first.created).toBe(true);
-    expect(first.user.email).toBe('new@example.com');
-    expect(first.user.country).toBe('GB');
-  });
-
-  it('starts with no stable; CTX assigns one from the country', async () => {
-    expect((await resolveOrCreateUserByEmail('pt@example.com', 'PT')).user.stableCurrency).toBe('');
-    expect((await resolveOrCreateUserByEmail('ca@example.com', 'CA')).user.stableCurrency).toBe('');
-  });
-
-  it('returns the existing row untouched and reports it as not created', async () => {
-    const first = await resolveOrCreateUserByEmail('again@example.com', 'GB');
-    const second = await resolveOrCreateUserByEmail('again@example.com', 'PT');
-    expect(second.created).toBe(false);
-    expect(second.user.id).toBe(first.user.id);
-    expect(second.user.country).toBe('GB');
-  });
-
-  it('leaves the country unset when the caller has none', async () => {
-    const { user } = await resolveOrCreateUserByEmail('bare@example.com');
-    expect(user.country).toBeUndefined();
-    expect(user.stableCurrency).toBe('');
+    expect(created).toBe(false);
+    expect(user).toMatchObject({ id: 'ctx-1', isAdmin: true, tokenVersion: 2 });
+    expect(await users.count({ id: 'ctx-1' })).toBe(1);
   });
 });

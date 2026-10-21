@@ -1,5 +1,6 @@
 // caller-scoped favourites integration tests — real document store
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { randomUUID } from 'node:crypto';
 
 // Catalog stub — handler reads `getMerchants().merchantsById` to
 // validate the merchant exists. Seeding the in-memory store with a
@@ -23,7 +24,7 @@ vi.mock('../../merchants/sync.js', () => ({
 }));
 
 import { db, __resetDbForTests } from '../../db/client.js';
-import { findOrCreateUserByEmail } from '../../db/users.js';
+import { cacheCtxUser } from '../../db/users.js';
 import { signLoopToken, DEFAULT_ACCESS_TTL_SECONDS } from '../../auth/tokens.js';
 import { app } from '../../app.js';
 
@@ -34,7 +35,15 @@ interface SeededUser {
 }
 
 async function seedUser(email: string): Promise<SeededUser> {
-  const user = await findOrCreateUserByEmail(email);
+  const { user } = await cacheCtxUser({
+    id: randomUUID(),
+    email,
+    status: 'enabled',
+    isAdmin: false,
+    stableCurrency: '',
+    cashbackDestination: 'account',
+    country: null,
+  });
   const access = signLoopToken({
     sub: user.id,
     email: user.email,

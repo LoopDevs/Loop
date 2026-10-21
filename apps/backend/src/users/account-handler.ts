@@ -13,7 +13,6 @@ import {
   updateCtxWallet,
   withdrawCtxSavings,
 } from '../ctx/account.js';
-import { resolveCtxUserId } from '../ctx/user-provisioning.js';
 import { resolveCallingUser } from './handler.js';
 
 const log = logger.child({ handler: 'user-account' });
@@ -45,25 +44,16 @@ interface ActAs {
 }
 
 async function resolveActAs(c: Context): Promise<ActAs | Response> {
-  let ctxUserId: string | null;
+  let ctxUserId: string;
   try {
     const user = await resolveCallingUser(c);
     if (user === null) {
       return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
     }
-    ctxUserId = user.ctxUserId ?? (await resolveCtxUserId(user.id));
+    ctxUserId = user.id;
   } catch (err) {
     log.error({ err }, 'Failed to resolve calling user');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
-  }
-  if (ctxUserId === null) {
-    return c.json(
-      {
-        code: 'SERVICE_UNAVAILABLE',
-        message: 'Your account is still being set up with our supplier — please retry shortly',
-      },
-      503,
-    );
   }
   const clientId = c.get('clientId') as string | undefined;
   return clientId === undefined ? { ctxUserId } : { ctxUserId, clientId };

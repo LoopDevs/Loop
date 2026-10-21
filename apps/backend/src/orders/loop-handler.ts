@@ -10,7 +10,7 @@ import type {
 } from '@loop/shared';
 import { getMerchants } from '../merchants/sync.js';
 import { LoopCreateOrderBody as CreateBody } from './request-schemas.js';
-import { ctxActAsHeaders, resolveCtxUserId } from '../ctx/user-provisioning.js';
+import { ctxActAsHeaders } from '../ctx/user-provisioning.js';
 import { loopCryptoPaymentCurrencies, loopFiatPaymentCurrencies } from '../ctx/startup.js';
 import { ctxFetch, CtxRateLimitedError, CtxUnavailableError } from '../ctx/api-fetch.js';
 import { upstreamUrl } from '../upstream.js';
@@ -247,23 +247,7 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
     return c.json({ code: 'VALIDATION_ERROR', message: denominationError }, 400);
   }
 
-  const ctxUserId = await resolveCtxUserId(auth.userId);
-  if (ctxUserId === null) {
-    return c.json(
-      {
-        code: 'SERVICE_UNAVAILABLE',
-        message: 'Your account is still being set up with our supplier — please retry shortly',
-      },
-      503,
-    );
-  }
-  const actAsHeaders = ctxActAsHeaders(ctxUserId, clientId);
-  if (actAsHeaders === null) {
-    return c.json(
-      { code: 'SERVICE_UNAVAILABLE', message: 'Supplier credentials unavailable' },
-      503,
-    );
-  }
+  const actAsHeaders = ctxActAsHeaders(auth.userId, clientId);
 
   let order: Order;
   try {

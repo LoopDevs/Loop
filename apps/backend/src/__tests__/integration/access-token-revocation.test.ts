@@ -84,8 +84,8 @@ async function seedUser(): Promise<{ userId: string; email: string }> {
   const now = new Date();
   await db.collection('users').insertOne({
     id: userId,
-    ctxUserId: null,
     email,
+    status: 'enabled',
     tokenVersion: 0,
     stableCurrency: 'XLM.USDC',
     isAdmin: false,

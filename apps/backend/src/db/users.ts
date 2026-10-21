@@ -1,59 +1,18 @@
-import { randomUUID } from 'node:crypto';
 import type { CashbackDestination } from '@loop/shared';
 import { db } from './client.js';
 import { isUniqueViolation } from './errors.js';
-import type { UserDoc } from './types.js';
+import type { CtxUserStatus, UserDoc } from './types.js';
 
 export type User = UserDoc;
-
-export async function upsertUserFromCtx(args: {
-  ctxUserId: string;
-  email: string | undefined;
-}): Promise<User> {
-  const users = db.collection('users');
-  const now = new Date();
-  const updated = await users.updateOne(
-    { ctxUserId: args.ctxUserId },
-    {
-      $set: {
-        ...(args.email !== undefined && args.email !== '' ? { email: args.email } : {}),
-        updatedAt: now,
-      },
-    },
-  );
-  if (updated !== null) return updated;
-  const doc: UserDoc = {
-    id: randomUUID(),
-    ctxUserId: args.ctxUserId,
-    email: args.email ?? '',
-    tokenVersion: 0,
-    stableCurrency: '',
-    isAdmin: false,
-    createdAt: now,
-    updatedAt: now,
-  };
-  await users.insertOne(doc);
-  return doc;
-}
 
 export async function getUserById(id: string): Promise<User | null> {
   return db.collection('users').findOne({ id });
 }
 
-export async function getUserCtxUserId(id: string): Promise<string | null> {
-  const user = await db.collection('users').findOne({ id });
-  return user?.ctxUserId ?? null;
-}
-
-// Guarded on ctxUserId: null so concurrent provisioning or legacy mappings are never clobbered.
-export async function setUserCtxUserId(id: string, ctxUserId: string): Promise<boolean> {
-  const updated = await db
-    .collection('users')
-    .updateOne({ id, ctxUserId: null }, { $set: { ctxUserId, updatedAt: new Date() } });
-  return updated !== null;
-}
-
-export interface CtxUserMirror {
+export interface CtxUser {
+  id: string;
+  email: string;
+  status: CtxUserStatus;
   isAdmin: boolean;
   stableCurrency: string;
   cashbackDestination: CashbackDestination;
@@ -61,19 +20,37 @@ export interface CtxUserMirror {
 }
 
 // ADR 037: every CTX user response overwrites the mirror; a staff_roles row still wins in requireStaff.
-export async function applyCtxUserMirror(id: string, mirror: CtxUserMirror): Promise<User | null> {
-  return db.collection('users').updateOne(
-    { id },
-    {
-      $set: {
-        isAdmin: mirror.isAdmin,
-        stableCurrency: mirror.stableCurrency,
-        cashbackDestination: mirror.cashbackDestination,
-        ...(mirror.country !== null ? { country: mirror.country } : {}),
-        updatedAt: new Date(),
-      },
-    },
-  );
+export async function cacheCtxUser(ctxUser: CtxUser): Promise<{ user: User; created: boolean }> {
+  const users = db.collection('users');
+  const fields = {
+    email: ctxUser.email,
+    status: ctxUser.status,
+    isAdmin: ctxUser.isAdmin,
+    stableCurrency: ctxUser.stableCurrency,
+    cashbackDestination: ctxUser.cashbackDestination,
+    ...(ctxUser.country !== null ? { country: ctxUser.country } : {}),
+  };
+  const overwrite = (): Promise<User | null> =>
+    users.updateOne({ id: ctxUser.id }, { $set: { ...fields, updatedAt: new Date() } });
+  const updated = await overwrite();
+  if (updated !== null) return { user: updated, created: false };
+  const now = new Date();
+  const doc: UserDoc = {
+    id: ctxUser.id,
+    ...fields,
+    tokenVersion: 0,
+    createdAt: now,
+    updatedAt: now,
+  };
+  try {
+    await users.insertOne(doc);
+    return { user: doc, created: true };
+  } catch (err) {
+    if (!isUniqueViolation(err)) throw err;
+    const raced = await overwrite();
+    if (raced === null) throw err;
+    return { user: raced, created: false };
+  }
 }
 
 // NS-09: caller fails closed if user row is missing.
@@ -87,41 +64,4 @@ export async function bumpUserTokenVersion(id: string): Promise<void> {
   await db
     .collection('users')
     .updateOne({ id }, { $inc: { tokenVersion: 1 }, $set: { updatedAt: new Date() } });
-}
-
-// ADR 013: callers MUST only pass a provider/OTP-verified email.
-export async function findOrCreateUserByEmail(email: string): Promise<User> {
-  return (await resolveOrCreateUserByEmail(email)).user;
-}
-
-export async function resolveOrCreateUserByEmail(
-  email: string,
-  country?: string,
-): Promise<{ user: User; created: boolean }> {
-  const users = db.collection('users');
-  const normalised = email.toLowerCase().trim();
-  const existing = await users.findOne({ email: normalised });
-  if (existing !== null) return { user: existing, created: false };
-  const now = new Date();
-  const doc: UserDoc = {
-    id: randomUUID(),
-    ctxUserId: null,
-    email: normalised,
-    tokenVersion: 0,
-    stableCurrency: '',
-    ...(country !== undefined ? { country: country.toUpperCase() } : {}),
-    isAdmin: false,
-    createdAt: now,
-    updatedAt: now,
-  };
-  try {
-    await users.insertOne(doc);
-    return { user: doc, created: true };
-  } catch (err) {
-    if (isUniqueViolation(err)) {
-      const raced = await users.findOne({ email: normalised });
-      if (raced !== null) return { user: raced, created: false };
-    }
-    throw err;
-  }
 }

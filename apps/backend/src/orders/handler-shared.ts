@@ -4,7 +4,6 @@ import { z } from 'zod';
 import type { ZodIssue } from 'zod';
 import { logger } from '../logger.js';
 import type { LoopAuthContext } from '../auth/require-auth.js';
-import { getUserCtxUserId } from '../db/users.js';
 import { ctxActAsHeaders } from '../ctx/user-provisioning.js';
 
 const log = logger.child({ handler: 'orders' });
@@ -18,13 +17,12 @@ export function summariseZodIssues(issues: readonly ZodIssue[]): string {
 }
 
 // Loop JWT is not forwardable to CTX; act-as requires X-User-Id to avoid exposing operator data.
-export async function upstreamHeaders(c: Context): Promise<Record<string, string> | null> {
+export function upstreamHeaders(c: Context): Record<string, string> {
   const clientId = c.get('clientId') as string | undefined;
   const auth = c.get('auth') as LoopAuthContext | undefined;
 
   if (auth?.kind === 'loop') {
-    const ctxUserId = await getUserCtxUserId(auth.userId);
-    return ctxActAsHeaders(ctxUserId, clientId);
+    return ctxActAsHeaders(auth.userId, clientId);
   }
 
   const headers: Record<string, string> = {

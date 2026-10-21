@@ -17,13 +17,9 @@
  *   - ctx-interop: every merchant carries a flat 2% operator-commission
  *     spread (MOCK_OPERATOR_COMMISSION_BPS) on top of its user discount;
  *     fulfilment accrues a commission entry, GET /companies/:id/commission
- *     (+ /settlements, /entries) reads the ledger, and
- *     POST /_test/settle-commission stands in for the real CTX
- *     `commission-settlement` system trigger. POST /users echoes an id so
- *     the act-as provisioning path works offline; GET /users (regex email
- *     filter, operatorUserId omitted when empty) + PUT /users/:id
- *     (operatorUserId claim) back the adopt-on-email-exists branch;
- *     GET /users/:id serves the roles the admin mirror reads.
+ *     (+ /settlements, /entries) reads the ledger. GET /users (regex email
+ *     filter), POST /users, GET /users/:id and POST /users/:id/status
+ *     back sign-in.
  *
  * Usage:
  *   node tests/e2e-mocked/fixtures/mock-ctx.mjs            # runs on :9091
@@ -104,9 +100,7 @@ const validRefreshTokens = new Set();
 
 // ctx-interop: operator-commission ledger. Every fulfilled order
 // accrues `fiat × MOCK_OPERATOR_COMMISSION_BPS / 10000` for the mock
-// operator company; POST /_test/settle-commission groups unsettled
-// entries into a settlement, mirroring the real CTX
-// `commission-settlement` system trigger.
+// operator company.
 const MOCK_OPERATOR_COMMISSION_BPS = 200;
 const MOCK_OPERATOR_COMPANY_ID = 'mock-loop-co';
 const commissionEntries = [];
@@ -355,8 +349,7 @@ const server = http.createServer(async (req, res) => {
 
   // ── ctx-interop: user provisioning (act-as) ──
   // Mirrors the real CTX validation envelope on rejection
-  // (`{ error: 'bad request', fields: { <field>: [msgs] } }`) — the
-  // backend's adoption branch routes on `fields.email` specifically.
+  // (`{ error: 'bad request', fields: { <field>: [msgs] } }`).
   if (method === 'POST' && path === '/users') {
     const body = await readBody(req);
     if (!body.email)
@@ -368,17 +361,14 @@ const server = http.createServer(async (req, res) => {
       id: randomUUID(),
       email,
       type: body.type ?? 'customer',
-      operatorUserId: body.operatorUserId ?? '',
+      status: body.status === 'enabled' ? 'enabled' : 'email_unverified',
       stableCurrency: String(body.stableCurrency ?? 'XLM.USDC').toUpperCase(),
     };
     provisionedUsers.set(email, user);
     return json(res, 201, { id: user.id, stableCurrency: user.stableCurrency });
   }
 
-  // ── ctx-interop: adoption lookup + operatorUserId claim ──
-  // Real CTX filters `email` as an unanchored case-insensitive regex
-  // and omits `operatorUserId` from the JSON when empty; both facts
-  // are load-bearing for the backend's adopt-on-email-exists path.
+  // Real CTX filters `email` as an unanchored case-insensitive regex.
   if (method === 'GET' && path === '/users') {
     const emailFilter = parsed.searchParams.get('email');
     let result = [...provisionedUsers.values()];
@@ -393,10 +383,29 @@ const server = http.createServer(async (req, res) => {
         id: u.id,
         email: u.email,
         type: u.type,
+        status: u.status,
         stableCurrency: u.stableCurrency,
-        ...(u.operatorUserId ? { operatorUserId: u.operatorUserId } : {}),
       })),
       pagination: { page: 1, perPage: 50, total: result.length },
+    });
+  }
+
+  const userStatusMatch = path.match(/^\/users\/([^/]+)\/status$/);
+  if (method === 'POST' && userStatusMatch) {
+    const target = [...provisionedUsers.values()].find((u) => u.id === userStatusMatch[1]);
+    if (!target) return json(res, 404, { error: 'not found' });
+    const body = await readBody(req);
+    if (!['enabled', 'disabled', 'suspended'].includes(body.status))
+      return json(res, 400, { error: 'bad request', fields: { status: ['invalid'] } });
+    target.status = body.status;
+    return json(res, 200, {
+      id: target.id,
+      email: target.email,
+      type: target.type,
+      status: target.status,
+      stableCurrency: target.stableCurrency,
+      cashbackDestination: target.cashbackDestination ?? 'account',
+      roles: [],
     });
   }
 
@@ -408,9 +417,9 @@ const server = http.createServer(async (req, res) => {
       id: target.id,
       email: target.email,
       type: target.type,
+      status: target.status,
       stableCurrency: target.stableCurrency,
       cashbackDestination: target.cashbackDestination ?? 'account',
-      ...(target.operatorUserId ? { operatorUserId: target.operatorUserId } : {}),
       roles: [],
     });
   }
@@ -418,20 +427,6 @@ const server = http.createServer(async (req, res) => {
     const target = [...provisionedUsers.values()].find((u) => u.id === userUpdateMatch[1]);
     if (!target) return json(res, 404, { error: 'not found' });
     const body = await readBody(req);
-    const operatorUserId = String(body.operatorUserId ?? '').trim();
-    if (operatorUserId && operatorUserId !== target.operatorUserId) {
-      // Real CTX enforces per-company operatorUserId uniqueness on
-      // update too — a claim racing another writer fails, not doubles.
-      const claimed = [...provisionedUsers.values()].some(
-        (u) => u.id !== target.id && u.operatorUserId === operatorUserId,
-      );
-      if (claimed)
-        return json(res, 400, {
-          error: 'bad request',
-          fields: { operatorUserId: ['already exists'] },
-        });
-      target.operatorUserId = operatorUserId;
-    }
     if (body.stableCurrency !== undefined) {
       const stableCurrency = String(body.stableCurrency).toUpperCase();
       if (!['XLM.USDC', 'XLM.EURC', 'XLM.GBPLOOP'].includes(stableCurrency))
@@ -454,9 +449,9 @@ const server = http.createServer(async (req, res) => {
       id: target.id,
       email: target.email,
       type: target.type,
+      status: target.status,
       stableCurrency: target.stableCurrency,
       cashbackDestination: target.cashbackDestination ?? 'account',
-      ...(target.operatorUserId ? { operatorUserId: target.operatorUserId } : {}),
     });
   }
 
@@ -615,41 +610,6 @@ const server = http.createServer(async (req, res) => {
       pagination: { page: 1, pages: 1, perPage: 25, total: result.length },
       result,
     });
-  }
-
-  // ── ctx-interop test-only: run a commission settlement ──
-  if (method === 'POST' && path === '/_test/settle-commission') {
-    const unsettled = commissionEntries.filter((entry) => entry.settlementId === '');
-    const settlements = [];
-    const byCurrency = new Map();
-    for (const entry of unsettled) {
-      const bucket = byCurrency.get(entry.currency) ?? [];
-      bucket.push(entry);
-      byCurrency.set(entry.currency, bucket);
-    }
-    for (const [currency, bucket] of byCurrency) {
-      const settlement = {
-        id: randomUUID(),
-        companyId: MOCK_OPERATOR_COMPANY_ID,
-        amount: bucket
-          .reduce(
-            (sum, entry) => sum + Number(entry.amount) * (entry.direction === 'debit' ? -1 : 1),
-            0,
-          )
-          .toFixed(2),
-        currency,
-        periodStart: bucket[0].created,
-        periodEnd: new Date().toISOString(),
-        giftCardIds: bucket.map((entry) => entry.giftCardId).filter(Boolean),
-        entryIds: bucket.map((entry) => entry.id),
-        entryCount: bucket.length,
-        created: new Date().toISOString(),
-      };
-      for (const entry of bucket) entry.settlementId = settlement.id;
-      commissionSettlements.push(settlement);
-      settlements.push(settlement);
-    }
-    return json(res, 200, { result: settlements, count: settlements.length });
   }
 
   // ── ws-interop test-only: mutate a merchant + emit the ws event the

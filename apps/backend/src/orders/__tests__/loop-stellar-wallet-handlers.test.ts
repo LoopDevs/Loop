@@ -38,7 +38,7 @@ const { dbState, ctxFetchMock, headersState } = vi.hoisted(() => ({
     value: { 'X-Api-Key': 'k', 'X-User-Id': 'ctx-u-1', 'X-Client-Id': 'loopweb' } as Record<
       string,
       string
-    > | null,
+    >,
   },
 }));
 
@@ -51,7 +51,7 @@ vi.mock('../../db/client.js', () => ({
 }));
 
 vi.mock('../handler-shared.js', () => ({
-  upstreamHeaders: vi.fn(async () => headersState.value),
+  upstreamHeaders: vi.fn(() => headersState.value),
 }));
 
 vi.mock('../../ctx/api-fetch.js', async (importActual) => {
@@ -212,16 +212,6 @@ describe('loopStellarTransactionHandler', () => {
       makeCtx({ auth: LOOP_AUTH, param: 'o-1', body: { source: SOURCE } }),
     );
     expect(res.status).toBe(503);
-  });
-
-  it('503s when the customer has no CTX identity to act as', async () => {
-    dbState.row = unpaidRow();
-    headersState.value = null;
-    const res = await loopStellarTransactionHandler(
-      makeCtx({ auth: LOOP_AUTH, param: 'o-1', body: { source: SOURCE } }),
-    );
-    expect(res.status).toBe(503);
-    expect(ctxFetchMock).not.toHaveBeenCalled();
   });
 });
 

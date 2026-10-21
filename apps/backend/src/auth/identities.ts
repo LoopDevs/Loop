@@ -2,8 +2,9 @@
 import { randomUUID } from 'node:crypto';
 import { db } from '../db/client.js';
 import { isUniqueViolation } from '../db/errors.js';
-import type { SocialProvider, UserDoc, UserIdentityDoc } from '../db/types.js';
-import { resolveOrCreateUserByEmail, type User } from '../db/users.js';
+import type { SocialProvider, UserIdentityDoc } from '../db/types.js';
+import type { User } from '../db/users.js';
+import { signInCtxUserByEmail, signInCtxUserById } from './ctx-login.js';
 import { normalizeEmail } from './normalize-email.js';
 
 export interface ResolveOrCreateArgs {
@@ -40,7 +41,7 @@ async function linkIdentity(
 /**
  * Returns user row and flag for new user creation.
  */
-export async function resolveOrCreateUserForIdentity(
+export async function signInUserForIdentity(
   args: ResolveOrCreateArgs,
 ): Promise<{ user: User; created: boolean }> {
   // A2-2002: normalizeEmail filters homographs; NonAsciiEmailError bubbles to handler for 400.
@@ -51,20 +52,11 @@ export async function resolveOrCreateUserForIdentity(
     .collection('user_identities')
     .findOne({ provider: args.provider, providerSub: args.providerSub });
   if (knownIdentity !== null) {
-    const user = await db.collection('users').findOne({ id: knownIdentity.userId });
-    if (user !== null) return { user, created: false };
-    // Dangling identity row (user deleted) — drop through to create fresh user.
+    return { user: await signInCtxUserById(knownIdentity.userId), created: false };
   }
 
-  // Step 2 — email already known. Link provider to existing user.
-  const existingUser: UserDoc | null = await db.collection('users').findOne({ email });
-  if (existingUser !== null) {
-    await linkIdentity(existingUser.id, args, email);
-    return { user: existingUser, created: false };
-  }
-
-  // Step 3 — brand-new user.
-  const { user, created } = await resolveOrCreateUserByEmail(email, args.country);
+  // Step 2 — the CTX customer for the email, created when CTX allows it.
+  const { user, created } = await signInCtxUserByEmail(email, args.country);
   await linkIdentity(user.id, args, email);
   return { user, created };
 }

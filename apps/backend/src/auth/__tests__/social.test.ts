@@ -43,14 +43,10 @@ vi.mock('../id-token-replay.js', () => ({
   consumeIdToken: (args: unknown) => consumeIdTokenMock(args),
 }));
 vi.mock('../identities.js', () => ({
-  resolveOrCreateUserForIdentity: (args: unknown) => resolveMock(args),
+  signInUserForIdentity: (args: unknown) => resolveMock(args),
 }));
 vi.mock('../refresh-tokens.js', () => ({
   recordRefreshToken: (args: unknown) => recordRefreshMock(args),
-}));
-const syncCtxUserMock = vi.fn();
-vi.mock('../../ctx/user-roles.js', () => ({
-  syncCtxUser: (user: unknown) => syncCtxUserMock(user),
 }));
 vi.mock('../../logger.js', () => ({
   logger: {
@@ -63,6 +59,8 @@ import {
   appleSocialLoginHandler,
   makeSocialLoginHandler,
 } from '../social.js';
+import { CtxSignInUnavailableError, CtxUserNotEnabledError } from '../ctx-login.js';
+import { CtxUserCreationDisabledError } from '../../ctx/user-provisioning.js';
 
 function makeCtx(body: unknown): Context {
   return {
@@ -161,10 +159,32 @@ describe('googleSocialLoginHandler', () => {
       email: 'a@b.com',
       country: 'PT',
     });
-    expect(syncCtxUserMock).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'user-uuid', email: 'a@b.com' }),
-    );
     expect(recordRefreshMock).toHaveBeenCalled();
+  });
+
+  it.each([
+    [new CtxUserCreationDisabledError(), 403, 'SIGNUP_DISABLED'],
+    [new CtxUserNotEnabledError('user-uuid'), 403, 'USER_DEACTIVATED'],
+    [new CtxSignInUnavailableError(new Error('ctx down')), 503, 'SERVICE_UNAVAILABLE'],
+    [new Error('db down'), 500, 'INTERNAL_ERROR'],
+  ])('maps a sign-in failure (%s) to %i %s and mints nothing', async (err, status, code) => {
+    verifyMock.mockResolvedValue({
+      ok: true,
+      claims: {
+        iss: 'https://accounts.google.com',
+        aud: 'google-web-client',
+        sub: 'google-sub-1',
+        email: 'a@b.com',
+        email_verified: true,
+        exp: 1,
+        iat: 1,
+      },
+    });
+    resolveMock.mockRejectedValue(err);
+    const res = await googleSocialLoginHandler(makeCtx({ idToken: 'x.y.z' }));
+    expect(res.status).toBe(status);
+    expect(((await res.json()) as { code: string }).code).toBe(code);
+    expect(recordRefreshMock).not.toHaveBeenCalled();
   });
 
   it('503 when the JWKS fetch throws', async () => {

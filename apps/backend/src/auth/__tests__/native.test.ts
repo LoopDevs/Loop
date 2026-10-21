@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type * as ConfigModule from '../../config/index.js';
 import type { Context } from 'hono';
 import type * as OtpsModule from '../otps.js';
+import type * as CtxLoginModule from '../ctx-login.js';
 
 const { jwtState } = vi.hoisted(() => ({
   jwtState: {
@@ -33,7 +34,9 @@ const incrementAttemptsMock = vi.fn();
 // BK-otpatomic: atomic CAS `tryConsumeOtp` replaces unconditional `markOtpConsumed`
 const tryConsumeOtpMock = vi.fn();
 const sendOtpMock = vi.fn();
-const findOrCreateUserMock = vi.fn();
+const signInByEmailMock = vi.fn();
+const registerForOtpMock = vi.fn();
+const signInByIdMock = vi.fn();
 // NS-09: verify-otp stamps token_version on access token; refresh reads current version
 const getUserTokenVersionMock = vi.fn();
 const recordRefreshMock = vi.fn();
@@ -72,16 +75,17 @@ vi.mock('../email.js', () => ({
   }),
 }));
 vi.mock('../../db/users.js', () => ({
-  resolveOrCreateUserByEmail: (email: string, country?: string) =>
-    findOrCreateUserMock(email, country),
   getUserTokenVersion: (id: string) => getUserTokenVersionMock(id),
 }));
-const syncCtxUserMock = vi.fn();
-const enqueueCtxUserSyncMock = vi.fn();
-vi.mock('../../ctx/user-roles.js', () => ({
-  syncCtxUser: (user: unknown) => syncCtxUserMock(user),
-  enqueueCtxUserSync: (userId: string) => enqueueCtxUserSyncMock(userId),
-}));
+vi.mock('../ctx-login.js', async (importActual) => {
+  const actual = await importActual<typeof CtxLoginModule>();
+  return {
+    ...actual,
+    signInCtxUserByEmail: (email: string, country?: string) => signInByEmailMock(email, country),
+    signInCtxUserById: (id: string) => signInByIdMock(id),
+    registerCtxUserForOtp: (email: string) => registerForOtpMock(email),
+  };
+});
 vi.mock('../refresh-tokens.js', () => ({
   recordRefreshToken: (args: unknown) => recordRefreshMock(args),
   findLiveRefreshToken: (args: unknown) => findLiveRefreshMock(args),
@@ -102,7 +106,9 @@ import {
   nativeVerifyOtpHandler,
   nativeRefreshHandler,
 } from '../native.js';
-import { signLoopToken } from '../tokens.js';
+import { signLoopToken, verifyLoopToken } from '../tokens.js';
+import { CtxSignInUnavailableError, CtxUserNotEnabledError } from '../ctx-login.js';
+import { CtxUserCreationDisabledError } from '../../ctx/user-provisioning.js';
 import {
   __resetRuntimeHealthForTests,
   getRuntimeHealthSnapshot,
@@ -144,7 +150,11 @@ beforeEach(() => {
   incrementAttemptsMock.mockReset();
   tryConsumeOtpMock.mockReset();
   sendOtpMock.mockReset();
-  findOrCreateUserMock.mockReset();
+  signInByEmailMock.mockReset();
+  registerForOtpMock.mockReset();
+  registerForOtpMock.mockResolvedValue(undefined);
+  signInByIdMock.mockReset();
+  signInByIdMock.mockResolvedValue({ id: 'user-1', email: 'ctx@b.com', tokenVersion: 0 });
   getUserTokenVersionMock.mockReset();
   getUserTokenVersionMock.mockResolvedValue(0);
   recordRefreshMock.mockReset();
@@ -196,6 +206,42 @@ describe('nativeRequestOtpHandler', () => {
     const createdCode = createOtpMock.mock.calls[0]![0].code as string;
     const sentCode = sendOtpMock.mock.calls[0]![0].code as string;
     expect(createdCode).toBe(sentCode);
+  });
+
+  it('registers the CTX customer for the normalised email before writing the OTP', async () => {
+    const { ctx } = makeCtx({ email: 'A@B.COM' });
+    await nativeRequestOtpHandler(ctx);
+    expect(registerForOtpMock).toHaveBeenCalledWith('a@b.com');
+    expect(registerForOtpMock.mock.invocationCallOrder[0]!).toBeLessThan(
+      createOtpMock.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('403 SIGNUP_DISABLED and sends no email when CTX refuses to create the customer', async () => {
+    registerForOtpMock.mockRejectedValue(new CtxUserCreationDisabledError());
+    const { ctx } = makeCtx({ email: 'a@b.com' });
+    const res = await nativeRequestOtpHandler(ctx);
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { code: string }).code).toBe('SIGNUP_DISABLED');
+    expect(createOtpMock).not.toHaveBeenCalled();
+    expect(sendOtpMock).not.toHaveBeenCalled();
+  });
+
+  it('403 USER_DEACTIVATED and sends no email when the CTX customer is not enabled', async () => {
+    registerForOtpMock.mockRejectedValue(new CtxUserNotEnabledError('ctx-1'));
+    const { ctx } = makeCtx({ email: 'a@b.com' });
+    const res = await nativeRequestOtpHandler(ctx);
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { code: string }).code).toBe('USER_DEACTIVATED');
+    expect(sendOtpMock).not.toHaveBeenCalled();
+  });
+
+  it('503 and sends no email when CTX is unavailable', async () => {
+    registerForOtpMock.mockRejectedValue(new CtxSignInUnavailableError(new Error('down')));
+    const { ctx } = makeCtx({ email: 'a@b.com' });
+    const res = await nativeRequestOtpHandler(ctx);
+    expect(res.status).toBe(503);
+    expect(sendOtpMock).not.toHaveBeenCalled();
   });
 
   it('skips send silently when the per-email cap is hit', async () => {
@@ -326,9 +372,9 @@ describe('nativeVerifyOtpHandler', () => {
     );
   });
 
-  it('consumes the OTP, upserts the user, mints a pair, and clears the counter on success', async () => {
+  it('consumes the OTP, signs the CTX user in, mints a pair, and clears the counter on success', async () => {
     findLiveOtpMock.mockResolvedValue({ id: 'otp-1', attempts: 0 });
-    findOrCreateUserMock.mockResolvedValue({
+    signInByEmailMock.mockResolvedValue({
       user: { id: 'user-1', email: 'a@b.com', tokenVersion: 0 },
       created: true,
     });
@@ -336,10 +382,7 @@ describe('nativeVerifyOtpHandler', () => {
     const res = await nativeVerifyOtpHandler(ctx);
     expect(res.status).toBe(200);
     expect(tryConsumeOtpMock).toHaveBeenCalledWith('otp-1');
-    expect(findOrCreateUserMock).toHaveBeenCalledWith('a@b.com', 'GB');
-    expect(syncCtxUserMock).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'user-1', email: 'a@b.com' }),
-    );
+    expect(signInByEmailMock).toHaveBeenCalledWith('a@b.com', 'GB');
     expect(recordRefreshMock).toHaveBeenCalled();
     expect(clearOtpAttemptsMock).toHaveBeenCalledWith('a@b.com');
     const body = (await res.json()) as {
@@ -360,16 +403,24 @@ describe('nativeVerifyOtpHandler', () => {
     expect(res.status).toBe(401);
     expect(((await res.json()) as { code: string }).code).toBe('UNAUTHORIZED');
     expect(tryConsumeOtpMock).toHaveBeenCalledWith('otp-1');
-    expect(findOrCreateUserMock).not.toHaveBeenCalled();
+    expect(signInByEmailMock).not.toHaveBeenCalled();
     expect(recordRefreshMock).not.toHaveBeenCalled();
     expect(clearOtpAttemptsMock).not.toHaveBeenCalled();
   });
 
-  it('returns 500 on a db failure inside user upsert', async () => {
+  it.each([
+    [new CtxUserCreationDisabledError(), 403, 'SIGNUP_DISABLED'],
+    [new CtxUserNotEnabledError('user-1'), 403, 'USER_DEACTIVATED'],
+    [new CtxSignInUnavailableError(new Error('ctx down')), 503, 'SERVICE_UNAVAILABLE'],
+    [new Error('db down'), 500, 'INTERNAL_ERROR'],
+  ])('maps a sign-in failure (%s) to %i %s and mints nothing', async (err, status, code) => {
     findLiveOtpMock.mockResolvedValue({ id: 'otp-1', attempts: 0 });
-    findOrCreateUserMock.mockRejectedValue(new Error('db down'));
+    signInByEmailMock.mockRejectedValue(err);
     const { ctx } = makeCtx({ email: 'a@b.com', otp: '123456' });
-    expect((await nativeVerifyOtpHandler(ctx)).status).toBe(500);
+    const res = await nativeVerifyOtpHandler(ctx);
+    expect(res.status).toBe(status);
+    expect(((await res.json()) as { code: string }).code).toBe(code);
+    expect(recordRefreshMock).not.toHaveBeenCalled();
   });
 });
 
@@ -431,7 +482,15 @@ describe('nativeRefreshHandler', () => {
     const body = (await res.json()) as { accessToken: string; refreshToken: string };
     expect(body.refreshToken).not.toBe(oldRefresh);
     expect(recordRefreshMock).toHaveBeenCalled();
-    expect(enqueueCtxUserSyncMock).toHaveBeenCalledWith('user-1');
+    expect(signInByIdMock).toHaveBeenCalledWith('user-1');
+    expect(signInByIdMock.mock.invocationCallOrder[0]!).toBeGreaterThan(
+      getUserTokenVersionMock.mock.invocationCallOrder[0]!,
+    );
+    expect(signInByIdMock.mock.invocationCallOrder[0]!).toBeLessThan(
+      tryRevokeIfLiveMock.mock.invocationCallOrder[0]!,
+    );
+    const verified = verifyLoopToken(body.accessToken, 'access');
+    expect(verified.ok && verified.claims.email).toBe('ctx@b.com');
     expect(tryRevokeIfLiveMock).toHaveBeenCalledWith(
       expect.objectContaining({ jti: oldClaims.jti }),
     );
@@ -461,6 +520,29 @@ describe('nativeRefreshHandler', () => {
     expect(recordRefreshMock).not.toHaveBeenCalled();
     expect(revokeAllRefreshForUserMock).not.toHaveBeenCalled();
   });
+
+  it.each([
+    [new CtxUserNotEnabledError('user-1'), 403, 'USER_DEACTIVATED'],
+    [new CtxSignInUnavailableError(new Error('ctx down')), 503, 'SERVICE_UNAVAILABLE'],
+  ])(
+    'refuses the refresh on %s with %i %s and leaves the token unrotated',
+    async (err, status, code) => {
+      const { token: oldRefresh, claims: oldClaims } = signLoopToken({
+        sub: 'user-1',
+        email: 'a@b.com',
+        typ: 'refresh',
+        ttlSeconds: 300,
+      });
+      findLiveRefreshMock.mockResolvedValue({ jti: oldClaims.jti, userId: 'user-1' });
+      signInByIdMock.mockRejectedValue(err);
+      const { ctx } = makeCtx({ refreshToken: oldRefresh });
+      const res = await nativeRefreshHandler(ctx);
+      expect(res.status).toBe(status);
+      expect(((await res.json()) as { code: string }).code).toBe(code);
+      expect(tryRevokeIfLiveMock).not.toHaveBeenCalled();
+      expect(recordRefreshMock).not.toHaveBeenCalled();
+    },
+  );
 
   it('401 on an access token used where a refresh is expected', async () => {
     const { token } = signLoopToken({

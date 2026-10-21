@@ -17,9 +17,8 @@ vi.mock('../../config/index.js', async (importActual) => {
   };
 });
 
-// null simulates a loop-native user with no CTX mapping
 const { mockUpstreamHeaders } = vi.hoisted(() => ({
-  mockUpstreamHeaders: vi.fn<() => Promise<Record<string, string> | null>>(),
+  mockUpstreamHeaders: vi.fn<() => Record<string, string>>(),
 }));
 vi.mock('../handler-shared.js', () => ({
   upstreamHeaders: mockUpstreamHeaders,
@@ -74,7 +73,7 @@ function ctxOrder(overrides: Record<string, unknown> = {}): Response {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockUpstreamHeaders.mockResolvedValue({ Authorization: 'Bearer op-token' });
+  mockUpstreamHeaders.mockReturnValue({ Authorization: 'Bearer op-token' });
   mockValidateUrl.mockResolvedValue(null);
   mockFetchAndTransform.mockResolvedValue({
     ok: true,
@@ -87,13 +86,6 @@ describe('orderBarcodeImageHandler', () => {
   it('rejects a malformed order id with 400', async () => {
     const res = await makeApp().request('/api/orders/../etc/barcode-image');
     expect([400, 404]).toContain(res.status);
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
-
-  it('404s when the caller has no CTX identity (loop-native user)', async () => {
-    mockUpstreamHeaders.mockResolvedValue(null);
-    const res = await makeApp().request('/api/orders/ord-1/barcode-image');
-    expect(res.status).toBe(404);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 

@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { config } from './config/index.js';
 import { __resetRateLimitsForTests } from './middleware/rate-limit.js';
 import { __resetUpstreamProbeCacheOnlyForTests } from './health.js';
-import { findOrCreateUserByEmail } from './db/users.js';
+import { signInCtxUserByEmail } from './auth/ctx-login.js';
 import { issueTokenPair } from './auth/issue-token-pair.js';
 
 const SECRET_HEADER = 'x-test-endpoints-secret';
@@ -54,7 +54,7 @@ export function mountTestEndpoints(app: Hono): void {
     if (!parsed.success) {
       return c.json({ error: 'invalid body', detail: parsed.error.format() }, 400);
     }
-    const user = await findOrCreateUserByEmail(parsed.data.email);
+    const { user } = await signInCtxUserByEmail(parsed.data.email.toLowerCase());
     // NS-09: mint with current token_version for revocability
     const pair = await issueTokenPair({
       id: user.id,

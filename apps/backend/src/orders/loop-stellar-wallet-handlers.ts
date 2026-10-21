@@ -84,13 +84,7 @@ async function relayStellarWalletCall<
     );
   }
 
-  const headers = await upstreamHeaders(c);
-  if (headers === null) {
-    return c.json(
-      { code: 'SERVICE_UNAVAILABLE', message: 'Supplier credentials unavailable' },
-      503,
-    );
-  }
+  const headers = upstreamHeaders(c);
 
   let res: Response;
   try {

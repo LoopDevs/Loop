@@ -92,8 +92,8 @@ function user(id: string, email: string, isAdmin: boolean): UserDoc {
   const now = new Date();
   return {
     id,
-    ctxUserId: null,
     email,
+    status: 'enabled',
     tokenVersion: 0,
     stableCurrency: 'XLM.USDC',
     isAdmin,

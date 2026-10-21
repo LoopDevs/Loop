@@ -9,16 +9,11 @@ vi.mock('../../logger.js', () => ({
 }));
 
 const state = vi.hoisted(() => ({
-  user: null as { id: string; ctxUserId: string | null } | null,
-  resolvedCtxUserId: null as string | null,
+  user: null as { id: string } | null,
 }));
 
 vi.mock('../handler.js', () => ({
   resolveCallingUser: vi.fn(async () => state.user),
-}));
-
-vi.mock('../../ctx/user-provisioning.js', () => ({
-  resolveCtxUserId: vi.fn(async () => state.resolvedCtxUserId),
 }));
 
 const ctx = vi.hoisted(() => ({
@@ -106,8 +101,7 @@ function account(): UserAccountView {
 }
 
 beforeEach(() => {
-  state.user = { id: 'u-1', ctxUserId: 'ctx-1' };
-  state.resolvedCtxUserId = null;
+  state.user = { id: 'ctx-1' };
   ctx.fetchCtxAccount.mockReset();
   ctx.linkCtxWallet.mockReset();
   ctx.updateCtxWallet.mockReset();
@@ -115,7 +109,7 @@ beforeEach(() => {
 });
 
 describe('getAccountHandler', () => {
-  it('returns the CTX account acting as the mapped user with the request client id', async () => {
+  it('returns the CTX account acting as the user with the request client id', async () => {
     ctx.fetchCtxAccount.mockResolvedValue(account());
     const res = await getAccountHandler(makeCtx({ clientId: 'loopios' }));
     expect(res.status).toBe(200);
@@ -128,22 +122,6 @@ describe('getAccountHandler', () => {
     const res = await getAccountHandler(makeCtx({}));
     expect(res.status).toBe(401);
     expect(ctx.fetchCtxAccount).not.toHaveBeenCalled();
-  });
-
-  it('provisions on demand when the user has no CTX mapping yet', async () => {
-    state.user = { id: 'u-1', ctxUserId: null };
-    state.resolvedCtxUserId = 'ctx-new';
-    ctx.fetchCtxAccount.mockResolvedValue(account());
-    const res = await getAccountHandler(makeCtx({}));
-    expect(res.status).toBe(200);
-    expect(ctx.fetchCtxAccount).toHaveBeenCalledWith({ ctxUserId: 'ctx-new' });
-  });
-
-  it('503s while the CTX mapping is still missing after provisioning', async () => {
-    state.user = { id: 'u-1', ctxUserId: null };
-    const res = await getAccountHandler(makeCtx({}));
-    expect(res.status).toBe(503);
-    expect(((await res.json()) as { code: string }).code).toBe('SERVICE_UNAVAILABLE');
   });
 
   it('503s on a CTX transport failure', async () => {
@@ -277,7 +255,7 @@ describe('savings handlers', () => {
   };
 
   beforeEach(() => {
-    state.user = { id: 'u-1', ctxUserId: 'ctx-1' };
+    state.user = { id: 'ctx-1' };
     ctx.depositCtxSavings.mockReset();
     ctx.withdrawCtxSavings.mockReset();
   });
@@ -318,14 +296,5 @@ describe('savings handlers', () => {
     const body = (await res.json()) as { code: string; message: string };
     expect(body.code).toBe('VALIDATION_ERROR');
     expect(body.message).toMatch(/lock period/);
-  });
-
-  it('503 while the user has no CTX mapping yet', async () => {
-    state.user = { id: 'u-1', ctxUserId: null };
-    state.resolvedCtxUserId = null;
-    const res = await withdrawSavingsHandler(
-      makeCtx({ body: { currency: 'XLM.USDC', amount: '1' } }),
-    );
-    expect(res.status).toBe(503);
   });
 });

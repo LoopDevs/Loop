@@ -6,10 +6,13 @@ export type { HomeCurrency, OrderState };
 export const SOCIAL_PROVIDERS = ['google', 'apple'] as const;
 export type SocialProvider = (typeof SOCIAL_PROVIDERS)[number];
 
+export const CTX_USER_STATUSES = ['enabled', 'disabled', 'suspended', 'email_unverified'] as const;
+export type CtxUserStatus = (typeof CTX_USER_STATUSES)[number];
+
 export interface UserDoc {
   id: string;
-  ctxUserId: string | null;
   email: string;
+  status: CtxUserStatus;
   // NS-09 — bumped on logout/sign-out-all/refresh-reuse to invalidate prior access tokens
   tokenVersion: number;
   stableCurrency: string;

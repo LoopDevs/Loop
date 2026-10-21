@@ -41,6 +41,19 @@ vi.mock('../../auth/otps.js', async () => {
   };
 });
 
+vi.mock('../../ctx/user-provisioning.js', () => ({
+  loadOrCreateCtxCustomer: async (email: string) => ({
+    id: '3f8a1c2e-5b7d-4e9f-a1b2-c3d4e5f60718',
+    email,
+    status: 'enabled',
+    isAdmin: false,
+    stableCurrency: '',
+    cashbackDestination: 'account',
+    country: null,
+  }),
+  CtxUserCreationDisabledError: class extends Error {},
+}));
+
 import { nativeVerifyOtpHandler } from '../../auth/native.js';
 import { createOtp } from '../../auth/otps.js';
 

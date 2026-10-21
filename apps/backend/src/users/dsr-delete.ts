@@ -30,14 +30,12 @@ export async function deleteUserViaAnonymisation(userId: string): Promise<DsrDel
   // doc instead of resolving to the anonymised one.
   await db.collection('user_identities').deleteMany({ userId });
 
-  // Email gets the synthetic placeholder; ctxUserId nulls out — both
-  // are PII anchors.
+  // Email gets the synthetic placeholder — a PII anchor.
   await db.collection('users').updateOne(
     { id: userId },
     {
       $set: {
         email: deletedEmailFor(userId),
-        ctxUserId: null,
         updatedAt: new Date(),
       },
     },

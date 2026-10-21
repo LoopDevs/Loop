@@ -23,8 +23,8 @@ async function seedUser(id: string): Promise<UserDoc> {
   const now = new Date();
   const doc: UserDoc = {
     id,
-    ctxUserId: null,
     email: `${id}@test.local`,
+    status: 'enabled',
     tokenVersion: 0,
     stableCurrency: 'XLM.USDC',
     isAdmin: false,

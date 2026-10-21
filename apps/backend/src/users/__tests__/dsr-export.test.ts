@@ -13,8 +13,8 @@ const NOW = new Date('2026-04-26T12:34:56.000Z');
 async function seedUser(overrides: Partial<UserDoc> = {}): Promise<UserDoc> {
   const doc: UserDoc = {
     id: 'u-1',
-    ctxUserId: null,
     email: 'alice@example.com',
+    status: 'enabled',
     tokenVersion: 0,
     stableCurrency: 'XLM.GBPLOOP',
     isAdmin: false,
@@ -122,7 +122,7 @@ describe('buildDsrExport (A2-1906)', () => {
   });
 
   it('exposes the fallback contact + excluded list for off-host data sources', async () => {
-    await seedUser({ ctxUserId: 'ctx-abc' });
+    await seedUser();
     const out = await buildDsrExport('u-1');
     expect(out).not.toBeNull();
     if (out === null) throw new Error('unreachable');
@@ -134,10 +134,10 @@ describe('buildDsrExport (A2-1906)', () => {
     expect(all).toMatch(/log/i);
   });
 
-  it('user.ctxUserId is preserved (CTX mapping is part of the user-attributable data)', async () => {
-    await seedUser({ ctxUserId: 'ctx-mapping-1234' });
+  it('reports the CTX user id as user.ctxUserId', async () => {
+    await seedUser();
     const out = await buildDsrExport('u-1');
-    expect(out?.user.ctxUserId).toBe('ctx-mapping-1234');
+    expect(out?.user.ctxUserId).toBe('u-1');
   });
 
   it('passes through identities docs for the user only', async () => {

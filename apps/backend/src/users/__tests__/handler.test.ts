@@ -62,8 +62,8 @@ async function seedUser(overrides: Partial<UserDoc> = {}): Promise<UserDoc> {
   const now = new Date('2026-04-01T00:00:00Z');
   const doc: UserDoc = {
     id: UID,
-    ctxUserId: 'ctx-123',
     email: 'a@b.com',
+    status: 'enabled',
     tokenVersion: 0,
     stableCurrency: 'XLM.USDC',
     isAdmin: false,
@@ -112,6 +112,9 @@ beforeEach(() => {
   __resetDbForTests();
   updateCtxStableCurrencyMock.mockReset();
   updateCtxStableCurrencyMock.mockResolvedValue({
+    id: UID,
+    email: 'a@b.com',
+    status: 'enabled',
     isAdmin: false,
     stableCurrency: 'XLM.GBPLOOP',
     cashbackDestination: 'account',
@@ -119,6 +122,9 @@ beforeEach(() => {
   });
   updateCtxCashbackDestinationMock.mockReset();
   updateCtxCashbackDestinationMock.mockResolvedValue({
+    id: UID,
+    email: 'a@b.com',
+    status: 'enabled',
     isAdmin: false,
     stableCurrency: 'XLM.GBPLOOP',
     cashbackDestination: 'savings',
@@ -126,6 +132,9 @@ beforeEach(() => {
   });
   updateCtxCountryMock.mockReset();
   updateCtxCountryMock.mockResolvedValue({
+    id: UID,
+    email: 'a@b.com',
+    status: 'enabled',
     isAdmin: false,
     stableCurrency: '',
     cashbackDestination: 'account',
@@ -160,7 +169,7 @@ describe('setCountryHandler', () => {
     await seedUser();
     const res = await setCountryHandler(makeCtx(loopAuth, { country: 'gb' }));
     expect(res.status).toBe(200);
-    expect(updateCtxCountryMock).toHaveBeenCalledWith('ctx-123', 'GB');
+    expect(updateCtxCountryMock).toHaveBeenCalledWith(UID, 'GB');
     const body = (await res.json()) as Record<string, unknown>;
     expect(body['country']).toBe('GB');
     const stored = await db.collection('users').findOne({ id: UID });
@@ -169,6 +178,9 @@ describe('setCountryHandler', () => {
 
   it('mirrors the stable CTX derives from the country', async () => {
     updateCtxCountryMock.mockResolvedValue({
+      id: UID,
+      email: 'a@b.com',
+      status: 'enabled',
       isAdmin: false,
       stableCurrency: 'XLM.GBPLOOP',
       cashbackDestination: 'account',
@@ -220,7 +232,7 @@ describe('setCashbackDestinationHandler', () => {
     await seedUser();
     const res = await setCashbackDestinationHandler(makeCtx(loopAuth, { destination: 'savings' }));
     expect(res.status).toBe(200);
-    expect(updateCtxCashbackDestinationMock).toHaveBeenCalledWith('ctx-123', 'savings');
+    expect(updateCtxCashbackDestinationMock).toHaveBeenCalledWith(UID, 'savings');
     const body = (await res.json()) as { cashbackDestination: string };
     expect(body.cashbackDestination).toBe('savings');
     const row = await db.collection('users').findOne({ id: UID });
@@ -277,7 +289,7 @@ describe('getMeHandler', () => {
     expect(res.status).toBe(401);
   });
 
-  it('omits ctxUserId, tokenVersion, and timestamps from the view — only the profile + staff tier surface', async () => {
+  it('surfaces only the profile + staff tier in the view', async () => {
     await seedUser();
     const res = await getMeHandler(makeCtx(loopAuth));
     const body = (await res.json()) as Record<string, unknown>;
@@ -290,7 +302,6 @@ describe('getMeHandler', () => {
       'stableCurrency',
       'staffRole',
     ]);
-    expect(JSON.stringify(body)).not.toContain('ctx-123');
   });
 
   // ADR 037: web admin shell gates navigation on staffRole
@@ -358,20 +369,9 @@ describe('setStableCurrencyHandler', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
     expect(body['stableCurrency']).toBe('XLM.GBPLOOP');
-    expect(updateCtxStableCurrencyMock).toHaveBeenCalledWith('ctx-123', 'XLM.GBPLOOP');
+    expect(updateCtxStableCurrencyMock).toHaveBeenCalledWith(UID, 'XLM.GBPLOOP');
     const stored = await db.collection('users').findOne({ id: UID });
     expect(stored?.stableCurrency).toBe('XLM.GBPLOOP');
-  });
-
-  it('503 and no local write while the user has no CTX mapping yet', async () => {
-    await seedUser({ stableCurrency: 'XLM.USDC', ctxUserId: null });
-    const res = await setStableCurrencyHandler(
-      makeCtx(loopAuth, { stableCurrency: 'XLM.GBPLOOP' }),
-    );
-    expect(res.status).toBe(503);
-    expect(updateCtxStableCurrencyMock).not.toHaveBeenCalled();
-    const stored = await db.collection('users').findOne({ id: UID });
-    expect(stored?.stableCurrency).toBe('XLM.USDC');
   });
 
   it('503 and no local write when the CTX stableCurrency update fails', async () => {
@@ -421,19 +421,5 @@ describe('setStableCurrencyHandler', () => {
     expect(updateCtxStableCurrencyMock).not.toHaveBeenCalled();
     const stored = await db.collection('users').findOne({ id: UID });
     expect(stored?.updatedAt).toEqual(seeded.updatedAt);
-  });
-
-  it('404 when the user row disappears between resolve and update (race with deletion)', async () => {
-    await seedUser({ stableCurrency: 'XLM.USDC' });
-    const users = db.collection('users');
-    const realUpdateOne = users.updateOne.bind(users);
-    vi.spyOn(users, 'updateOne').mockImplementationOnce(async (filter, update, options) => {
-      await users.deleteMany({ id: UID });
-      return realUpdateOne(filter, update, options);
-    });
-    const res = await setStableCurrencyHandler(
-      makeCtx(loopAuth, { stableCurrency: 'XLM.GBPLOOP' }),
-    );
-    expect(res.status).toBe(404);
   });
 });

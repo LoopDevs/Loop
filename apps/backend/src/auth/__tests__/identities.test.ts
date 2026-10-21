@@ -1,19 +1,28 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { db, __resetDbForTests } from '../../db/client.js';
 import type { UserDoc, UserIdentityDoc } from '../../db/types.js';
-import { resolveOrCreateUserForIdentity, listLinkedIdentities } from '../identities.js';
 
-// Social-provider identity linking (ADR 014) — real in-memory store, no mocks
+const signInByEmailMock = vi.fn();
+const signInByIdMock = vi.fn();
+vi.mock('../ctx-login.js', () => ({
+  signInCtxUserByEmail: (email: string, country?: string) => signInByEmailMock(email, country),
+  signInCtxUserById: (id: string) => signInByIdMock(id),
+}));
+
+import { signInUserForIdentity, listLinkedIdentities } from '../identities.js';
+
 beforeEach(() => {
   __resetDbForTests();
+  signInByEmailMock.mockReset();
+  signInByIdMock.mockReset();
 });
 
-async function seedUser(overrides: Partial<UserDoc> = {}): Promise<UserDoc> {
+function ctxUser(overrides: Partial<UserDoc> = {}): UserDoc {
   const now = new Date();
-  const doc: UserDoc = {
-    id: overrides.id ?? 'u-seed',
-    ctxUserId: null,
+  return {
+    id: 'u-seed',
     email: 'seed@b.com',
+    status: 'enabled',
     tokenVersion: 0,
     stableCurrency: 'XLM.USDC',
     isAdmin: false,
@@ -21,8 +30,6 @@ async function seedUser(overrides: Partial<UserDoc> = {}): Promise<UserDoc> {
     updatedAt: now,
     ...overrides,
   };
-  await db.collection('users').insertOne(doc);
-  return doc;
 }
 
 async function seedIdentity(overrides: Partial<UserIdentityDoc> = {}): Promise<UserIdentityDoc> {
@@ -39,76 +46,57 @@ async function seedIdentity(overrides: Partial<UserIdentityDoc> = {}): Promise<U
   return doc;
 }
 
-describe('resolveOrCreateUserForIdentity', () => {
-  it('step 1 — known (provider, sub) → returns the existing user, no writes', async () => {
-    await seedUser({ id: 'u-1', email: 'a@b.com' });
+describe('signInUserForIdentity', () => {
+  it('signs a known (provider, sub) in by its linked CTX user id', async () => {
     await seedIdentity({ userId: 'u-1', provider: 'google', providerSub: 'sub-1' });
-    const out = await resolveOrCreateUserForIdentity({
+    signInByIdMock.mockResolvedValue(ctxUser({ id: 'u-1', email: 'a@b.com' }));
+    const out = await signInUserForIdentity({
       provider: 'google',
       providerSub: 'sub-1',
       email: 'a@b.com',
     });
     expect(out.created).toBe(false);
     expect(out.user.id).toBe('u-1');
-    expect(await db.collection('users').count()).toBe(1);
+    expect(signInByIdMock).toHaveBeenCalledWith('u-1');
+    expect(signInByEmailMock).not.toHaveBeenCalled();
     expect(await db.collection('user_identities').count()).toBe(1);
   });
 
-  it('step 2 — unknown identity, known email → links provider to the existing user', async () => {
-    await seedUser({ id: 'u-2', email: 'same@b.com' });
-    const out = await resolveOrCreateUserForIdentity({
-      provider: 'google',
-      providerSub: 'sub-new',
-      email: 'SAME@B.COM',
+  it('signs an unknown identity in by its normalised email and links it to the CTX user', async () => {
+    signInByEmailMock.mockResolvedValue({
+      user: ctxUser({ id: 'ctx-2', email: 'fresh@b.com' }),
+      created: true,
     });
-    expect(out.created).toBe(false);
-    expect(out.user.id).toBe('u-2');
-    const link = await db
-      .collection('user_identities')
-      .findOne({ provider: 'google', providerSub: 'sub-new' });
-    expect(link).not.toBeNull();
-    expect(link?.userId).toBe('u-2');
-    expect(link?.emailAtLink).toBe('same@b.com');
-    expect(await db.collection('users').count()).toBe(1);
-  });
-
-  it('step 3 — unknown both → creates a fresh user + link (created=true)', async () => {
-    const out = await resolveOrCreateUserForIdentity({
+    const out = await signInUserForIdentity({
       provider: 'apple',
       providerSub: 'apple-sub',
       email: 'Fresh@B.com',
+      country: 'GB',
     });
     expect(out.created).toBe(true);
-    expect(out.user.email).toBe('fresh@b.com');
-    const storedUser = await db.collection('users').findOne({ email: 'fresh@b.com' });
-    expect(storedUser?.id).toBe(out.user.id);
+    expect(out.user.id).toBe('ctx-2');
+    expect(signInByEmailMock).toHaveBeenCalledWith('fresh@b.com', 'GB');
     const link = await db
       .collection('user_identities')
       .findOne({ provider: 'apple', providerSub: 'apple-sub' });
-    expect(link?.userId).toBe(out.user.id);
+    expect(link?.userId).toBe('ctx-2');
     expect(link?.emailAtLink).toBe('fresh@b.com');
   });
 
-  it('step 1 but the user row is missing — dangling identity drops through to a fresh user', async () => {
-    // Identity row survives a user deletion (ops-grade edge case).
-    await seedIdentity({ userId: 'u-dead', provider: 'google', providerSub: 'sub-dangling' });
-    const out = await resolveOrCreateUserForIdentity({
-      provider: 'google',
-      providerSub: 'sub-dangling',
-      email: 'z@b.com',
-    });
-    expect(out.created).toBe(true);
-    expect(out.user.email).toBe('z@b.com');
-    expect(out.user.id).not.toBe('u-dead');
+  it('propagates a CTX refusal without linking the identity', async () => {
+    signInByEmailMock.mockRejectedValue(new Error('refused'));
+    await expect(
+      signInUserForIdentity({ provider: 'google', providerSub: 'sub-x', email: 'x@b.com' }),
+    ).rejects.toThrow('refused');
+    expect(await db.collection('user_identities').count()).toBe(0);
   });
 
   it('parallel-login race — the duplicate identity insert no-ops instead of failing the login', async () => {
-    // A second simultaneous login for the same (provider, sub) reaches
-    // linkIdentity after the winner's row exists: the unique-spec
-    // violation must be swallowed and the login succeed.
-    await seedUser({ id: 'u-race', email: 'race@b.com' });
-    await seedIdentity({ userId: 'u-race', provider: 'google', providerSub: 'sub-race' });
-    const out = await resolveOrCreateUserForIdentity({
+    signInByEmailMock.mockImplementation(async () => {
+      await seedIdentity({ id: 'ident-winner', userId: 'u-race', providerSub: 'sub-race' });
+      return { user: ctxUser({ id: 'u-race', email: 'race@b.com' }), created: false };
+    });
+    const out = await signInUserForIdentity({
       provider: 'google',
       providerSub: 'sub-race',
       email: 'race@b.com',
@@ -119,14 +107,14 @@ describe('resolveOrCreateUserForIdentity', () => {
 
   it('A2-2002: rejects a non-ASCII (homograph-capable) provider email', async () => {
     await expect(
-      resolveOrCreateUserForIdentity({
+      signInUserForIdentity({
         provider: 'google',
         providerSub: 'sub-h',
         // Cyrillic 'а' in place of Latin 'a'.
         email: 'паypal@b.com',
       }),
     ).rejects.toThrow();
-    expect(await db.collection('users').count()).toBe(0);
+    expect(signInByEmailMock).not.toHaveBeenCalled();
     expect(await db.collection('user_identities').count()).toBe(0);
   });
 });

@@ -9,7 +9,7 @@ vi.mock('../../ctx/user-roles.js', async (importOriginal) => ({
 }));
 
 import { db, __resetDbForTests } from '../../db/client.js';
-import { findOrCreateUserByEmail } from '../../db/users.js';
+import { cacheCtxUser } from '../../db/users.js';
 import { signLoopToken, DEFAULT_ACCESS_TTL_SECONDS } from '../../auth/tokens.js';
 import { app, __resetRateLimitsForTests } from '../../app.js';
 
@@ -20,10 +20,15 @@ interface SeededUser {
 }
 
 async function seedUser(email: string, stableCurrency: string): Promise<SeededUser> {
-  const user = await findOrCreateUserByEmail(email);
-  await db
-    .collection('users')
-    .updateOne({ id: user.id }, { $set: { stableCurrency, ctxUserId: `ctx-${user.id}` } });
+  const { user } = await cacheCtxUser({
+    id: randomUUID(),
+    email,
+    status: 'enabled',
+    isAdmin: false,
+    stableCurrency,
+    cashbackDestination: 'account',
+    country: null,
+  });
   const access = signLoopToken({
     sub: user.id,
     email: user.email,
@@ -82,7 +87,10 @@ describe('self-serve stable-currency change — document store', () => {
     __resetDbForTests();
     __resetRateLimitsForTests();
     updateCtxStableCurrencyMock.mockReset();
-    updateCtxStableCurrencyMock.mockImplementation(async (_ctxUserId: string, stable: string) => ({
+    updateCtxStableCurrencyMock.mockImplementation(async (ctxUserId: string, stable: string) => ({
+      id: ctxUserId,
+      email: 'hc@test.local',
+      status: 'enabled',
       isAdmin: false,
       stableCurrency: stable,
       cashbackDestination: 'account',
@@ -98,7 +106,7 @@ describe('self-serve stable-currency change — document store', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { stableCurrency: string };
     expect(body.stableCurrency).toBe('XLM.GBPLOOP');
-    expect(updateCtxStableCurrencyMock).toHaveBeenCalledWith(`ctx-${me.userId}`, 'XLM.GBPLOOP');
+    expect(updateCtxStableCurrencyMock).toHaveBeenCalledWith(me.userId, 'XLM.GBPLOOP');
 
     const after = await db.collection('users').findOne({ id: me.userId });
     expect(after?.stableCurrency).toBe('XLM.GBPLOOP');
