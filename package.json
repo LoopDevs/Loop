@@ -42,6 +42,7 @@
       "axios": "1.20.0"
     },
     "fast-uri": "^3.1.2",
+    "follow-redirects": "1.16.1",
     "brace-expansion@5": "5.0.12",
     "shell-quote": "1.12.0",
     "ip-address": "10.5.0",
@@ -50,7 +51,7 @@
     }
   },
   "devDependencies": {
-    "@anthropic-ai/claude-code": "2.1.163",
+    "@anthropic-ai/claude-code": "2.1.306",
     "@commitlint/cli": "20.5.3",
     "@commitlint/config-conventional": "21.2.0",
     "@cyclonedx/cyclonedx-npm": "5.0.0",
