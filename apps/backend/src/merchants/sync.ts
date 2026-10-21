@@ -270,8 +270,14 @@ async function refreshMerchantsInternal(opts: { rethrow?: boolean } = {}): Promi
       for (const item of parsed.data.result) {
         const merchantParsed = UpstreamMerchantSchema.safeParse(item);
         if (!merchantParsed.success) {
+          const rawItem =
+            typeof item === 'object' && item !== null ? (item as Record<string, unknown>) : {};
           log.warn(
-            { issues: merchantParsed.error.issues },
+            {
+              merchantId: rawItem.id,
+              merchantName: rawItem.name,
+              issues: merchantParsed.error.issues,
+            },
             'Skipping malformed merchant from upstream',
           );
           continue;
