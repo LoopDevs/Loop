@@ -102,7 +102,11 @@ export const CtxAccountSchema = z
   .passthrough();
 
 const CtxValidationErrorSchema = z
-  .object({ error: z.string(), fields: z.record(z.string(), z.array(z.string())).optional() })
+  .object({
+    error: z.string(),
+    message: z.string().optional(),
+    fields: z.record(z.string(), z.array(z.string())).optional(),
+  })
   .passthrough();
 
 export class CtxAccountRequestError extends Error {
@@ -230,7 +234,7 @@ async function ctxAccountRequest<T>(
     try {
       const parsed = CtxValidationErrorSchema.safeParse(JSON.parse(raw));
       if (parsed.success) {
-        message = parsed.data.error;
+        message = parsed.data.message ?? parsed.data.error;
         fields = parsed.data.fields ?? null;
       }
     } catch {

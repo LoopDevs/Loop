@@ -8,7 +8,7 @@ import { CtxUserRolesError, fetchCtxUser } from './user-roles.js';
 
 const FETCH_TIMEOUT_MS = 10_000;
 
-const CTX_USER_CREATION_DISABLED = 'user creation is disabled for this company';
+const CTX_USER_CREATION_DISABLED = 'ErrUserCreationDisabled';
 
 export class CtxUserCreationDisabledError extends Error {
   constructor() {

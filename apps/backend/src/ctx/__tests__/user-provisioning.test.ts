@@ -209,7 +209,15 @@ describe('loadOrCreateCtxCustomer', () => {
   it('throws CtxUserCreationDisabledError when CTX has user creation disabled for the company', async () => {
     routeFetch(
       lookup(listOf()),
-      create(json({ error: 'user creation is disabled for this company' }, 403)),
+      create(
+        json(
+          {
+            error: 'ErrUserCreationDisabled',
+            message: 'user creation is disabled for this company',
+          },
+          403,
+        ),
+      ),
     );
     await expect(loadOrCreateCtxCustomer('u1@test.io')).rejects.toBeInstanceOf(
       CtxUserCreationDisabledError,
