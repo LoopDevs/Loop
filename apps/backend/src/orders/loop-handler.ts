@@ -10,7 +10,6 @@ import type {
 } from '@loop/shared';
 import { getMerchants } from '../merchants/sync.js';
 import { LoopCreateOrderBody as CreateBody } from './request-schemas.js';
-import { ctxActAsHeaders } from '../ctx/user-provisioning.js';
 import { loopCryptoPaymentCurrencies, loopFiatPaymentCurrencies } from '../ctx/startup.js';
 import { ctxFetch, CtxRateLimitedError, CtxUnavailableError } from '../ctx/api-fetch.js';
 import { upstreamUrl } from '../upstream.js';
@@ -247,8 +246,6 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
     return c.json({ code: 'VALIDATION_ERROR', message: denominationError }, 400);
   }
 
-  const actAsHeaders = ctxActAsHeaders(auth.userId, clientId);
-
   let order: Order;
   try {
     order = await createOrder({
@@ -268,21 +265,22 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
 
   let res: Response;
   try {
-    res = await ctxFetch(upstreamUrl('/gift-cards'), {
-      method: 'POST',
-      headers: {
-        ...actAsHeaders,
-        'Content-Type': 'application/json',
+    res = await ctxFetch(
+      upstreamUrl('/gift-cards'),
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...(paymentMethod === 'crypto' ? { cryptoCurrency: parsed.data.cryptoCurrency } : {}),
+          fiatCurrency: parsed.data.currency,
+          fiatAmount: minorToMajor(parsed.data.amountMinor),
+          merchantId: parsed.data.merchantId,
+          operatorReference: order.id,
+        }),
+        signal: AbortSignal.timeout(CTX_CREATE_TIMEOUT_MS),
       },
-      body: JSON.stringify({
-        ...(paymentMethod === 'crypto' ? { cryptoCurrency: parsed.data.cryptoCurrency } : {}),
-        fiatCurrency: parsed.data.currency,
-        fiatAmount: minorToMajor(parsed.data.amountMinor),
-        merchantId: parsed.data.merchantId,
-        operatorReference: order.id,
-      }),
-      signal: AbortSignal.timeout(CTX_CREATE_TIMEOUT_MS),
-    });
+      { actAs: { userId: auth.userId, clientId } },
+    );
   } catch (err) {
     const transient = err instanceof CtxUnavailableError || err instanceof CtxRateLimitedError;
     await markOrderRejected(order.id, transient ? 'supplier unavailable' : 'supplier call failed');

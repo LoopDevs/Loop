@@ -1,6 +1,5 @@
 // CTX customer provisioning — ADR 013, ADR 030, ADR 051
 import { z } from 'zod';
-import { config } from '../config/index.js';
 import { upstreamUrl } from '../upstream.js';
 import { scrubUpstreamBody } from '../upstream-body-scrub.js';
 import type { CtxUser } from '../db/users.js';
@@ -144,12 +143,4 @@ export async function loadOrCreateCtxCustomer(
     );
   }
   return fetchCtxUser(id);
-}
-
-export function ctxActAsHeaders(ctxUserId: string, clientId?: string): Record<string, string> {
-  return {
-    'X-Api-Key': config.ctx.credentials.key,
-    'X-User-Id': ctxUserId,
-    'X-Client-Id': clientId ?? config.ctx.clientIds.web,
-  };
 }

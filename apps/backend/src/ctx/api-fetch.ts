@@ -47,7 +47,6 @@ export interface CtxApiCredentials {
   apiKey: string;
   apiSecret?: string | undefined;
   privateKey: string;
-  clientId: string;
 }
 
 // The operator API-key credentials. The key proves itself with a secp256k1 signature over every request
@@ -57,15 +56,20 @@ export function ctxApiCredentials(): CtxApiCredentials {
     apiKey: config.ctx.credentials.key,
     apiSecret: config.ctx.credentials.secret,
     privateKey: config.ctx.credentials.privateKey,
-    clientId: config.ctx.clientIds.web,
   };
 }
 
 export type CtxAuthProof = 'signature' | 'secret';
 
+export interface CtxActAs {
+  userId: string;
+  clientId?: string | undefined;
+}
+
 export interface CtxFetchOptions {
   proof?: CtxAuthProof;
   passthrough401?: boolean;
+  actAs?: CtxActAs;
 }
 
 function headersToRecord(headers: RequestInit['headers']): Record<string, string> {
@@ -75,11 +79,6 @@ function headersToRecord(headers: RequestInit['headers']): Record<string, string
   return { ...(headers as Record<string, string>) };
 }
 
-function headerValue(record: Record<string, string>, name: string): string {
-  const key = Object.keys(record).find((k) => k.toLowerCase() === name.toLowerCase());
-  return key === undefined ? '' : (record[key] ?? '');
-}
-
 function deleteHeader(record: Record<string, string>, name: string): void {
   for (const key of Object.keys(record)) {
     if (key.toLowerCase() === name.toLowerCase()) delete record[key];
@@ -87,23 +86,28 @@ function deleteHeader(record: Record<string, string>, name: string): void {
 }
 
 // Builds the headers that authenticate one CTX request: the operator key plus a signature over this exact method,
-// URI, body and act-as headers, or the legacy secret when startup is registering the signing key. Callers that
-// pre-set `X-User-Id` / `X-Client-Id` keep them; the signature covers whatever they end up as, so a signed request
-// cannot be replayed as another customer.
+// URI, body and act-as scope, or the legacy secret when startup is registering the signing key. The act-as
+// headers come only from `actAs`; operator requests carry neither. The signature covers them, so a signed
+// request cannot be replayed as another customer.
 export function ctxAuthHeaders(
   method: string,
   url: string | URL,
   body: RequestBody,
   existing?: RequestInit['headers'],
   proof?: CtxAuthProof,
+  actAs?: CtxActAs,
 ): Record<string, string> {
   const creds = ctxApiCredentials();
   const headers = headersToRecord(existing);
-  deleteHeader(headers, 'X-Api-Key');
-  deleteHeader(headers, 'X-Api-Secret');
+  for (const name of ['X-Api-Key', 'X-Api-Secret', 'X-User-Id', 'X-Client-Id']) {
+    deleteHeader(headers, name);
+  }
   headers['X-Api-Key'] = creds.apiKey;
-  if (headerValue(headers, 'X-Client-Id') === '') {
-    headers['X-Client-Id'] = creds.clientId;
+  const userId = actAs?.userId ?? '';
+  const clientId = actAs === undefined ? '' : (actAs.clientId ?? config.ctx.clientIds.web);
+  if (actAs !== undefined) {
+    headers['X-User-Id'] = userId;
+    headers['X-Client-Id'] = clientId;
   }
   if (proof !== 'secret') {
     Object.assign(
@@ -114,8 +118,8 @@ export function ctxAuthHeaders(
           uri: requestUri(url),
           body,
           apiKey: creds.apiKey,
-          clientId: headerValue(headers, 'X-Client-Id'),
-          userId: headerValue(headers, 'X-User-Id'),
+          clientId,
+          userId,
           timestamp: unixNow(),
           nonce: newNonce(),
         },
@@ -155,7 +159,7 @@ async function drainBody(res: Response): Promise<void> {
   }
 }
 
-// Injects the CTX auth headers into `init.headers` and dispatches through `upstreamFetch`, which carries the A2-1305 request-id correlation in both directions. Callers may pre-set `X-User-Id` (act-as) and `X-Client-Id` (request-origin client) — `ctxFetch` only fills `X-Client-Id` when the caller didn't.
+// Injects the CTX auth headers into `init.headers` and dispatches through `upstreamFetch`, which carries the A2-1305 request-id correlation in both directions. `options.actAs` scopes the request to one customer.
 export async function ctxFetch(
   url: string | URL,
   init?: RequestInit,
@@ -165,7 +169,14 @@ export async function ctxFetch(
     init?.signal ?? AbortSignal.timeout(CTX_FETCH_DEFAULT_TIMEOUT_MS);
 
   const headers = new Headers(
-    ctxAuthHeaders(init?.method ?? 'GET', url, init?.body, init?.headers, options?.proof),
+    ctxAuthHeaders(
+      init?.method ?? 'GET',
+      url,
+      init?.body,
+      init?.headers,
+      options?.proof,
+      options?.actAs,
+    ),
   );
   // A2-1305 in both directions (our id stamped outbound, CTX's id captured off the response for the `X-Ctx-Request-Id` echo) is `upstreamFetch`'s job — see `../upstream.ts`.
   const res = await upstreamFetch(url, { ...init, headers, signal });

@@ -80,11 +80,14 @@ describe('ctxAuthHeaders', () => {
   it('signs the request and drops any secret header', () => {
     ctxState.credentials = { key: 'loop', secret: 'shh', privateKey: PRIVATE_KEY };
     const body = JSON.stringify({ fiatAmount: '5' });
-    const headers = ctxAuthHeaders('POST', 'https://ctx.test/gift-cards?page=1', body, {
-      'X-User-Id': 'user-1',
-      'X-Api-Secret': 'stale',
-      'Content-Type': 'application/json',
-    });
+    const headers = ctxAuthHeaders(
+      'POST',
+      'https://ctx.test/gift-cards?page=1',
+      body,
+      { 'X-Api-Secret': 'stale', 'Content-Type': 'application/json' },
+      undefined,
+      { userId: 'user-1' },
+    );
     expect(headers['X-Api-Secret']).toBeUndefined();
     expect(headers['X-Api-Key']).toBe('loop');
     expect(headers['X-Client-Id']).toBe('loopweb');
@@ -99,13 +102,38 @@ describe('ctxAuthHeaders', () => {
     ).toBe(false);
   });
 
-  it('keeps a caller-chosen client id inside the signed message', () => {
+  it('puts the act-as scope inside the signed message', () => {
     ctxState.credentials = { key: 'loop', privateKey: PRIVATE_KEY };
-    const headers = ctxAuthHeaders('GET', new URL('https://ctx.test/users/u1/account'), undefined, {
-      'X-Client-Id': 'loopios',
-    });
+    const headers = ctxAuthHeaders(
+      'GET',
+      new URL('https://ctx.test/users/u1/account'),
+      undefined,
+      undefined,
+      undefined,
+      { userId: 'u1', clientId: 'loopios' },
+    );
+    expect(headers['X-User-Id']).toBe('u1');
     expect(headers['X-Client-Id']).toBe('loopios');
     expect(verifies(headers, 'GET', '/users/u1/account', undefined)).toBe(true);
+  });
+
+  it('sends neither client nor user id on an operator request', () => {
+    ctxState.credentials = { key: 'loop', privateKey: PRIVATE_KEY };
+    const headers = ctxAuthHeaders('GET', 'https://ctx.test/merchants?page=1', undefined);
+    expect(headers['X-User-Id']).toBeUndefined();
+    expect(headers['X-Client-Id']).toBeUndefined();
+    expect(verifies(headers, 'GET', '/merchants?page=1', undefined)).toBe(true);
+  });
+
+  it('drops act-as headers set by the caller', () => {
+    ctxState.credentials = { key: 'loop', privateKey: PRIVATE_KEY };
+    const headers = ctxAuthHeaders('GET', 'https://ctx.test/merchants', undefined, {
+      'X-User-Id': 'user-1',
+      'X-Client-Id': 'loopios',
+    });
+    expect(headers['X-User-Id']).toBeUndefined();
+    expect(headers['X-Client-Id']).toBeUndefined();
+    expect(verifies(headers, 'GET', '/merchants', undefined)).toBe(true);
   });
 
   it('uses a fresh nonce per request', () => {
@@ -119,14 +147,16 @@ describe('ctxAuthHeaders', () => {
     ctxState.credentials = { key: 'loop', privateKey: PRIVATE_KEY };
     upstreamFetchMock.mockResolvedValue(new Response('{}', { status: 200 }));
     const body = JSON.stringify({ chain: 'XLM' });
-    await ctxFetch('https://ctx.test/users/u1/wallets', {
-      method: 'POST',
-      headers: { 'X-User-Id': 'u1', 'X-Api-Secret': 'stale' },
-      body,
-    });
+    await ctxFetch(
+      'https://ctx.test/users/u1/wallets',
+      { method: 'POST', headers: { 'X-Api-Secret': 'stale' }, body },
+      { actAs: { userId: 'u1' } },
+    );
     const [, init] = upstreamFetchMock.mock.calls[0] as [string, RequestInit];
     const sent = init.headers as Headers;
     expect(sent.get('X-Api-Secret')).toBeNull();
+    expect(sent.get('X-User-Id')).toBe('u1');
+    expect(sent.get('X-Client-Id')).toBe('loopweb');
     expect(init.body).toBe(body);
     const record = Object.fromEntries(sent.entries());
     expect(
@@ -156,11 +186,7 @@ describe('ctxAuthHeaders', () => {
   it('sends the secret instead of signing when the caller asks for the secret proof', () => {
     ctxState.credentials = { key: 'loop', secret: 'shh', privateKey: PRIVATE_KEY };
     const headers = ctxAuthHeaders('GET', 'https://ctx.test/me', undefined, undefined, 'secret');
-    expect(headers).toEqual({
-      'X-Api-Key': 'loop',
-      'X-Api-Secret': 'shh',
-      'X-Client-Id': 'loopweb',
-    });
+    expect(headers).toEqual({ 'X-Api-Key': 'loop', 'X-Api-Secret': 'shh' });
   });
 
   it('refuses the secret proof when no secret is configured', () => {

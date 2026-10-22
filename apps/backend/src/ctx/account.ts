@@ -11,7 +11,6 @@ import type {
 import { upstreamUrl } from '../upstream.js';
 import { scrubUpstreamBody } from '../upstream-body-scrub.js';
 import { ctxFetch } from './api-fetch.js';
-import { ctxActAsHeaders } from './user-provisioning.js';
 
 const FETCH_TIMEOUT_MS = 15_000;
 
@@ -211,19 +210,19 @@ async function ctxAccountRequest<T>(
   schema: z.ZodType<T>,
   body?: unknown,
 ): Promise<T> {
-  const headers = ctxActAsHeaders(actAs.ctxUserId, actAs.clientId);
-  if (headers === null)
-    throw new CtxAccountRequestError(503, 'Supplier credentials unavailable', null);
-  const res = await ctxFetch(upstreamUrl(path), {
-    method,
-    headers: {
-      ...headers,
-      Accept: 'application/json',
-      ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+  const res = await ctxFetch(
+    upstreamUrl(path),
+    {
+      method,
+      headers: {
+        Accept: 'application/json',
+        ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     },
-    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-  });
+    { actAs: { userId: actAs.ctxUserId, clientId: actAs.clientId } },
+  );
   const raw = await res.text().catch(() => '');
   if (!res.ok) {
     let fields: Record<string, string[]> | null = null;

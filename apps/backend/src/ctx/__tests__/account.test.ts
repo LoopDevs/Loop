@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { CtxFetchOptions } from '../api-fetch.js';
 
 vi.mock('../../logger.js', () => ({
   logger: {
@@ -15,18 +16,6 @@ const ctxFetchMock = vi.hoisted(() => vi.fn());
 vi.mock('../api-fetch.js', async (importOriginal) => ({
   ...((await importOriginal()) as Record<string, unknown>),
   ctxFetch: ctxFetchMock,
-}));
-
-vi.mock('../user-provisioning.js', () => ({
-  ctxActAsHeaders: (ctxUserId: string | null, clientId?: string) =>
-    ctxUserId === null
-      ? null
-      : {
-          'X-Api-Key': 'k',
-          'X-Api-Secret': 's',
-          'X-User-Id': ctxUserId,
-          'X-Client-Id': clientId ?? 'loopweb',
-        },
 }));
 
 import {
@@ -112,11 +101,14 @@ describe('fetchCtxAccount', () => {
 
     const view = await fetchCtxAccount({ ctxUserId: 'ctx-user-1', clientId: 'loopios' });
 
-    const [url, init] = ctxFetchMock.mock.calls[0] as [string, RequestInit];
+    const [url, init, options] = ctxFetchMock.mock.calls[0] as [
+      string,
+      RequestInit,
+      CtxFetchOptions,
+    ];
     expect(url).toBe('http://ctx.test/users/ctx-user-1/account');
     expect(init.method).toBe('GET');
-    expect((init.headers as Record<string, string>)['X-User-Id']).toBe('ctx-user-1');
-    expect((init.headers as Record<string, string>)['X-Client-Id']).toBe('loopios');
+    expect(options.actAs).toEqual({ userId: 'ctx-user-1', clientId: 'loopios' });
     expect(view.wallet).toEqual([{ currency: 'XLM.GBPLOOP', amount: '0.4000000' }]);
     expect(view.linkedWallets[0]).toEqual({
       id: 'w-1',
@@ -237,11 +229,15 @@ describe('savings', () => {
       { ctxUserId: 'ctx-user-1', clientId: 'loopios' },
       { currency: 'XLM.USDC', amount: '1' },
     );
-    const [url, init] = ctxFetchMock.mock.calls[0] as [string, RequestInit];
+    const [url, init, options] = ctxFetchMock.mock.calls[0] as [
+      string,
+      RequestInit,
+      CtxFetchOptions,
+    ];
     expect(url).toBe('http://ctx.test/users/ctx-user-1/account/savings/deposits');
     expect(init.method).toBe('POST');
     expect(JSON.parse(init.body as string)).toEqual({ currency: 'XLM.USDC', amount: '1' });
-    expect((init.headers as Record<string, string>)['X-User-Id']).toBe('ctx-user-1');
+    expect(options.actAs?.userId).toBe('ctx-user-1');
     expect(view).toEqual({
       id: 'sop-1',
       type: 'deposit',

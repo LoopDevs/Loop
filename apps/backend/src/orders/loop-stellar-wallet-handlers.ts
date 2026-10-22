@@ -8,7 +8,6 @@ import type { LoopAuthContext } from '../auth/handler.js';
 import { ctxFetch } from '../ctx/api-fetch.js';
 import { upstreamUrl } from '../upstream.js';
 import { scrubUpstreamBody } from '../upstream-body-scrub.js';
-import { upstreamHeaders } from './handler-shared.js';
 import type { LoopStellarSubmitResponse, LoopStellarTransactionResponse } from '@loop/shared';
 
 const log = logger.child({ area: 'loop-stellar-wallet' });
@@ -84,18 +83,17 @@ async function relayStellarWalletCall<
     );
   }
 
-  const headers = upstreamHeaders(c);
-
   let res: Response;
   try {
     res = await ctxFetch(
       upstreamUrl(`/payments/${encodeURIComponent(row.ctxPaymentId)}/stellar/${action}`),
       {
         method: 'POST',
-        headers: { ...headers, 'Content-Type': 'application/json', Accept: 'application/json' },
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify(parsed.data),
         signal: AbortSignal.timeout(CTX_CALL_TIMEOUT_MS),
       },
+      { actAs: { userId: auth.userId, clientId: c.get('clientId') as string | undefined } },
     );
   } catch (err) {
     log.error({ orderId: row.id, action, err }, 'CTX stellar wallet call failed');

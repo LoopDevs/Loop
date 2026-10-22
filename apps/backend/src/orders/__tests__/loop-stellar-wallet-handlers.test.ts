@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type * as ConfigModule from '../../config/index.js';
 import type { Context } from 'hono';
 import type { LoopAuthContext } from '../../auth/handler.js';
+import type { CtxFetchOptions } from '../../ctx/api-fetch.js';
 
 const { configState } = vi.hoisted(() => ({
   configState: { nativeAuthEnabled: true },
@@ -31,15 +32,9 @@ vi.mock('../../logger.js', () => ({
   },
 }));
 
-const { dbState, ctxFetchMock, headersState } = vi.hoisted(() => ({
+const { dbState, ctxFetchMock } = vi.hoisted(() => ({
   dbState: { row: undefined as unknown },
   ctxFetchMock: vi.fn(),
-  headersState: {
-    value: { 'X-Api-Key': 'k', 'X-User-Id': 'ctx-u-1', 'X-Client-Id': 'loopweb' } as Record<
-      string,
-      string
-    >,
-  },
 }));
 
 vi.mock('../../db/client.js', () => ({
@@ -50,15 +45,12 @@ vi.mock('../../db/client.js', () => ({
   },
 }));
 
-vi.mock('../handler-shared.js', () => ({
-  upstreamHeaders: vi.fn(() => headersState.value),
-}));
-
 vi.mock('../../ctx/api-fetch.js', async (importActual) => {
   const actual = (await importActual()) as Record<string, unknown>;
   return {
     ...actual,
-    ctxFetch: (url: string, init?: RequestInit) => ctxFetchMock(url, init),
+    ctxFetch: (url: string, init?: RequestInit, options?: CtxFetchOptions) =>
+      ctxFetchMock(url, init, options),
   };
 });
 
@@ -117,7 +109,6 @@ function ctxResponse(status: number, body: unknown): Response {
 beforeEach(() => {
   dbState.row = undefined;
   ctxFetchMock.mockReset();
-  headersState.value = { 'X-Api-Key': 'k', 'X-User-Id': 'ctx-u-1', 'X-Client-Id': 'loopweb' };
   configState.nativeAuthEnabled = true;
 });
 
@@ -171,7 +162,8 @@ describe('loopStellarTransactionHandler', () => {
     const [url, init] = ctxFetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('https://ctx.test/payments/pay-1/stellar/transaction');
     expect(init.method).toBe('POST');
-    expect(init.headers).toMatchObject({ 'X-User-Id': 'ctx-u-1', 'X-Client-Id': 'loopweb' });
+    const [, , options] = ctxFetchMock.mock.calls[0] as [string, RequestInit, CtxFetchOptions];
+    expect(options.actAs).toEqual({ userId: 'user-uuid', clientId: undefined });
     expect(JSON.parse(init.body as string)).toEqual({ source: SOURCE });
   });
 

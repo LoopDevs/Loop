@@ -249,3 +249,30 @@ describe('listOrdersHandler — plain-proxy path unchanged', () => {
     expect(body.pagination).toMatchObject({ total: 42, totalPages: 3, hasNext: true });
   });
 });
+
+describe('listOrdersHandler — act-as auth', () => {
+  it('signs the act-as request with the operator key', async () => {
+    mockFetch.mockResolvedValueOnce(upstreamPage(1, 1, []));
+    const ctx = makeCtx({ page: '1' });
+    const store = new Map<string, unknown>([['auth', { kind: 'loop', userId: 'ctx-user-1' }]]);
+    (ctx as unknown as { get: (k: string) => unknown }).get = (k) => store.get(k);
+
+    await listOrdersHandler(ctx);
+
+    const headers = new Headers((mockFetch.mock.calls[0]![1] as RequestInit).headers);
+    expect(headers.get('X-User-Id')).toBe('ctx-user-1');
+    expect(headers.get('X-Signature')).toBeTruthy();
+    expect(headers.get('X-Api-Secret')).toBeNull();
+  });
+
+  it('forwards the bearer token without operator credentials', async () => {
+    mockFetch.mockResolvedValueOnce(upstreamPage(1, 1, []));
+
+    await listOrdersHandler(makeCtx({ page: '1' }));
+
+    const headers = new Headers((mockFetch.mock.calls[0]![1] as RequestInit).headers);
+    expect(headers.get('Authorization')).toBe('Bearer test-bearer');
+    expect(headers.get('X-Api-Key')).toBeNull();
+    expect(headers.get('X-Signature')).toBeNull();
+  });
+});

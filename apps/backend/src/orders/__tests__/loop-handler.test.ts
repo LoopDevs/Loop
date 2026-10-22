@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type * as ConfigModule from '../../config/index.js';
 import type { Context } from 'hono';
 import type { LoopAuthContext } from '../../auth/require-auth.js';
+import type { CtxFetchOptions } from '../../ctx/api-fetch.js';
 
 const { configState } = vi.hoisted(() => ({
   configState: { nativeAuthEnabled: true },
@@ -77,23 +78,12 @@ vi.mock('../../merchants/sync.js', () => ({
 vi.mock('../../db/users.js', () => ({
   getUserById: vi.fn(async () => ({ id: 'user-uuid', email: 'a@b.com' })),
 }));
-vi.mock('../../ctx/user-provisioning.js', async (importActual) => {
-  const actual = (await importActual()) as Record<string, unknown>;
-  return {
-    ...actual,
-    ctxActAsHeaders: (ctxUserId: string, clientId?: string) => ({
-      'X-Api-Key': 'k',
-      'X-Api-Secret': 's',
-      'X-User-Id': ctxUserId,
-      'X-Client-Id': clientId ?? 'loopweb',
-    }),
-  };
-});
 vi.mock('../../ctx/api-fetch.js', async (importActual) => {
   const actual = (await importActual()) as Record<string, unknown>;
   return {
     ...actual,
-    ctxFetch: (url: string, init?: RequestInit) => ctxFetchMock(url, init),
+    ctxFetch: (url: string, init?: RequestInit, options?: CtxFetchOptions) =>
+      ctxFetchMock(url, init, options),
   };
 });
 vi.mock('../repo.js', async (importActual) => {
@@ -331,9 +321,8 @@ describe('the CTX create call', () => {
       merchantId: 'amazon',
       operatorReference: 'o-local-1',
     });
-    const headers = init.headers as Record<string, string>;
-    expect(headers['X-User-Id']).toBe('user-uuid');
-    expect(headers['X-Client-Id']).toBe('loopios');
+    const [, , options] = ctxFetchMock.mock.calls[0] as [string, RequestInit, CtxFetchOptions];
+    expect(options.actAs).toEqual({ userId: 'user-uuid', clientId: 'loopios' });
   });
 
   it('relays CTX payment instructions in the response', async () => {

@@ -2,14 +2,14 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
 import { logger } from '../logger.js';
-import { upstreamUrl, upstreamFetch } from '../upstream.js';
+import { upstreamUrl } from '../upstream.js';
 import { scrubUpstreamBody } from '../upstream-body-scrub.js';
 import { notifyCtxSchemaDrift } from '../discord.js';
 import {
   mapStatus,
   percentFromBasisPoints,
   summariseZodIssues,
-  upstreamHeaders,
+  ctxProxyFetch,
 } from './handler-shared.js';
 
 const log = logger.child({ handler: 'orders' });
@@ -108,10 +108,7 @@ async function fetchUpstreamOrders(
     url.searchParams.set(key, value);
   }
 
-  const headers = upstreamHeaders(c);
-
-  const response = await upstreamFetch(url.toString(), {
-    headers,
+  const response = await ctxProxyFetch(c, url.toString(), {
     signal: AbortSignal.timeout(15_000),
   });
 

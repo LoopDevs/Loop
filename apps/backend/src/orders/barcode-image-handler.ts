@@ -2,9 +2,9 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
 import { logger } from '../logger.js';
-import { upstreamUrl, upstreamFetch } from '../upstream.js';
+import { upstreamUrl } from '../upstream.js';
 import { scrubUpstreamBody } from '../upstream-body-scrub.js';
-import { upstreamHeaders } from './handler-shared.js';
+import { ctxProxyFetch } from './handler-shared.js';
 import { extractBarcodeImageUrl } from './barcode-fields.js';
 import {
   fetchAndTransformImage,
@@ -25,11 +25,8 @@ export async function orderBarcodeImageHandler(c: Context): Promise<Response> {
     return c.json({ code: 'VALIDATION_ERROR', message: 'Invalid order ID' }, 400);
   }
 
-  const headers = upstreamHeaders(c);
-
   try {
-    const response = await upstreamFetch(upstreamUrl(`/gift-cards/${orderId}`), {
-      headers,
+    const response = await ctxProxyFetch(c, upstreamUrl(`/gift-cards/${orderId}`), {
       signal: AbortSignal.timeout(15_000),
     });
 

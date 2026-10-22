@@ -35,7 +35,6 @@ vi.mock('../../upstream.js', async (importOriginal) => ({
 
 import {
   CtxUserCreationDisabledError,
-  ctxActAsHeaders,
   findCtxCustomerIdByEmail,
   loadOrCreateCtxCustomer,
 } from '../user-provisioning.js';
@@ -228,19 +227,5 @@ describe('loadOrCreateCtxCustomer', () => {
   it('throws on create-response schema drift', async () => {
     routeFetch(lookup(listOf()), create(json({ nope: true }, 201)));
     await expect(loadOrCreateCtxCustomer('u1@test.io')).rejects.toBeInstanceOf(CtxUserRolesError);
-  });
-});
-
-describe('ctxActAsHeaders', () => {
-  it('returns the act-as header set, leaving the proof of identity to ctxFetch', () => {
-    expect(ctxActAsHeaders('ctx-u9')).toEqual({
-      'X-Api-Key': 'op-key',
-      'X-User-Id': 'ctx-u9',
-      'X-Client-Id': 'loopweb',
-    });
-  });
-
-  it('uses the request client id when one is given', () => {
-    expect(ctxActAsHeaders('ctx-u9', 'loopios')).toMatchObject({ 'X-Client-Id': 'loopios' });
   });
 });

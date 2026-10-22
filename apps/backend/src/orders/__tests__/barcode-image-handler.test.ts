@@ -17,11 +17,9 @@ vi.mock('../../config/index.js', async (importActual) => {
   };
 });
 
-const { mockUpstreamHeaders } = vi.hoisted(() => ({
-  mockUpstreamHeaders: vi.fn<() => Record<string, string>>(),
-}));
 vi.mock('../handler-shared.js', () => ({
-  upstreamHeaders: mockUpstreamHeaders,
+  ctxProxyFetch: (_c: unknown, url: string, init: RequestInit) =>
+    fetch(url, { ...init, headers: { Authorization: 'Bearer op-token' } }),
 }));
 
 // mocked to isolate handler resolution and authz mapping
@@ -73,7 +71,6 @@ function ctxOrder(overrides: Record<string, unknown> = {}): Response {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockUpstreamHeaders.mockReturnValue({ Authorization: 'Bearer op-token' });
   mockValidateUrl.mockResolvedValue(null);
   mockFetchAndTransform.mockResolvedValue({
     ok: true,
