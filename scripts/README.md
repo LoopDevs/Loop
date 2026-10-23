@@ -28,5 +28,7 @@ README + `archive/` convention).
 
 ## Git hooks
 
-`hooks/` is wired via husky (`prepare`): commit-msg (commitlint) and a
-pre-push warning when another PR is already open (serial-PR discipline).
+`.husky/` is wired via husky (`prepare`): commit-msg (commitlint) and
+pre-commit (lint-staged). There is no pre-push hook — `verify.sh` runs in
+Drone (`.drone.yml`) and fails the build before any image is built.
+`hooks/` holds Claude Code harness hooks, not git hooks.
