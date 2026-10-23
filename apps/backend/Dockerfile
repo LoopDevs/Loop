@@ -12,8 +12,9 @@ COPY package.json package-lock.json ./
 COPY apps/backend/package.json apps/backend/
 COPY packages/shared/package.json packages/shared/
 
-# Install all dependencies (need devDeps for build)
-RUN npm ci --ignore-scripts && npm rebuild esbuild
+# Install the backend workspace's dependency tree only (root devDeps are
+# repo tooling the image never runs)
+RUN npm ci --ignore-scripts -w @loop/backend --include-workspace-root=false && npm rebuild esbuild
 
 # Copy source
 COPY tsconfig.base.json ./
@@ -52,7 +53,7 @@ COPY package.json package-lock.json ./
 COPY apps/backend/package.json apps/backend/
 
 # Install production deps only
-RUN npm ci --omit=dev --ignore-scripts
+RUN npm ci --omit=dev --ignore-scripts -w @loop/backend --include-workspace-root=false
 
 # Copy bundled output.
 COPY --from=builder /app/apps/backend/dist apps/backend/dist
@@ -64,9 +65,9 @@ COPY --from=builder /app/geoip /app/geoip
 # Run as the non-root `node` user that node:*-alpine ships with. The default
 # is root — meaning any RCE in a dep would land with full container
 # privileges. `node` has no write access outside its home, which is all this
-# process needs. Chown the workdir so the user can still read the bundled
-# dist + package.json it just lost the ability to modify.
-RUN chown -R node:node /app
+# process needs. /app stays root-owned so the process cannot modify its
+# own bundle; only the memory store's default flush dir is writable.
+RUN mkdir -p /app/_data && chown node:node /app/_data
 USER node
 
 EXPOSE 8080

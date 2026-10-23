@@ -6,10 +6,11 @@ COPY package.json package-lock.json ./
 COPY apps/web/package.json apps/web/
 COPY packages/shared/package.json packages/shared/
 
-# Install all dependencies (need devDeps for build). Keep the hardened
-# --ignore-scripts posture, then explicitly re-enable only esbuild's
-# platform-binary selector — same supply-chain boundary as backend.
-RUN npm ci --ignore-scripts && npm rebuild esbuild
+# Install the web workspace's dependency tree only (root devDeps are repo
+# tooling the image never runs). Keep the hardened --ignore-scripts
+# posture, then explicitly re-enable only esbuild's platform-binary
+# selector — same supply-chain boundary as backend.
+RUN npm ci --ignore-scripts -w @loop/web --include-workspace-root=false && npm rebuild esbuild
 
 # Copy source
 COPY tsconfig.base.json ./
@@ -46,7 +47,7 @@ COPY package.json package-lock.json ./
 COPY apps/web/package.json apps/web/
 COPY packages/shared/package.json packages/shared/
 
-RUN npm ci --omit=dev --ignore-scripts
+RUN npm ci --omit=dev --ignore-scripts -w @loop/web --include-workspace-root=false
 
 # Copy built output
 COPY --from=builder /app/apps/web/build apps/web/build
@@ -56,9 +57,8 @@ COPY --from=builder /app/packages/shared packages/shared
 # hardening as apps/backend/Dockerfile (PR #61). The default is root —
 # meaning any RCE in a dep running under this image would land with
 # full container privileges. `node` has no write access outside its
-# home, which is all react-router-serve needs. Chown the workdir so
-# the user can still read the bundled assets.
-RUN chown -R node:node /app
+# home, which is all react-router-serve needs. /app stays root-owned:
+# `node` only reads the bundle, so the process cannot modify it either.
 USER node
 
 EXPOSE 3000

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Run every quality check sequentially. Drone runs this before building
-# images; GitHub CI runs the same jobs in parallel.
+# Run every quality check sequentially; CI runs the same checks as
+# parallel steps.
 set -euo pipefail
 echo "=== Typecheck ===" && npm run typecheck
 echo "=== Lint ==="      && npm run lint

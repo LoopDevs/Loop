@@ -8,15 +8,53 @@ metadata:
 service_account_name: drone-runner-sa
 
 steps:
-  - name: verify
+  - name: install
     image: node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2
     environment:
       CI: 'true'
     commands:
-      - apk add --no-cache bash
       - npm ci --ignore-scripts
       - npm rebuild esbuild
-      - ./scripts/verify.sh
+
+  - name: typecheck
+    image: node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2
+    depends_on: [install]
+    environment:
+      CI: 'true'
+    commands:
+      - npm run typecheck
+
+  - name: lint
+    image: node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2
+    depends_on: [install]
+    environment:
+      CI: 'true'
+    commands:
+      - npm run lint
+
+  - name: format
+    image: node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2
+    depends_on: [install]
+    environment:
+      CI: 'true'
+    commands:
+      - npm run format:check
+
+  - name: test
+    image: node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2
+    depends_on: [install]
+    environment:
+      CI: 'true'
+    commands:
+      - npm test
+
+  - name: audit
+    image: node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2
+    depends_on: [install]
+    environment:
+      CI: 'true'
+    commands:
+      - npm run audit
 
   - name: wait for docker
     image: docker:dind
@@ -31,9 +69,11 @@ steps:
           sleep 1
         done
         echo "Docker is ready!"
+        docker info --format 'storage driver: {{.Driver}}'
 
   - name: build loop-backend
     image: docker:dind
+    depends_on: [wait for docker]
     volumes:
       - name: dockersock
         path: /var/run
@@ -53,12 +93,10 @@ steps:
           .
       - docker tag registry.ctx.com/loop-backend:latest registry.ctx.com/loop-backend:$DRONE_COMMIT_SHA
       - docker tag registry.ctx.com/loop-backend:latest registry.ctx.com/loop-backend:$DRONE_BRANCH
-      - docker push registry.ctx.com/loop-backend:$DRONE_COMMIT_SHA
-      - docker push registry.ctx.com/loop-backend:$DRONE_BRANCH
-      - docker push registry.ctx.com/loop-backend:latest
 
   - name: build loop-web
     image: docker:dind
+    depends_on: [wait for docker]
     volumes:
       - name: dockersock
         path: /var/run
@@ -82,12 +120,32 @@ steps:
           .
       - docker tag registry.ctx.com/loop-web:latest registry.ctx.com/loop-web:$DRONE_COMMIT_SHA
       - docker tag registry.ctx.com/loop-web:latest registry.ctx.com/loop-web:$DRONE_BRANCH
+
+  - name: push loop-backend
+    image: docker:dind
+    depends_on: [build loop-backend, typecheck, lint, format, test, audit]
+    volumes:
+      - name: dockersock
+        path: /var/run
+    commands:
+      - docker push registry.ctx.com/loop-backend:$DRONE_COMMIT_SHA
+      - docker push registry.ctx.com/loop-backend:$DRONE_BRANCH
+      - docker push registry.ctx.com/loop-backend:latest
+
+  - name: push loop-web
+    image: docker:dind
+    depends_on: [build loop-web, typecheck, lint, format, test, audit]
+    volumes:
+      - name: dockersock
+        path: /var/run
+    commands:
       - docker push registry.ctx.com/loop-web:$DRONE_COMMIT_SHA
       - docker push registry.ctx.com/loop-web:$DRONE_BRANCH
       - docker push registry.ctx.com/loop-web:latest
 
   - name: discord notification
     image: appleboy/drone-discord
+    depends_on: [push loop-backend, push loop-web]
     failure: ignore
     when:
       status: [success, failure]
@@ -108,9 +166,13 @@ services:
     volumes:
       - name: dockersock
         path: /var/run
+      - name: dockerlib
+        path: /var/lib/docker
 
 volumes:
   - name: dockersock
+    temp: {}
+  - name: dockerlib
     temp: {}
 
 trigger:
