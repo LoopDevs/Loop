@@ -13,6 +13,7 @@ steps:
     environment:
       CI: 'true'
     commands:
+      - apk add --no-cache bash
       - npm ci --ignore-scripts
       - npm rebuild esbuild
       - ./scripts/verify.sh
