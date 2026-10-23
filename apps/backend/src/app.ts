@@ -179,8 +179,7 @@ mountPublicRoutes(app);
 // constraint is inseparable from the credential-minting handlers.
 mountAuthRoutes(app);
 
-// `/api/orders/*` route mounts (legacy CTX-proxy + Loop-native
-// paths) live in `./routes/orders.ts`. Bundles cache-control +
+// `/api/orders/*` route mounts live in `./routes/orders.ts`. Bundles cache-control +
 // requireAuth + handlers together because the mount-order
 // constraint between them (cache-control before auth so 401s
 // also get `private, no-store`) is the contract.

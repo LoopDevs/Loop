@@ -4,7 +4,6 @@ import type { Route } from './+types/orders';
 import i18n from '~/i18n/i18next';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 import { useAuth } from '~/hooks/use-auth';
-import { useAppConfig } from '~/hooks/use-app-config';
 import { Navbar } from '~/components/features/Navbar';
 import { PageHeader } from '~/components/ui/PageHeader';
 import { Button } from '~/components/ui/Button';
@@ -36,7 +35,6 @@ export default function OrdersRoute(): React.JSX.Element {
   const { t } = useTranslation('orders');
   const { isNative } = useNativePlatform();
   const { isAuthenticated } = useAuth();
-  const { config } = useAppConfig();
   const navigate = useNavigate();
 
   return (
@@ -86,7 +84,7 @@ export default function OrdersRoute(): React.JSX.Element {
           </div>
         ) : null}
 
-        {isAuthenticated ? <LoopOrdersList enabled={config.loopOrdersEnabled} /> : null}
+        {isAuthenticated ? <LoopOrdersList /> : null}
 
         {!isAuthenticated && (
           <div className="text-center py-12">

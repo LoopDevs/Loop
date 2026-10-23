@@ -55,8 +55,7 @@ function makeCtx(auth: LoopAuthContext | undefined, body?: unknown): Context {
 
 const UID = '00000000-0000-4000-8000-000000000001';
 
-const loopAuth: LoopAuthContext = { kind: 'loop', userId: UID } as LoopAuthContext;
-const ctxAuth = { kind: 'ctx', token: 'ctx-bearer' } as unknown as LoopAuthContext;
+const loopAuth: LoopAuthContext = { userId: UID, email: 'u@loop.test' };
 
 async function seedUser(overrides: Partial<UserDoc> = {}): Promise<UserDoc> {
   const now = new Date('2026-04-01T00:00:00Z');
@@ -283,12 +282,6 @@ describe('getMeHandler', () => {
     expect(res.status).toBe(401);
   });
 
-  it('A2-550: rejects CTX pass-through bearers with 401 (forged-sub attack)', async () => {
-    await seedUser();
-    const res = await getMeHandler(makeCtx(ctxAuth));
-    expect(res.status).toBe(401);
-  });
-
   it('surfaces only the profile + staff tier in the view', async () => {
     await seedUser();
     const res = await getMeHandler(makeCtx(loopAuth));
@@ -352,12 +345,6 @@ describe('setStableCurrencyHandler', () => {
     const res = await setStableCurrencyHandler(
       makeCtx(undefined, { stableCurrency: 'XLM.GBPLOOP' }),
     );
-    expect(res.status).toBe(401);
-  });
-
-  it('401 for a CTX pass-through bearer', async () => {
-    await seedUser();
-    const res = await setStableCurrencyHandler(makeCtx(ctxAuth, { stableCurrency: 'XLM.GBPLOOP' }));
     expect(res.status).toBe(401);
   });
 

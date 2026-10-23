@@ -5,6 +5,6 @@ import { getUserById, type User } from '../db/users.js';
 
 export async function resolveLoopAuthenticatedUser(c: Context): Promise<User | null> {
   const auth = c.get('auth') as LoopAuthContext | undefined;
-  if (auth === undefined || auth.kind !== 'loop') return null;
+  if (auth === undefined) return null;
   return await getUserById(auth.userId);
 }

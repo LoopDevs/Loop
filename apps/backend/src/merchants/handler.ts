@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { foldForSearch } from '@loop/shared';
 import { getMerchants } from './sync.js';
 import { toLiteMerchant } from './lite.js';
-import { upstreamUrl, upstreamFetch } from '../upstream.js';
+import { upstreamUrl } from '../upstream.js';
 import { logger } from '../logger.js';
 import type { LoopAuthContext } from '../auth/require-auth.js';
 import { ctxFetch } from '../ctx/api-fetch.js';
@@ -104,21 +104,14 @@ export async function merchantDetailHandler(c: Context): Promise<Response> {
   const merchant = { ...cached };
 
   try {
-    // Loop JWT is not forwardable to CTX; act-as headers required for native users
+    // Loop JWT is not forwardable to CTX; the detail read acts as the user
     const clientId = c.get('clientId') as string | undefined;
-    const auth = c.get('auth') as LoopAuthContext | undefined;
-    const url = upstreamUrl(`/merchants/${id}`);
-    const signal = AbortSignal.timeout(10_000);
-    let response: Response;
-    if (auth?.kind === 'loop') {
-      response = await ctxFetch(url, { signal }, { actAs: { userId: auth.userId, clientId } });
-    } else {
-      const bearer = c.get('bearerToken') as string | undefined;
-      const headers: Record<string, string> = {};
-      if (bearer) headers['Authorization'] = `Bearer ${bearer}`;
-      if (clientId) headers['X-Client-Id'] = clientId;
-      response = await upstreamFetch(url, { headers, signal });
-    }
+    const auth = c.get('auth') as LoopAuthContext;
+    const response = await ctxFetch(
+      upstreamUrl(`/merchants/${id}`),
+      { signal: AbortSignal.timeout(10_000) },
+      { actAs: { userId: auth.userId, clientId } },
+    );
 
     if (response.ok) {
       const raw = (await response.json().catch(() => null)) as unknown;

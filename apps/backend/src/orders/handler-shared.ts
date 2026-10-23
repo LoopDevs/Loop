@@ -5,7 +5,6 @@ import type { ZodIssue } from 'zod';
 import { logger } from '../logger.js';
 import type { LoopAuthContext } from '../auth/require-auth.js';
 import { ctxFetch } from '../ctx/api-fetch.js';
-import { upstreamFetch } from '../upstream.js';
 
 const log = logger.child({ handler: 'orders' });
 
@@ -20,19 +19,8 @@ export function summariseZodIssues(issues: readonly ZodIssue[]): string {
 // Loop JWT is not forwardable to CTX; act-as requires X-User-Id to avoid exposing operator data.
 export function ctxProxyFetch(c: Context, url: string, init: RequestInit): Promise<Response> {
   const clientId = c.get('clientId') as string | undefined;
-  const auth = c.get('auth') as LoopAuthContext | undefined;
-
-  if (auth?.kind === 'loop') {
-    return ctxFetch(url, init, { actAs: { userId: auth.userId, clientId } });
-  }
-
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${c.get('bearerToken') as string}`,
-  };
-  if (clientId) {
-    headers['X-Client-Id'] = clientId;
-  }
-  return upstreamFetch(url, { ...init, headers });
+  const auth = c.get('auth') as LoopAuthContext;
+  return ctxFetch(url, init, { actAs: { userId: auth.userId, clientId } });
 }
 
 // A2-1706

@@ -30,6 +30,5 @@ database:
 
 auth:
   native:
-    enabled: true
     jwt:
       current: integration-test-loop-jwt-signing-key-32-chars-min

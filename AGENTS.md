@@ -33,11 +33,11 @@ and `mongo-store.ts` (`DB_DRIVER=mongo` + `MONGODB_URI`). Collections
 and unique specs live in `db/types.ts`. There are NO migrations —
 the project is undeployed; change `db/types.ts` and move on.
 
-**Auth has two paths.** Loop-native (ADR 013, default via
-`auth.native.enabled: true`): backend mints its own HS256 JWTs
-(`auth.native.jwt.current` / `.previous` rotation window),
-generates OTPs, sends email. Legacy CTX-proxy: backend forwards auth
-calls to upstream. Both paths coexist until the takeover completes.
+**Auth is Loop-native (ADR 013).** The backend mints its own HS256
+JWTs (`auth.native.jwt.current` / `.previous` rotation window),
+generates OTPs and sends email. Every CTX call for a signed-in user
+is made by the operator key acting as that user (`ctxFetch` with
+`options.actAs`); no CTX bearer ever reaches the client.
 
 **Orders.** `POST /api/orders/loop` inserts the local mirror doc,
 creates the gift card at CTX, and relays CTX's payment instructions.

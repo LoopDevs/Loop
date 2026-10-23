@@ -91,7 +91,7 @@ describe('requireAuth', () => {
     expect(res.status).toBe(401);
   });
 
-  it('accepts a valid Loop access token whose tv matches and sets loop-kind auth', async () => {
+  it('accepts a valid Loop access token whose tv matches and sets the auth context', async () => {
     mockTokenVersion = 3;
     const { token } = signLoopToken({
       sub: 'user-uuid',
@@ -105,12 +105,7 @@ describe('requireAuth', () => {
     await requireAuth(fake.ctx, next);
     expect(next).toHaveBeenCalledOnce();
     const auth = fake.store.get('auth') as LoopAuthContext;
-    expect(auth.kind).toBe('loop');
-    if (auth.kind === 'loop') {
-      expect(auth.userId).toBe('user-uuid');
-      expect(auth.email).toBe('a@b.com');
-    }
-    expect(fake.store.get('bearerToken')).toBe(token);
+    expect(auth).toEqual({ userId: 'user-uuid', email: 'a@b.com' });
   });
 
   it('NS-09: rejects a token whose tv is stale (< current token_version) with 401', async () => {
@@ -202,38 +197,35 @@ describe('requireAuth', () => {
     expect(res.status).toBe(401);
   });
 
-  it('falls through to the CTX pass-through path for a non-Loop bearer', async () => {
-    const ctxLike = 'header.payload.signature';
-    const fake = makeCtx({ Authorization: `Bearer ${ctxLike}` });
+  it('rejects a bearer that is not a Loop token with a 401', async () => {
+    const fake = makeCtx({ Authorization: 'Bearer header.payload.signature' });
     const next = vi.fn().mockResolvedValue(undefined);
-    await requireAuth(fake.ctx, next);
-    expect(next).toHaveBeenCalledOnce();
-    const auth = fake.store.get('auth') as LoopAuthContext;
-    expect(auth.kind).toBe('ctx');
-    expect(auth.bearerToken).toBe(ctxLike);
-    expect(fake.store.get('bearerToken')).toBe(ctxLike);
-  });
-
-  it('honours an allowlisted X-Client-Id on the CTX pass-through', async () => {
-    const fake = makeCtx({
-      Authorization: 'Bearer opaque-ctx-token',
-      'X-Client-Id': 'loopweb',
-    });
-    await requireAuth(fake.ctx, vi.fn().mockResolvedValue(undefined));
-    expect(fake.store.get('clientId')).toBe('loopweb');
+    const res = (await requireAuth(fake.ctx, next)) as Response;
+    expect(res.status).toBe(401);
+    expect(next).not.toHaveBeenCalled();
+    expect(fake.store.get('auth')).toBeUndefined();
   });
 
   it('drops an untrusted X-Client-Id without failing the request', async () => {
+    mockTokenVersion = 0;
+    const { token } = signLoopToken({
+      sub: 'user-uuid',
+      email: 'a@b.com',
+      typ: 'access',
+      ttlSeconds: 300,
+      tv: 0,
+    });
     const fake = makeCtx({
-      Authorization: 'Bearer opaque-ctx-token',
+      Authorization: `Bearer ${token}`,
       'X-Client-Id': 'attacker-owned',
     });
-    await requireAuth(fake.ctx, vi.fn().mockResolvedValue(undefined));
+    const next = vi.fn().mockResolvedValue(undefined);
+    await requireAuth(fake.ctx, next);
+    expect(next).toHaveBeenCalledOnce();
     expect(fake.store.get('clientId')).toBeUndefined();
   });
 
-  it('honours an allowlisted X-Client-Id on the Loop-native JWT path', async () => {
-    // Client-id forwarding must run before the auth-path fork to ensure loop-native sessions have attribution.
+  it('honours an allowlisted X-Client-Id', async () => {
     mockTokenVersion = 0;
     const { token } = signLoopToken({
       sub: 'user-uuid',
@@ -249,7 +241,6 @@ describe('requireAuth', () => {
     const next = vi.fn().mockResolvedValue(undefined);
     await requireAuth(fake.ctx, next);
     expect(next).toHaveBeenCalledOnce();
-    expect((fake.store.get('auth') as LoopAuthContext).kind).toBe('loop');
     expect(fake.store.get('clientId')).toBe('loopweb');
   });
 });

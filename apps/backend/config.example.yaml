@@ -90,11 +90,6 @@ database:
 # ── Loop-native auth (ADR 013 / 014) ────────────────────────────────
 auth:
   native:
-    # The parent switch. When true, Loop sends OTP emails and mints its
-    # own JWTs; when false the legacy CTX-proxy path stays in place.
-    # Production requires true (R3-7) unless unsafe.allowLegacyProxyAuth
-    # is set. Enabling this requires the signing key below.
-    enabled: false
     jwt:
       # Symmetric HS256 secret, min 32 chars of real entropy.
       # `openssl rand -base64 32`
@@ -235,8 +230,6 @@ testing:
 # Each of these switches OFF a production safety check. For a
 # deliberate, audited rollback or staging deploy only.
 unsafe:
-  # R3-7: permit production to run the legacy CTX-proxy auth path.
-  allowLegacyProxyAuth: false
   # NS-10: permit production to store gift-card redeem codes and PINs —
   # spendable bearer secrets — as plaintext at rest.
   allowPlaintextRedeemSecrets: false

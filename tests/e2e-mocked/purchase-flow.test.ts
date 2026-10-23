@@ -4,16 +4,16 @@ import { test, expect, type Page } from '@playwright/test';
  * Mocked end-to-end purchase flow.
  *
  * The mock CTX server (tests/e2e-mocked/fixtures/mock-ctx.mjs) stands in
- * for the real upstream. It accepts OTP "123456" for any email and holds
- * orders in memory; a test-only POST /_test/mark-fulfilled/:id flips an
- * order to the redeem/complete state deterministically.
+ * for the real upstream. It holds orders in memory; a test-only
+ * POST /_test/mark-fulfilled/:id flips an order to the redeem/complete
+ * state deterministically. Sign-in is Loop-native: the backend's console
+ * email provider captures each OTP and GET /__test__/last-otp returns it.
  *
  * Each test resets the mock's state so ordering is irrelevant.
  */
 
 const MOCK_CTX_URL = 'http://localhost:9091';
 const BACKEND_URL = 'http://localhost:8081';
-const FIXED_OTP = '123456';
 
 // AUDIT-2-E: `/__test__/*` now requires this shared secret via the
 // `X-Test-Endpoints-Secret` header in addition to NODE_ENV=test — see
@@ -31,6 +31,17 @@ async function resetMock(page: Page): Promise<void> {
   await page.request.post(`${BACKEND_URL}/__test__/reset`, {
     headers: { 'X-Test-Endpoints-Secret': TEST_ENDPOINTS_SECRET },
   });
+}
+
+async function lastOtp(page: Page, email: string): Promise<string> {
+  const res = await page.request.get(
+    `${BACKEND_URL}/__test__/last-otp?email=${encodeURIComponent(email)}`,
+    { headers: { 'X-Test-Endpoints-Secret': TEST_ENDPOINTS_SECRET } },
+  );
+  if (!res.ok()) {
+    throw new Error(`No captured OTP for ${email}: ${res.status()}`);
+  }
+  return ((await res.json()) as { code: string }).code;
 }
 
 async function markOrderFulfilled(
@@ -72,17 +83,26 @@ async function signInInline(page: Page, email = 'e2e-mocked@test.local'): Promis
   await page.getByLabel(/Email address/).fill(email);
   await page.getByRole('button', { name: 'Continue' }).click();
   // A2-1704: bump the OTP-step sync wait to 10s. The Continue click
-  // fires `POST /api/auth/request-otp` which proxies to the mock CTX
-  // and only THEN re-renders the OTP step. On a slow CI runner the
-  // round-trip can exceed Playwright's 5s default and produce the
-  // 15+-consecutive-run "toBeVisible flake" the audit flagged. Match
-  // the timeout cadence of other purchase-flow waits (10_000) — the
-  // `Verification code` label is the more reliable signal because it
-  // anchors on the OTP-input element, not interstitial text that can
-  // appear before the input is hooked up.
+  // fires `POST /api/auth/request-otp` and only THEN re-renders the OTP
+  // step. On a slow CI runner the round-trip can exceed Playwright's 5s
+  // default and produce the 15+-consecutive-run "toBeVisible flake" the
+  // audit flagged. Match the timeout cadence of other purchase-flow
+  // waits (10_000) — the `Verification code` label is the more reliable
+  // signal because it anchors on the OTP-input element, not interstitial
+  // text that can appear before the input is hooked up.
   await expect(page.getByLabel('Verification code')).toBeVisible({ timeout: 10_000 });
-  await page.getByLabel('Verification code').fill(FIXED_OTP);
+  await page.getByLabel('Verification code').fill(await lastOtp(page, email));
   await page.getByRole('button', { name: 'Verify' }).click();
+
+  const cashbackCurrency = page.getByRole('dialog', { name: 'Your cashback currency' });
+  const shown = await cashbackCurrency.waitFor({ state: 'visible', timeout: 10_000 }).then(
+    () => true,
+    () => false,
+  );
+  if (shown) {
+    await cashbackCurrency.getByRole('button', { name: 'Confirm' }).click();
+    await expect(cashbackCurrency).toBeHidden({ timeout: 10_000 });
+  }
 }
 
 test.describe('mocked purchase flow', () => {
@@ -118,8 +138,10 @@ test.describe('mocked purchase flow', () => {
     // polling (every 3s) should pick it up and transition to the Redeem step.
     await markOrderFulfilled(page, orderId!, 'url');
 
-    // Wait for the Redeem screen — challenge code is a distinct signal.
-    await expect(page.getByText(/MOCK-CHALLENGE-/)).toBeVisible({ timeout: 15_000 });
+    // Wait for the Redeem screen — the mock's redemption link is a distinct signal.
+    const redeemLink = page.getByRole('link', { name: 'Open redemption link' });
+    await expect(redeemLink).toBeVisible({ timeout: 15_000 });
+    await expect(redeemLink).toHaveAttribute('href', 'https://redeem.test/mock');
 
     // A2-1705 phase A.3 nip-in: after redemption, navigate to /orders
     // and assert the order we just paid for shows up in the list. The

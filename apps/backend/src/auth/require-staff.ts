@@ -14,12 +14,6 @@ export function requireStaff(minimum: StaffRole): MiddlewareHandler {
     if (auth === undefined) {
       return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
     }
-    if (auth.kind !== 'loop') {
-      return c.json(
-        { code: 'UNAUTHORIZED', message: 'Loop-authenticated admin session required' },
-        401,
-      );
-    }
 
     let role = c.get('staffRole') as StaffRole | undefined;
     const cachedUser = c.get('user') as User | undefined;

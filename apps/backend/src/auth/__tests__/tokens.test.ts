@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import type * as ConfigModule from '../../config/index.js';
 import { createHmac } from 'node:crypto';
 
@@ -28,7 +28,6 @@ vi.mock('../../config/index.js', async (importActual) => {
 import {
   signLoopToken,
   verifyLoopToken,
-  isLoopAuthConfigured,
   DEFAULT_ACCESS_TTL_SECONDS,
   DEFAULT_REFRESH_TTL_SECONDS,
 } from '../tokens.js';
@@ -322,17 +321,7 @@ describe('wire-format back-compat (Track A.1 regression gate)', () => {
   });
 });
 
-describe('isLoopAuthConfigured', () => {
-  it('reports configured when the signing key is present', () => {
-    expect(isLoopAuthConfigured()).toBe(true);
-  });
-});
-
 afterEach(() => {
   jwtState.current = 'jwt-test-signing-key-32-chars-min!!';
   jwtState.previous = undefined;
-});
-
-beforeAll(() => {
-  expect(isLoopAuthConfigured()).toBe(true);
 });

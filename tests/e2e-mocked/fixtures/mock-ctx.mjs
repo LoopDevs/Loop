@@ -3,13 +3,11 @@
  * Mock CTX upstream server for deterministic end-to-end testing.
  *
  * Replaces https://spend.ctx.com for the duration of a test run. Implements
- * just enough of the real CTX surface to drive the Loop backend's auth,
- * merchant sync, order create, and order polling paths. Holds all state
- * in memory — starts fresh on every spawn.
+ * just enough of the real CTX surface to drive the Loop backend's merchant
+ * sync, user sign-in, order create, and order polling paths. Holds all
+ * state in memory — starts fresh on every spawn.
  *
  * Deviation from real CTX:
- *   - OTP validation accepts a single hard-coded code ('123456'). Real CTX
- *     emails a random one.
  *   - Orders begin in status 'unpaid' and only transition to 'fulfilled'
  *     when a test calls POST /_test/mark-paid/:id. Real CTX flips on chain
  *     confirmation.
@@ -29,7 +27,6 @@ import http from 'node:http';
 import { createHash, randomUUID } from 'node:crypto';
 
 const PORT = Number(process.env.PORT ?? 9091);
-const OTP = '123456';
 
 // Q6-4 (loop-native purchase-through-the-UI e2e): the operator-side
 // procurement worker (apps/backend/src/orders/procure-one.ts) parses
@@ -96,7 +93,6 @@ const merchants = [
  * status transitions: 'unpaid' → (POST /_test/mark-fulfilled) → 'fulfilled'.
  */
 const orders = new Map();
-const validRefreshTokens = new Set();
 
 // ctx-interop: operator-commission ledger. Every fulfilled order
 // accrues `fiat × MOCK_OPERATOR_COMMISSION_BPS / 10000` for the mock
@@ -158,13 +154,6 @@ function walletLinkJson(link) {
   };
 }
 
-function makeTokens() {
-  const accessToken = `mock-at-${randomUUID()}`;
-  const refreshToken = `mock-rt-${randomUUID()}`;
-  validRefreshTokens.add(refreshToken);
-  return { accessToken, refreshToken };
-}
-
 // ───────── Request router ────────────────────────────────────────────
 
 const server = http.createServer(async (req, res) => {
@@ -175,35 +164,6 @@ const server = http.createServer(async (req, res) => {
   // ── Health / status ──
   if (method === 'GET' && path === '/status') {
     return json(res, 200, { status: 'ok' });
-  }
-
-  // ── Auth ──
-  if (method === 'POST' && path === '/login') {
-    const body = await readBody(req);
-    if (!body.email) return json(res, 400, { error: 'email required' });
-    return json(res, 200, { message: 'OTP sent' });
-  }
-
-  if (method === 'POST' && path === '/verify-email') {
-    const body = await readBody(req);
-    if (!body.email || !body.code) return json(res, 400, { error: 'email and code required' });
-    if (body.code !== OTP) return json(res, 401, { error: 'invalid code' });
-    return json(res, 200, makeTokens());
-  }
-
-  if (method === 'POST' && path === '/refresh-token') {
-    const body = await readBody(req);
-    if (!body.refreshToken || !validRefreshTokens.has(body.refreshToken)) {
-      return json(res, 401, { error: 'invalid refresh token' });
-    }
-    validRefreshTokens.delete(body.refreshToken);
-    return json(res, 200, makeTokens());
-  }
-
-  if (method === 'POST' && path === '/logout') {
-    const body = await readBody(req);
-    if (body.refreshToken) validRefreshTokens.delete(body.refreshToken);
-    return json(res, 200, { message: 'ok' });
   }
 
   // ── Merchants ──
@@ -252,6 +212,7 @@ const server = http.createServer(async (req, res) => {
         XLM: `web+stellar:pay?destination=${CTX_MOCK_DESTINATION}&amount=${xlmAmount}&memo=${encodeURIComponent(memo)}`,
       },
       status: 'unpaid',
+      displayStatus: 'unpaid',
       fulfilmentStatus: 'pending',
       userDiscountBasisPoints: userDiscountBps,
       operatorDiscountBasisPoints: operatorDiscountBps,
@@ -287,6 +248,7 @@ const server = http.createServer(async (req, res) => {
     if (!order) return json(res, 404, { error: 'order not found' });
     const body = await readBody(req);
     order.status = 'fulfilled';
+    order.displayStatus = 'fulfilled';
     order.fulfilmentStatus = 'completed';
     // ctx-interop: accrue the operator commission on fulfilment,
     // idempotent per gift card like the real flow's unique index.
@@ -314,6 +276,7 @@ const server = http.createServer(async (req, res) => {
       order.redeemUrl = 'https://redeem.test/mock';
       order.redeemUrlChallenge = 'MOCK-CHALLENGE-' + order.id.slice(0, 6);
     }
+    broadcastEvent('giftcard', 'system.giftcard.fulfilled', order);
     return json(res, 200, order);
   }
 
@@ -648,7 +611,6 @@ const server = http.createServer(async (req, res) => {
 
   if (method === 'POST' && path === '/_test/reset') {
     orders.clear();
-    validRefreshTokens.clear();
     commissionEntries.length = 0;
     commissionSettlements.length = 0;
     provisionedUsers.clear();
@@ -704,11 +666,15 @@ function wsSend(client, message) {
   }
 }
 
-function broadcastMerchantEvent(eventName, merchant) {
+function broadcastEvent(topic, eventName, data) {
   for (const client of wsClients) {
-    if (!client.subscriptions.has('merchant')) continue;
-    wsSend(client, { type: 'event', topic: 'merchant', event: eventName, data: merchant });
+    if (!client.subscriptions.has(topic)) continue;
+    wsSend(client, { type: 'event', topic, event: eventName, data });
   }
+}
+
+function broadcastMerchantEvent(eventName, merchant) {
+  broadcastEvent('merchant', eventName, merchant);
 }
 
 /**

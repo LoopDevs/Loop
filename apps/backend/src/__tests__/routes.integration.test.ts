@@ -51,7 +51,7 @@ vi.mock('../db/client.js', async (importOriginal) => {
   return {
     ...orig,
     db: {
-      collection: () => ({ count: dbCountMock }),
+      collection: () => ({ count: dbCountMock, findOne: async () => ({ tokenVersion: 0 }) }),
     },
   };
 });
@@ -85,6 +85,20 @@ import {
   __resetRateLimitsForTests,
   __resetUpstreamProbeCacheOnlyForTests,
 } from '../app.js';
+import { signLoopToken } from '../auth/tokens.js';
+
+const EMPTY_ORDER_PAGE = { pagination: { page: 1, pages: 1, perPage: 20, total: 0 }, result: [] };
+
+function loopBearer(): Record<string, string> {
+  const { token } = signLoopToken({
+    sub: 'u-1',
+    email: 'u@test.io',
+    typ: 'access',
+    ttlSeconds: 300,
+    tv: 0,
+  });
+  return { Authorization: `Bearer ${token}` };
+}
 import {
   __resetRuntimeHealthForTests,
   markWorkerStarted,
@@ -271,11 +285,11 @@ describe('GET /api/merchants/by-slug/:slug', () => {
 });
 
 describe('GET /api/merchants/:id', () => {
-  it('returns 404 for unknown id', async () => {
+  it('returns 401 for a bearer that is not a Loop token', async () => {
     const res = await app.request('/api/merchants/unknown-id', {
       headers: { Authorization: 'Bearer test-token' },
     });
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(401);
   });
 });
 
@@ -288,34 +302,6 @@ describe('POST /api/auth/request-otp', () => {
     });
     expect(res.status).toBe(400);
   });
-
-  it('returns 200 when upstream accepts the login request', async () => {
-    mockFetch.mockResolvedValueOnce(
-      new Response(JSON.stringify({ message: 'ok' }), { status: 200 }),
-    );
-
-    const res = await app.request('/api/auth/request-otp', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'test@example.com' }),
-    });
-    expect(res.status).toBe(200);
-    expect(mockFetch).toHaveBeenCalledWith(
-      'http://test-upstream.local/login',
-      expect.objectContaining({ method: 'POST' }),
-    );
-  });
-
-  it('returns 502 when upstream rejects the login request', async () => {
-    mockFetch.mockResolvedValueOnce(new Response('error', { status: 500 }));
-
-    const res = await app.request('/api/auth/request-otp', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'test@example.com' }),
-    });
-    expect(res.status).toBe(502);
-  });
 });
 
 describe('POST /api/auth/verify-otp', () => {
@@ -327,32 +313,6 @@ describe('POST /api/auth/verify-otp', () => {
     });
     expect(res.status).toBe(400);
   });
-
-  it('returns tokens when upstream verifies successfully', async () => {
-    const tokens = { accessToken: 'at-123', refreshToken: 'rt-456' };
-    mockFetch.mockResolvedValueOnce(new Response(JSON.stringify(tokens), { status: 200 }));
-
-    const res = await app.request('/api/auth/verify-otp', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'test@example.com', otp: '123456' }),
-    });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as Record<string, unknown>;
-    expect(body.accessToken).toBe('at-123');
-    expect(body.refreshToken).toBe('rt-456');
-  });
-
-  it('returns 401 when upstream rejects the code', async () => {
-    mockFetch.mockResolvedValueOnce(new Response('invalid', { status: 401 }));
-
-    const res = await app.request('/api/auth/verify-otp', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'test@example.com', otp: '000000' }),
-    });
-    expect(res.status).toBe(401);
-  });
 });
 
 describe('POST /api/auth/refresh', () => {
@@ -363,20 +323,6 @@ describe('POST /api/auth/refresh', () => {
       body: JSON.stringify({}),
     });
     expect(res.status).toBe(400);
-  });
-
-  it('returns new tokens when upstream accepts refresh', async () => {
-    const tokens = { accessToken: 'new-at' };
-    mockFetch.mockResolvedValueOnce(new Response(JSON.stringify(tokens), { status: 200 }));
-
-    const res = await app.request('/api/auth/refresh', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refreshToken: 'rt-valid' }),
-    });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as Record<string, unknown>;
-    expect(body.accessToken).toBe('new-at');
   });
 });
 
@@ -445,17 +391,13 @@ describe('app-level middleware', () => {
   // A2-1305: end-to-end round-trip for CTX response request-id echo
   it('A2-1305: echoes the CTX response X-Request-Id back as X-Ctx-Request-Id', async () => {
     mockFetch.mockResolvedValueOnce(
-      new Response(JSON.stringify({ message: 'ok' }), {
+      new Response(JSON.stringify(EMPTY_ORDER_PAGE), {
         status: 200,
         headers: { 'X-Request-Id': 'ctx-req-abc123' },
       }),
     );
 
-    const res = await app.request('/api/auth/request-otp', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'test@example.com' }),
-    });
+    const res = await app.request('/api/orders', { headers: loopBearer() });
 
     expect(res.status).toBe(200);
     expect(res.headers.get('X-Ctx-Request-Id')).toBe('ctx-req-abc123');
@@ -473,17 +415,13 @@ describe('app-level middleware', () => {
 
   it('A2-1305: falls back to X-Correlation-Id when X-Request-Id is absent', async () => {
     mockFetch.mockResolvedValueOnce(
-      new Response(JSON.stringify({ message: 'ok' }), {
+      new Response(JSON.stringify(EMPTY_ORDER_PAGE), {
         status: 200,
         headers: { 'X-Correlation-Id': 'ctx-corr-xyz789' },
       }),
     );
 
-    const res = await app.request('/api/auth/request-otp', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'test@example.com' }),
-    });
+    const res = await app.request('/api/orders', { headers: loopBearer() });
 
     expect(res.status).toBe(200);
     expect(res.headers.get('X-Ctx-Request-Id')).toBe('ctx-corr-xyz789');

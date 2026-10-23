@@ -67,15 +67,9 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('LoopOrdersList', () => {
-  it('renders null when the flag is off — no fetch', () => {
-    const { container } = render(wrap(<LoopOrdersList enabled={false} />));
-    expect(container.innerHTML).toBe('');
-    expect(listMock).not.toHaveBeenCalled();
-  });
-
   it('shows the empty state with a browse CTA when there are no orders', async () => {
     listMock.mockResolvedValue({ orders: [] });
-    render(wrap(<LoopOrdersList enabled={true} />));
+    render(wrap(<LoopOrdersList />));
     await waitFor(() => expect(screen.getByText('No orders yet.')).toBeTruthy());
     expect(screen.getByRole('button', { name: 'Browse gift cards' })).toBeTruthy();
   });
@@ -87,7 +81,7 @@ describe('LoopOrdersList', () => {
         mkOrder({ id: 'o-2', state: 'unpaid', faceValueMinor: '2500' }),
       ],
     });
-    render(wrap(<LoopOrdersList enabled={true} />));
+    render(wrap(<LoopOrdersList />));
     await waitFor(() => expect(screen.getAllByText('Target')).toHaveLength(2));
     expect(screen.getByText('$10.00')).toBeTruthy();
     expect(screen.getByText('$25.00')).toBeTruthy();
@@ -97,14 +91,14 @@ describe('LoopOrdersList', () => {
 
   it('links each row to the order detail page', async () => {
     listMock.mockResolvedValue({ orders: [mkOrder({ id: 'o-1' })] });
-    render(wrap(<LoopOrdersList enabled={true} />));
+    render(wrap(<LoopOrdersList />));
     const link = await waitFor(() => screen.getByRole('link', { name: /Target/ }));
     expect(link.getAttribute('href')).toBe('/orders/o-1');
   });
 
   it('keeps the redemption payload off the list', async () => {
     listMock.mockResolvedValue({ orders: [mkOrder({ id: 'o-1' })] });
-    render(wrap(<LoopOrdersList enabled={true} />));
+    render(wrap(<LoopOrdersList />));
     await waitFor(() => screen.getByRole('link', { name: /Target/ }));
     expect(screen.queryByText('GIFT-123')).toBeNull();
     expect(screen.queryByText('4242')).toBeNull();
@@ -114,13 +108,13 @@ describe('LoopOrdersList', () => {
     listMock.mockResolvedValue({
       orders: [mkOrder({ id: 'o-1', state: 'fulfilled', userCashbackMinor: '125' })],
     });
-    render(wrap(<LoopOrdersList enabled={true} />));
+    render(wrap(<LoopOrdersList />));
     await waitFor(() => expect(screen.getByText('+$1.25 cashback')).toBeTruthy());
   });
 
   it('hides the cashback pill when userCashbackMinor is zero', async () => {
     listMock.mockResolvedValue({ orders: [mkOrder({ id: 'o-1', userCashbackMinor: '0' })] });
-    render(wrap(<LoopOrdersList enabled={true} />));
+    render(wrap(<LoopOrdersList />));
     await waitFor(() => screen.getByRole('link', { name: /Target/ }));
     expect(screen.queryByText(/cashback/)).toBeNull();
   });
@@ -129,7 +123,7 @@ describe('LoopOrdersList', () => {
     listMock.mockResolvedValue({
       orders: [mkOrder({ id: 'o-1', state: 'paid', userCashbackMinor: '125' })],
     });
-    render(wrap(<LoopOrdersList enabled={true} />));
+    render(wrap(<LoopOrdersList />));
     await waitFor(() => screen.getByRole('link', { name: /Target/ }));
     expect(screen.queryByText(/cashback/)).toBeNull();
   });
@@ -137,7 +131,7 @@ describe('LoopOrdersList', () => {
   it('shows a retry affordance when the list fails to load', async () => {
     listMock.mockRejectedValueOnce(new Error('boom'));
     listMock.mockResolvedValue({ orders: [mkOrder({ id: 'o-1' })] });
-    render(wrap(<LoopOrdersList enabled={true} />));
+    render(wrap(<LoopOrdersList />));
     const retry = await waitFor(() => screen.getByRole('button', { name: 'Retry' }));
     retry.click();
     await waitFor(() => screen.getByRole('link', { name: /Target/ }));
@@ -145,7 +139,7 @@ describe('LoopOrdersList', () => {
 
   it('shows the sign-in message on a 401', async () => {
     listMock.mockRejectedValue(new ApiException(401, { code: 'UNAUTHORIZED', message: 'nope' }));
-    render(wrap(<LoopOrdersList enabled={true} />));
+    render(wrap(<LoopOrdersList />));
     await waitFor(() =>
       expect(screen.getByText('Please sign in to view your orders.')).toBeTruthy(),
     );

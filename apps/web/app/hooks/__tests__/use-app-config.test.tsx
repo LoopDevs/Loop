@@ -26,8 +26,6 @@ function Probe(): React.ReactElement {
   return (
     <div>
       <span data-testid="loading">{isLoading ? 'true' : 'false'}</span>
-      <span data-testid="native">{String(config.loopAuthNativeEnabled)}</span>
-      <span data-testid="orders">{String(config.loopOrdersEnabled)}</span>
       <span data-testid="phase1">{String(config.phase1Only)}</span>
       <span data-testid="google-web">{config.social.googleClientIdWeb ?? '__null__'}</span>
     </div>
@@ -48,8 +46,6 @@ function renderProbe(): void {
 describe('useAppConfig', () => {
   it('returns the fetched config once the request resolves', async () => {
     fetchAppConfigMock.mockResolvedValue({
-      loopAuthNativeEnabled: true,
-      loopOrdersEnabled: true,
       social: {
         googleClientIdWeb: 'gid-web',
         googleClientIdIos: null,
@@ -59,8 +55,6 @@ describe('useAppConfig', () => {
     });
     renderProbe();
     await waitFor(() => expect(screen.getByTestId('loading').textContent).toBe('false'));
-    expect(screen.getByTestId('native').textContent).toBe('true');
-    expect(screen.getByTestId('orders').textContent).toBe('true');
     expect(screen.getByTestId('google-web').textContent).toBe('gid-web');
   });
 
@@ -75,12 +69,8 @@ describe('useAppConfig', () => {
     // Synchronously, before the query resolves: loading=true and the
     // safe defaults take effect (no flag silently flipped on).
     expect(screen.getByTestId('loading').textContent).toBe('true');
-    expect(screen.getByTestId('native').textContent).toBe('false');
-    expect(screen.getByTestId('orders').textContent).toBe('false');
     // Resolve so cleanup is clean.
     resolve({
-      loopAuthNativeEnabled: false,
-      loopOrdersEnabled: false,
       social: {
         googleClientIdWeb: null,
         googleClientIdIos: null,
@@ -113,8 +103,6 @@ describe('useAppConfig', () => {
       expect(screen.getByTestId('loading').textContent).toBe('true');
       expect(screen.getByTestId('phase1').textContent).toBe('true');
       resolve({
-        loopAuthNativeEnabled: false,
-        loopOrdersEnabled: false,
         phase1Only: false,
         social: {
           googleClientIdWeb: null,
@@ -137,8 +125,6 @@ describe('useAppConfig', () => {
       expect(screen.getByTestId('loading').textContent).toBe('true');
       expect(screen.getByTestId('phase1').textContent).toBe('false');
       resolve({
-        loopAuthNativeEnabled: false,
-        loopOrdersEnabled: false,
         phase1Only: false,
         social: {
           googleClientIdWeb: null,

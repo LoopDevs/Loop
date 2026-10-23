@@ -1,4 +1,4 @@
-// application config — A2-1605, AUDIT-2-E, R3-7, A4-093, NS-10, A2-203
+// application config — A2-1605, AUDIT-2-E, A4-093, NS-10, A2-203
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parse as parseYaml } from 'yaml';
@@ -51,21 +51,12 @@ export function applyCrossFieldGuards(config: Config, source: string): void {
     );
   }
 
-  // R3-7: refuse boot in production if native auth is disabled without explicit unsafe override.
-  if (isProduction && !config.auth.native.enabled && !config.unsafe.allowLegacyProxyAuth) {
+  // A4-093: refuse boot in production with the console email provider.
+  if (isProduction && config.email.provider === 'console') {
     fail(
-      'auth.native.enabled must be true in production (R3-7 / ADR 013). Leaving it false reverts ' +
-        'auth to the legacy CTX-proxy path. Enable native auth with a JWT signing key, or set ' +
-        'unsafe.allowLegacyProxyAuth: true only for an explicit rollback/staging deploy.',
-    );
-  }
-
-  // A4-093: refuse boot in production if native auth is enabled with console email provider.
-  if (isProduction && config.auth.native.enabled && config.email.provider === 'console') {
-    fail(
-      'email.provider must be a real provider when auth.native.enabled is true in production ' +
-        '(A4-093 / FT-09). The `console` provider only logs OTPs to stdout, so every login request ' +
-        'would silently fail while returning 200. Set email.provider: resend or aws_ses with credentials.',
+      'email.provider must be a real provider in production (A4-093 / FT-09). The `console` ' +
+        'provider only logs OTPs to stdout, so every login request would silently fail while ' +
+        'returning 200. Set email.provider: resend or aws_ses with credentials.',
     );
   }
 

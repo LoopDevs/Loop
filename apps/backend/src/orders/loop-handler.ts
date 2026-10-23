@@ -1,6 +1,5 @@
 // POST /api/orders/loop — create a Loop order — ADR 052
 import type { Context } from 'hono';
-import { config } from '../config/index.js';
 import { logger } from '../logger.js';
 import type { LoopAuthContext } from '../auth/require-auth.js';
 import type {
@@ -151,15 +150,9 @@ async function captureOrderEconomics(orderId: string, ctxOrderId: string): Promi
 }
 
 export async function loopCreateOrderHandler(c: Context): Promise<Response> {
-  if (!config.auth.native.enabled) {
-    return c.json({ code: 'NOT_FOUND', message: 'Not found' }, 404);
-  }
   const auth = c.get('auth') as LoopAuthContext | undefined;
-  if (auth === undefined || auth.kind !== 'loop') {
-    return c.json(
-      { code: 'UNAUTHORIZED', message: 'Loop-native authentication required for this endpoint' },
-      401,
-    );
+  if (auth === undefined) {
+    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
   }
 
   const clientId = c.get('clientId') as string | undefined;

@@ -29,7 +29,7 @@ function shannonEntropyBitsPerChar(s: string): number {
 const SIGNING_KEY_MIN_ENTROPY_BITS_PER_CHAR = 3.0;
 
 // CF2-17: length alone doesn't rule out low-entropy secrets (e.g. repeated chars)
-export function signingKeySchema(path: string): z.ZodOptional<z.ZodString> {
+export function signingKeySchema(path: string): z.ZodString {
   return z
     .string()
     .min(32, { message: `${path} must be at least 32 characters` })
@@ -38,8 +38,7 @@ export function signingKeySchema(path: string): z.ZodOptional<z.ZodString> {
         `${path} is too low-entropy to be a real signing key ` +
         `(looks like a repeated/patterned value, not a random secret) — ` +
         `generate one with \`openssl rand -base64 32\` or similar`,
-    })
-    .optional();
+    });
 }
 
 export function decode32ByteKey(raw: string): Buffer | null {

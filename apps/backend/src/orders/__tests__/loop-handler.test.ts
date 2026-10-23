@@ -5,10 +5,6 @@ import type { Context } from 'hono';
 import type { LoopAuthContext } from '../../auth/require-auth.js';
 import type { CtxFetchOptions } from '../../ctx/api-fetch.js';
 
-const { configState } = vi.hoisted(() => ({
-  configState: { nativeAuthEnabled: true },
-}));
-
 vi.mock('../../config/index.js', async (importActual) => {
   const actual = await importActual<typeof ConfigModule>();
   return {
@@ -23,7 +19,6 @@ vi.mock('../../config/index.js', async (importActual) => {
         },
         auth: {
           ...actual.config.auth,
-          native: { ...actual.config.auth.native, enabled: configState.nativeAuthEnabled },
         },
       };
     },
@@ -137,10 +132,8 @@ vi.mock('../../discord.js', () => ({
 import { loopCreateOrderHandler } from '../loop-handler.js';
 
 const LOOP_AUTH: LoopAuthContext = {
-  kind: 'loop',
   userId: 'user-uuid',
   email: 'a@b.com',
-  bearerToken: 'loop-access',
 };
 
 function makeCtx(opts: {
@@ -194,7 +187,6 @@ function ctx201(body?: Record<string, unknown>): Response {
 }
 
 beforeEach(() => {
-  configState.nativeAuthEnabled = true;
   merchantsState.map = new Map([['amazon', { id: 'amazon', name: 'Amazon', enabled: true }]]);
   repoState.created = undefined;
   repoState.priorByKey = null;
@@ -211,14 +203,6 @@ beforeEach(() => {
 });
 
 describe('gate ladder', () => {
-  it('404s when auth.native.enabled is off', async () => {
-    configState.nativeAuthEnabled = false;
-    const res = await loopCreateOrderHandler(
-      makeCtx({ auth: LOOP_AUTH, clientId: 'loopweb', body: GOOD_BODY }),
-    );
-    expect(res.status).toBe(404);
-  });
-
   it('401s without a loop auth context', async () => {
     const res = await loopCreateOrderHandler(makeCtx({ clientId: 'loopweb', body: GOOD_BODY }));
     expect(res.status).toBe(401);

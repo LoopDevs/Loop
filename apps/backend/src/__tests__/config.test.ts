@@ -26,12 +26,12 @@ const base = {
     credentials: { key: 'test-operator-key', privateKey: '11'.repeat(32) },
   },
   orders: { redeem: { encryptionKey: REDEEM_KEY } },
+  auth: { native: { jwt: { current: JWT_KEY } } },
 };
 
-// production doc clearing every boot guard (R3-7, A4-093, NS-10); guard tests break exactly one thing
+// production doc clearing every boot guard (A4-093, NS-10); guard tests break exactly one thing
 const prodBase = {
   ...base,
-  auth: { native: { enabled: true, jwt: { current: JWT_KEY } } },
   email: { provider: 'resend', credentials: { key: 're_test_key_value' } },
 };
 
@@ -69,7 +69,6 @@ describe('parseConfig', () => {
     expect(config.database.driver).toBe('memory');
     expect(config.email.provider).toBe('console');
     expect(config.rateLimit.enabled).toBe(true);
-    expect(config.auth.native.enabled).toBe(false);
     expect(config.launch.phase1Only).toBe(false);
   });
 
@@ -271,7 +270,7 @@ describe('parseConfig', () => {
   describe('signing-key entropy validation', () => {
     const jwtDoc = (jwt: Record<string, unknown>): unknown => ({
       ...base,
-      auth: { native: { enabled: true, jwt } },
+      auth: { native: { jwt } },
     });
 
     it('accepts a realistic random-looking key', () => {
@@ -301,29 +300,16 @@ describe('parseConfig', () => {
     });
   });
 
-  // Hardening B3: native auth without a signing key used to 500 on first verify-otp/refresh; now a parse error
-  describe('native-auth signing-key requirement', () => {
-    it('refuses auth.native.enabled with no signing capability, in any env', () => {
+  // Hardening B3: a missing signing key is a parse error, never a 500 on first verify-otp/refresh
+  describe('signing-key requirement', () => {
+    it('refuses a document without auth.native.jwt.current, in any env', () => {
       for (const nodeEnv of ['development', 'test', 'production'] as const) {
         expect(() =>
           withNodeEnv(nodeEnv, () =>
-            parseConfig({ ...base, auth: { native: { enabled: true } } }, 'test config'),
+            parseConfig({ ...base, auth: { native: { jwt: {} } } }, 'test config'),
           ),
-        ).toThrow(/auth\.native\.enabled requires a signing key/);
+        ).toThrow(/auth\.native\.jwt\.current/);
       }
-    });
-
-    it('accepts native auth with a signing key', () => {
-      expect(() =>
-        parse({
-          ...base,
-          auth: { native: { enabled: true, jwt: { current: JWT_KEY } } },
-        }),
-      ).not.toThrow();
-    });
-
-    it('leaves native-auth-disabled documents unconstrained', () => {
-      expect(() => parse(base)).not.toThrow();
     });
   });
 
@@ -608,38 +594,11 @@ describe('production cross-field guards', () => {
     ).toThrow(/testing\.endpointsSecret must not be set in production/);
   });
 
-  it('R3-7: refuses production when auth.native.enabled is false or absent', () => {
-    expect(() => parseProd(base)).toThrow(/auth\.native\.enabled must be true in production/);
-    expect(() => parseProd({ ...base, auth: { native: { enabled: false } } })).toThrow(
-      /auth\.native\.enabled must be true in production/,
-    );
-  });
-
-  it('R3-7: allows unsafe.allowLegacyProxyAuth as the explicit rollback opt-out', () => {
-    expect(() => parseProd({ ...base, unsafe: { allowLegacyProxyAuth: true } })).not.toThrow();
-  });
-
-  it('R3-7: does not enforce native auth outside production', () => {
-    for (const nodeEnv of ['development', 'test'] as const) {
-      expect(() => withNodeEnv(nodeEnv, () => parseConfig(base, 'test config'))).not.toThrow();
-    }
-  });
-
   // the console provider only logs OTPs to stdout, so every login would silently fail while returning 200
-  it('A4-093: refuses production native auth with the console email provider', () => {
+  it('A4-093: refuses production with the console email provider', () => {
     expect(() => parseProd({ ...prodBase, email: { provider: 'console' } })).toThrow(
       /email\.provider must be a real provider/,
     );
-  });
-
-  it('A4-093: does not constrain the email provider when native auth is off', () => {
-    expect(() =>
-      parseProd({
-        ...base,
-        unsafe: { allowLegacyProxyAuth: true },
-        email: { provider: 'console' },
-      }),
-    ).not.toThrow();
   });
 
   // redeem codes/PINs are spendable bearer secrets — production must encrypt them at rest
@@ -701,6 +660,10 @@ describe('loadConfig', () => {
         '  credentials:',
         '    key: k',
         `    privateKey: "${'11'.repeat(32)}"`,
+        'auth:',
+        '  native:',
+        '    jwt:',
+        `      current: ${JWT_KEY}`,
         'server:',
         '  port: 9091',
         '',

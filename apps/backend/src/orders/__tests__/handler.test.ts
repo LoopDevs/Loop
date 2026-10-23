@@ -60,12 +60,22 @@ vi.mock('../../discord.js', () => ({
   notifyCtxSchemaDrift: vi.fn(),
 }));
 
+vi.mock('../../db/users.js', async (importOriginal) => ({
+  ...((await importOriginal()) as Record<string, unknown>),
+  getUserTokenVersion: async () => 0,
+}));
+
 import { app, __resetRateLimitsForTests } from '../../app.js';
+import { signLoopToken } from '../../auth/tokens.js';
 
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
 
-const AUTH_HEADER = { Authorization: 'Bearer test-token' };
+const AUTH_HEADER = {
+  Authorization: `Bearer ${
+    signLoopToken({ sub: 'u-1', email: 'u@test.io', typ: 'access', ttlSeconds: 300, tv: 0 }).token
+  }`,
+};
 
 beforeEach(() => {
   mockFetch.mockReset();

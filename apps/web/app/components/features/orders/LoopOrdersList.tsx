@@ -15,20 +15,18 @@ import { friendlyError } from '~/utils/error-messages';
  * `GET /api/orders/loop` and renders each order as a row linking to
  * `/orders/:id`, where the redemption payload lives.
  */
-export function LoopOrdersList({ enabled }: { enabled: boolean }): React.JSX.Element | null {
+export function LoopOrdersList(): React.JSX.Element | null {
   const { t } = useTranslation('orders');
   const navigate = useNavigate();
   const query = useQuery({
     queryKey: ['loop-orders'],
     queryFn: () => listLoopOrders(),
-    enabled,
     retry: shouldRetry,
     staleTime: 30_000,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
   });
 
-  if (!enabled) return null;
   if (query.isPending) {
     return (
       <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden">

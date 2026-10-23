@@ -6,7 +6,6 @@ import { verifyIdToken, type VerifyIdTokenResult } from './id-token.js';
 import { consumeIdToken } from './id-token-replay.js';
 import { signInUserForIdentity } from './identities.js';
 import { ctxSignInErrorResponse } from './ctx-login.js';
-import { isLoopAuthConfigured } from './tokens.js';
 import { issueTokenPair } from './issue-token-pair.js';
 import type { SocialProvider } from '../db/types.js';
 // D1: request body schema matches OpenAPI spec
@@ -24,13 +23,6 @@ export interface SocialProviderConfig {
 
 export function makeSocialLoginHandler(providerConfig: SocialProviderConfig) {
   return async function socialLoginHandler(c: Context): Promise<Response> {
-    if (!config.auth.native.enabled) {
-      return c.json({ code: 'NOT_FOUND', message: 'Not found' }, 404);
-    }
-    if (!isLoopAuthConfigured()) {
-      log.error('LOOP_AUTH_NATIVE_ENABLED without LOOP_JWT_SIGNING_KEY');
-      return c.json({ code: 'INTERNAL_ERROR', message: 'Auth not configured' }, 500);
-    }
     const audiences = providerConfig.resolveAudiences();
     if (audiences.length === 0) {
       // 404 rather than 401 to prevent probing for live providers

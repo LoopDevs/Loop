@@ -29,6 +29,11 @@ database:
   # Empty path → ephemeral store, no filesystem writes from a test run.
   jsonPath: ''
 
+auth:
+  native:
+    jwt:
+      current: unit-test-loop-jwt-signing-key-32-chars-min!!
+
 admin:
   # A step-up signing key is present so the admin-write gates take
   # their real code path (401 STEP_UP_REQUIRED / consume-and-burn)

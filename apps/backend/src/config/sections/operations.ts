@@ -35,9 +35,6 @@ export const testingSchema = z
 // Defaults to safe direction; setting is for deliberate rollback/staging only.
 export const unsafeSchema = z
   .object({
-    // R3-7: Permit legacy CTX-proxy auth path.
-    allowLegacyProxyAuth: z.boolean().default(false),
-
     // NS-10: Permit plaintext storage of redeem codes/PINs.
     allowPlaintextRedeemSecrets: z.boolean().default(false),
   })

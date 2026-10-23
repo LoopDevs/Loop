@@ -16,7 +16,7 @@ import { revokeAllOwnSessionsHandler } from '../revoke-sessions-handler.js';
 
 const UID = '00000000-0000-4000-8000-000000000001';
 
-function makeCtx(opts: { auth?: { kind: 'loop' | 'ctx'; userId?: string } }): Context {
+function makeCtx(opts: { auth?: { userId: string } }): Context {
   const store = new Map<string, unknown>();
   if (opts.auth !== undefined) store.set('auth', opts.auth);
   return {
@@ -32,15 +32,9 @@ beforeEach(() => {
 
 describe('revokeAllOwnSessionsHandler (self sign-out-all)', () => {
   it('revokes all refresh tokens for a loop-native caller', async () => {
-    const res = await revokeAllOwnSessionsHandler(makeCtx({ auth: { kind: 'loop', userId: UID } }));
+    const res = await revokeAllOwnSessionsHandler(makeCtx({ auth: { userId: UID } }));
     expect(res.status).toBe(200);
     expect(revokeAllMock).toHaveBeenCalledWith(UID);
-  });
-
-  it('is a no-op success for a CTX-proxy caller (no local rows)', async () => {
-    const res = await revokeAllOwnSessionsHandler(makeCtx({ auth: { kind: 'ctx' } }));
-    expect(res.status).toBe(200);
-    expect(revokeAllMock).not.toHaveBeenCalled();
   });
 
   it('401s with no auth context', async () => {
@@ -51,7 +45,7 @@ describe('revokeAllOwnSessionsHandler (self sign-out-all)', () => {
 
   it('500s (does not throw) when the revoke fails', async () => {
     revokeAllMock.mockRejectedValue(new Error('db down'));
-    const res = await revokeAllOwnSessionsHandler(makeCtx({ auth: { kind: 'loop', userId: UID } }));
+    const res = await revokeAllOwnSessionsHandler(makeCtx({ auth: { userId: UID } }));
     expect(res.status).toBe(500);
   });
 });

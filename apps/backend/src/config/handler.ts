@@ -9,10 +9,6 @@ import {
 } from '../ctx/startup.js';
 
 export interface AppConfig {
-  /** ADR 013: Loop-native auth is active (OTP + JWTs minted by Loop). */
-  loopAuthNativeEnabled: boolean;
-  /** ADR 010: the order workers are running and Loop-native orders can be placed. */
-  loopOrdersEnabled: boolean;
   /**
    * ADR 052 — chain-qualified CTX payment currencies the customer can
    * choose at checkout (`LOOP_CTX_PAYMENT_CURRENCIES`, default `XLM`).
@@ -67,12 +63,6 @@ export interface AppConfig {
 
 export function configHandler(c: Context): Response {
   const body: AppConfig = {
-    loopAuthNativeEnabled: config.auth.native.enabled,
-    // ADR 052: ctx is the payment processor. The operator API creds
-    // (the CTX create + status mirror transport) are boot-required
-    // and the order-mirror machinery always runs, so native auth is
-    // the only remaining gate.
-    loopOrdersEnabled: config.auth.native.enabled,
     ctxPaymentCurrencies: loopCryptoPaymentCurrencies(),
     fiatPaymentCurrencies: loopFiatPaymentCurrencies(),
     countries: loopCountries(),

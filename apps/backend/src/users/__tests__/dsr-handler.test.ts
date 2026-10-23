@@ -62,10 +62,8 @@ vi.mock('../../logger.js', () => ({
 import { dsrExportHandler, dsrDeleteHandler } from '../dsr-handler.js';
 
 const LOOP_AUTH: LoopAuthContext = {
-  kind: 'loop',
   userId: 'user-uuid',
   email: 'a@b.com',
-  bearerToken: 'loop-jwt',
 };
 
 function makeCtx(): Context {

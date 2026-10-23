@@ -60,10 +60,8 @@ import {
 } from '../loop-stellar-wallet-handlers.js';
 
 const LOOP_AUTH: LoopAuthContext = {
-  kind: 'loop',
   userId: 'user-uuid',
   email: 'a@b.com',
-  bearerToken: 'loop-access',
 };
 
 const SOURCE = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';

@@ -57,9 +57,8 @@ interface UseLoopOrderRestoreArgs {
   /** The merchant currently being viewed — restore only applies to a
    *  persisted pointer scoped to this exact merchant. */
   merchantId: string;
-  /** Gate the restore attempt (pass `isAuthenticated && loopOrdersEnabled`)
-   *  so this never fires a doomed fetch while signed out or the
-   *  loop-native path is off. */
+  /** Gate the restore attempt (pass `isAuthenticated`) so this never
+   *  fires a doomed fetch while signed out. */
   enabled: boolean;
 }
 

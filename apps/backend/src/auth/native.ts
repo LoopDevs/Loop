@@ -16,7 +16,7 @@ import {
 } from './otp-attempt-counter.js';
 import { ctxSignInErrorResponse, signInCtxUserByEmail, signInCtxUserById } from './ctx-login.js';
 import { normalizeEmail, NonAsciiEmailError } from './normalize-email.js';
-import { verifyLoopToken, isLoopAuthConfigured } from './tokens.js';
+import { verifyLoopToken } from './tokens.js';
 import { getUserTokenVersion } from '../db/users.js';
 import {
   findLiveRefreshToken,
@@ -25,7 +25,6 @@ import {
   revokeAllRefreshTokensForUser,
 } from './refresh-tokens.js';
 
-// A2-803: shared schemas prevent drift between native and CTX-proxy paths
 import { VerifyOtpBody, RefreshBody } from './request-schemas.js';
 
 export { nativeRequestOtpHandler } from './native-request-otp.js';
@@ -36,11 +35,6 @@ export { issueTokenPair, type TokenPair } from './issue-token-pair.js';
 import { issueTokenPair, mintTokenPair, persistMintedRefreshToken } from './issue-token-pair.js';
 
 export async function nativeVerifyOtpHandler(c: Context): Promise<Response> {
-  if (!isLoopAuthConfigured()) {
-    // Refuse loudly to prevent minting unsigned tokens
-    log.error('LOOP_AUTH_NATIVE_ENABLED without LOOP_JWT_SIGNING_KEY');
-    return c.json({ code: 'INTERNAL_ERROR', message: 'Auth not configured' }, 500);
-  }
   const parsed = VerifyOtpBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) {
     return c.json({ code: 'VALIDATION_ERROR', message: 'email and otp are required' }, 400);
@@ -109,10 +103,6 @@ export async function nativeVerifyOtpHandler(c: Context): Promise<Response> {
 }
 
 export async function nativeRefreshHandler(c: Context): Promise<Response> {
-  if (!isLoopAuthConfigured()) {
-    log.error('LOOP_AUTH_NATIVE_ENABLED without LOOP_JWT_SIGNING_KEY');
-    return c.json({ code: 'INTERNAL_ERROR', message: 'Auth not configured' }, 500);
-  }
   const parsed = RefreshBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) {
     return c.json({ code: 'VALIDATION_ERROR', message: 'refreshToken is required' }, 400);

@@ -72,10 +72,8 @@ import { loopGetOrderHandler, loopListOrdersHandler } from '../loop-read-handler
 import { encryptRedeemField, resetRedeemKeyCache } from '../redeem-crypto.js';
 
 const LOOP_AUTH: LoopAuthContext = {
-  kind: 'loop',
   userId: 'user-uuid',
   email: 'a@b.com',
-  bearerToken: 'loop-access',
 };
 
 function makeCtx(opts: {

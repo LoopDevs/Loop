@@ -1,7 +1,6 @@
 // Loop order read handlers — ADR 052
 import type { Context } from 'hono';
 import { db } from '../db/client.js';
-import { config } from '../config/index.js';
 import { logger } from '../logger.js';
 import type { LoopAuthContext } from '../auth/handler.js';
 import type { LoopOrderView, OrderState } from '@loop/shared';
@@ -58,12 +57,9 @@ export function orderToView(row: Order): LoopOrderView {
 }
 
 export async function loopGetOrderHandler(c: Context): Promise<Response> {
-  if (!config.auth.native.enabled) {
-    return c.json({ code: 'NOT_FOUND', message: 'Not found' }, 404);
-  }
   const auth = c.get('auth') as LoopAuthContext | undefined;
-  if (auth === undefined || auth.kind !== 'loop') {
-    return c.json({ code: 'UNAUTHORIZED', message: 'Loop-native authentication required' }, 401);
+  if (auth === undefined) {
+    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
   }
   const id = c.req.param('id');
   if (id === undefined || id.length === 0) {
@@ -97,12 +93,9 @@ export async function loopGetOrderHandler(c: Context): Promise<Response> {
 }
 
 export async function loopListOrdersHandler(c: Context): Promise<Response> {
-  if (!config.auth.native.enabled) {
-    return c.json({ code: 'NOT_FOUND', message: 'Not found' }, 404);
-  }
   const auth = c.get('auth') as LoopAuthContext | undefined;
-  if (auth === undefined || auth.kind !== 'loop') {
-    return c.json({ code: 'UNAUTHORIZED', message: 'Loop-native authentication required' }, 401);
+  if (auth === undefined) {
+    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
   }
 
   const limitRaw = c.req.query('limit');

@@ -27,8 +27,6 @@ describe('API_BASE', () => {
 
 describe('fetchAppConfig', () => {
   const validConfig = {
-    loopAuthNativeEnabled: true,
-    loopOrdersEnabled: false,
     social: {
       googleClientIdWeb: 'goog-web',
       googleClientIdIos: null,

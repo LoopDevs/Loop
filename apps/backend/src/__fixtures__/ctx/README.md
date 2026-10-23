@@ -44,12 +44,10 @@ Refresh a fixture when:
 
 ## Files
 
-| Filename                       | Schema                        | Surface                                                |
-| ------------------------------ | ----------------------------- | ------------------------------------------------------ |
-| `verify-otp-response.json`     | `VerifyOtpUpstreamResponse`   | `POST /verify-email` (token issuance)                  |
-| `refresh-token-response.json`  | `RefreshUpstreamResponse`     | `POST /refresh-token` (rotated access + refresh token) |
-| `merchants-list-response.json` | `UpstreamListResponseSchema`  | `GET /merchants` (paginated catalog list)              |
-| `merchant-item.json`           | `UpstreamMerchantSchema`      | A single merchant from the `result[]` array            |
-| `create-order-response.json`   | `CreateOrderUpstreamResponse` | `POST /gift-cards` (order creation)                    |
-| `get-order-response.json`      | `GetOrderUpstreamResponse`    | `GET /gift-cards/:id` (single order detail)            |
-| `list-orders-response.json`    | `ListOrdersUpstreamResponse`  | `GET /gift-cards` (paginated user-orders)              |
+| Filename                       | Schema                        | Surface                                     |
+| ------------------------------ | ----------------------------- | ------------------------------------------- |
+| `merchants-list-response.json` | `UpstreamListResponseSchema`  | `GET /merchants` (paginated catalog list)   |
+| `merchant-item.json`           | `UpstreamMerchantSchema`      | A single merchant from the `result[]` array |
+| `create-order-response.json`   | `CreateOrderUpstreamResponse` | `POST /gift-cards` (order creation)         |
+| `get-order-response.json`      | `GetOrderUpstreamResponse`    | `GET /gift-cards/:id` (single order detail) |
+| `list-orders-response.json`    | `ListOrdersUpstreamResponse`  | `GET /gift-cards` (paginated user-orders)   |

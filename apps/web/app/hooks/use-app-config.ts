@@ -38,8 +38,6 @@ export function defaultPhase1Only(): boolean {
 }
 
 const DEFAULT_CONFIG: AppConfig = {
-  loopAuthNativeEnabled: false,
-  loopOrdersEnabled: false,
   // ADR 052 — safe default matching the backend's own fallback
   // (`LOOP_CTX_PAYMENT_CURRENCIES ?? 'XLM'`). A missing config keeps
   // checkout on the universally-supported currency rather than
@@ -52,9 +50,7 @@ const DEFAULT_CONFIG: AppConfig = {
   // deploy-aware `defaultPhase1Only()` at call time so SSR/first-paint
   // tracks the deployment. Kept `true` here as the safe fallback for any
   // reader that consumes DEFAULT_CONFIG directly. `phase1Only` only
-  // governs UI visibility — the cashback flow itself is independently
-  // gated on `loopOrdersEnabled` / `loopAuthNativeEnabled`, so this
-  // unlocks nothing live; it only hides Phase-2 surfaces until config
+  // governs UI visibility; it hides Phase-2 surfaces until config
   // confirms they're on.
   phase1Only: true,
   // Default all LOOP assets to unavailable — matches a deployment that

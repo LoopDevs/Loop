@@ -71,6 +71,7 @@ const UNLIMITED_ALLOWLIST = new Set<string>([
   // before a limiter would ever be relevant).
   'POST /__test__/reset',
   'POST /__test__/mint-loop-token',
+  'GET /__test__/last-otp',
 ]);
 
 describe('hardening C6 — every route declares a rate limit', () => {

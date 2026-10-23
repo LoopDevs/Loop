@@ -6,7 +6,6 @@ import { readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { z } from 'zod';
 
-import { VerifyOtpUpstreamResponse, RefreshUpstreamResponse } from '../auth/handler.js';
 import { CreateOrderUpstreamResponse } from '../orders/handler-shared.js';
 import { CtxGiftCardSchema } from '../orders/ctx-order.js';
 import { UpstreamMerchantSchema, UpstreamListResponseSchema } from '../merchants/sync.js';
@@ -24,16 +23,6 @@ interface ContractCase {
 }
 
 const CASES: ContractCase[] = [
-  {
-    fixture: 'verify-otp-response.json',
-    schema: VerifyOtpUpstreamResponse,
-    surface: 'POST /verify-email',
-  },
-  {
-    fixture: 'refresh-token-response.json',
-    schema: RefreshUpstreamResponse,
-    surface: 'POST /refresh-token',
-  },
   {
     fixture: 'merchants-list-response.json',
     schema: UpstreamListResponseSchema,
@@ -77,10 +66,10 @@ describe('CTX upstream contract (A2-1706)', () => {
   }
 
   it('a fixture with a missing required field fails the parse (smoke test for the gate itself)', () => {
-    const data = loadFixture('verify-otp-response.json') as Record<string, unknown>;
+    const data = loadFixture('create-order-response.json') as Record<string, unknown>;
     const broken = { ...data };
-    delete broken['accessToken'];
-    const result = VerifyOtpUpstreamResponse.safeParse(broken);
+    delete broken['id'];
+    const result = CreateOrderUpstreamResponse.safeParse(broken);
     expect(result.success).toBe(false);
   });
 

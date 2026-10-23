@@ -78,7 +78,7 @@ vi.mock('../../auth/handler.js', async (importOriginal) => {
       if (id === undefined) {
         return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
       }
-      c.set('auth', { kind: 'loop', userId: id, email: 'admin@loop.test', bearerToken: 't' });
+      c.set('auth', { userId: id, email: 'admin@loop.test' });
       await next();
       return undefined;
     },

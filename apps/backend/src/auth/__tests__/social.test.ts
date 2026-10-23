@@ -2,10 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type * as ConfigModule from '../../config/index.js';
 import type { Context } from 'hono';
 
-const { configState } = vi.hoisted(() => ({
-  configState: { nativeAuthEnabled: true },
-}));
-
 vi.mock('../../config/index.js', async (importActual) => {
   const actual = await importActual<typeof ConfigModule>();
   return {
@@ -17,7 +13,6 @@ vi.mock('../../config/index.js', async (importActual) => {
           ...actual.config.auth,
           native: {
             ...actual.config.auth.native,
-            enabled: configState.nativeAuthEnabled,
             jwt: { current: 'jwt-test-signing-key-32-chars-min!!', previous: undefined },
           },
           social: {
@@ -265,17 +260,5 @@ describe('provider not configured', () => {
     });
     const res = await handler(makeCtx({ idToken: 'x.y.z' }));
     expect(res.status).toBe(404);
-  });
-});
-
-describe('feature flag off', () => {
-  it('returns 404 when auth.native.enabled is false', async () => {
-    configState.nativeAuthEnabled = false;
-    try {
-      const res = await googleSocialLoginHandler(makeCtx({ idToken: 'x.y.z' }));
-      expect(res.status).toBe(404);
-    } finally {
-      configState.nativeAuthEnabled = true;
-    }
   });
 });

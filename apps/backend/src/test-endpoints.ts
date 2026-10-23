@@ -7,6 +7,7 @@ import { __resetRateLimitsForTests } from './middleware/rate-limit.js';
 import { __resetUpstreamProbeCacheOnlyForTests } from './health.js';
 import { signInCtxUserByEmail } from './auth/ctx-login.js';
 import { issueTokenPair } from './auth/issue-token-pair.js';
+import { __capturedOtpForTests } from './auth/email.js';
 
 const SECRET_HEADER = 'x-test-endpoints-secret';
 
@@ -41,6 +42,13 @@ export function mountTestEndpoints(app: Hono): void {
     __resetRateLimitsForTests();
     __resetUpstreamProbeCacheOnlyForTests();
     return c.json({ message: 'reset' });
+  });
+
+  app.get('/__test__/last-otp', requireSecret, (c) => {
+    const email = c.req.query('email');
+    const code = email === undefined ? undefined : __capturedOtpForTests(email);
+    if (code === undefined) return c.notFound();
+    return c.json({ code });
   });
 
   // A2-1705 phase A.3: test-only loop-native session minter.

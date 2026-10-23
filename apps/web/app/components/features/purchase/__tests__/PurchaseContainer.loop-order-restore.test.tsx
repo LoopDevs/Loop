@@ -28,7 +28,6 @@ import type * as OrdersLoopModule from '~/services/orders-loop';
 const { authState, appConfigState } = vi.hoisted(() => ({
   authState: { email: 'a@b.com' as string | null, accessToken: 'tok' as string | null },
   appConfigState: {
-    loopOrdersEnabled: true,
     phase1Only: false,
     ctxPaymentCurrencies: ['XLM'] as string[],
   },
@@ -55,7 +54,6 @@ vi.mock('~/services/auth', () => ({ requestOtp: vi.fn(), verifyOtp: vi.fn() }));
 vi.mock('~/hooks/use-app-config', () => ({
   useAppConfig: () => ({
     config: {
-      loopOrdersEnabled: appConfigState.loopOrdersEnabled,
       phase1Only: appConfigState.phase1Only,
       ctxPaymentCurrencies: appConfigState.ctxPaymentCurrencies,
     },
@@ -169,7 +167,6 @@ beforeEach(() => {
   sessionStorage.clear();
   authState.email = 'a@b.com';
   authState.accessToken = 'tok';
-  appConfigState.loopOrdersEnabled = true;
   appConfigState.phase1Only = false;
   appConfigState.ctxPaymentCurrencies = ['XLM'];
   createLoopOrderMock.mockReset();

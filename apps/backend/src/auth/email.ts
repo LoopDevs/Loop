@@ -16,11 +16,18 @@ export interface EmailProvider {
   sendOtpEmail(input: OtpEmailInput): Promise<void>;
 }
 
+const capturedOtps = new Map<string, string>();
+
+export function __capturedOtpForTests(email: string): string | undefined {
+  return capturedOtps.get(email);
+}
+
 // A2-1612: Sentry transport receives log records before redaction; skip raw code when SENTRY_DSN is set
 class ConsoleEmailProvider implements EmailProvider {
   readonly name = 'console';
 
   async sendOtpEmail(input: OtpEmailInput): Promise<void> {
+    if (config.env === 'test') capturedOtps.set(input.to, input.code);
     const sentryActive = config.observability.sentry.dsn !== undefined;
     log.info(
       {

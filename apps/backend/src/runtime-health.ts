@@ -1,5 +1,3 @@
-import { config } from './config/index.js';
-
 export type RuntimeWorkerName =
   | 'asset_drift_watcher'
   | 'auth_row_purge'
@@ -54,7 +52,7 @@ export interface RuntimeHealthSnapshot {
 const workerState = new Map<RuntimeWorkerName, MutableWorkerState>();
 
 const otpDeliveryState: OtpDeliveryState = {
-  enabled: Boolean(config.auth.native.enabled),
+  enabled: true,
   lastSuccessAtMs: null,
   lastFailureAtMs: null,
   lastError: null,
@@ -233,7 +231,7 @@ export function getRuntimeHealthSnapshot(now: number = Date.now()): RuntimeHealt
 
 export function __resetRuntimeHealthForTests(): void {
   workerState.clear();
-  otpDeliveryState.enabled = Boolean(config.auth.native.enabled);
+  otpDeliveryState.enabled = true;
   otpDeliveryState.lastSuccessAtMs = null;
   otpDeliveryState.lastFailureAtMs = null;
   otpDeliveryState.lastError = null;

@@ -1,6 +1,6 @@
 // Loop-signed JWT sign + verify — ADR 013, ADR 030, A2-1600, NS-09
 import { randomBytes } from 'node:crypto';
-import { getActiveSigner, getVerifiers, isAnySignerConfigured } from './signer.js';
+import { getActiveSigner, getVerifiers } from './signer.js';
 
 export type TokenType = 'access' | 'refresh';
 
@@ -59,9 +59,7 @@ function b64urlDecode(s: string): Buffer {
 export function signLoopToken(opts: SignOptions): { token: string; claims: LoopTokenClaims } {
   const signer = getActiveSigner();
   if (signer === null) {
-    throw new Error(
-      'No Loop JWT signing key configured (auth.native.jwt.current) — Loop-native auth is disabled',
-    );
+    throw new Error('No Loop JWT signing key configured (auth.native.jwt.current)');
   }
   const nowSec = opts.now ?? Math.floor(Date.now() / 1000);
   const claims: LoopTokenClaims = {
@@ -189,8 +187,4 @@ export function verifyLoopToken(token: string, expectedType: TokenType): VerifyR
   // NS-09: surface tv for requireAuth comparison; verify stays pure (no DB)
   if (typeof obj['tv'] === 'number') claims.tv = obj['tv'];
   return { ok: true, claims };
-}
-
-export function isLoopAuthConfigured(): boolean {
-  return isAnySignerConfigured();
 }

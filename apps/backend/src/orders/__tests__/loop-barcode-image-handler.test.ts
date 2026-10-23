@@ -71,15 +71,13 @@ vi.mock('../../images/ssrf-guard.js', () => ({
 import { loopOrderBarcodeImageHandler } from '../loop-barcode-image-handler.js';
 
 const LOOP_AUTH: LoopAuthContext = {
-  kind: 'loop',
   userId: 'user-uuid',
   email: 'a@b.com',
-  bearerToken: 'loop-access',
 };
 
 function makeContext(args: {
   id?: string;
-  auth?: LoopAuthContext | { kind: 'ctx' };
+  auth?: LoopAuthContext;
   query?: Record<string, string>;
 }): Context {
   const vars = new Map<string, unknown>();
@@ -127,13 +125,6 @@ describe('loopOrderBarcodeImageHandler', () => {
     configState.nativeAuthEnabled = false;
     const res = await loopOrderBarcodeImageHandler(makeContext({ id: 'o-1', auth: LOOP_AUTH }));
     expect(res.status).toBe(404);
-  });
-
-  it('returns 401 for a non-Loop auth context', async () => {
-    const res = await loopOrderBarcodeImageHandler(
-      makeContext({ id: 'o-1', auth: { kind: 'ctx' } }),
-    );
-    expect(res.status).toBe(401);
   });
 
   it('returns 404 when the order does not belong to the caller', async () => {

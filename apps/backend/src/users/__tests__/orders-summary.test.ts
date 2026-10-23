@@ -14,10 +14,8 @@ import type { OrderState, UserDoc } from '../../db/types.js';
 import { getUserOrdersSummaryHandler } from '../orders-summary.js';
 
 const LOOP_AUTH: LoopAuthContext = {
-  kind: 'loop',
   userId: 'user-uuid',
   email: 'a@b.com',
-  bearerToken: 'loop-jwt',
 } as LoopAuthContext;
 
 function makeCtx(auth: LoopAuthContext | undefined): Context {

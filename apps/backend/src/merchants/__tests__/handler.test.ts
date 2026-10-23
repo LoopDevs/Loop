@@ -92,7 +92,13 @@ vi.stubGlobal('fetch', async () => {
   throw new Error('upstream disabled in tests');
 });
 
+vi.mock('../../db/users.js', async (importOriginal) => ({
+  ...((await importOriginal()) as Record<string, unknown>),
+  getUserTokenVersion: async () => 0,
+}));
+
 import { app } from '../../app.js';
+import { signLoopToken } from '../../auth/tokens.js';
 
 function merchant(id: string, name: string, extra?: Partial<Merchant>): Merchant {
   return { id, name, enabled: true, ...extra };
@@ -356,13 +362,17 @@ describe('GET /api/merchants/by-slug/:slug', () => {
 });
 
 describe('GET /api/merchants/:id', () => {
-  // `/api/merchants/:id` is gated by requireAuth — it proxies CTX with
-  // the user's bearer + X-Client-Id to enrich the detail with
-  // longDescription / terms / instructions. Tests supply a dummy
-  // bearer so the auth guard passes; upstream fetch falls through to
-  // the cached merchant when the mock upstream doesn't respond (the
-  // handler logs a warn and returns the cached baseline).
-  const AUTH_HEADER = { Authorization: 'Bearer test-token' };
+  // `/api/merchants/:id` is gated by requireAuth — it reads CTX acting
+  // as the user to enrich the detail with longDescription / terms /
+  // instructions. Tests supply a Loop access token so the auth guard
+  // passes; upstream fetch falls through to the cached merchant when
+  // the mock upstream doesn't respond (the handler logs a warn and
+  // returns the cached baseline).
+  const AUTH_HEADER = {
+    Authorization: `Bearer ${
+      signLoopToken({ sub: 'u-1', email: 'u@test.io', typ: 'access', ttlSeconds: 300, tv: 0 }).token
+    }`,
+  };
 
   it('returns merchant when id matches', async () => {
     seed([merchant('m-1', 'Home Depot')]);

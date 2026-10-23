@@ -64,17 +64,17 @@ function makeBodyCtx(body: unknown): Context {
 /** Drives `requireAuth` with a bearer token; reports outcome + whether it passed through. */
 async function runAuth(
   token: string,
-): Promise<{ status: number | null; passed: boolean; kind: string | undefined }> {
+): Promise<{ status: number | null; passed: boolean; userId: string | undefined }> {
   const fake = makeCtx({ Authorization: `Bearer ${token}` });
   let nextCalled = false;
   const res = await requireAuth(fake.ctx, async () => {
     nextCalled = true;
   });
-  const auth = fake.store.get('auth') as { kind: string } | undefined;
+  const auth = fake.store.get('auth') as { userId: string } | undefined;
   return {
     status: res instanceof Response ? res.status : null,
     passed: nextCalled,
-    kind: auth?.kind,
+    userId: auth?.userId,
   };
 }
 
@@ -114,7 +114,7 @@ describe('NS-09: access tokens are revocable via users.token_version', () => {
     const out = await runAuth(token);
     expect(out.passed).toBe(true);
     expect(out.status).toBeNull();
-    expect(out.kind).toBe('loop');
+    expect(out.userId).toBe(userId);
   });
 
   it('(b+c) revoke-all bumps token_version: the SAME token is rejected, a fresh one is accepted', async () => {

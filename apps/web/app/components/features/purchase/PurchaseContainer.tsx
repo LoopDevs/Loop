@@ -141,11 +141,11 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
   // Restore-on-remount for an in-progress order (see
   // ~/hooks/use-loop-order-restore.ts for the full mechanism +
   // money-safety reasoning). Read-only — this never creates a new
-  // order, so it can't double-order. Gated on auth + the orders path
-  // being live so it never fires a doomed fetch.
+  // order, so it can't double-order. Gated on auth so it never fires a
+  // doomed fetch.
   const { restored: restoredLoopOrder } = useLoopOrderRestore({
     merchantId: merchant.id,
-    enabled: isAuthenticated && config.loopOrdersEnabled,
+    enabled: isAuthenticated,
   });
   useEffect(() => {
     if (restoredLoopOrder === null) return;

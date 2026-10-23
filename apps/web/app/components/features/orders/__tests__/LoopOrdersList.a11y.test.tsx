@@ -78,7 +78,7 @@ describe('<LoopOrdersList /> a11y', () => {
         mkOrder({ id: 'o-3', state: 'rejected', failureReason: 'Card declined' }),
       ],
     });
-    const { container } = render(wrap(<LoopOrdersList enabled={true} />));
+    const { container } = render(wrap(<LoopOrdersList />));
     await waitFor(() => expect(container.querySelector('section')).not.toBeNull());
     const results = await axe(container, {
       runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'] },

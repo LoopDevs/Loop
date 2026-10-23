@@ -4,7 +4,6 @@ import type { Context } from 'hono';
 
 const { configState } = vi.hoisted(() => ({
   configState: {
-    nativeAuthEnabled: false,
     phase1Only: false,
     google: {
       web: undefined as string | undefined,
@@ -35,7 +34,6 @@ vi.mock('../index.js', async (importActual) => {
         ...actual.config,
         auth: {
           ...actual.config.auth,
-          native: { ...actual.config.auth.native, enabled: configState.nativeAuthEnabled },
           social: { google: configState.google, apple: configState.apple },
         },
         launch: { phase1Only: configState.phase1Only },
@@ -66,7 +64,6 @@ function makeCtx(): { headers: Record<string, string>; ctx: Context } {
 }
 
 function resetConfigState(): void {
-  configState.nativeAuthEnabled = false;
   configState.phase1Only = false;
   configState.google = { web: undefined, ios: undefined, android: undefined };
   configState.apple = { serviceId: undefined };
@@ -84,14 +81,12 @@ afterEach(() => {
 });
 
 describe('configHandler', () => {
-  it('returns all-false when no flags are set', async () => {
+  it('returns the defaults when nothing is configured', async () => {
     const { configHandler } = await import('../handler.js');
     const { ctx, headers } = makeCtx();
     const res = configHandler(ctx);
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      loopAuthNativeEnabled: boolean;
-      loopOrdersEnabled: boolean;
       social: {
         googleClientIdWeb: string | null;
         googleClientIdIos: string | null;
@@ -99,8 +94,6 @@ describe('configHandler', () => {
         appleServiceId: string | null;
       };
     };
-    expect(body.loopAuthNativeEnabled).toBe(false);
-    expect(body.loopOrdersEnabled).toBe(false);
     expect((body as unknown as { phase1Only: boolean }).phase1Only).toBe(false);
     expect(body.social).toEqual({
       googleClientIdWeb: null,
@@ -132,26 +125,6 @@ describe('configHandler', () => {
     expect(body.social.appleServiceId).toBe('io.loopfinance.app');
   });
 
-  // ADR 052: native auth is the only gate loopOrdersEnabled reflects
-  it('sets loopOrdersEnabled with auth.native.enabled alone', async () => {
-    configState.nativeAuthEnabled = true;
-    const { configHandler } = await import('../handler.js');
-    const { ctx } = makeCtx();
-    const body = (await configHandler(ctx).json()) as {
-      loopAuthNativeEnabled: boolean;
-      loopOrdersEnabled: boolean;
-    };
-    expect(body.loopAuthNativeEnabled).toBe(true);
-    expect(body.loopOrdersEnabled).toBe(true);
-  });
-
-  it('keeps loopOrdersEnabled=false without native auth', async () => {
-    const { configHandler } = await import('../handler.js');
-    const { ctx } = makeCtx();
-    const body = (await configHandler(ctx).json()) as { loopOrdersEnabled: boolean };
-    expect(body.loopOrdersEnabled).toBe(false);
-  });
-
   it('surfaces the operator company payment currencies, countries and stable currencies', async () => {
     const { configHandler } = await import('../handler.js');
     const { ctx } = makeCtx();
@@ -167,7 +140,7 @@ describe('configHandler', () => {
     expect(body.stableCurrencies).toEqual(['XLM.USDC']);
   });
 
-  it('reflects launch.phase1Only independently of the loop-native flags', async () => {
+  it('reflects launch.phase1Only', async () => {
     configState.phase1Only = true;
     const { configHandler } = await import('../handler.js');
     const { ctx } = makeCtx();

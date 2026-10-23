@@ -13,10 +13,6 @@ export async function revokeAllOwnSessionsHandler(c: Context): Promise<Response>
   if (auth === undefined) {
     return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
   }
-  if (auth.kind !== 'loop') {
-    // CTX-proxy: no local rows; upstream handles revocation
-    return c.json({ message: 'Signed out of all devices' });
-  }
   try {
     await revokeAllRefreshTokensForUser(auth.userId);
   } catch (err) {

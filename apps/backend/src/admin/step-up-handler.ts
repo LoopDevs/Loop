@@ -40,12 +40,8 @@ export async function adminStepUpHandler(c: Context): Promise<Response> {
   }
 
   const auth = c.get('auth') as LoopAuthContext | undefined;
-  if (auth === undefined || auth.kind !== 'loop') {
-    // ADR-028: Loop-native only; CTX-proxy has no subject to pin
-    return c.json(
-      { code: 'UNAUTHORIZED', message: 'Loop-native authentication required for admin step-up' },
-      401,
-    );
+  if (auth === undefined) {
+    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
   }
 
   const parsed = StepUpBody.safeParse(await c.req.json().catch(() => null));

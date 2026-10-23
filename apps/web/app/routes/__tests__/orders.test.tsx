@@ -6,8 +6,8 @@ import { MemoryRouter } from 'react-router';
 
 const { authMock, configMock, loopListMock } = vi.hoisted(() => ({
   authMock: { isAuthenticated: true },
-  configMock: { loopOrdersEnabled: true },
-  loopListMock: vi.fn<(props: { enabled: boolean }) => React.JSX.Element | null>(),
+  configMock: {},
+  loopListMock: vi.fn<() => React.JSX.Element | null>(),
 }));
 
 vi.mock('~/hooks/use-native-platform', () => ({
@@ -21,7 +21,7 @@ vi.mock('~/hooks/use-app-config', () => ({
 }));
 vi.mock('~/components/features/Navbar', () => ({ Navbar: () => null }));
 vi.mock('~/components/features/orders/LoopOrdersList', () => ({
-  LoopOrdersList: (props: { enabled: boolean }) => loopListMock(props),
+  LoopOrdersList: () => loopListMock(),
 }));
 vi.mock('~/components/features/orders/OrdersSummaryHeader', () => ({
   OrdersSummaryHeader: () => null,
@@ -48,7 +48,6 @@ async function renderPage(): Promise<void> {
 
 beforeEach(() => {
   authMock.isAuthenticated = true;
-  configMock.loopOrdersEnabled = true;
   loopListMock.mockReset();
   loopListMock.mockReturnValue(<div data-testid="loop-orders-list" />);
 });
@@ -58,14 +57,8 @@ describe('OrdersRoute', () => {
   it('renders the Loop orders list as the only order source when signed in', async () => {
     await renderPage();
     expect(screen.getByTestId('loop-orders-list')).toBeTruthy();
-    expect(loopListMock).toHaveBeenCalledWith({ enabled: true });
+    expect(loopListMock).toHaveBeenCalledOnce();
     expect(screen.queryByText('Sign in to view your order history.')).toBeNull();
-  });
-
-  it('passes the loopOrdersEnabled flag through to the list', async () => {
-    configMock.loopOrdersEnabled = false;
-    await renderPage();
-    expect(loopListMock).toHaveBeenCalledWith({ enabled: false });
   });
 
   it('shows the signed-out prompt and no list when unauthenticated', async () => {

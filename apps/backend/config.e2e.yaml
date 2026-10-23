@@ -5,11 +5,6 @@
 # the backend at the real upstream instead of the mock-CTX fixture on
 # :9091, and bind the wrong port.
 #
-# Loop-native auth is deliberately left OFF: the home page has a
-# `loopAuthNativeEnabled` branch, so turning it on would change
-# SSR-vs-CSR rendering and cause a hydration mismatch in the existing
-# CTX-proxy tests. A future flywheel-via-UI suite gets its own fixture.
-#
 # Placeholders only — committed on purpose.
 
 env: test
@@ -32,6 +27,11 @@ database:
   driver: memory
   # Empty path → ephemeral store, no filesystem writes from an e2e run.
   jsonPath: ''
+
+auth:
+  native:
+    jwt:
+      current: mocked-e2e-loop-jwt-signing-key-32-chars-min!
 
 rateLimit:
   # The suite runs its handful of tests with Playwright retries=2 in CI,

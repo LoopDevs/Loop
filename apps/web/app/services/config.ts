@@ -37,8 +37,6 @@ export interface LoopAssetConfig {
  * an endpoint that isn't active in the current deployment.
  */
 export interface AppConfig {
-  loopAuthNativeEnabled: boolean;
-  loopOrdersEnabled: boolean;
   /**
    * ADR 052 — chain-qualified CTX payment currencies the customer can
    * choose at checkout (e.g. `XLM`, `DASH`, `ETH.USDT`). Mirrors the
