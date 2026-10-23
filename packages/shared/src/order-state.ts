@@ -32,3 +32,7 @@ export type OrderState = (typeof ORDER_STATES)[number];
 export function isOrderState(s: string): s is OrderState {
   return (ORDER_STATES as readonly string[]).includes(s);
 }
+
+export function isTerminalOrderState(s: OrderState): boolean {
+  return s !== 'unpaid' && s !== 'paid';
+}

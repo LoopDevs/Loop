@@ -145,7 +145,7 @@ describe('GET /api/orders/:id', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { order: Record<string, unknown> };
     expect(body.order.id).toBe('88ab206f-abc');
-    expect(body.order.status).toBe('completed');
+    expect(body.order.status).toBe('fulfilled');
     expect(body.order.amount).toBe(10);
     expect(body.order.currency).toBe('USD');
     expect(body.order.redeemUrl).toBe(
@@ -219,7 +219,7 @@ describe('GET /api/orders', () => {
       ),
     );
 
-    const res = await app.request('/api/orders?page=2&status=completed', {
+    const res = await app.request('/api/orders?page=2&status=fulfilled', {
       headers: AUTH_HEADER,
     });
 
@@ -229,7 +229,7 @@ describe('GET /api/orders', () => {
     const calledUrl = mockFetch.mock.calls[0]![0] as string;
     const url = new URL(calledUrl);
     expect(url.searchParams.get('page')).toBe('2');
-    expect(url.searchParams.get('status')).toBe('completed');
+    expect(url.searchParams.get('status')).toBe('fulfilled');
   });
 
   it('returns Cache-Control: private, no-store to keep user-specific data out of shared caches', async () => {
@@ -299,10 +299,10 @@ describe('GET /api/orders', () => {
 
     expect(body.orders).toHaveLength(2);
     expect(body.orders[0]!.id).toBe('order-1');
-    expect(body.orders[0]!.status).toBe('completed');
+    expect(body.orders[0]!.status).toBe('fulfilled');
     expect(body.orders[0]!.amount).toBe(25);
     expect(body.orders[0]!.createdAt).toBe('2026-03-25T18:08:58Z');
-    expect(body.orders[1]!.status).toBe('pending');
+    expect(body.orders[1]!.status).toBe('unpaid');
 
     expect(body.pagination.page).toBe(1);
     expect(body.pagination.limit).toBe(10);

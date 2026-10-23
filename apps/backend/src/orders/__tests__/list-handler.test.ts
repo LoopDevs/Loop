@@ -155,7 +155,12 @@ describe('listOrdersHandler — exclude-pending server-side pagination (AUD-08)'
     mockFetch
       .mockResolvedValueOnce(upstreamPage(1, 2, [pendingRow('p1'), pendingRow('p2')]))
       .mockResolvedValueOnce(
-        upstreamPage(2, 2, [doneRow('d1'), doneRow('d2', 'refunded'), pendingRow('p3')]),
+        upstreamPage(2, 2, [
+          doneRow('d1'),
+          doneRow('d2', 'refunded'),
+          doneRow('d3', 'rejected'),
+          pendingRow('p3'),
+        ]),
       );
 
     const ctx = makeCtx({ excludePending: 'true', page: '1' });
@@ -165,9 +170,9 @@ describe('listOrdersHandler — exclude-pending server-side pagination (AUD-08)'
       pagination: { total: number; hasNext: boolean; hasPrev: boolean };
     };
 
-    expect(body.orders.map((o) => o.id)).toEqual(['d1', 'd2']);
-    expect(body.orders.every((o) => o.status !== 'pending')).toBe(true);
-    expect(body.pagination.total).toBe(2);
+    expect(body.orders.map((o) => o.id)).toEqual(['d1', 'd2', 'd3']);
+    expect(body.orders.map((o) => o.status)).toEqual(['fulfilled', 'refunded', 'rejected']);
+    expect(body.pagination.total).toBe(3);
     expect(body.pagination.hasNext).toBe(false);
     expect(body.pagination.hasPrev).toBe(false);
   });
@@ -245,7 +250,7 @@ describe('listOrdersHandler — plain-proxy path unchanged', () => {
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(body.orders).toHaveLength(1);
-    expect(body.orders[0]!.status).toBe('pending');
+    expect(body.orders[0]!.status).toBe('unpaid');
     expect(body.pagination).toMatchObject({ total: 42, totalPages: 3, hasNext: true });
   });
 });

@@ -10,6 +10,7 @@ import {
   currencyOf,
   foldForSearch,
   groupMerchants,
+  isTerminalOrderState,
   merchantInCountry,
   merchantSlug,
 } from '@loop/shared';
@@ -148,7 +149,7 @@ export function MobileHome(): React.JSX.Element {
   // at view time. Used while the backend query is pending or has
   // errored so the hero doesn't flash "$0.00" on a cold load.
   const { fallbackCents, ordersCount } = useMemo(() => {
-    const completed = orders.filter((o) => o.status === 'completed');
+    const completed = orders.filter((o) => o.status === 'fulfilled');
     const byId = new Map(visibleMerchants.map((m) => [m.id, m]));
     let total = 0;
     for (const o of completed) {
@@ -189,7 +190,7 @@ export function MobileHome(): React.JSX.Element {
   // Pending orders are hidden from Recent activity — a blank row
   // with no cashback reads as noise on the home screen. Matches the
   // same filter on /orders.
-  const recent = orders.filter((o) => o.status !== 'pending').slice(0, 3);
+  const recent = orders.filter((o) => isTerminalOrderState(o.status)).slice(0, 3);
   const merchantById = useMemo(
     () => new Map(visibleMerchants.map((m) => [m.id, m])),
     [visibleMerchants],

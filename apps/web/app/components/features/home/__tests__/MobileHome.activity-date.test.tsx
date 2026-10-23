@@ -77,7 +77,7 @@ function mkOrder(overrides: Partial<Order> = {}): Order {
     merchantName: 'Acme Cards',
     amount: 25,
     currency: 'CAD',
-    status: 'completed',
+    status: 'fulfilled',
     xlmAmount: '0',
     createdAt: new Date().toISOString(),
     ...overrides,

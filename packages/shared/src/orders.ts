@@ -1,25 +1,6 @@
-/**
- * Status of a gift card order on the **legacy CTX-proxy flow** (`POST
- * /api/orders` → upstream `POST /gift-cards`). CTX is the merchant of
- * record on this path; the four-state vocabulary mirrors the
- * upstream's normalised status enum (`apps/backend/src/orders/handler.ts`
- * `mapStatus`).
- *
- * **Distinct from `OrderState`** in `./order-state.ts` — that one is
- * the **Loop-native** order state machine (`POST /api/orders/loop`,
- * ADR 010) where Loop is merchant of record and orders go through
- * `created → paid → fulfilled → settled` with explicit failure
- * branches. The two state spaces don't map onto each other; an order
- * lives in exactly one of the two flows for its lifetime, and the
- * shape on the wire identifies which (`Order` for legacy CTX-proxy,
- * `LoopOrderView` from `./loop-orders.ts` for Loop-native).
- *
- * A2-818: cross-reference added so a reader landing on either type
- * understands which surface it belongs to.
- */
-export type OrderStatus = 'pending' | 'completed' | 'failed' | 'expired';
+import type { OrderState } from './order-state.js';
 
-/** A placed gift card order. */
+/** A gift card order on the CTX-proxy flow (`GET /api/orders`). */
 export interface Order {
   id: string;
   merchantId: string;
@@ -27,14 +8,15 @@ export interface Order {
   /** Fiat amount of the gift card (e.g. 10.00). */
   amount: number;
   currency: string;
-  status: OrderStatus;
+  /** CTX's own gift-card status, forwarded verbatim. */
+  status: OrderState;
   /** XLM amount to pay / paid. */
   xlmAmount: string;
   /** Savings percentage for this order (e.g. "2.00"). */
   percentDiscount?: string;
   /** Redemption type: "url" (open URL + challenge) or "barcode" (code + pin). */
   redeemType?: 'url' | 'barcode';
-  /** Gift card code — present when redeemType is "barcode" and status is "completed". */
+  /** Gift card code — present when redeemType is "barcode" and status is "fulfilled". */
   giftCardCode?: string;
   /** Gift card PIN — present for PIN-based cards. */
   giftCardPin?: string;
@@ -42,7 +24,7 @@ export interface Order {
    *  side rendering when present, so the scanned format matches what
    *  the merchant's POS actually expects (CODE128, CODE39, QR, etc.). */
   barcodeImageUrl?: string;
-  /** Redemption URL — present when redeemType is "url" and status is "completed". */
+  /** Redemption URL — present when redeemType is "url" and status is "fulfilled". */
   redeemUrl?: string;
   /** Challenge code for the redemption page. */
   redeemChallengeCode?: string;

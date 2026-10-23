@@ -2,11 +2,8 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
 import type { ZodIssue } from 'zod';
-import { logger } from '../logger.js';
 import type { LoopAuthContext } from '../auth/require-auth.js';
 import { ctxFetch } from '../ctx/api-fetch.js';
-
-const log = logger.child({ handler: 'orders' });
 
 // A2-1915
 export function summariseZodIssues(issues: readonly ZodIssue[]): string {
@@ -39,15 +36,4 @@ export const ORDER_EXPIRY_SECONDS = 30 * 60;
 export function percentFromBasisPoints(basisPoints: number | undefined): string | undefined {
   if (basisPoints === undefined) return undefined;
   return (basisPoints / 100).toFixed(2);
-}
-
-export function mapStatus(ctxStatus: string): 'pending' | 'completed' | 'failed' | 'expired' {
-  if (ctxStatus === 'fulfilled') return 'completed';
-  if (ctxStatus === 'expired') return 'expired';
-  if (ctxStatus === 'refunded') return 'failed';
-  const known = new Set(['unpaid', 'processing', 'paid', 'pending']);
-  if (!known.has(ctxStatus)) {
-    log.warn({ ctxStatus }, 'Unknown upstream order status — defaulting to pending');
-  }
-  return 'pending';
 }

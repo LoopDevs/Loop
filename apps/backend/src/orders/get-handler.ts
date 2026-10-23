@@ -1,16 +1,12 @@
 // GET /api/orders/:id — single-order detail proxy — ADR-039, R3-11
 import type { Context } from 'hono';
 import { z } from 'zod';
+import { ORDER_STATES } from '@loop/shared';
 import { logger } from '../logger.js';
 import { upstreamUrl } from '../upstream.js';
 import { scrubUpstreamBody } from '../upstream-body-scrub.js';
 import { notifyCtxSchemaDrift, notifyOrderFulfilled } from '../discord.js';
-import {
-  mapStatus,
-  percentFromBasisPoints,
-  summariseZodIssues,
-  ctxProxyFetch,
-} from './handler-shared.js';
+import { percentFromBasisPoints, summariseZodIssues, ctxProxyFetch } from './handler-shared.js';
 import { applyBarcodeFields } from './barcode-fields.js';
 
 const log = logger.child({ handler: 'orders' });
@@ -24,7 +20,7 @@ export const GetOrderUpstreamResponse = z
     cardFiatAmount: z.string(),
     cardFiatCurrency: z.string().optional(),
     paymentCryptoAmount: z.string().optional(),
-    status: z.string(),
+    status: z.enum(ORDER_STATES),
     fulfilmentStatus: z.string().optional(),
     userDiscountBasisPoints: z.number().optional(),
     redeemType: z.string().optional(),
@@ -105,11 +101,11 @@ export async function getOrderHandler(c: Context): Promise<Response> {
       );
     }
 
-    const status = mapStatus(validated.data.status);
+    const status = validated.data.status;
     const amount = parseMoney(validated.data.cardFiatAmount);
     const currency = validated.data.cardFiatCurrency ?? 'USD';
 
-    if (status === 'completed' && !notifiedFulfilled.has(validated.data.id)) {
+    if (status === 'fulfilled' && !notifiedFulfilled.has(validated.data.id)) {
       log.info(
         {
           orderId: validated.data.id,
@@ -147,7 +143,7 @@ export async function getOrderHandler(c: Context): Promise<Response> {
     }
 
     // ADR-005 §2
-    if (status === 'completed' && validated.data.redeemType === 'barcode') {
+    if (status === 'fulfilled' && validated.data.redeemType === 'barcode') {
       applyBarcodeFields({
         upstream: validated.data as unknown as Record<string, unknown>,
         orderId: validated.data.id,
@@ -156,7 +152,7 @@ export async function getOrderHandler(c: Context): Promise<Response> {
       });
     }
 
-    if (status === 'completed' && !notifiedFulfilled.has(validated.data.id)) {
+    if (status === 'fulfilled' && !notifiedFulfilled.has(validated.data.id)) {
       markFulfilledNotified(validated.data.id);
       notifyOrderFulfilled({
         orderId: validated.data.id,

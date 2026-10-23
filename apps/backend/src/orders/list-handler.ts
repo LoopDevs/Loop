@@ -1,16 +1,12 @@
 // GET /api/orders handler — AUD-08, R3-11
 import type { Context } from 'hono';
 import { z } from 'zod';
+import { ORDER_STATES, isTerminalOrderState, type OrderState } from '@loop/shared';
 import { logger } from '../logger.js';
 import { upstreamUrl } from '../upstream.js';
 import { scrubUpstreamBody } from '../upstream-body-scrub.js';
 import { notifyCtxSchemaDrift } from '../discord.js';
-import {
-  mapStatus,
-  percentFromBasisPoints,
-  summariseZodIssues,
-  ctxProxyFetch,
-} from './handler-shared.js';
+import { percentFromBasisPoints, summariseZodIssues, ctxProxyFetch } from './handler-shared.js';
 
 const log = logger.child({ handler: 'orders' });
 
@@ -22,7 +18,7 @@ const ListOrdersUpstreamItem = z
     cardFiatAmount: z.string().optional(),
     cardFiatCurrency: z.string().optional(),
     paymentCryptoAmount: z.string().optional(),
-    status: z.string().optional(),
+    status: z.enum(ORDER_STATES).optional(),
     userDiscountBasisPoints: z.number().optional(),
     redeemType: z.string().optional(),
     created: z.string().optional(),
@@ -65,7 +61,7 @@ interface OrderListRow {
   merchantName: string;
   amount: number;
   currency: string;
-  status: ReturnType<typeof mapStatus>;
+  status: OrderState;
   xlmAmount: string;
   percentDiscount: string | undefined;
   redeemType: string | undefined;
@@ -87,7 +83,7 @@ function shapeOrder(item: UpstreamListItem): OrderListRow | null {
     merchantName: item.merchantName ?? '',
     amount,
     currency: item.cardFiatCurrency ?? 'USD',
-    status: mapStatus(item.status ?? 'unpaid'),
+    status: item.status ?? 'unpaid',
     xlmAmount: item.paymentCryptoAmount ?? '0',
     percentDiscount: percentFromBasisPoints(item.userDiscountBasisPoints),
     redeemType: item.redeemType,
@@ -179,7 +175,7 @@ async function listNonPendingOrders(
     if (!result.ok) return result.response;
 
     for (const item of result.data.result) {
-      if (mapStatus(item.status ?? 'unpaid') === 'pending') continue;
+      if (!isTerminalOrderState(item.status ?? 'unpaid')) continue;
       const shaped = shapeOrder(item);
       if (shaped !== null) filtered.push(shaped);
     }
