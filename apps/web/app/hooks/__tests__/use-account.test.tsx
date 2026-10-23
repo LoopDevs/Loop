@@ -5,10 +5,9 @@ import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { UserAccountView } from '@loop/shared';
 
-const { userMock, authMock, configMock } = vi.hoisted(() => ({
+const { userMock, authMock } = vi.hoisted(() => ({
   userMock: { getMyAccount: vi.fn() },
   authMock: { isAuthenticated: true },
-  configMock: { phase1Only: false },
 }));
 
 vi.mock('~/services/user', () => ({
@@ -17,10 +16,6 @@ vi.mock('~/services/user', () => ({
 
 vi.mock('~/hooks/use-auth', () => ({
   useAuth: () => ({ isAuthenticated: authMock.isAuthenticated }),
-}));
-
-vi.mock('~/hooks/use-app-config', () => ({
-  useAppConfig: () => ({ config: { phase1Only: configMock.phase1Only }, isLoading: false }),
 }));
 
 vi.mock('~/hooks/query-retry', () => ({ shouldRetry: () => false }));
@@ -32,7 +27,6 @@ afterEach(cleanup);
 beforeEach(() => {
   userMock.getMyAccount.mockReset();
   authMock.isAuthenticated = true;
-  configMock.phase1Only = false;
 });
 
 function makeWrapper(): React.FC<{ children: React.ReactNode }> {
@@ -107,13 +101,6 @@ describe('useAccount', () => {
     expect(userMock.getMyAccount).not.toHaveBeenCalled();
     expect(result.current.account).toBeUndefined();
     expect(result.current.activeLink).toBeNull();
-  });
-
-  it('does not fetch under phase1Only', async () => {
-    configMock.phase1Only = true;
-    renderHook(() => useAccount(), { wrapper: makeWrapper() });
-    await new Promise((r) => setTimeout(r, 10));
-    expect(userMock.getMyAccount).not.toHaveBeenCalled();
   });
 
   it('surfaces the load error', async () => {

@@ -61,7 +61,7 @@ vi.mock('~/hooks/use-native-platform', () => ({
 
 vi.mock('~/hooks/use-app-config', () => ({
   useAppConfig: () => ({
-    config: { phase1Only: true },
+    config: {},
     isLoading: false,
   }),
 }));

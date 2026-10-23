@@ -6,12 +6,7 @@ import { databaseSchema } from './sections/database.js';
 import { authSchema, emailSchema } from './sections/auth.js';
 import { adminSchema } from './sections/admin.js';
 import { ordersSchema } from './sections/orders.js';
-import {
-  rateLimitSchema,
-  launchSchema,
-  testingSchema,
-  unsafeSchema,
-} from './sections/operations.js';
+import { rateLimitSchema, testingSchema, unsafeSchema } from './sections/operations.js';
 import { observabilitySchema, mobileSchema } from './sections/observability.js';
 
 // Exported for tests; production code should consume the validated `config` object from `./index.ts`
@@ -29,7 +24,6 @@ export const ConfigSchema = z.object({
   rateLimit: rateLimitSchema,
   observability: observabilitySchema,
   mobile: mobileSchema,
-  launch: launchSchema,
   testing: testingSchema,
   unsafe: unsafeSchema,
 });

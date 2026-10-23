@@ -10,10 +10,8 @@ import CashbackMerchantLanding from '../cashback.$slug';
 vi.mock('~/components/features/Navbar', () => ({ Navbar: () => null }));
 vi.mock('~/components/features/Footer', () => ({ Footer: () => null }));
 vi.mock('~/hooks/use-native-platform', () => ({ useNativePlatform: () => ({ isNative: false }) }));
-// Phase2Gate wraps this route — force phase1Only=false so the body
-// actually renders (this fix is orthogonal to CF2-08's phase gating).
 vi.mock('~/hooks/use-app-config', () => ({
-  useAppConfig: () => ({ config: { phase1Only: false }, isLoading: false }),
+  useAppConfig: () => ({ config: {}, isLoading: false }),
 }));
 
 afterEach(cleanup);

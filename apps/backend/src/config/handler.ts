@@ -19,21 +19,6 @@ export interface AppConfig {
   countries: string[];
   stableCurrencies: string[];
   /**
-   * Tranche 1 (MVP) launch gate. When true, the web client hides
-   * every Phase 2+ surface — cashback navbar links, /settings/wallet,
-   * /settings/cashback, /cashback rates index, the onboarding
-   * currency picker + wallet-intro screens, LinkWalletNudge, and
-   * any "you've earned X cashback" copy. The discount badges stay
-   * (they ARE the Tranche 1 user proposition).
-   *
-   * Operator side: leave LOOP issuers + operator secret unset and
-   * set `INTEREST_APY_BASIS_POINTS=0` (defaults already do both) —
-   * the money-moving workers each gate on that config directly.
-   * Flipping `LOOP_PHASE_1_ONLY=false` later is a server-side
-   * config change — no app store resubmission needed.
-   */
-  phase1Only: boolean;
-  /**
    * ADR 014 social-login client identifiers. Public on purpose: the web /
    * mobile bundle includes these to initialise the Google / Apple SDKs.
    * Per-platform — the client picks the id matching its own platform
@@ -67,7 +52,6 @@ export function configHandler(c: Context): Response {
     fiatPaymentCurrencies: loopFiatPaymentCurrencies(),
     countries: loopCountries(),
     stableCurrencies: loopStableCurrencies(),
-    phase1Only: config.launch.phase1Only,
     social: {
       googleClientIdWeb: config.auth.social.google.web ?? null,
       googleClientIdIos: config.auth.social.google.ios ?? null,

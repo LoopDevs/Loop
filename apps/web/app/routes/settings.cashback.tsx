@@ -22,7 +22,6 @@ import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
 import { Button } from '~/components/ui/Button';
-import { Phase2Gate } from '~/components/Phase2Gate';
 import { Navbar } from '~/components/features/Navbar';
 import { PageHeader } from '~/components/ui/PageHeader';
 import { useNativePlatform } from '~/hooks/use-native-platform';
@@ -139,7 +138,7 @@ export default function SettingsCashbackRoute(): React.JSX.Element {
   const { t } = useTranslation('settings');
   const { isNative } = useNativePlatform();
   return (
-    <Phase2Gate>
+    <>
       {/* Same interior-page chrome idiom as routes/orders.tsx: web gets
           the shared fixed Navbar, native gets the back-chevron PageHeader
           (the Navbar's account menu links here, so a chrome-less page
@@ -147,7 +146,7 @@ export default function SettingsCashbackRoute(): React.JSX.Element {
       {!isNative && <Navbar />}
       <PageHeader title={t('cashback.heading')} fallbackHref="/auth" />
       <SettingsCashbackBody />
-    </Phase2Gate>
+    </>
   );
 }
 

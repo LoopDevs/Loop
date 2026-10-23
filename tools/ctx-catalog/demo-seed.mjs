@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 /**
- * Demo seed for the discount-vs-cashback recording (see LOOP_PHASE_1_ONLY).
+ * Demo seed for the cashback recording.
  *
- * Discount vs cashback is one runtime flag, not two builds — so you record the
- * same app twice, flipping the flag between takes. The catch is that a fresh
- * account makes the *cashback* take look empty ($0 balance, no history). This
+ * The catch is that a fresh
+ * account makes the cashback take look empty ($0 balance, no history). This
  * script seeds one demo user with a believable accrued balance + a spread of
  * fulfilled orders so the Phase-2 surfaces (balance card, monthly chart,
  * by-merchant, flywheel chip, order list) render populated.
@@ -18,8 +17,6 @@
  *     node scripts/demo-seed.mjs --email demo@loopfinance.io --currency USD
  *
  * Then to record:
- *   - Discount video:  set LOOP_PHASE_1_ONLY=true  in apps/backend/.env, restart backend
- *   - Cashback video:  set LOOP_PHASE_1_ONLY=false in apps/backend/.env, restart backend
  *   Log in as the demo email via the normal OTP flow (loop-native OTP is in the
  *   `otps` table in dev; or run the backend with NODE_ENV=test AND
  *   LOOP_TEST_ENDPOINTS_SECRET set to use the /__test__/mint-loop-token
@@ -231,8 +228,6 @@ try {
   );
   console.log('');
   console.log('Record:');
-  console.log('  • Discount take  → LOOP_PHASE_1_ONLY=true  in apps/backend/.env, restart backend');
-  console.log('  • Cashback take  → LOOP_PHASE_1_ONLY=false in apps/backend/.env, restart backend');
   console.log(`  • Log in as ${email} (OTP flow), then open Account → Cashback / Wallet.`);
 } finally {
   await sql.end({ timeout: 5 });

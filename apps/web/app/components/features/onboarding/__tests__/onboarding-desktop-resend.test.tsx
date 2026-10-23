@@ -23,7 +23,7 @@ vi.mock('~/services/auth', () => ({
 }));
 
 vi.mock('~/hooks/use-app-config', () => ({
-  useAppConfig: () => ({ config: { phase1Only: true }, isLoading: false }),
+  useAppConfig: () => ({ config: {}, isLoading: false }),
 }));
 
 beforeEach(() => {

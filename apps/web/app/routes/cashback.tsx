@@ -8,7 +8,6 @@ import { shouldRetry } from '~/hooks/query-retry';
 import { useLocale } from '~/i18n/locale';
 import { Navbar } from '~/components/features/Navbar';
 import { Footer } from '~/components/features/Footer';
-import { Phase2Gate } from '~/components/Phase2Gate';
 import { Spinner } from '~/components/ui/Spinner';
 import { LazyImage } from '~/components/ui/LazyImage';
 import { getMerchantImageUrl } from '~/utils/image';
@@ -49,11 +48,7 @@ export function meta({ params }: Route.MetaArgs): Route.MetaDescriptors {
 }
 
 export default function CashbackIndexRoute(): React.JSX.Element {
-  return (
-    <Phase2Gate>
-      <CashbackIndexBody />
-    </Phase2Gate>
-  );
+  return <CashbackIndexBody />;
 }
 
 function CashbackIndexBody(): React.JSX.Element {

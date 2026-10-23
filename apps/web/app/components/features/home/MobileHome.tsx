@@ -20,7 +20,6 @@ import {
 } from '~/hooks/use-merchants';
 import { useOrders } from '~/hooks/use-orders';
 import { useAuth } from '~/hooks/use-auth';
-import { useAppConfig } from '~/hooks/use-app-config';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 import { useLocale } from '~/i18n/locale';
 import { shouldRetry } from '~/hooks/query-retry';
@@ -106,15 +105,6 @@ export function MobileHome(): React.JSX.Element {
   const { orders } = useOrders(1, isAuthenticated);
   const navigate = useNavigate();
   const { isNative } = useNativePlatform();
-  // Phase 1 delivers cashback as instant discount at order creation —
-  // no accumulating balance, no on-chain wallet to withdraw to. The
-  // savings hero copy switches between "Cashback earned" (Phase 2,
-  // user has a balance) and "You've saved" (Phase 1, totals are the
-  // sum of discounts already realised). The numeric value is the
-  // same in both phases — `o.amount × savingsPercentage` is the
-  // realised saving regardless of delivery model.
-  const { config } = useAppConfig();
-  const phase1Only = config.phase1Only;
   const visibleMerchants = useMemo(() => (hydrated ? merchants : []), [hydrated, merchants]);
   const visibleMerchantsLoading = !hydrated || merchantsLoading;
   const { country } = useLocale();
@@ -148,7 +138,7 @@ export function MobileHome(): React.JSX.Element {
   const summaryQuery = useQuery({
     queryKey: ['me', 'cashback-summary'],
     queryFn: getCashbackSummary,
-    enabled: isAuthenticated && !phase1Only,
+    enabled: isAuthenticated,
     retry: shouldRetry,
     staleTime: 60_000,
   });
@@ -332,7 +322,6 @@ export function MobileHome(): React.JSX.Element {
           cashbackCents={cashbackCents}
           ordersCount={ordersCount}
           isAuthenticated={isAuthenticated}
-          phase1Only={phase1Only}
           currency={heroCurrency}
           locale={locale}
         />
@@ -577,14 +566,12 @@ export function SavingsHero({
   cashbackCents,
   ordersCount,
   isAuthenticated,
-  phase1Only,
   currency = 'USD',
   locale = 'en-US',
 }: {
   cashbackCents: number;
   ordersCount: number;
   isAuthenticated: boolean;
-  phase1Only: boolean;
   /**
    * Home/ledger currency for the hero figures (WEB-M1). Defaults to
    * `USD` so legacy call sites / tests still render `$`; the parent
@@ -605,13 +592,9 @@ export function SavingsHero({
   // which reads as a bug. Matches the design's ink face but with a
   // friendlier copy instead of the stat strip.
   const empty = !isAuthenticated || ordersCount === 0;
-  // Phase 1 = instant-discount delivery, no accumulating balance →
-  // "You've saved" / "Buy a gift card to start saving."
-  // Phase 2 = cashback paid to user's Loop wallet, withdraw-able →
-  // "Cashback earned" / "Buy a gift card to start earning cashback."
-  const heroLabel = phase1Only ? t('hero.savedLabel') : t('hero.cashbackLabel');
-  const emptySubtitle = phase1Only ? t('hero.savedEmptySub') : t('hero.cashbackEmptySub');
-  const avgLabel = phase1Only ? t('hero.avgSavingLabel') : t('hero.avgBackLabel');
+  const heroLabel = t('hero.cashbackLabel');
+  const emptySubtitle = t('hero.cashbackEmptySub');
+  const avgLabel = t('hero.avgBackLabel');
   return (
     <div
       className="relative overflow-hidden rounded-[18px] px-6 py-5 text-white shadow-[0_8px_24px_rgba(3,7,18,0.25),0_2px_6px_rgba(3,7,18,0.15)]"

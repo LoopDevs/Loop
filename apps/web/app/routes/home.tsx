@@ -6,7 +6,6 @@ import type { Route } from './+types/home';
 import { canonicalHref, countryLabel } from '~/i18n/seo';
 import { useAllMerchants, useMerchantsCashbackRatesMap } from '~/hooks/use-merchants';
 import { useAuth } from '~/hooks/use-auth';
-import { useAppConfig } from '~/hooks/use-app-config';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 import { useLocale } from '~/i18n/locale';
 import { Navbar } from '~/components/features/Navbar';
@@ -87,16 +86,6 @@ function HomeContent(): React.JSX.Element {
     () => merchants.filter((m) => merchantInCountry(m, country)),
     [merchants, country],
   );
-  // Phase 1 (LOOP_PHASE_1_ONLY=true) delivers cashback as instant
-  // discount at order creation — no balance, no on-chain withdraw.
-  // Hero copy below switches between Phase-1 framing ("Save on
-  // every gift card") and Phase-2 framing ("Earn cashback…")
-  // accordingly. Meta tags stay Phase-2-leaning for now — they
-  // drive search-result indexing rather than the in-page
-  // experience, and changing them has SEO implications worth
-  // batching with the eventual marketing-site copy refresh.
-  const { config } = useAppConfig();
-  const phase1Only = config.phase1Only;
   // Bulk cashback-rate map (ADR 011 / 015). One fetch for the whole
   // page — the lookup below is O(1) per card, so both grids share it.
   const { lookup: lookupCashback } = useMerchantsCashbackRatesMap();
@@ -180,26 +169,14 @@ function HomeContent(): React.JSX.Element {
               <div className="relative mx-auto max-w-4xl text-center px-6 pt-28 pb-20">
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 ring-1 ring-blue-100">
                   <span className="h-1.5 w-1.5 rounded-full bg-blue-600" />
-                  {phase1Only ? t('hero.badgePhase1') : t('hero.badgePhase2')}
+                  {t('hero.badge')}
                 </span>
                 <h1 className="mt-6 text-4xl sm:text-6xl font-semibold tracking-[-0.03em] text-ink leading-[1.05]">
-                  {phase1Only ? (
-                    <>
-                      {t('hero.titlePhase1Prefix')}{' '}
-                      <span className="text-blue-600">{t('hero.titlePhase1Highlight')}</span>
-                      <br className="hidden sm:block" /> {t('hero.titlePhase1Suffix')}
-                    </>
-                  ) : (
-                    <>
-                      {t('hero.titlePhase2Prefix')}
-                      <br className="hidden sm:block" /> {t('hero.titlePhase2Middle')}{' '}
-                      <span className="text-blue-600">{t('hero.titlePhase2Highlight')}</span>
-                    </>
-                  )}
+                  {t('hero.titlePrefix')}
+                  <br className="hidden sm:block" /> {t('hero.titleMiddle')}{' '}
+                  <span className="text-blue-600">{t('hero.titleHighlight')}</span>
                 </h1>
-                <p className="mt-5 text-lg text-ink-muted max-w-xl mx-auto">
-                  {phase1Only ? t('hero.subtitlePhase1') : t('hero.subtitlePhase2')}
-                </p>
+                <p className="mt-5 text-lg text-ink-muted max-w-xl mx-auto">{t('hero.subtitle')}</p>
                 <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3">
                   {!isAuthenticated && (
                     <Link
@@ -276,7 +253,7 @@ function HomeContent(): React.JSX.Element {
                         />
                       </svg>
                     }
-                    label={phase1Only ? t('hero.featureSavePhase1') : t('hero.featureSavePhase2')}
+                    label={t('hero.featureSave')}
                   />
                 </div>
               </div>

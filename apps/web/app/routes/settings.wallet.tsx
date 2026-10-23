@@ -28,7 +28,6 @@ import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
 import { PayoutsCard } from '~/components/features/cashback/PayoutsCard';
 import { copyToClipboard } from '~/native/clipboard';
-import { Phase2Gate } from '~/components/Phase2Gate';
 import { Navbar } from '~/components/features/Navbar';
 import { PageHeader } from '~/components/ui/PageHeader';
 import { useNativePlatform } from '~/hooks/use-native-platform';
@@ -56,11 +55,11 @@ export default function SettingsWalletRoute(): React.JSX.Element {
   const { t } = useTranslation('settings');
   const { isNative } = useNativePlatform();
   return (
-    <Phase2Gate>
+    <>
       {!isNative && <Navbar />}
       <PageHeader title={t('wallet.heading')} fallbackHref="/auth" />
       <SettingsWalletBody />
-    </Phase2Gate>
+    </>
   );
 }
 

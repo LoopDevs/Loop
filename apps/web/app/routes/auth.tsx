@@ -179,16 +179,14 @@ function BiometricLockRow(): React.JSX.Element | null {
 function CashbackBalanceCard({
   me,
   isLoading,
-  phase1Only,
 }: {
   me: UserMeView | undefined;
   isLoading: boolean;
-  phase1Only: boolean;
 }): React.JSX.Element {
   const { account, activeLink } = useAccount();
   const locale = useLocaleTag();
   const { t } = useTranslation('auth');
-  const showWithdrawNudge = !phase1Only && account !== undefined && activeLink === null;
+  const showWithdrawNudge = account !== undefined && activeLink === null;
   let headline = '—';
   if (!isLoading && me !== undefined) {
     const stable = me.stableCurrency;
@@ -204,7 +202,7 @@ function CashbackBalanceCard({
       </p>
       <p className="mt-1 text-2xl font-semibold text-gray-900 dark:text-white">{headline}</p>
       <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-        {phase1Only ? t('cashback.subtitlePhase1') : t('cashback.subtitlePhase2')}
+        {t('cashback.subtitle')}
         {showWithdrawNudge ? t('cashback.withdrawNudge') : ''}
       </p>
     </div>
@@ -401,7 +399,7 @@ export default function AuthRoute(): React.JSX.Element {
   const historyQuery = useQuery({
     queryKey: ['me', 'cashback-history'],
     queryFn: () => getCashbackHistory({ limit: 5 }),
-    enabled: isAuthenticated && !config.phase1Only,
+    enabled: isAuthenticated,
     retry: shouldRetry,
     staleTime: 60_000,
   });
@@ -477,11 +475,7 @@ export default function AuthRoute(): React.JSX.Element {
               {t('account.heading')}
             </h1>
             <p className="text-gray-500 dark:text-gray-400 mb-6">{userEmail}</p>
-            <CashbackBalanceCard
-              me={meQuery.data}
-              isLoading={meQuery.isLoading}
-              phase1Only={config.phase1Only}
-            />
+            <CashbackBalanceCard me={meQuery.data} isLoading={meQuery.isLoading} />
             <CashbackHistoryCard
               entries={historyQuery.data?.entries}
               isLoading={historyQuery.isLoading}
@@ -503,7 +497,7 @@ export default function AuthRoute(): React.JSX.Element {
                 </p>
               </Link>
               {/* CF-26 / X-PRIV-01: in-app data export + account deletion.
-                  Always shown (not Phase2Gate'd) — GDPR Art. 15/17 +
+                  Always shown — GDPR Art. 15/17 +
                   Apple Guideline 5.1.1(v) require an in-app path. */}
               <Link
                 to="/settings/privacy"

@@ -38,7 +38,7 @@ vi.mock('~/hooks/use-auth', () => ({
 }));
 
 vi.mock('~/hooks/use-app-config', () => ({
-  useAppConfig: () => ({ config: { phase1Only: false }, isLoading: false }),
+  useAppConfig: () => ({ config: {}, isLoading: false }),
 }));
 
 vi.mock('~/hooks/query-retry', () => ({

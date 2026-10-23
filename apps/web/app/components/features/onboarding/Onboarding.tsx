@@ -6,7 +6,6 @@ import { checkBiometrics } from '~/native/biometrics';
 import type { BiometricResult } from '~/native/biometrics';
 import { setStableCurrency } from '~/services/user';
 import { useAuthStore } from '~/stores/auth.store';
-import { useAppConfig } from '~/hooks/use-app-config';
 import { readCountryCookie } from '~/i18n/locale';
 import { isValidEmail } from '~/utils/email';
 import { ApiException, heldStableForCurrency, isSupportedCountryCode } from '@loop/shared';
@@ -34,27 +33,14 @@ interface ScreenCopy {
 // we end on Welcome-in right after OTP verify. Step 6 is an
 // optional biometric-enable step between OTP and Welcome-in; it
 // self-skips on devices without biometrics.
-// Steps 1-3 (the marketing trust screens, rendered as steps 0-2 by
-// `renderStep`) are Phase-2 (cashback / bank-transfer) by default.
-// U-2 / UX-01 (docs/ux-pass-2026-07-09.md): these were the last
-// screens in the app still making that promise unconditionally under
-// `LOOP_PHASE_1_ONLY=true` — every other surface already branches on
-// `phase1Only` (see home.tsx's hero copy). The `onboarding:copyPhase1.*`
-// catalogue keys (see `getOnboardingCopy()` below) override just those
-// three entries with discount-flavoured copy when the flag is set. Steps
-// 4-9 are phase-neutral or already skipped outright by the effect below,
-// so they don't need a split.
-//
-// ADR 043 (B-6): the literal copy bank that used to live here (`COPY` +
-// `PHASE1_TRUST_COPY`) is now the `onboarding:copy.*` / `onboarding:copyPhase1.*`
-// catalogue (`~/i18n/locales/en/onboarding.json`); `getOnboardingCopy()`
-// below builds the same `Record<1..9, ScreenCopy>` shape via `t()` lookups
-// instead of an object-literal merge.
+// ADR 043 (B-6): the literal copy bank that used to live here is now the
+// `onboarding:copy.*` catalogue (`~/i18n/locales/en/onboarding.json`);
+// `getOnboardingCopy()` below builds the `Record<1..9, ScreenCopy>` shape
+// via `t()` lookups.
 export function getOnboardingCopy(
   t: TFunction<'onboarding'>,
-  phase1Only: boolean,
 ): Record<1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9, ScreenCopy> {
-  const copy: Record<1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9, ScreenCopy> = {
+  return {
     1: { eyebrow: t('copy.1.eyebrow'), title: t('copy.1.title'), sub: t('copy.1.sub') },
     2: { eyebrow: t('copy.2.eyebrow'), title: t('copy.2.title'), sub: t('copy.2.sub') },
     3: { eyebrow: t('copy.3.eyebrow'), title: t('copy.3.title'), sub: t('copy.3.sub') },
@@ -64,25 +50,6 @@ export function getOnboardingCopy(
     7: { title: t('copy.7.title'), sub: t('copy.7.sub') },
     8: { eyebrow: t('copy.8.eyebrow'), title: t('copy.8.title'), sub: t('copy.8.sub') },
     9: { title: t('copy.9.title'), sub: t('copy.9.sub') },
-  };
-  if (!phase1Only) return copy;
-  return {
-    ...copy,
-    1: {
-      eyebrow: t('copyPhase1.1.eyebrow'),
-      title: t('copyPhase1.1.title'),
-      sub: t('copyPhase1.1.sub'),
-    },
-    2: {
-      eyebrow: t('copyPhase1.2.eyebrow'),
-      title: t('copyPhase1.2.title'),
-      sub: t('copyPhase1.2.sub'),
-    },
-    3: {
-      eyebrow: t('copyPhase1.3.eyebrow'),
-      title: t('copyPhase1.3.title'),
-      sub: t('copyPhase1.3.sub'),
-    },
   };
 }
 
@@ -120,22 +87,11 @@ interface OnboardingProps {
 
 export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Element {
   const navigate = useNavigate();
-  const { config } = useAppConfig();
   const { t } = useTranslation('onboarding');
   // FE-53 (a11y): gate the inter-step slide animation on the OS
   // reduced-motion preference (WCAG 2.1 §2.3.3).
   const reduced = useReducedMotion();
-  // Tranche 1 (MVP) launch: skip steps 5 (CurrencyPicker — needs
-  // multi-currency cashback) and 7 (WalletIntro — needs the
-  // Stellar passkey wallet that ships in Tranche 2). Auto-advance
-  // when we render those indices so users see only steps 0-4, 6, 8.
-  const phase1Only = config.phase1Only;
-  // U-2 / UX-01: steps 0-2 (the marketing trust screens) show
-  // discount-flavoured copy in Phase 1 instead of the default
-  // cashback/bank-transfer copy — see `getOnboardingCopy()`. Named
-  // `stepCopy` (not `copy`) to stay unambiguous next to the `copy`
-  // prop every screen component below takes.
-  const stepCopy = getOnboardingCopy(t, phase1Only);
+  const stepCopy = getOnboardingCopy(t);
   const [step, setStep] = useState(0);
   const [email, setEmail] = useState('');
   const [otp, setOtp] = useState('');
@@ -379,34 +335,11 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
     if (step !== 5) setCurrencyError(null);
   }, [step, clearErrors]);
 
-  // Tranche 1 auto-skip for the cashback-related steps. Done in
-  // an effect so React commits the intermediate render before we
-  // setStep — avoids "Cannot update during render" warnings.
-  //
-  // Direction-aware (comprehensive-audit 2026-06-11, P10): the skip
-  // must follow the user's travel direction. The previous version
-  // always skipped forward, so pressing Back from step 6 landed on
-  // skipped step 5 and immediately bounced forward to 6 again —
-  // Back was a no-op trap. Track where we came from and skip
-  // backward when the user is navigating backward.
-  const prevStepRef = useRef(0);
-  useEffect(() => {
-    const cameFrom = prevStepRef.current;
-    prevStepRef.current = step;
-    if (!phase1Only) return;
-    if (step === 5 || step === 7) {
-      const movingBack = cameFrom > step;
-      setStep((s) => (movingBack ? Math.max(0, s - 1) : Math.min(TOTAL_STEPS - 1, s + 1)));
-    }
-  }, [step, phase1Only]);
-
   const currentCta = stepCta[step]!;
 
   const renderStep = (idx: number, active: boolean): React.JSX.Element | null => {
-    if (idx === 0)
-      return <TrustWelcome active={active} copy={stepCopy[1]} phase1Only={phase1Only} />;
-    if (idx === 1)
-      return <TrustHowItWorks active={active} copy={stepCopy[2]} phase1Only={phase1Only} />;
+    if (idx === 0) return <TrustWelcome active={active} copy={stepCopy[1]} />;
+    if (idx === 1) return <TrustHowItWorks active={active} copy={stepCopy[2]} />;
     if (idx === 2) return <TrustMerchants active={active} copy={stepCopy[3]} />;
     if (idx === 3)
       return (

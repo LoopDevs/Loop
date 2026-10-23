@@ -1,13 +1,10 @@
 import { Link } from 'react-router';
 import { hasPositiveAccountBalance } from '@loop/shared';
 import { useAccount } from '~/hooks/use-account';
-import { useAppConfig } from '~/hooks/use-app-config';
 
 export function LinkWalletNudge(): React.JSX.Element | null {
-  const { config } = useAppConfig();
   const { account, activeLink, isLoading, isError } = useAccount();
 
-  if (config.phase1Only) return null;
   if (isLoading || isError || account === undefined) return null;
   if (activeLink !== null) return null;
   if (!hasPositiveAccountBalance(account.wallet)) return null;

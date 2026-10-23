@@ -1,10 +1,10 @@
 /**
- * Deploy-environment values (API origin, env tag, phase gate) resolved at
+ * Deploy-environment values (API origin, env tag) resolved at
  * RUNTIME instead of baked by Vite, so one web image serves every
  * environment (the spend-admin `FE_API_ENDPOINT` pattern).
  *
  * Resolution order:
- *  - server (SSR): `process.env` — `API_URL` / `LOOP_ENV` / `PHASE_1_ONLY`
+ *  - server (SSR): `process.env` — `API_URL` / `LOOP_ENV`
  *    first (set via k8s pod env), then their legacy `VITE_`-prefixed
  *    runtime spellings, then the values Vite baked into the bundle.
  *  - browser: `window.__ENV__` (stamped by the root Layout's inline
@@ -19,7 +19,6 @@
 export interface RuntimeEnv {
   API_URL?: string | undefined;
   LOOP_ENV?: string | undefined;
-  PHASE_1_ONLY?: string | undefined;
 }
 
 declare global {
@@ -29,12 +28,11 @@ declare global {
 }
 
 // Read lazily with bracket access so tests can stub `import.meta.env`
-// after module load (matches the pre-existing defaultPhase1Only contract).
+// after module load.
 function bakedEnv(): RuntimeEnv {
   return {
     API_URL: import.meta.env['VITE_API_URL'] as string | undefined,
     LOOP_ENV: import.meta.env['VITE_LOOP_ENV'] as string | undefined,
-    PHASE_1_ONLY: import.meta.env['VITE_PHASE_1_ONLY'] as string | undefined,
   };
 }
 
@@ -52,7 +50,6 @@ export function runtimeEnv(): RuntimeEnv {
   return {
     API_URL: fromProcessEnv('API_URL') ?? baked.API_URL,
     LOOP_ENV: fromProcessEnv('LOOP_ENV') ?? baked.LOOP_ENV,
-    PHASE_1_ONLY: fromProcessEnv('PHASE_1_ONLY') ?? baked.PHASE_1_ONLY,
   };
 }
 
@@ -66,6 +63,5 @@ export function runtimeEnvScript(): string {
   const env = runtimeEnv();
   if (env.API_URL !== undefined) snapshot.API_URL = env.API_URL;
   if (env.LOOP_ENV !== undefined) snapshot.LOOP_ENV = env.LOOP_ENV;
-  if (env.PHASE_1_ONLY !== undefined) snapshot.PHASE_1_ONLY = env.PHASE_1_ONLY;
   return `window.__ENV__=${JSON.stringify(snapshot).replace(/</g, '\\u003c')};`;
 }

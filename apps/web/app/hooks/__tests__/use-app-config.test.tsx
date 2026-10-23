@@ -12,12 +12,9 @@ vi.mock('~/services/config', () => ({
   fetchAppConfig: () => fetchAppConfigMock(),
 }));
 
-import { useAppConfig, defaultPhase1Only } from '../use-app-config';
+import { useAppConfig } from '../use-app-config';
 
-afterEach(() => {
-  cleanup();
-  vi.unstubAllEnvs();
-});
+afterEach(cleanup);
 
 beforeEach(() => fetchAppConfigMock.mockReset());
 
@@ -26,7 +23,6 @@ function Probe(): React.ReactElement {
   return (
     <div>
       <span data-testid="loading">{isLoading ? 'true' : 'false'}</span>
-      <span data-testid="phase1">{String(config.phase1Only)}</span>
       <span data-testid="google-web">{config.social.googleClientIdWeb ?? '__null__'}</span>
     </div>
   );
@@ -87,64 +83,4 @@ describe('useAppConfig', () => {
   // inside the React-Query queryFn — a known interaction that's
   // worked around by the existing component tests via service-
   // layer mocks (see OrderPayoutCard.test.tsx) rather than here.
-
-  // FE-22: the SSR / first-paint `phase1Only` fallback is deploy-aware so
-  // the gate a crawler indexes (SSR) matches the one a real runtime
-  // hydrates to. Before this, it was hard-coded `true` regardless of the
-  // deployment, so a Phase-2 deployment's crawler saw "Coming soon" while
-  // its runtime saw the live page.
-  describe('deploy-aware phase1Only fallback (FE-22)', () => {
-    it('defaults phase1Only to true when VITE_PHASE_1_ONLY is unset', () => {
-      vi.stubEnv('VITE_PHASE_1_ONLY', undefined as unknown as string);
-      let resolve!: (value: unknown) => void;
-      fetchAppConfigMock.mockReturnValue(new Promise((r) => (resolve = r)));
-      renderProbe();
-      // Pending state → uses the fallback.
-      expect(screen.getByTestId('loading').textContent).toBe('true');
-      expect(screen.getByTestId('phase1').textContent).toBe('true');
-      resolve({
-        phase1Only: false,
-        social: {
-          googleClientIdWeb: null,
-          googleClientIdIos: null,
-          googleClientIdAndroid: null,
-          appleServiceId: null,
-        },
-      });
-    });
-
-    it('opens the SSR fallback gate when the deployment is Phase 2 (VITE_PHASE_1_ONLY=false)', () => {
-      // The crawler/runtime-mismatch fix: on a Phase-2 deployment the
-      // SSR/first-paint fallback now says phase1Only=false, matching what
-      // the runtime will get from /api/config — so the crawler no longer
-      // indexes "Coming soon" for a live page.
-      vi.stubEnv('VITE_PHASE_1_ONLY', 'false');
-      let resolve!: (value: unknown) => void;
-      fetchAppConfigMock.mockReturnValue(new Promise((r) => (resolve = r)));
-      renderProbe();
-      expect(screen.getByTestId('loading').textContent).toBe('true');
-      expect(screen.getByTestId('phase1').textContent).toBe('false');
-      resolve({
-        phase1Only: false,
-        social: {
-          googleClientIdWeb: null,
-          googleClientIdIos: null,
-          googleClientIdAndroid: null,
-          appleServiceId: null,
-        },
-      });
-    });
-
-    it('defaultPhase1Only(): only an explicit "false" opens the gate', () => {
-      vi.stubEnv('VITE_PHASE_1_ONLY', 'false');
-      expect(defaultPhase1Only()).toBe(false);
-      vi.stubEnv('VITE_PHASE_1_ONLY', 'true');
-      expect(defaultPhase1Only()).toBe(true);
-      vi.stubEnv('VITE_PHASE_1_ONLY', undefined as unknown as string);
-      expect(defaultPhase1Only()).toBe(true);
-      // A stray/typo'd value is treated as Phase-1 (fail-safe closed).
-      vi.stubEnv('VITE_PHASE_1_ONLY', 'no');
-      expect(defaultPhase1Only()).toBe(true);
-    });
-  });
 });

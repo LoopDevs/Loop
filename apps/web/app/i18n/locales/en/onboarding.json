@@ -42,23 +42,6 @@
       "sub": "Your Loop account is ready. Start earning on your first purchase."
     }
   },
-  "copyPhase1": {
-    "1": {
-      "eyebrow": "Welcome to Loop",
-      "title": "Shop. Save.\nRepeat.",
-      "sub": "The smart way to shop — save up to 15% instantly on gift cards from stores you already use."
-    },
-    "2": {
-      "eyebrow": "How it works",
-      "title": "Buy gift cards, save instantly.",
-      "sub": "When you shop at stores you already love, buy a Loop gift card first. You save up to 15% off the sticker price, right away."
-    },
-    "3": {
-      "eyebrow": "Where it works",
-      "title": "500+ brands you’ll actually use.",
-      "sub": "Groceries, gas, dining, everyday runs. Your savings add up fast."
-    }
-  },
   "cta": {
     "getStarted": "Get started",
     "continue": "Continue",
@@ -73,13 +56,11 @@
     "alreadyHaveAccount": "I already have an account"
   },
   "trust": {
-    "totalSaved": "Total saved",
     "totalCashback": "Total cashback",
     "thisYearSoFar": "This year so far",
     "step1": "Open Loop before you shop",
     "step2": "Buy a gift card at the store",
-    "step3Phase1": "Your discount applies instantly",
-    "step3Phase2": "Cashback lands in your bank",
+    "step3": "Cashback lands in your bank",
     "moreBrands": "+ 500 more brands",
     "emailPrivacy": "Your email stays yours. We never sell contacts."
   },

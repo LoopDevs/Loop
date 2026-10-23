@@ -69,7 +69,6 @@ describe('parseConfig', () => {
     expect(config.database.driver).toBe('memory');
     expect(config.email.provider).toBe('console');
     expect(config.rateLimit.enabled).toBe(true);
-    expect(config.launch.phase1Only).toBe(false);
   });
 
   it('defaults env to development when NODE_ENV is unset', () => {

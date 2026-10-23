@@ -6,14 +6,11 @@
     "accountAriaLabel": "Account"
   },
   "hero": {
-    "savedLabel": "You’ve saved",
     "cashbackLabel": "Cashback earned",
-    "savedEmptySub": "Buy a gift card to start saving.",
     "cashbackEmptySub": "Buy a gift card to start earning cashback.",
     "activitySub_one": "Across {{count}} order — keep going.",
     "activitySub_other": "Across {{count}} orders — keep going.",
     "ordersLabel": "Orders",
-    "avgSavingLabel": "Avg saving",
     "avgBackLabel": "Avg back"
   },
   "section": {

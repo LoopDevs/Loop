@@ -16,32 +16,16 @@ interface ScreenProps {
   copy: ScreenCopy;
 }
 
-interface TrustWelcomeProps extends ScreenProps {
-  /**
-   * U-2 / UX-01 (docs/ux-pass-2026-07-09.md): the receipt-card below
-   * is hardcoded UI, not sourced from `copy`, so it needs its own
-   * phase switch — swaps the "Total cashback" label for "Total
-   * saved" so the card doesn't promise a Phase-2 feature. Optional /
-   * defaults to Phase-2 framing so existing callers (if any are
-   * added later) don't silently regress.
-   */
-  phase1Only?: boolean;
-}
-
 /**
  * Screen 1 — brand moment. Loop wordmark, a receipt-card with an
  * animated "total cashback" counter that re-ticks every time the
  * screen becomes active, then the headline + sub.
  */
-export function TrustWelcome({
-  active,
-  copy,
-  phase1Only = false,
-}: TrustWelcomeProps): React.JSX.Element {
+export function TrustWelcome({ active, copy }: ScreenProps): React.JSX.Element {
   const { t } = useTranslation('onboarding');
   const savings = useCountUp(2847, active, 1600);
   const [dollars, cents] = savings.toFixed(2).split('.');
-  const totalLabel = phase1Only ? t('trust.totalSaved') : t('trust.totalCashback');
+  const totalLabel = t('trust.totalCashback');
   return (
     <div className="flex-1 flex flex-col px-6">
       <div className="flex-1 flex flex-col items-center justify-center gap-6">
@@ -134,37 +118,17 @@ function TrustStepVisual({ visual }: { visual: StepVisual }): React.JSX.Element 
   );
 }
 
-interface TrustHowItWorksProps extends ScreenProps {
-  /**
-   * U-2 / UX-01 (docs/ux-pass-2026-07-09.md): step 3's label below is
-   * hardcoded UI, not sourced from `copy` — "Cashback lands in your
-   * bank" is a Phase-2 settlement claim (Loop doesn't do bank
-   * transfers in Phase 1). Swaps to the discount-at-checkout framing
-   * when set. Optional / defaults to Phase-2 framing so existing
-   * callers (if any are added later) don't silently regress.
-   */
-  phase1Only?: boolean;
-}
-
 /**
  * Screen 2 — three-step explainer. Each step card fades+slides in
  * with a staggered delay when the screen becomes active.
  */
-export function TrustHowItWorks({
-  active,
-  copy,
-  phase1Only = false,
-}: TrustHowItWorksProps): React.JSX.Element {
+export function TrustHowItWorks({ active, copy }: ScreenProps): React.JSX.Element {
   const { t } = useTranslation('onboarding');
   const reduced = useReducedMotion();
   const steps: { num: string; label: string; visual: StepVisual }[] = [
     { num: '1', label: t('trust.step1'), visual: 'app' },
     { num: '2', label: t('trust.step2'), visual: 'card' },
-    {
-      num: '3',
-      label: phase1Only ? t('trust.step3Phase1') : t('trust.step3Phase2'),
-      visual: 'bank',
-    },
+    { num: '3', label: t('trust.step3'), visual: 'bank' },
   ];
   return (
     <div className="flex-1 flex flex-col justify-center gap-6 px-6 overflow-hidden py-6">

@@ -6,92 +6,22 @@ import { SavingsHero } from '../MobileHome';
 afterEach(cleanup);
 
 describe('SavingsHero', () => {
-  describe('Phase 1 (instant-discount delivery — phase1Only=true)', () => {
-    it("renders the 'You've saved' label and 'start saving' empty subtitle", () => {
-      render(
-        <SavingsHero cashbackCents={0} ordersCount={0} isAuthenticated={true} phase1Only={true} />,
-      );
-      expect(screen.getByText(/You['’]ve saved/)).toBeTruthy();
-      // The empty state shows the "start saving" subtitle, not the
-      // Phase-2 "earning cashback" copy.
-      expect(screen.getByText(/start saving/i)).toBeTruthy();
-      expect(screen.queryByText(/earning cashback/i)).toBeNull();
-    });
-
-    it("renders the 'Avg saving' stat label", () => {
-      render(
-        <SavingsHero
-          cashbackCents={1234}
-          ordersCount={3}
-          isAuthenticated={true}
-          phase1Only={true}
-        />,
-      );
-      expect(screen.getByText('Avg saving')).toBeTruthy();
-      expect(screen.queryByText('Avg back')).toBeNull();
-    });
-
-    it('shows the realised savings total in dollars', () => {
-      render(
-        <SavingsHero
-          cashbackCents={1234}
-          ordersCount={3}
-          isAuthenticated={true}
-          phase1Only={true}
-        />,
-      );
-      // 1234 cents → $12.34 in the hero, $4.11 average across 3 orders.
-      // (currency defaults to USD when the prop is omitted.)
-      expect(screen.getByText('$12.34')).toBeTruthy();
-      expect(screen.getByText('$4.11')).toBeTruthy();
-    });
-
-    it('formats the hero + average figures in the active currency (WEB-M1)', () => {
-      render(
-        <SavingsHero
-          cashbackCents={1234}
-          ordersCount={3}
-          isAuthenticated={true}
-          phase1Only={true}
-          currency="GBP"
-        />,
-      );
-      // Same amounts, GBP ledger → £12.34 hero, £4.11 average.
-      expect(screen.getByText('£12.34')).toBeTruthy();
-      expect(screen.getByText('£4.11')).toBeTruthy();
-      expect(screen.queryByText('$12.34')).toBeNull();
-    });
-  });
-
-  describe('Phase 2 (cashback to wallet — phase1Only=false)', () => {
+  describe('labels', () => {
     it("renders the 'Cashback earned' label and 'earning cashback' empty subtitle", () => {
-      render(
-        <SavingsHero cashbackCents={0} ordersCount={0} isAuthenticated={true} phase1Only={false} />,
-      );
+      render(<SavingsHero cashbackCents={0} ordersCount={0} isAuthenticated={true} />);
       expect(screen.getByText('Cashback earned')).toBeTruthy();
       expect(screen.getByText(/earning cashback/i)).toBeTruthy();
-      expect(screen.queryByText(/start saving/i)).toBeNull();
     });
 
     it("renders the 'Avg back' stat label", () => {
-      render(
-        <SavingsHero
-          cashbackCents={5000}
-          ordersCount={2}
-          isAuthenticated={true}
-          phase1Only={false}
-        />,
-      );
+      render(<SavingsHero cashbackCents={5000} ordersCount={2} isAuthenticated={true} />);
       expect(screen.getByText('Avg back')).toBeTruthy();
-      expect(screen.queryByText('Avg saving')).toBeNull();
     });
   });
 
   describe('empty state', () => {
     it('shows $0.00 with the empty subtitle when ordersCount=0', () => {
-      render(
-        <SavingsHero cashbackCents={0} ordersCount={0} isAuthenticated={true} phase1Only={true} />,
-      );
+      render(<SavingsHero cashbackCents={0} ordersCount={0} isAuthenticated={true} />);
       // The "$0.00" appears as the headline amount.
       expect(screen.getByText('$0.00')).toBeTruthy();
       // Avg row shows '—' rather than $0.00 to avoid the noise of
@@ -101,13 +31,7 @@ describe('SavingsHero', () => {
 
     it('renders the empty-state zero in the active currency, not a hardcoded $', () => {
       render(
-        <SavingsHero
-          cashbackCents={0}
-          ordersCount={0}
-          isAuthenticated={true}
-          phase1Only={true}
-          currency="GBP"
-        />,
+        <SavingsHero cashbackCents={0} ordersCount={0} isAuthenticated={true} currency="GBP" />,
       );
       // WEB-M1: a GBP ledger shows £0.00, never $0.00.
       expect(screen.getByText('£0.00')).toBeTruthy();
@@ -119,16 +43,9 @@ describe('SavingsHero', () => {
       // the empty teaser — the user may have stale order data from
       // a previous session in the cache, but they're not signed in
       // so we don't show their figure.
-      render(
-        <SavingsHero
-          cashbackCents={5000}
-          ordersCount={3}
-          isAuthenticated={false}
-          phase1Only={true}
-        />,
-      );
+      render(<SavingsHero cashbackCents={5000} ordersCount={3} isAuthenticated={false} />);
       expect(screen.getByText('$0.00')).toBeTruthy();
-      expect(screen.getByText(/start saving/i)).toBeTruthy();
+      expect(screen.getByText(/earning cashback/i)).toBeTruthy();
     });
   });
 });

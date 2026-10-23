@@ -49,7 +49,7 @@ vi.mock('~/native/haptics', () => ({
 
 vi.mock('~/hooks/use-app-config', () => ({
   useAppConfig: () => ({
-    config: { phase1Only: false, ctxPaymentCurrencies: ['XLM'] },
+    config: { ctxPaymentCurrencies: ['XLM'] },
     isLoading: false,
   }),
 }));

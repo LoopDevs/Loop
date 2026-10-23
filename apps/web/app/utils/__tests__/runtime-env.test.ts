@@ -18,8 +18,8 @@ describe('runtimeEnv', () => {
   });
 
   it('falls back to baked values when window.__ENV__ is absent', () => {
-    vi.stubEnv('VITE_PHASE_1_ONLY', 'false');
-    expect(runtimeEnv().PHASE_1_ONLY).toBe('false');
+    vi.stubEnv('VITE_LOOP_ENV', 'staging');
+    expect(runtimeEnv().LOOP_ENV).toBe('staging');
   });
 });
 

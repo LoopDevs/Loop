@@ -8,11 +8,9 @@
  *   - POST /api/users/me/dsr/delete → anonymises the account; returns
  *     409 with a typed code when money / fulfilment is in flight.
  *
- * This screen wires both. It is **deliberately NOT behind `Phase2Gate`**
- * — data export and account deletion are GDPR Art. 15/17 rights and an
- * Apple App Store Guideline 5.1.1(v) submission requirement, so they
- * must be reachable in Phase-1 discount mode, unlike the wallet /
- * cashback screens.
+ * This screen wires both. Data export and account deletion are GDPR
+ * Art. 15/17 rights and an Apple App Store Guideline 5.1.1(v) submission
+ * requirement, so this screen is always reachable.
  *
  * Deletion is gated behind a typed-confirmation ("DELETE") so a stray
  * tap can't anonymise an account; the server takes no confirmation

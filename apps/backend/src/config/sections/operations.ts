@@ -1,4 +1,4 @@
-// config sections: `rateLimit:`, `launch:`, `testing:` and `unsafe:` — A2-1605, CF2-10, S4-4, AUDIT-2-E, R3-7, NS-10
+// config sections: `rateLimit:`, `testing:` and `unsafe:` — A2-1605, CF2-10, S4-4, AUDIT-2-E, R3-7, NS-10
 import { z } from 'zod';
 
 export const rateLimitSchema = z
@@ -11,14 +11,6 @@ export const rateLimitSchema = z
     // This is the no-signal fallback for `fleet-size.ts` when dynamic DNS count is unavailable.
     // Defaults to 1 (no division) for single-process local dev/tests.
     machineCountEstimate: z.number().int().positive().default(1),
-  })
-  .prefault({});
-
-export const launchSchema = z
-  .object({
-    // Phase 1 UI gate: hides Phase 2 cashback/wallet elements.
-    // Flipping to false is the Phase 2 cutover (server-side only).
-    phase1Only: z.boolean().default(false),
   })
   .prefault({});
 

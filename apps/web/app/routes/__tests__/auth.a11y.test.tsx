@@ -53,7 +53,6 @@ vi.mock('~/hooks/use-native-platform', () => ({
 vi.mock('~/hooks/use-app-config', () => ({
   useAppConfig: () => ({
     config: {
-      phase1Only: true,
       social: {
         googleClientIdWeb: null,
         googleClientIdIos: null,

@@ -214,12 +214,6 @@ mobile:
       # keystore during rollout.
       certFingerprints: []
 
-# ── Launch gating ───────────────────────────────────────────────────
-launch:
-  # Hide every Phase 2 cashback / wallet surface in the web + onboarding
-  # UI. Flipping to false is the Phase 2 cutover — server-side only.
-  phase1Only: false
-
 # ── Test-only ───────────────────────────────────────────────────────
 testing:
   # AUDIT-2-E: second gate (with `env: test`) before the /__test__/*

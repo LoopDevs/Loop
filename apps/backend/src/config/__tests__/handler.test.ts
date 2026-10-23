@@ -4,7 +4,6 @@ import type { Context } from 'hono';
 
 const { configState } = vi.hoisted(() => ({
   configState: {
-    phase1Only: false,
     google: {
       web: undefined as string | undefined,
       ios: undefined as string | undefined,
@@ -36,7 +35,6 @@ vi.mock('../index.js', async (importActual) => {
           ...actual.config.auth,
           social: { google: configState.google, apple: configState.apple },
         },
-        launch: { phase1Only: configState.phase1Only },
         mobile: {
           ...actual.config.mobile,
           minSupportedVersion: configState.minSupportedVersion,
@@ -64,7 +62,6 @@ function makeCtx(): { headers: Record<string, string>; ctx: Context } {
 }
 
 function resetConfigState(): void {
-  configState.phase1Only = false;
   configState.google = { web: undefined, ios: undefined, android: undefined };
   configState.apple = { serviceId: undefined };
   configState.minSupportedVersion = { ios: undefined, android: undefined };
@@ -94,7 +91,6 @@ describe('configHandler', () => {
         appleServiceId: string | null;
       };
     };
-    expect((body as unknown as { phase1Only: boolean }).phase1Only).toBe(false);
     expect(body.social).toEqual({
       googleClientIdWeb: null,
       googleClientIdIos: null,
@@ -138,14 +134,6 @@ describe('configHandler', () => {
     expect(body.fiatPaymentCurrencies).toEqual(['GBP']);
     expect(body.countries).toEqual(['US', 'GB']);
     expect(body.stableCurrencies).toEqual(['XLM.USDC']);
-  });
-
-  it('reflects launch.phase1Only', async () => {
-    configState.phase1Only = true;
-    const { configHandler } = await import('../handler.js');
-    const { ctx } = makeCtx();
-    const body = (await configHandler(ctx).json()) as { phase1Only: boolean };
-    expect(body.phase1Only).toBe(true);
   });
 
   it('defaults minSupportedVersion to null per platform when unset (no gate)', async () => {

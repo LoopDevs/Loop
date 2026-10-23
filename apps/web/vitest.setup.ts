@@ -10,8 +10,7 @@
  * the kind of thing that silently rots (a component starts calling `t()`,
  * its test starts asserting rendered strings, and without this the
  * assertion would see raw `"namespace:key"` strings instead of English
- * copy — see the `onboarding-phase1-copy.test.tsx` / `onboarding-skip-nav.test.tsx`
- * regression this setup file fixes).
+ * copy — the onboarding copy tests hit exactly this).
  *
  * Importing for the side effect is enough: `~/i18n/i18next` calls
  * `i18next.use(initReactI18next).init(...)` synchronously with bundled

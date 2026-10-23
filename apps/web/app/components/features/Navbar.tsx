@@ -9,7 +9,6 @@ import { useAuthStore } from '~/stores/auth.store';
 import { useLocale, useLocalizedNavigate } from '~/i18n/locale';
 import { useAuth } from '~/hooks/use-auth';
 import { useNativePlatform } from '~/hooks/use-native-platform';
-import { useAppConfig } from '~/hooks/use-app-config';
 import { getMerchantImageUrl } from '~/utils/image';
 import { Avatar } from '~/components/ui/Avatar';
 import { LoopLogo } from '~/components/ui/LoopLogo';
@@ -302,7 +301,7 @@ SearchBar.displayName = 'SearchBar';
  * Signed-in account control: avatar button → dropdown menu. Closes on
  * outside-click, Escape, or route change.
  */
-function AccountMenu({ showCashbackNav }: { showCashbackNav: boolean }): React.JSX.Element {
+function AccountMenu(): React.JSX.Element {
   const { t } = useTranslation('navbar');
   const email = useAuthStore((s) => s.email);
   const { logout } = useAuth();
@@ -335,12 +334,8 @@ function AccountMenu({ showCashbackNav }: { showCashbackNav: boolean }): React.J
 
   const items: Array<{ to: string; label: string }> = [
     { to: '/orders', label: t('account.orders') },
-    ...(showCashbackNav
-      ? [
-          { to: '/settings/cashback', label: t('account.cashback') },
-          { to: '/settings/wallet', label: t('account.wallet') },
-        ]
-      : []),
+    { to: '/settings/cashback', label: t('account.cashback') },
+    { to: '/settings/wallet', label: t('account.wallet') },
   ];
 
   return (
@@ -405,9 +400,6 @@ export function Navbar(_props: NavbarProps = {}): React.JSX.Element {
   const navigate = useLocalizedNavigate();
   const { isNative } = useNativePlatform();
   const isAuthenticated = useAuthStore((s) => s.accessToken !== null);
-  const { config } = useAppConfig();
-  // Tranche 1 (MVP): hide cashback nav links until v1.1.
-  const showCashbackNav = !config.phase1Only;
 
   const handleSelect = (r: SearchResult): void => {
     void navigate(r.to);
@@ -469,11 +461,9 @@ export function Navbar(_props: NavbarProps = {}): React.JSX.Element {
             <Link to="/map" className={navLinkClass('/map')}>
               {t('nav.map')}
             </Link>
-            {showCashbackNav && (
-              <Link to="/cashback" className={navLinkClass('/cashback')}>
-                {t('nav.rates')}
-              </Link>
-            )}
+            <Link to="/cashback" className={navLinkClass('/cashback')}>
+              {t('nav.rates')}
+            </Link>
             {isAuthenticated && (
               <Link to="/orders" className={navLinkClass('/orders')}>
                 {t('nav.orders')}
@@ -485,7 +475,7 @@ export function Navbar(_props: NavbarProps = {}): React.JSX.Element {
           <div className="flex items-center gap-2 ms-auto">
             <CountrySelector />
             {isAuthenticated ? (
-              <AccountMenu showCashbackNav={showCashbackNav} />
+              <AccountMenu />
             ) : isNative ? null : (
               <>
                 <Link

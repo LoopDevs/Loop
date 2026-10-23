@@ -9,7 +9,6 @@ import { shouldRetry } from '~/hooks/query-retry';
 import { useLocale } from '~/i18n/locale';
 import { Navbar } from '~/components/features/Navbar';
 import { Footer } from '~/components/features/Footer';
-import { Phase2Gate } from '~/components/Phase2Gate';
 import { Spinner } from '~/components/ui/Spinner';
 import { CashbackCalculator } from '~/components/features/cashback/CashbackCalculator';
 import i18n from '~/i18n/i18next';
@@ -44,11 +43,7 @@ export function meta({ params }: Route.MetaArgs): Route.MetaDescriptors {
 }
 
 export default function CalculatorRoute(): React.JSX.Element {
-  return (
-    <Phase2Gate>
-      <CalculatorRouteBody />
-    </Phase2Gate>
-  );
+  return <CalculatorRouteBody />;
 }
 
 function CalculatorRouteBody(): React.JSX.Element {

@@ -38,7 +38,7 @@ app/
 │                       Skeleton, Spinner, ToastContainer)
 ├── hooks/            ← TanStack Query wrappers + lifecycle (use-auth, use-merchants,
 │                       use-orders, use-account (CTX account: balances, linked
-│                       wallets, payouts; gated on auth AND !phase1Only), use-native-platform,
+│                       wallets, payouts; gated on auth), use-native-platform,
 │                       use-session-restore, query-retry,
 │                       use-staff-role — ADR 037 staffRole resolver over the ['me'] line)
 ├── services/         ← Typed API client (api-client, auth, clusters, merchants,

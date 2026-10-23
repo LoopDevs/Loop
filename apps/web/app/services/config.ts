@@ -31,11 +31,7 @@ export interface LoopAssetConfig {
   available: boolean;
 }
 
-/**
- * Feature-flag snapshot from the backend (`GET /api/config`). These
- * gate the Loop-native code paths so the web app doesn't try to call
- * an endpoint that isn't active in the current deployment.
- */
+/** Public config snapshot from the backend (`GET /api/config`). */
 export interface AppConfig {
   /**
    * ADR 052 — chain-qualified CTX payment currencies the customer can
@@ -46,17 +42,6 @@ export interface AppConfig {
   fiatPaymentCurrencies: string[];
   countries: string[];
   stableCurrencies: string[];
-  /**
-   * Tranche 1 (MVP) launch gate. When true, the web client hides
-   * every Phase 2+ surface (cashback navbar, /settings/wallet,
-   * /settings/cashback, /cashback rates index, onboarding
-   * currency-picker + wallet-intro screens, LinkWalletNudge,
-   * "you've earned X cashback" copy). Discount badges stay —
-   * they're the Tranche 1 user proposition. Toggled server-side
-   * via `LOOP_PHASE_1_ONLY`; no app store resubmission needed
-   * to flip it back when Tranche 2 launches.
-   */
-  phase1Only: boolean;
   /**
    * ADR 015 — which LOOP stablecoins are wired for on-chain payout.
    * Always returns all three keys so the client can render a stable

@@ -4,14 +4,13 @@ import { render, screen, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import type { UserAccountView, WalletLinkView } from '@loop/shared';
 
-const { accountState, configMock } = vi.hoisted(() => ({
+const { accountState } = vi.hoisted(() => ({
   accountState: {
     account: undefined as UserAccountView | undefined,
     activeLink: null as WalletLinkView | null,
     isLoading: false,
     isError: false,
   },
-  configMock: { phase1Only: false },
 }));
 
 vi.mock('~/hooks/use-account', () => ({
@@ -24,10 +23,6 @@ vi.mock('~/hooks/use-account', () => ({
     error: null,
     refetch: () => undefined,
   }),
-}));
-
-vi.mock('~/hooks/use-app-config', () => ({
-  useAppConfig: () => ({ config: { phase1Only: configMock.phase1Only }, isLoading: false }),
 }));
 
 import { LinkWalletNudge } from '../LinkWalletNudge';
@@ -72,7 +67,6 @@ beforeEach(() => {
   accountState.activeLink = null;
   accountState.isLoading = false;
   accountState.isError = false;
-  configMock.phase1Only = false;
 });
 
 describe('<LinkWalletNudge />', () => {
@@ -93,17 +87,12 @@ describe('<LinkWalletNudge />', () => {
     expect(renderNudge().innerHTML).toBe('');
   });
 
-  it('hides while loading, on error, and under phase1Only', () => {
+  it('hides while loading and on error', () => {
     accountState.isLoading = true;
     expect(renderNudge().innerHTML).toBe('');
     cleanup();
     accountState.isLoading = false;
     accountState.isError = true;
-    expect(renderNudge().innerHTML).toBe('');
-    cleanup();
-    accountState.isError = false;
-    accountState.account = account([{ currency: 'XLM.GBPLOOP', amount: '0.4000000' }]);
-    configMock.phase1Only = true;
     expect(renderNudge().innerHTML).toBe('');
   });
 });
