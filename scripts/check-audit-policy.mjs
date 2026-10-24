@@ -74,6 +74,50 @@ const ACCEPTED_HIGH_VULNS = new Map([
     '@cyclonedx/cyclonedx-npm',
     'GHSA-v75r-vx73-82pj (shell injection via unsanitized --workspace argument, range 2.1.0-4.2.1). Root devDependency invoked once, in CI only, by .github/workflows/ci.yml to generate the SBOM — never runs with untrusted/user-controlled arguments (the workflow invokes it with a fixed, repo-authored argument list, not external input), so the injection vector is not reachable. Fix is semver-major (5.0.0); deferred as a tracked follow-up rather than risking breaking the SBOM step mid-audit-remediation.',
   ],
+  [
+    'zod',
+    'GHSA-mrhx-c7xc-m3w5 / CVE-2023-54404 (zod <4.6.6: unbounded issue accumulation on oversized arrays → memory exhaustion). Loop’s own zod — the apps/backend request/CTX-response validator — is 4.6.7, patched. The only flagged copies are two nested zod v3 installs that the advisory range also covers and that have no v3 patch (3.x tops out at 3.25.76): @reown/appkit-wallet pins 3.22.4 and @coinbase/cdp-sdk requires ^3.25.76, both under @creit.tech/stellar-wallets-kit’s WalletConnect module. Loop initialises the kit with defaultModules() (apps/web/app/services/stellar-wallet.ts), which excludes WalletConnect, so neither copy is in any Loop bundle; the kit is browser-only (never SSR or native). Accept-by-name caveat: this entry would also mask a future advisory against the root runtime zod — same accept-by-advisory-ID follow-up as form-data.',
+  ],
+  [
+    '@reown/appkit-wallet',
+    'No advisory against the package itself — flagged only for its pinned zod@3.22.4 (see zod). Pulled in by @creit.tech/stellar-wallets-kit’s WalletConnect module, which Loop never imports (defaultModules() only). Not in any Loop bundle; no upstream release drops the pin (1.8.24 still pins 3.22.4).',
+  ],
+  [
+    '@reown/appkit',
+    'Parent of the @reown/appkit-wallet→zod@3 chain; no advisory of its own. WalletConnect-module-only, never imported by Loop.',
+  ],
+  [
+    '@reown/appkit-controllers',
+    'Parent of the @reown/appkit-wallet→zod@3 chain; no advisory of its own. WalletConnect-module-only, never imported by Loop.',
+  ],
+  [
+    '@reown/appkit-pay',
+    'Parent of the @reown/appkit-wallet→zod@3 chain; no advisory of its own. WalletConnect-module-only, never imported by Loop.',
+  ],
+  [
+    '@reown/appkit-scaffold-ui',
+    'Parent of the @reown/appkit-wallet→zod@3 chain; no advisory of its own. WalletConnect-module-only, never imported by Loop.',
+  ],
+  [
+    '@reown/appkit-ui',
+    'Parent of the @reown/appkit-wallet→zod@3 chain; no advisory of its own. WalletConnect-module-only, never imported by Loop.',
+  ],
+  [
+    '@reown/appkit-utils',
+    'Parent of the @reown/appkit-wallet→zod@3 and @coinbase/cdp-sdk→zod@3 chains; no advisory of its own. WalletConnect-module-only, never imported by Loop.',
+  ],
+  [
+    '@coinbase/cdp-sdk',
+    'No advisory of its own — flagged for its nested zod@3.25.76 (^3.25.76; no patched v3 exists) and abitype@1.0.6. Reached only via @reown/appkit-utils→@base-org/account under the kit’s WalletConnect module, which Loop never imports.',
+  ],
+  [
+    'abitype',
+    'No advisory of its own — the 1.0.6 copy nested under @coinbase/cdp-sdk is flagged for its zod@3 peer. The copies Loop’s tree dedupes to (1.2.3 / 1.3.0) resolve to the patched root zod 4.6.7. Same unreached WalletConnect chain.',
+  ],
+  [
+    '@creit.tech/stellar-wallets-kit',
+    'Direct apps/web dependency at the latest release (2.7.1); no advisory against the kit itself — flagged only as the parent of the @reown/appkit→zod@3 chain, which lives in its WalletConnect module. Loop loads defaultModules() only. npm’s offered "fix" is a downgrade to 1.9.5, not a fix.',
+  ],
 ]);
 
 const ACCEPTED_MODERATE_VULNS = new Map([
