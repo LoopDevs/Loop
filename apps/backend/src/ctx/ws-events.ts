@@ -6,8 +6,7 @@ import { ctxAuthHeaders } from './api-fetch.js';
 
 const log = logger.child({ module: 'ctx-ws' });
 
-const BACKOFF_INITIAL_MS = 1_000;
-const BACKOFF_MAX_MS = 60_000;
+const RECONNECT_DELAY_MS = 2_000;
 
 const WsMessageSchema = z
   .object({
@@ -37,7 +36,6 @@ const everSubscribedTopics = new Set<string>();
 let socket: WebSocket | null = null;
 let status: CtxWsStatus = 'disabled';
 let reconnectTimer: NodeJS.Timeout | null = null;
-let backoffMs = BACKOFF_INITIAL_MS;
 let stopped = true;
 
 export function getCtxWsStatus(): CtxWsStatus {
@@ -112,6 +110,7 @@ function connect(): void {
   socket = ws;
 
   ws.onopen = () => {
+    log.info({ topics: handlers.map((h) => h.topic) }, 'CTX ws connected — subscribing');
     for (const handler of handlers) {
       ws.send(subscribeCommand(handler.topic));
     }
@@ -130,7 +129,7 @@ function connect(): void {
     subscribedTopics.clear();
     if (stopped) return;
     log.warn(
-      { code: event.code, reason: event.reason, backoffMs },
+      { code: event.code, reason: event.reason, delayMs: RECONNECT_DELAY_MS },
       'CTX ws closed — scheduling reconnect',
     );
     scheduleReconnect();
@@ -140,13 +139,10 @@ function connect(): void {
 function scheduleReconnect(): void {
   if (stopped || reconnectTimer !== null) return;
   status = 'connecting';
-  const jitter = 1 + (Math.random() - 0.5) * 0.5; // ±25%
-  const delay = Math.round(backoffMs * jitter);
-  backoffMs = Math.min(backoffMs * 2, BACKOFF_MAX_MS);
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     connect();
-  }, delay);
+  }, RECONNECT_DELAY_MS);
   reconnectTimer.unref();
 }
 
@@ -172,7 +168,7 @@ function handleMessage(raw: string): void {
 
     case 'error':
       // e.g. "not authorized" on subscribe — no point hammering CTX
-      // with instant retries; the backoff loop handles cadence after
+      // with instant retries; the reconnect loop handles cadence after
       // the server closes, and a manual creds fix needs a redeploy
       // anyway.
       log.error({ action: msg.action, error: msg.error }, 'CTX ws returned an error');
@@ -208,7 +204,6 @@ function markTopicSubscribed(topic: string): void {
   const handler = handlers.find((h) => h.topic === topic);
   if (handler === undefined || subscribedTopics.has(topic)) return;
   subscribedTopics.add(topic);
-  backoffMs = BACKOFF_INITIAL_MS;
   log.info({ topic }, 'CTX ws topic subscription active');
   const resubscribe = everSubscribedTopics.has(topic);
   everSubscribedTopics.add(topic);
@@ -236,7 +231,6 @@ export function __resetCtxWsForTests(): void {
   stopCtxWs();
   handlers.length = 0;
   everSubscribedTopics.clear();
-  backoffMs = BACKOFF_INITIAL_MS;
   stopped = true;
   status = 'disabled';
 }
