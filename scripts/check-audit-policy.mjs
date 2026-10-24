@@ -31,10 +31,6 @@ const ACCEPTED_HIGH_VULNS = new Map([
     'GHSA-67mh-4wv8-2f99 + GHSA-gv7w-rqvm-qjhr (esbuild <=0.28.0): dev-server lets any site send requests to it / Deno NPM_CONFIG_REGISTRY RCE. Dev/build-time only — esbuild is never in the deployed runtime (backend runs compiled dist; web is prebuilt). Fix is semver-major; accepted.',
   ],
   [
-    'vite',
-    'Transitive via esbuild (build/dev tool only, not in the deployed runtime). Fix is semver-major; tracked behind the esbuild bump.',
-  ],
-  [
     'vite-node',
     'Transitive via vite→esbuild (vitest runner, dev/test only). Not in any deployed surface.',
   ],
