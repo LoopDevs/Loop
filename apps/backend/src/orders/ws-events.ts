@@ -3,6 +3,7 @@ import { logger } from '../logger.js';
 import { CtxGiftCardSchema } from './ctx-order.js';
 import { applyCtxCardStatus, resolveOrderForCard } from './mirror-apply.js';
 import { registerCtxWsTopic } from '../ctx/ws-events.js';
+import { runMirrorSweepTick } from './ctx-mirror-sweep.js';
 
 const log = logger.child({ module: 'giftcard-ws' });
 
@@ -20,8 +21,15 @@ export function registerGiftcardWsEvents(): void {
     topic: 'giftcard',
     events: GIFTCARD_EVENTS,
     onEvent: handleGiftcardEvent,
-    // Events during a disconnect window are unrecoverable — the
-    // mirror sweep is the standing reconciler, no resync here.
+    onSubscribed: ({ resubscribe }) => {
+      if (!resubscribe) return;
+      // Events during the disconnect window are unrecoverable —
+      // reconcile open orders now (coalesces via the sweep mutex).
+      log.info('Reconciling open orders after ws reconnect');
+      void runMirrorSweepTick().catch((err: unknown) => {
+        log.warn({ err }, 'Post-reconnect mirror sweep failed');
+      });
+    },
   });
 }
 

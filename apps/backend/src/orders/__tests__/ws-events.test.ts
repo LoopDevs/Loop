@@ -12,8 +12,23 @@ const { mirrorMock } = vi.hoisted(() => ({
 }));
 vi.mock('../mirror-apply.js', () => mirrorMock);
 
+const { sweepMock } = vi.hoisted(() => ({
+  sweepMock: { runMirrorSweepTick: vi.fn(async () => ({})) },
+}));
+vi.mock('../ctx-mirror-sweep.js', () => sweepMock);
+
 import { registerGiftcardWsEvents } from '../ws-events.js';
-import { __handleCtxWsMessageForTests, __resetCtxWsForTests } from '../../ctx/ws-events.js';
+import {
+  __dropCtxWsSessionForTests,
+  __handleCtxWsMessageForTests,
+  __resetCtxWsForTests,
+} from '../../ctx/ws-events.js';
+
+const SUBSCRIBE_OK = JSON.stringify({
+  type: 'ok',
+  action: 'subscribe',
+  subscriptions: ['giftcard'],
+});
 
 function eventFrame(eventName: string, data: unknown): string {
   return JSON.stringify({ type: 'event', topic: 'giftcard', event: eventName, data });
@@ -70,5 +85,15 @@ describe('giftcard ws event handling', () => {
     await flushDispatch();
 
     expect(mirrorMock.resolveOrderForCard).not.toHaveBeenCalled();
+  });
+
+  it('runs a mirror sweep on reconnect, but not on the first session', () => {
+    __handleCtxWsMessageForTests(SUBSCRIBE_OK);
+    expect(sweepMock.runMirrorSweepTick).not.toHaveBeenCalled();
+
+    __dropCtxWsSessionForTests();
+
+    __handleCtxWsMessageForTests(SUBSCRIBE_OK);
+    expect(sweepMock.runMirrorSweepTick).toHaveBeenCalledTimes(1);
   });
 });

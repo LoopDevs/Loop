@@ -26,7 +26,7 @@ import { CtxRateLimitedError, CtxUnavailableError } from '../ctx/api-fetch.js';
 
 const log = logger.child({ area: 'ctx-mirror-sweep' });
 
-const SWEEP_INTERVAL_MS = 60_000;
+const SWEEP_INTERVAL_MS = 5 * 60_000;
 const SWEEP_BATCH = 50;
 const ORPHAN_GRACE_MS = 60 * 60 * 1000;
 
