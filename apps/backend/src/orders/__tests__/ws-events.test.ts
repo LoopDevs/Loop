@@ -65,6 +65,21 @@ describe('giftcard ws event handling', () => {
     );
   });
 
+  it('applies an expired card to the resolved order', async () => {
+    const order = { id: 'o-1' };
+    mirrorMock.resolveOrderForCard.mockResolvedValue(order);
+
+    __handleCtxWsMessageForTests(
+      eventFrame('system.giftcard.expired', { ...CARD, displayStatus: 'expired' }),
+    );
+    await flushDispatch();
+
+    expect(mirrorMock.applyCtxCardStatus).toHaveBeenCalledExactlyOnceWith(
+      order,
+      expect.objectContaining({ id: 'gc-1', displayStatus: 'expired' }),
+    );
+  });
+
   it('applies nothing when the card resolves to no local order', async () => {
     __handleCtxWsMessageForTests(eventFrame('system.giftcard.fulfilled', CARD));
     await flushDispatch();

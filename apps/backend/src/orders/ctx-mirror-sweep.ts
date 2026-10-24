@@ -20,15 +20,18 @@ import { applyCtxCardStatus } from './mirror-apply.js';
 import {
   deriveOrderEconomics,
   fetchCtxCardAsOperator,
+  listCtxCardsAsOperator,
   operatorProfitShareBp,
+  type CtxGiftCard,
 } from './ctx-order.js';
 import { CtxRateLimitedError, CtxUnavailableError } from '../ctx/api-fetch.js';
 
 const log = logger.child({ area: 'ctx-mirror-sweep' });
 
 const SWEEP_INTERVAL_MS = 5 * 60_000;
-const SWEEP_BATCH = 50;
+const SWEEP_BATCH = 500;
 const ORPHAN_GRACE_MS = 60 * 60 * 1000;
+const CTX_PENDING_STATUSES = ['unpaid', 'paid'] as const;
 
 export interface MirrorSweepResult {
   picked: number;
@@ -39,6 +42,28 @@ export interface MirrorSweepResult {
   skippedLocked: boolean;
 }
 
+type PendingRow = Order & { ctxOrderId: string };
+
+function isCtxUnavailable(err: unknown): boolean {
+  return err instanceof CtxUnavailableError || err instanceof CtxRateLimitedError;
+}
+
+async function applyCard(
+  row: Order,
+  card: CtxGiftCard,
+  now: number,
+  r: MirrorSweepResult,
+): Promise<void> {
+  await applyCtxCardStatus(row, card);
+  await recordMirrorSynced(row.id, new Date(now));
+  r.applied++;
+
+  if (row.expectedCommissionMinor === null) {
+    const profitShareBp = await operatorProfitShareBp();
+    await recordOrderEconomics(row.id, deriveOrderEconomics(card, profitShareBp));
+  }
+}
+
 async function sweepOne(row: Order, now: number, r: MirrorSweepResult): Promise<void> {
   if (row.ctxOrderId === null) {
     if (now - row.createdAt.getTime() > ORPHAN_GRACE_MS) {
@@ -47,15 +72,60 @@ async function sweepOne(row: Order, now: number, r: MirrorSweepResult): Promise<
     }
     return;
   }
+  await applyCard(row, await fetchCtxCardAsOperator(row.ctxOrderId), now, r);
+}
 
-  const card = await fetchCtxCardAsOperator(row.ctxOrderId);
-  await applyCtxCardStatus(row, card);
-  await recordMirrorSynced(row.id, new Date(now));
-  r.applied++;
+// One operator-scope list covers every row still pending at CTX; a row absent
+// from it has reached a terminal state and is read individually to learn which.
+async function sweepBatch(rows: Order[], now: number, r: MirrorSweepResult): Promise<void> {
+  const pending: PendingRow[] = [];
+  for (const row of rows) {
+    if (row.ctxOrderId === null) {
+      try {
+        await sweepOne(row, now, r);
+      } catch (err) {
+        r.errors++;
+        log.warn({ orderId: row.id, err }, 'Mirror sweep row failed — retried next tick');
+      }
+      continue;
+    }
+    pending.push({ ...row, ctxOrderId: row.ctxOrderId });
+  }
+  if (pending.length === 0) return;
 
-  if (row.expectedCommissionMinor === null) {
-    const profitShareBp = await operatorProfitShareBp();
-    await recordOrderEconomics(row.id, deriveOrderEconomics(card, profitShareBp));
+  let pendingCards: Map<string, CtxGiftCard>;
+  try {
+    const cards = await listCtxCardsAsOperator(CTX_PENDING_STATUSES);
+    pendingCards = new Map(cards.map((card) => [card.id, card]));
+  } catch (err) {
+    if (isCtxUnavailable(err)) {
+      r.abortedCtxUnavailable = true;
+      log.warn(
+        { rateLimited: err instanceof CtxRateLimitedError },
+        'CTX unavailable — aborting mirror-sweep tick',
+      );
+      return;
+    }
+    throw err;
+  }
+
+  for (const row of pending) {
+    try {
+      const card =
+        pendingCards.get(row.ctxOrderId) ?? (await fetchCtxCardAsOperator(row.ctxOrderId));
+      await applyCard(row, card, now, r);
+    } catch (err) {
+      if (isCtxUnavailable(err)) {
+        r.abortedCtxUnavailable = true;
+        log.warn(
+          { orderId: row.id, rateLimited: err instanceof CtxRateLimitedError },
+          'CTX unavailable — aborting mirror-sweep tick',
+        );
+        break;
+      }
+      r.errors++;
+      log.warn({ orderId: row.id, err }, 'Mirror sweep row failed — retried next tick');
+    }
   }
 }
 
@@ -72,22 +142,7 @@ export async function runMirrorSweepTick(nowMs?: number): Promise<MirrorSweepRes
     const now = nowMs ?? Date.now();
     const rows = await listOpenMirrorOrders(SWEEP_BATCH);
     r.picked = rows.length;
-    for (const row of rows) {
-      try {
-        await sweepOne(row, now, r);
-      } catch (err) {
-        if (err instanceof CtxUnavailableError || err instanceof CtxRateLimitedError) {
-          r.abortedCtxUnavailable = true;
-          log.warn(
-            { orderId: row.id, rateLimited: err instanceof CtxRateLimitedError },
-            'CTX unavailable — aborting mirror-sweep tick',
-          );
-          break;
-        }
-        r.errors++;
-        log.warn({ orderId: row.id, err }, 'Mirror sweep row failed — retried next tick');
-      }
-    }
+    await sweepBatch(rows, now, r);
   });
   if (!locked.ran) {
     r.skippedLocked = true;

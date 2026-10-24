@@ -13,6 +13,7 @@ const GIFTCARD_EVENTS = new Set([
   'system.giftcard.fulfilled',
   'system.giftcard.rejected',
   'system.giftcard.refunded',
+  'system.giftcard.expired',
   'system.giftcard.display_status_updated',
 ]);
 

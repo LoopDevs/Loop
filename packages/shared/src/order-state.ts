@@ -7,9 +7,7 @@
  *   `unpaid` → `paid` → `fulfilled`
  *        └──▶ `rejected` / `refunded` / `expired` (terminal)
  *
- * `expired` is Loop-local: CTX leaves a never-paid card `unpaid`
- * forever when its payment window lapses, so the mirror sweep flips
- * the local row once the CTX payment expiry has passed.
+ * CTX reports `expired` once an unpaid card's payment window lapses.
  *
  * This is the single source of truth for both the Postgres CHECK
  * constraint (`orders_state_known` in `apps/backend/src/db/schema.ts`)

@@ -298,7 +298,7 @@ describe('read helpers', () => {
     );
 
     const open = await listOpenMirrorOrders(10);
-    expect(open.map((o) => o.id)).toEqual([d.id, b.id, a.id]);
+    expect(open.map((o) => o.id)).toEqual([b.id, a.id]);
     expect(await listOpenMirrorOrders(1)).toHaveLength(1);
   });
 });

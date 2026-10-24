@@ -101,9 +101,18 @@ describe('applyCtxCardStatus', () => {
     expect(discordMock.notifyOrderFulfilled).not.toHaveBeenCalled();
   });
 
+  it('moves an unpaid row to expired when CTX reports the card expired', async () => {
+    const order = await seedOrder('unpaid');
+    await applyCtxCardStatus(order, { id: 'gc-1', displayStatus: 'expired' });
+    const stored = await db.collection('orders').findOne({ id: order.id });
+    expect(stored?.state).toBe('expired');
+    expect(stored?.failedAt).toBeInstanceOf(Date);
+    expect(stored?.failureReason).toBe('payment window expired');
+  });
+
   it('leaves the row untouched on an unknown displayStatus', async () => {
     const order = await seedOrder('paid');
-    await applyCtxCardStatus(order, { id: 'gc-1', displayStatus: 'expired' });
+    await applyCtxCardStatus(order, { id: 'gc-1', displayStatus: 'archived' });
     expect(await stateOf(order.id)).toBe('paid');
   });
 });

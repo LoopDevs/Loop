@@ -228,9 +228,14 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (method === 'GET' && path === '/gift-cards') {
+    const statusFilter = parsed.searchParams.get('status');
+    const statuses = statusFilter ? new Set(statusFilter.toLowerCase().split(',')) : null;
+    const result = [...orders.values()].filter(
+      (order) => statuses === null || statuses.has(order.displayStatus),
+    );
     return json(res, 200, {
-      pagination: { page: 1, pages: 1, perPage: 20, total: orders.size },
-      result: [...orders.values()],
+      pagination: { page: 1, pages: 1, perPage: 20, total: result.length },
+      result,
     });
   }
 

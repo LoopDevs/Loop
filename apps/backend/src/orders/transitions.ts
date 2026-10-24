@@ -65,6 +65,15 @@ export async function markOrderRejected(
   );
 }
 
+export async function markOrderExpired(orderId: string): Promise<Order | null> {
+  return db
+    .collection('orders')
+    .updateOne(
+      { id: orderId, state: { $ne: 'expired' } },
+      { $set: { state: 'expired', failedAt: new Date(), failureReason: 'payment window expired' } },
+    );
+}
+
 export async function markOrderRefunded(orderId: string): Promise<Order | null> {
   return db
     .collection('orders')

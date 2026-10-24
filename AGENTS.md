@@ -42,7 +42,7 @@ is made by the operator key acting as that user (`ctxFetch` with
 **Orders.** `POST /api/orders/loop` inserts the local mirror doc,
 creates the gift card at CTX, and relays CTX's payment instructions.
 The giftcard ws subscription + mirror sweep move the local doc through
-`unpaid → paid → fulfilled` (or `rejected | refunded`) in
+`unpaid → paid → fulfilled` (or `rejected | refunded | expired`) in
 lock-step with CTX.
 
 ## Quick commands

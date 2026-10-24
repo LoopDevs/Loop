@@ -10,6 +10,7 @@ import type { LoopOrderPaymentInstructions, LoopOrderPaymentMethod } from '@loop
 const log = logger.child({ area: 'ctx-order' });
 
 const CTX_READ_TIMEOUT_MS = 10_000;
+const CTX_LIST_PER_PAGE = 500;
 
 // Returns null for unparseable input — callers treat as "snapshot unavailable", never zero
 export function parseMajorToMinor(value: string | undefined): bigint | null {
@@ -48,6 +49,13 @@ export const CtxGiftCardSchema = z
 
 export type CtxGiftCard = z.infer<typeof CtxGiftCardSchema>;
 
+const CtxGiftCardListSchema = z
+  .object({
+    result: z.array(CtxGiftCardSchema).nullable(),
+    pagination: z.object({ page: z.number(), pages: z.number() }).passthrough(),
+  })
+  .passthrough();
+
 export const CtxPaymentSchema = z
   .object({
     id: z.string().min(1),
@@ -61,13 +69,14 @@ export type CtxPayment = z.infer<typeof CtxPaymentSchema>;
 // Returns null for unknown strings — schema drift is logged by the caller
 export function mapCtxDisplayStatus(
   displayStatus: string,
-): 'unpaid' | 'paid' | 'fulfilled' | 'rejected' | 'refunded' | null {
+): 'unpaid' | 'paid' | 'fulfilled' | 'rejected' | 'refunded' | 'expired' | null {
   switch (displayStatus) {
     case 'unpaid':
     case 'paid':
     case 'fulfilled':
     case 'rejected':
     case 'refunded':
+    case 'expired':
       return displayStatus;
     default:
       return null;
@@ -88,6 +97,32 @@ export async function fetchCtxCardAsOperator(ctxOrderId: string): Promise<CtxGif
     );
   }
   return CtxGiftCardSchema.parse(await res.json());
+}
+
+// Operator-scope list (no act-as scopes CTX to Loop's company); walks every page
+export async function listCtxCardsAsOperator(
+  displayStatuses: readonly string[],
+): Promise<CtxGiftCard[]> {
+  const cards: CtxGiftCard[] = [];
+  for (let page = 1; ; page++) {
+    const url = new URL(upstreamUrl('/gift-cards'));
+    url.searchParams.set('status', displayStatuses.join(','));
+    url.searchParams.set('perPage', String(CTX_LIST_PER_PAGE));
+    url.searchParams.set('page', String(page));
+    const res = await ctxFetch(url, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(CTX_READ_TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      const body = scrubUpstreamBody(await res.text().catch(() => ''));
+      throw new Error(`CTX GET /gift-cards list returned ${res.status}: ${body.slice(0, 200)}`);
+    }
+    const parsed = CtxGiftCardListSchema.parse(await res.json());
+    cards.push(...(parsed.result ?? []));
+    if (page >= parsed.pagination.pages) break;
+  }
+  return cards;
 }
 
 export async function fetchCtxPayment(paymentId: string): Promise<CtxPayment | null> {

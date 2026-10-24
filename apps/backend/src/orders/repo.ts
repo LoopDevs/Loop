@@ -132,7 +132,7 @@ export async function getOrderByCtxOrderId(ctxOrderId: string): Promise<Order | 
 // Rows CTX may still move, least-recently-synced first so no row starves the batch
 export async function listOpenMirrorOrders(limit: number): Promise<Order[]> {
   return db.collection('orders').findMany(
-    { state: { $in: ['unpaid', 'paid', 'expired'] } },
+    { state: { $in: ['unpaid', 'paid'] } },
     {
       sort: [
         ['mirrorSyncedAt', 'asc'],

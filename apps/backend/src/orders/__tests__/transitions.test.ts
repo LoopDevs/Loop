@@ -27,6 +27,7 @@ vi.mock('../../config/index.js', async (importActual) => {
 
 import { resetRedeemKeyCache } from '../redeem-crypto.js';
 import {
+  markOrderExpired,
   markOrderFulfilled,
   markOrderPaid,
   markOrderRefunded,
@@ -100,6 +101,22 @@ describe('markOrderPaid', () => {
       expect(stored?.failedAt).toBeNull();
       expect(stored?.failureReason).toBeNull();
     }
+  });
+});
+
+describe('markOrderExpired', () => {
+  it('sets state=expired with the failure fields from unpaid', async () => {
+    const id = await seedOrder('unpaid');
+    const r = await markOrderExpired(id);
+    expect(r?.state).toBe('expired');
+    const stored = await getOrder(id);
+    expect(stored?.failedAt).toBeInstanceOf(Date);
+    expect(stored?.failureReason).toBe('payment window expired');
+  });
+
+  it('returns null when the doc is already expired', async () => {
+    const id = await seedOrder('expired');
+    expect(await markOrderExpired(id)).toBeNull();
   });
 });
 

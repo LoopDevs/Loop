@@ -4,6 +4,7 @@ import { notifyOrderFulfilled } from '../discord.js';
 import { mapCtxDisplayStatus, type CtxGiftCard } from './ctx-order.js';
 import { getOrderByCtxOrderId, getOrderById, recordCtxCreate, type Order } from './repo.js';
 import {
+  markOrderExpired,
   markOrderFulfilled,
   markOrderPaid,
   markOrderRefunded,
@@ -83,6 +84,11 @@ export async function applyCtxCardStatus(order: Order, card: CtxGiftCard): Promi
     case 'refunded': {
       const updated = await markOrderRefunded(order.id);
       if (updated !== null) log.info({ orderId: order.id }, 'Order mirror → refunded');
+      return;
+    }
+    case 'expired': {
+      const updated = await markOrderExpired(order.id);
+      if (updated !== null) log.info({ orderId: order.id }, 'Order mirror → expired');
       return;
     }
   }
