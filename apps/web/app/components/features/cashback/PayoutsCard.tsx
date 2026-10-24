@@ -11,6 +11,8 @@ const PAYOUT_STATUS_UI: Record<PayoutStatus, { label: string; classes: string }>
   approved: { label: 'Approved', classes: PENDING_CLASSES },
   held: { label: 'Held', classes: PENDING_CLASSES },
   pending: { label: 'Sending', classes: PENDING_CLASSES },
+  submitted: { label: 'Confirming', classes: PENDING_CLASSES },
+  queued: { label: 'Retrying', classes: PENDING_CLASSES },
   complete: {
     label: 'Paid',
     classes: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
@@ -94,6 +96,11 @@ function PayoutRow({ row }: { row: PayoutView }): React.JSX.Element {
         {row.status === 'failed' ? (
           <p className="mt-1 text-xs text-red-700 dark:text-red-400">
             This payout didn&rsquo;t land. Support is reviewing.
+          </p>
+        ) : null}
+        {row.status === 'queued' ? (
+          <p className="mt-1 text-xs text-yellow-800 dark:text-yellow-300">
+            This payout didn&rsquo;t land yet. We&rsquo;ll keep trying automatically.
           </p>
         ) : null}
       </div>

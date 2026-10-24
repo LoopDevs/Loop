@@ -8,6 +8,8 @@ export type PayoutStatus =
   | 'approved'
   | 'held'
   | 'pending'
+  | 'submitted'
+  | 'queued'
   | 'complete'
   | 'failed'
   | 'rejected'

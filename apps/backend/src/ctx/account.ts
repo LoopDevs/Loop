@@ -51,6 +51,8 @@ const CTX_PAYOUT_STATUSES = [
   'approved',
   'held',
   'pending',
+  'submitted',
+  'queued',
   'complete',
   'failed',
   'rejected',
